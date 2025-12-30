@@ -107,12 +107,43 @@ namespace CompanionAI_v3.Core
                 // 1. 턴 상태 가져오기 또는 생성
                 var turnState = GetOrCreateTurnState(unit);
 
+                // ★ v3.1.03: MP 증가 감지 → 리플랜 (런 앤 건, 무모한 돌진 등)
+                // Execute 직후에는 게임 효과가 아직 적용 안 됨 → 다음 ProcessTurn 호출 시 감지
+                // ★ v3.1.05: 플랜에 Move가 이미 있으면 리플랜하지 않음 (Move 실행 기회 보존)
+                float currentMP = CombatAPI.GetCurrentMP(unit);
+                if (currentMP > turnState.LastKnownMP && turnState.Plan != null)
+                {
+                    // ★ v3.1.05: Move가 이미 계획되어 있으면 리플랜하지 않음
+                    // 문제: MP 증가 → 리플랜 → 버프 먼저 → MP 또 증가 → 리플랜... 무한 루프
+                    // 해결: Move가 플랜에 있으면 그대로 실행하도록 보존
+                    if (turnState.Plan.HasMoveActions)
+                    {
+                        Main.Log($"[Orchestrator] {unitName}: ★ MP increased ({turnState.LastKnownMP:F1} -> {currentMP:F1}) but plan already has Move - keeping plan");
+                    }
+                    else
+                    {
+                        Main.Log($"[Orchestrator] {unitName}: ★ MP increased ({turnState.LastKnownMP:F1} -> {currentMP:F1}) - forcing replan for movement opportunity");
+                        turnState.Plan = null;  // 새 Plan 생성 유도
+                    }
+                }
+                turnState.LastKnownMP = currentMP;  // 업데이트
+
                 // ★ v3.0.69: 게임 AP=0이고 이미 행동했으면 즉시 턴 종료 (안전장치)
+                // ★ v3.1.06: Move가 남아있고 MP가 있으면 계속 진행 (Move는 AP 안 씀)
                 float gameAP = CombatAPI.GetCurrentAP(unit);
                 if (gameAP <= 0 && turnState.ActionCount > 0)
                 {
-                    Main.Log($"[Orchestrator] {unitName}: Game AP=0 with {turnState.ActionCount} actions done - ending turn");
-                    return ExecutionResult.EndTurn("No AP remaining");
+                    // ★ v3.1.06: 플랜에 Move가 남아있으면 계속 진행
+                    var pendingAction = turnState.Plan?.PeekNextAction();
+                    if (pendingAction?.Type == ActionType.Move && currentMP > 0)
+                    {
+                        Main.Log($"[Orchestrator] {unitName}: AP=0 but Move pending with MP={currentMP:F1} - continuing");
+                    }
+                    else
+                    {
+                        Main.Log($"[Orchestrator] {unitName}: Game AP=0 with {turnState.ActionCount} actions done - ending turn");
+                        return ExecutionResult.EndTurn("No AP remaining");
+                    }
                 }
 
                 // 2. 안전 체크
@@ -180,6 +211,9 @@ namespace CompanionAI_v3.Core
                 bool success = result.Type == ResultType.CastAbility || result.Type == ResultType.MoveTo;
                 turnState.RecordAction(nextAction, success);
 
+                // ★ v3.1.08: pendingEndTurn 설정 제거 - MainAIPatch에서 Commands 체크로 대체
+                // 이동 애니메이션 중에는 Commands가 비어있지 않으므로 MainAIPatch에서 Running 반환
+
                 // ★ v3.0.4: 능력 사용 추적 - 중앙화
                 if (success && nextAction.Ability != null)
                 {
@@ -198,13 +232,23 @@ namespace CompanionAI_v3.Core
                     AbilityUsageTracker.MarkFailed(unit.UniqueId, nextAction.Ability);
                 }
 
+                // ★ v3.0.93: 실패 시 게임 AI로 위임하지 않고 EndTurn 반환
+                // 게임 AI가 제어권을 가져가면 메디킷 오사용 등 이상 행동 발생
+                if (result.Type == ResultType.Failure)
+                {
+                    Main.LogWarning($"[Orchestrator] {unitName}: Execution failed ({result.Reason}) - ending turn instead of delegating to game AI");
+                    turnState.Plan?.Cancel("Execution failed");
+                    return ExecutionResult.EndTurn($"Execution failed: {result.Reason}");
+                }
+
                 return result;
             }
             catch (Exception ex)
             {
                 Main.LogError($"[Orchestrator] {unitName}: Critical error - {ex.Message}");
                 Main.LogError($"[Orchestrator] Stack: {ex.StackTrace}");
-                return ExecutionResult.Failure($"Exception: {ex.Message}");
+                // ★ v3.0.93: 예외 시에도 EndTurn 반환 (게임 AI 위임 방지)
+                return ExecutionResult.EndTurn($"Exception: {ex.Message}");
             }
         }
 
@@ -236,7 +280,9 @@ namespace CompanionAI_v3.Core
                 }
                 else
                 {
-                    Main.LogDebug($"[Orchestrator] Continuing turn for {unit.CharacterName}: AP={state.RemainingAP:F1}");
+                    // ★ v3.0.77: 게임 AP 표시 (TurnState.RemainingAP는 레거시)
+                    float gameAP = CombatAPI.GetCurrentAP(unit);
+                    Main.LogDebug($"[Orchestrator] Continuing turn for {unit.CharacterName}: AP={gameAP:F1} (game)");
                 }
             }
             else
@@ -258,6 +304,7 @@ namespace CompanionAI_v3.Core
         /// <summary>
         /// 새 턴인지 확인 (게임 턴 시스템 기반)
         /// ★ v3.0: 프레임 기반에서 게임 턴 시스템 기반으로 변경
+        /// ★ v3.0.76: AP 기반 감지 제거, 게임의 Initiative 시스템 활용
         /// </summary>
         private bool IsNewTurn(TurnState state, BaseUnitEntity unit)
         {
@@ -265,9 +312,9 @@ namespace CompanionAI_v3.Core
             var turnController = Kingmaker.Game.Instance?.TurnController;
             if (turnController == null)
             {
-                // 턴 컨트롤러가 없으면 폴백: 프레임 기반
+                // 턴 컨트롤러가 없으면 폴백: 프레임 기반 (10초 타임아웃)
                 int framesSince = UnityEngine.Time.frameCount - state.TurnStartFrame;
-                return framesSince > 600; // 10초 (더 긴 윈도우)
+                return framesSince > 600;
             }
 
             // 2. 현재 턴 유닛이 다른 유닛이면 새 턴이 아님 (아직 이 유닛 턴 안 옴)
@@ -287,20 +334,15 @@ namespace CompanionAI_v3.Core
                 return true;
             }
 
-            // 4. AP가 완전히 충전되었고 이전에 행동을 했으면 새 턴
-            float currentAP = CombatAPI.GetCurrentAP(unit);
-            if (state.ActionCount > 0 && currentAP >= state.StartingAP && state.RemainingAP < 1f)
-            {
-                Main.LogDebug($"[Orchestrator] AP fully restored: {state.RemainingAP:F1} → {currentAP:F1}");
-                return true;
-            }
-
-            // 같은 턴
+            // ★ v3.0.76: AP 기반 감지 완전 제거
+            // CombatRound가 같으면 같은 턴 (버프로 인한 AP 증가와 무관)
+            // Note: LastTurn은 GameRound 기반이라 CombatRound와 비교 불가
             return false;
         }
 
         /// <summary>
         /// ★ v3.0.70: 게임의 새 턴 시작인지 확인 (pendingEndTurn 클리어용)
+        /// ★ v3.0.76: AP 기반 감지 제거, CombatRound 기반으로 변경
         /// TurnState 없이도 판단 가능해야 함
         /// </summary>
         private bool IsGameTurnStart(BaseUnitEntity unit)
@@ -315,31 +357,48 @@ namespace CompanionAI_v3.Core
                 return false;  // 이 유닛의 턴이 아님
             }
 
-            // 이 유닛의 턴인데, TurnState가 없거나 ActionCount=0이면 새 턴 시작
+            // 이 유닛의 턴인데, TurnState가 없으면 새 턴 시작
             if (!_turnStates.TryGetValue(unit.UniqueId, out var state))
             {
                 return true;  // TurnState 없음 = 새 턴
             }
 
-            // TurnState는 있지만 ActionCount=0이고 AP가 충분하면 새 턴
-            // (이전 턴에서 행동 없이 끝났을 수도 있으므로 AP 체크 추가)
-            float currentAP = CombatAPI.GetCurrentAP(unit);
-            if (state.ActionCount == 0 && currentAP >= state.StartingAP)
+            // ★ v3.0.76: CombatRound가 바뀌었으면 새 턴
+            int currentRound = turnController.CombatRound;
+            if (state.CombatRound > 0 && state.CombatRound != currentRound)
             {
-                return false;  // 같은 턴, 아직 행동 안 함
+                return true;  // 새 라운드 = 새 턴
             }
 
-            // ActionCount > 0인데 AP가 완전히 충전되어 있으면 새 턴
-            if (state.ActionCount > 0 && currentAP >= state.StartingAP)
-            {
-                return true;  // 새 턴 (AP 리셋됨)
-            }
-
+            // AP 기반 감지 제거 - 버프로 인한 AP 증가 오탐 방지
+            // CombatRound가 같으면 같은 턴
             return false;
         }
 
         /// <summary>
-        /// 턴 종료 시 호출
+        /// ★ v3.0.76: 턴 시작 시 호출 (TurnEventHandler에서)
+        /// 게임의 ITurnStartHandler 이벤트로 호출됨
+        /// </summary>
+        public void OnTurnStart(BaseUnitEntity unit)
+        {
+            if (unit == null) return;
+
+            string unitId = unit.UniqueId;
+
+            // 이전 턴 상태 정리
+            _turnStates.Remove(unitId);
+            _pendingEndTurn.Remove(unitId);
+            _pendingMoveDestinations.Remove(unitId);
+
+            // 능력 사용 추적 초기화
+            AbilityUsageTracker.ClearForUnit(unitId);
+
+            Main.Log($"[Orchestrator] Turn started for {unit.CharacterName} (via event)");
+        }
+
+        /// <summary>
+        /// 턴 종료 시 호출 (TurnEventHandler에서)
+        /// 게임의 ITurnEndHandler 이벤트로 호출됨
         /// </summary>
         public void OnTurnEnd(BaseUnitEntity unit)
         {

@@ -4,6 +4,7 @@ using HarmonyLib;
 using UnityModManagerNet;
 using CompanionAI_v3.Settings;
 using CompanionAI_v3.UI;
+using CompanionAI_v3.GameInterface;
 
 namespace CompanionAI_v3
 {
@@ -50,6 +51,9 @@ namespace CompanionAI_v3
                     _harmony = new Harmony(modEntry.Info.Id);
                     _harmony.PatchAll(Assembly.GetExecutingAssembly());
                     Log("Harmony patches applied");
+
+                    // ★ v3.0.76: 게임 턴 이벤트 구독
+                    TurnEventHandler.Instance.Subscribe();
                 }
                 catch (Exception ex)
                 {
@@ -61,6 +65,9 @@ namespace CompanionAI_v3
             {
                 try
                 {
+                    // ★ v3.0.76: 게임 턴 이벤트 구독 해제
+                    TurnEventHandler.Instance.Unsubscribe();
+
                     _harmony?.UnpatchAll(modEntry.Info.Id);
                     Log("Harmony patches removed");
                 }

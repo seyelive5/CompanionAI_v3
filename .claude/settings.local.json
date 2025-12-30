@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" CompanionAI_v3.csproj /p:Configuration=Release /t:Rebuild /v:minimal /nologo)",
+      "Bash(powershell:*)",
+      "Bash(\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"c:\\\\Users\\\\veria\\\\Downloads\\\\CompanionAI_v3\\\\CompanionAI_v3.csproj\" /p:Configuration=Release /t:Rebuild /v:minimal /nologo)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nv3.1.08 - Fix movement animation lag\n\n## Major Changes \\(v3.0.75 ~ v3.1.08\\)\n\n### v3.1.08 - Movement Animation Lag Fix\n- Fix: Use Commands.Empty check to prevent repeated EndTurn during movement animation\n- Apply LESSONS_LEARNED 12.2: \"완전 제어 또는 완전 위임, 중간은 위험\"\n- Remove pendingEndTurn approach in favor of command queue check\n\n### v3.1.05~07 - MP Recovery + Movement\n- v3.1.05: Add HasMoveActions flag to prevent replan loop when Move is already planned\n- v3.1.06: Allow Move execution when AP=0 but MP>0 \\(Move uses MP not AP\\)\n- v3.1.07: \\(superseded by v3.1.08\\)\n\n### v3.1.00~04 - MP Recovery Prediction\n- v3.1.00: bypassCanMoveCheck for MP recovery abilities\n- v3.1.01: Pass predictedMP to MovementAPI for reachable tile calculation\n- v3.1.02~04: Various fixes for Move execution after MP recovery\n\n### Other Changes\n- Add RoleDetector.cs for automatic role detection\n- Add TurnEventHandler.cs for game event subscription\n- Various bug fixes and improvements\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+    ]
+  }
+}

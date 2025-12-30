@@ -93,5 +93,7 @@ namespace CompanionAI_v3.Data
         IsWeaponAttack = 1 << 9, // 무기 공격
         IsConsumable = 1 << 10,  // 소모품
         OncePerTurn = 1 << 11,   // 한 턴에 한 번만
+        // ★ v3.0.98: MPRecovery 플래그 deprecated - CombatAPI.GetAbilityMPRecovery()가 Blueprint에서 자동 감지
+        // MPRecovery = 1 << 12,
     }
 }

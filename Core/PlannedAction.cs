@@ -146,6 +146,22 @@ namespace CompanionAI_v3.Core
             };
         }
 
+        /// <summary>
+        /// ★ v3.0.81: 위치 타겟 공격 (Death from Above 등 갭클로저)
+        /// </summary>
+        public static PlannedAction PositionalAttack(AbilityData ability, Vector3 position, string reason, float apCost)
+        {
+            return new PlannedAction
+            {
+                Type = ActionType.Attack,
+                Ability = ability,
+                Target = new TargetWrapper(position),
+                APCost = apCost,
+                Reason = reason,
+                Priority = 25  // 일반 Attack(50)보다 우선 (갭클로저 → 공격 연계)
+            };
+        }
+
         public static PlannedAction EndTurn(string reason = "No more actions available")
         {
             return new PlannedAction

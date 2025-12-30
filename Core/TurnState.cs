@@ -94,6 +94,12 @@ namespace CompanionAI_v3.Core
         /// <summary>시작 MP</summary>
         public float StartingMP { get; }
 
+        /// <summary>★ v3.0.76: 이 턴에서 본 최대 AP (버프로 인한 AP 증가 감지용)</summary>
+        public float MaxAPSeenThisTurn { get; set; }
+
+        /// <summary>★ v3.1.03: 마지막으로 확인한 MP (리플랜용)</summary>
+        public float LastKnownMP { get; set; }
+
         #endregion
 
         #region Safety
@@ -124,6 +130,8 @@ namespace CompanionAI_v3.Core
             StartingMP = currentMP;
             RemainingAP = currentAP;
             RemainingMP = currentMP;
+            MaxAPSeenThisTurn = currentAP;  // ★ v3.0.76: 초기값 설정
+            LastKnownMP = currentMP;  // ★ v3.1.03: MP 변화 감지용
         }
 
         #endregion

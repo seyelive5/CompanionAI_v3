@@ -31,6 +31,14 @@ namespace CompanionAI_v3.GameInterface
             Blackboard blackboard,  // ★ Blackboard 파라미터 추가
             ref Status __result)
         {
+            // ★ v3.0.75: 이미 턴이 종료되었으면 즉시 반환
+            // IsFinishedTurn = true 설정 후에도 Root가 반복되면서 다시 호출될 수 있음
+            if (blackboard?.IsFinishedTurn == true)
+            {
+                __result = Status.Success;
+                return false;
+            }
+
             // ★ v2.2 방식: Blackboard에서 DecisionContext 가져오기
             var context = blackboard?.DecisionContext;
             if (context == null)
@@ -43,6 +51,15 @@ namespace CompanionAI_v3.GameInterface
             if (unit == null)
             {
                 return true;
+            }
+
+            // ★ v3.1.08: 이동/능력 애니메이션 중에는 대기 (LESSONS_LEARNED 12.2 적용)
+            // 문제: 이동 중 게임이 AI를 계속 호출 → EndTurn 반복 반환 → 렉
+            // 해결: Commands가 비어있지 않으면 Running 반환하여 게임이 대기하게 함
+            if (!CombatAPI.IsCommandQueueEmpty(unit))
+            {
+                __result = Status.Running;
+                return false;
             }
 
             if (!TurnOrchestrator.Instance.ShouldControl(unit))
@@ -65,8 +82,7 @@ namespace CompanionAI_v3.GameInterface
 
                     case ResultType.MoveTo:
                         // ★ 완전 제어: 게임 AI에 위임하지 않음 (LESSONS_LEARNED 12.2)
-                        // ★ v3.0.26: 이동 명령 시 pendingEndTurn 클리어 (이전 상태 잔존 방지)
-                        TurnOrchestrator.Instance.ClearPendingEndTurn(unit.UniqueId);
+                        // ★ v3.1.08: ClearPendingEndTurn 제거 - Commands 체크로 대체
                         // 이동 목적지 저장 - FindBetterPlace에서 사용
                         if (result.Destination.HasValue)
                         {
@@ -124,6 +140,13 @@ namespace CompanionAI_v3.GameInterface
             Blackboard blackboard,
             ref Status __result)
         {
+            // ★ v3.0.75: 이미 턴이 종료되었으면 즉시 반환
+            if (blackboard?.IsFinishedTurn == true)
+            {
+                __result = Status.Success;
+                return false;
+            }
+
             try
             {
                 var context = blackboard?.DecisionContext;

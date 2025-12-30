@@ -282,6 +282,19 @@ namespace CompanionAI_v3.Core
         }
 
         /// <summary>
+        /// ★ v3.0.76: 특정 유닛의 추적 기록 초기화
+        /// 턴 시작 시 호출하여 이전 턴 기록 정리
+        /// </summary>
+        public static void ClearForUnit(string unitId)
+        {
+            if (string.IsNullOrEmpty(unitId)) return;
+
+            _usageByUnit.Remove(unitId);
+            _failedByUnit.Remove(unitId);
+            Main.LogDebug($"[UsageTracker] Cleared tracking for unit {unitId}");
+        }
+
+        /// <summary>
         /// 디버그: 현재 추적 상태 출력
         /// </summary>
         public static string GetDebugStatus()

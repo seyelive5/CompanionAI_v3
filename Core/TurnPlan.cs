@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System.Linq;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.Utility;
+using CompanionAI_v3.GameInterface;
 
 namespace CompanionAI_v3.Core
 {
@@ -42,6 +44,9 @@ namespace CompanionAI_v3.Core
         /// <summary>★ v3.0.6: 계획에 공격이 포함되어 있는지</summary>
         public bool HasAttackActions { get; private set; }
 
+        /// <summary>★ v3.1.05: 계획에 이동이 포함되어 있는지</summary>
+        public bool HasMoveActions { get; private set; }
+
         #endregion
 
         #region Constructor
@@ -64,6 +69,9 @@ namespace CompanionAI_v3.Core
 
             // ★ v3.0.6: 공격 행동 포함 여부
             HasAttackActions = actions.Any(a => a.Type == ActionType.Attack);
+
+            // ★ v3.1.05: 이동 행동 포함 여부
+            HasMoveActions = actions.Any(a => a.Type == ActionType.Move);
 
             Main.Log($"[TurnPlan] Created: Priority={priority}, Actions={actions.Count}, Reason={reasoning}");
             foreach (var action in actions)
@@ -100,11 +108,41 @@ namespace CompanionAI_v3.Core
 
         /// <summary>
         /// 계획 재수립 필요 여부 판단
+        /// ★ v3.0.93: 능력 Available 및 타겟 Hittable 체크 추가
         /// </summary>
         public bool NeedsReplan(Analysis.Situation currentSituation)
         {
             if (currentSituation == null) return false;
             if (_actionQueue.Count == 0) return false;
+
+            var nextAction = _actionQueue.Peek();
+            if (nextAction == null) return false;
+
+            // ★ v3.0.93: 0. 다음 액션의 능력이 더 이상 Available하지 않으면 재계획
+            if (nextAction.Ability != null && nextAction.Type != ActionType.EndTurn)
+            {
+                List<string> unavailableReasons;
+                if (!CombatAPI.IsAbilityAvailable(nextAction.Ability, out unavailableReasons))
+                {
+                    string reasons = string.Join(", ", unavailableReasons);
+                    Main.Log($"[TurnPlan] Replan needed: Ability {nextAction.Ability.Name} no longer available ({reasons})");
+                    return true;
+                }
+
+                // ★ v3.0.93: 공격/디버프 액션인 경우 타겟이 여전히 공격 가능한지 체크
+                if ((nextAction.Type == ActionType.Attack || nextAction.Type == ActionType.Debuff)
+                    && nextAction.Target != null)
+                {
+                    string cantUseReason;
+                    if (!CombatAPI.CanUseAbilityOn(nextAction.Ability, nextAction.Target, out cantUseReason))
+                    {
+                        var targetUnit = nextAction.Target.Entity as BaseUnitEntity;
+                        string targetName = targetUnit?.CharacterName ?? "target";
+                        Main.Log($"[TurnPlan] Replan needed: Cannot use {nextAction.Ability.Name} on {targetName} ({cantUseReason})");
+                        return true;
+                    }
+                }
+            }
 
             // 1. HP 급감 체크 - Emergency가 아니었는데 지금 위험하면 재계획
             if (Priority != TurnPriority.Emergency && currentSituation.IsHPCritical)
@@ -118,8 +156,7 @@ namespace CompanionAI_v3.Core
             }
 
             // 2. 계획된 타겟 사망 체크
-            var nextAction = _actionQueue.Peek();
-            if (nextAction != null && nextAction.Type == ActionType.Attack)
+            if (nextAction.Type == ActionType.Attack)
             {
                 var target = nextAction.Target?.Entity as BaseUnitEntity;
                 if (target != null && target.LifeState.IsDead)

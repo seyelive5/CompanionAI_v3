@@ -245,7 +245,7 @@ namespace CompanionAI_v3.Analysis
         private float CalculateRoleFitScore(Situation situation)
         {
             float score = 0f;
-            var role = situation.CharacterSettings?.Role ?? Settings.AIRole.Balanced;
+            var role = situation.CharacterSettings?.Role ?? Settings.AIRole.Auto;
 
             // ★ v3.0.59: "공격 안 함" 시퀀스 체크
             bool isSkipSequence = Actions.Count == 0;
@@ -286,11 +286,11 @@ namespace CompanionAI_v3.Analysis
                     }
                     break;
 
-                case Settings.AIRole.Balanced:
-                    // Balanced: 원거리 선호면 Support처럼
+                case Settings.AIRole.Auto:
+                    // ★ v3.0.92: Auto는 RangePreference 기반 판단
                     if (situation.PrefersRanged)
                     {
-                        // ★ v3.0.59: 위험한 공격 스킵 보너스
+                        // 원거리 선호: 위험한 공격 스킵 보너스
                         if (isSkipSequence && situation.IsInDanger)
                             score += 20f;
                         else if (isSkipSequence && ExpectedRemainingMP > 0)

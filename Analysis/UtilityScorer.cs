@@ -608,7 +608,7 @@ namespace CompanionAI_v3.Analysis
         /// </summary>
         public static float GetRoleSafetyWeight(Situation situation)
         {
-            var role = situation.CharacterSettings?.Role ?? Settings.AIRole.Balanced;
+            var role = situation.CharacterSettings?.Role ?? Settings.AIRole.Auto;
             switch (role)
             {
                 case Settings.AIRole.Support:
@@ -617,9 +617,9 @@ namespace CompanionAI_v3.Analysis
                     return 0.5f;   // 균형
                 case Settings.AIRole.Tank:
                     return 0.2f;   // 안전 무시 - 낮은 가중치
-                case Settings.AIRole.Balanced:
+                case Settings.AIRole.Auto:
                 default:
-                    // Balanced는 RangePreference에 따라 조정
+                    // ★ v3.0.92: Auto는 RangePreference에 따라 조정
                     if (situation.PrefersRanged)
                         return 0.7f;  // 원거리 선호 = 안전 중시
                     else

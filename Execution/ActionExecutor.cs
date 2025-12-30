@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Utility;
 using CompanionAI_v3.Core;
@@ -72,7 +73,16 @@ namespace CompanionAI_v3.Execution
                 return ExecutionResult.Failure("Target is null");
             }
 
-            // 최종 검증
+            // ★ v3.0.93: 능력 자체가 사용 가능한지 먼저 체크 (쿨다운, 탄약, 충전 등)
+            List<string> unavailableReasons;
+            if (!CombatAPI.IsAbilityAvailable(ability, out unavailableReasons))
+            {
+                string reasons = string.Join(", ", unavailableReasons);
+                Main.LogWarning($"[Executor] Ability unavailable: {ability.Name} - {reasons}");
+                return ExecutionResult.Failure($"Ability unavailable: {reasons}");
+            }
+
+            // 최종 검증 - 타겟에게 사용 가능한지
             string reason;
             if (!CombatAPI.CanUseAbilityOn(ability, target, out reason))
             {

@@ -301,17 +301,22 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// ★ v3.0.62: AoE/위협 점수 통합
+        /// ★ v3.1.01: predictedMP 파라미터 추가 - MP 회복 예측 후 이동 계획 지원
         /// </summary>
         public static PositionScore FindRangedAttackPositionSync(
             BaseUnitEntity unit,
             List<BaseUnitEntity> enemies,
             float weaponRange = 15f,
-            float minSafeDistance = 5f)
+            float minSafeDistance = 5f,
+            float predictedMP = 0f)
         {
-            var tiles = FindAllReachableTilesSync(unit);
+            // ★ v3.1.01: predictedMP가 있으면 사용, 없으면 기본 동작
+            var tiles = predictedMP > 0
+                ? FindAllReachableTilesSync(unit, predictedMP)
+                : FindAllReachableTilesSync(unit);
             if (tiles == null || tiles.Count == 0)
             {
-                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles");
+                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles (predictedMP={predictedMP:F1})");
                 return null;
             }
 
@@ -377,19 +382,24 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// ★ v3.0.74: 근접 공격 위치 찾기 (실제 도달 가능한 타일 기반)
+        /// ★ v3.1.01: predictedMP 파라미터 추가
         /// 적의 타일이 아닌, 적에게 인접한 공격 가능 위치 반환
         /// </summary>
         public static PositionScore FindMeleeAttackPositionSync(
             BaseUnitEntity unit,
             BaseUnitEntity target,
-            float meleeRange = 2f)
+            float meleeRange = 2f,
+            float predictedMP = 0f)
         {
             if (unit == null || target == null) return null;
 
-            var tiles = FindAllReachableTilesSync(unit);
+            // ★ v3.1.01: predictedMP 지원
+            var tiles = predictedMP > 0
+                ? FindAllReachableTilesSync(unit, predictedMP)
+                : FindAllReachableTilesSync(unit);
             if (tiles == null || tiles.Count == 0)
             {
-                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles for melee approach");
+                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles for melee approach (predictedMP={predictedMP:F1})");
                 return null;
             }
 
@@ -466,21 +476,26 @@ namespace CompanionAI_v3.GameInterface
         /// <summary>
         /// ★ v3.0.60: 후퇴 위치 찾기 (실제 도달 가능한 타일 기반)
         /// ★ v3.0.62: AoE/위협 점수 통합
+        /// ★ v3.1.01: predictedMP 파라미터 추가
         ///
         /// PositionEvaluator의 단순 Vector3 계산 대신 PathfindingService 사용
         /// </summary>
         public static PositionScore FindRetreatPositionSync(
             BaseUnitEntity unit,
             List<BaseUnitEntity> enemies,
-            float minSafeDistance = 8f)
+            float minSafeDistance = 8f,
+            float predictedMP = 0f)
         {
             if (unit == null || enemies == null || enemies.Count == 0)
                 return null;
 
-            var tiles = FindAllReachableTilesSync(unit);
+            // ★ v3.1.01: predictedMP 지원
+            var tiles = predictedMP > 0
+                ? FindAllReachableTilesSync(unit, predictedMP)
+                : FindAllReachableTilesSync(unit);
             if (tiles == null || tiles.Count == 0)
             {
-                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles for retreat");
+                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles for retreat (predictedMP={predictedMP:F1})");
                 return null;
             }
 

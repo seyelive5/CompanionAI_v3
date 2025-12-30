@@ -148,6 +148,46 @@ namespace CompanionAI_v3.Planning.Plans
                 if (postAction != null)
                 {
                     actions.Add(postAction);
+
+                    // ★ v3.0.98: MP 회복 능력 예측 (Blueprint에서 직접 읽어옴)
+                    float expectedMP = AbilityDatabase.GetExpectedMPRecovery(postAction.Ability);
+                    if (expectedMP > 0)
+                    {
+                        remainingMP += expectedMP;
+                        Main.Log($"[Tank] Phase 6: {postAction.Ability.Name} will restore ~{expectedMP:F0} MP (predicted MP={remainingMP:F1})");
+                    }
+                }
+            }
+
+            // ★ v3.0.96: Phase 6.5: 공격 불가 시 남은 버프 사용
+            // 이전 버그: 점화 후 Hittable=0이면 강철 팔 등 버프 사용 못함
+            // HasPerformedFirstAction=true여도 남은 AP로 버프 사용
+            if (!didPlanAttack && remainingAP >= 1f && situation.AvailableBuffs.Count > 0)
+            {
+                Main.Log($"[Tank] Phase 6.5: No attack possible, using remaining buffs (AP={remainingAP:F1})");
+
+                foreach (var buff in situation.AvailableBuffs)
+                {
+                    if (remainingAP < 1f) break;
+
+                    float cost = CombatAPI.GetAbilityAPCost(buff);
+                    if (cost > remainingAP) continue;
+
+                    // 이미 활성화된 버프 스킵
+                    if (CombatAPI.HasActiveBuff(situation.Unit, buff)) continue;
+
+                    // ★ Self 또는 Ally 타겟 버프 (강철 팔은 AllyTarget이므로 CanTargetFriends 체크)
+                    var bp = buff.Blueprint;
+                    if (bp?.CanTargetSelf != true && bp?.CanTargetFriends != true) continue;
+
+                    var target = new TargetWrapper(situation.Unit);
+                    string reason;
+                    if (CombatAPI.CanUseAbilityOn(buff, target, out reason))
+                    {
+                        remainingAP -= cost;
+                        actions.Add(PlannedAction.Buff(buff, situation.Unit, "Fallback buff - no attack available", cost));
+                        Main.Log($"[Tank] Fallback buff: {buff.Name}");
+                    }
                 }
             }
 
@@ -160,11 +200,22 @@ namespace CompanionAI_v3.Planning.Plans
 
             // ★ Phase 8: 이동 또는 GapCloser (공격 가능한 적이 없을 때)
             // ★ v3.0.55: remainingMP 체크 - 계획된 능력들의 MP 코스트 반영
+            // ★ v3.0.90: 공격 계획 실패 시에도 이동 허용
+            // ★ v3.0.99: MP 회복 예측 후 이동 가능
+            // ★ v3.1.01: predictedMP를 MovementAPI에 전달하여 reachable tiles 계산에 사용
             bool hasMoveInPlan = actions.Any(a => a.Type == ActionType.Move);
-            if (!hasMoveInPlan && !situation.HasHittableEnemies && situation.CanMove && remainingMP > 0 && situation.HasLivingEnemies)
+            bool needsMovement = situation.NeedsReposition || (!didPlanAttack && situation.HasLivingEnemies);
+            bool canMove = situation.CanMove || remainingMP > 0;
+
+            if (!hasMoveInPlan && needsMovement && canMove && remainingMP > 0)
             {
-                // ★ v3.0.47: GapCloser 우선 시도 (Tank는 적에게 돌진)
-                var moveOrGapCloser = PlanMoveOrGapCloser(situation, ref remainingAP);
+                Main.Log($"[Tank] Phase 8: Trying move (attack planned={didPlanAttack}, predictedMP={remainingMP:F1})");
+                // ★ v3.0.90: 공격 실패 시 forceMove=true로 이동 강제
+                bool forceMove = !didPlanAttack && situation.HasHittableEnemies;
+                // ★ v3.1.00: MP 회복 예측 후 situation.CanMove=False여도 이동 가능
+                bool bypassCanMoveCheck = !situation.CanMove && remainingMP > 0;
+                // ★ v3.1.01: remainingMP를 MovementAPI에 전달
+                var moveOrGapCloser = PlanMoveOrGapCloser(situation, ref remainingAP, forceMove, bypassCanMoveCheck, remainingMP);
                 if (moveOrGapCloser != null)
                 {
                     actions.Add(moveOrGapCloser);

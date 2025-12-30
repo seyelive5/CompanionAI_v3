@@ -47,15 +47,15 @@ namespace CompanionAI_v3.Settings
             ["CombatRoleDesc"] = new() { { Language.English, "How should this character behave in combat?" }, { Language.Korean, "이 캐릭터가 전투에서 어떻게 행동할까요?" } },
 
             // Role names
-            ["Role_Balanced"] = new() { { Language.English, "Balanced" }, { Language.Korean, "균형" } },
+            ["Role_Auto"] = new() { { Language.English, "Auto" }, { Language.Korean, "자동" } },
             ["Role_Tank"] = new() { { Language.English, "Tank" }, { Language.Korean, "탱커" } },
             ["Role_DPS"] = new() { { Language.English, "DPS" }, { Language.Korean, "딜러" } },
             ["Role_Support"] = new() { { Language.English, "Support" }, { Language.Korean, "지원" } },
 
             // Role descriptions
-            ["RoleDesc_Balanced"] = new() {
-                { Language.English, "Jack of all trades. Uses the best available action based on the situation." },
-                { Language.Korean, "만능형. 상황에 맞는 최선의 행동을 선택합니다." }
+            ["RoleDesc_Auto"] = new() {
+                { Language.English, "Automatically detects optimal role based on character abilities.\n• Has Taunt/Defense → Tank\n• Has Finisher/Heroic Act → DPS\n• Has Ally Heal/Buff → Support" },
+                { Language.Korean, "캐릭터 능력을 분석하여 최적 역할을 자동 감지합니다.\n• 도발/방어 스킬 보유 → 탱커\n• 마무리/영웅적 행동 보유 → 딜러\n• 아군 힐/버프 보유 → 지원" }
             },
             ["RoleDesc_Tank"] = new() {
                 { Language.English, "Frontline fighter. Draws enemy attention, uses defensive skills, protects allies." },
@@ -122,7 +122,7 @@ namespace CompanionAI_v3.Settings
     /// </summary>
     public enum AIRole
     {
-        Balanced,   // Default balanced behavior
+        Auto,       // ★ v3.0.92: Automatically detect optimal role based on abilities
         Tank,       // Prioritize defense, draw enemy attention
         DPS,        // Prioritize damage output
         Support     // Prioritize buffs and debuffs
@@ -147,7 +147,7 @@ namespace CompanionAI_v3.Settings
         public string CharacterId { get; set; } = "";
         public string CharacterName { get; set; } = "";
         public bool EnableCustomAI { get; set; } = false;
-        public AIRole Role { get; set; } = AIRole.Balanced;
+        public AIRole Role { get; set; } = AIRole.Auto;
         public RangePreference RangePreference { get; set; } = RangePreference.Adaptive;
 
         // Combat behavior

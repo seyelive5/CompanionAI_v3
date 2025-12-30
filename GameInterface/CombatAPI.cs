@@ -429,6 +429,11 @@ namespace CompanionAI_v3.GameInterface
 
         #region Abilities
 
+        /// <summary>
+        /// ★ v3.0.94: GetUnavailabilityReasons() 체크 추가
+        /// 기존: data.IsAvailable만 체크 → 쿨다운 능력도 포함됨!
+        /// 수정: GetUnavailabilityReasons()로 쿨다운, 탄약, 충전 등 모두 체크
+        /// </summary>
         public static List<AbilityData> GetAvailableAbilities(BaseUnitEntity unit)
         {
             var abilities = new List<AbilityData>();
@@ -444,10 +449,20 @@ namespace CompanionAI_v3.GameInterface
                     var data = ability?.Data;
                     if (data == null) continue;
 
-                    if (data.IsAvailable)
+                    // ★ v3.0.94: IsAvailable + GetUnavailabilityReasons() 체크
+                    // 기존 IsAvailable만으로는 쿨다운을 필터링하지 않음!
+                    if (!data.IsAvailable) continue;
+
+                    // ★ 핵심: GetUnavailabilityReasons()로 실제 사용 가능 여부 체크
+                    var unavailabilityReasons = data.GetUnavailabilityReasons();
+                    if (unavailabilityReasons.Count > 0)
                     {
-                        abilities.Add(data);
+                        // 쿨다운, 탄약 부족, 충전 없음 등 → 스킵
+                        Main.LogDebug($"[CombatAPI] Filtered out {data.Name}: {string.Join(", ", unavailabilityReasons)}");
+                        continue;
                     }
+
+                    abilities.Add(data);
                 }
             }
             catch { }
@@ -1444,6 +1459,115 @@ namespace CompanionAI_v3.GameInterface
             if (abilities == null) return new List<AbilityData>();
 
             return abilities.Where(a => AbilityDatabase.IsFinisher(a)).ToList();
+        }
+
+        #endregion
+
+        #region Resource Prediction
+
+        /// <summary>
+        /// ★ v3.0.98: 능력이 MP를 회복하는지 확인하고 예상 회복량 반환
+        /// Blueprint의 WarhammerContextActionRestoreActionPoints 컴포넌트에서 직접 읽어옴
+        /// </summary>
+        public static float GetAbilityMPRecovery(AbilityData ability, BaseUnitEntity caster = null)
+        {
+            if (ability?.Blueprint == null) return 0f;
+
+            try
+            {
+                // AbilityEffectRunAction 컴포넌트에서 Actions 확인
+                var runAction = ability.Blueprint.GetComponent<AbilityEffectRunAction>();
+                if (runAction?.Actions?.Actions == null) return 0f;
+
+                foreach (var action in runAction.Actions.Actions)
+                {
+                    // WarhammerContextActionRestoreActionPoints 찾기
+                    if (action is WarhammerContextActionRestoreActionPoints restoreAction)
+                    {
+                        // MovePointsToMax가 true면 최대 MP 반환 (보수적으로 10 추정)
+                        if (restoreAction.MovePointsToMax)
+                        {
+                            return 10f;
+                        }
+
+                        // MovePoints 값 계산 (ContextValue)
+                        // ContextValue는 정적 값이거나 스탯 기반일 수 있음
+                        var movePoints = restoreAction.MovePoints;
+                        if (movePoints != null)
+                        {
+                            // 정적 값이 있으면 사용
+                            int staticValue = movePoints.Value;
+                            if (staticValue > 0)
+                            {
+                                Main.LogDebug($"[CombatAPI] {ability.Name}: MP recovery = {staticValue}");
+                                return staticValue;
+                            }
+
+                            // 런타임 계산 필요 (캐스터 컨텍스트 기반)
+                            // 보수적으로 기본값 반환
+                            return 6f;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] GetAbilityMPRecovery error: {ex.Message}");
+            }
+
+            return 0f;
+        }
+
+        /// <summary>
+        /// ★ v3.0.98: 능력이 AP를 회복하는지 확인하고 예상 회복량 반환
+        /// </summary>
+        public static float GetAbilityAPRecovery(AbilityData ability, BaseUnitEntity caster = null)
+        {
+            if (ability?.Blueprint == null) return 0f;
+
+            try
+            {
+                var runAction = ability.Blueprint.GetComponent<AbilityEffectRunAction>();
+                if (runAction?.Actions?.Actions == null) return 0f;
+
+                foreach (var action in runAction.Actions.Actions)
+                {
+                    if (action is WarhammerContextActionRestoreActionPoints restoreAction)
+                    {
+                        if (restoreAction.ActionPointsToMax)
+                        {
+                            return 5f;  // 최대 AP (보수적 추정)
+                        }
+
+                        var actionPoints = restoreAction.ActionPoints;
+                        if (actionPoints != null)
+                        {
+                            int staticValue = actionPoints.Value;
+                            if (staticValue > 0)
+                            {
+                                Main.LogDebug($"[CombatAPI] {ability.Name}: AP recovery = {staticValue}");
+                                return staticValue;
+                            }
+
+                            return 2f;  // 보수적 기본값
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] GetAbilityAPRecovery error: {ex.Message}");
+            }
+
+            return 0f;
+        }
+
+        /// <summary>
+        /// ★ v3.0.98: 능력이 리소스(AP/MP)를 회복하는 능력인지 확인
+        /// </summary>
+        public static bool IsResourceRecoveryAbility(AbilityData ability)
+        {
+            return GetAbilityMPRecovery(ability) > 0 || GetAbilityAPRecovery(ability) > 0;
         }
 
         #endregion

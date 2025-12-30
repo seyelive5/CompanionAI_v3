@@ -276,6 +276,11 @@ namespace CompanionAI_v3.Data
             // ★ v3.0.34: Bladedancer 스킬
             // ========================================
 
+            // ★ v3.0.81: Death from Above - 핵심 갭클로저 (3칸 점프 + 착지 피해)
+            // 충전 기반, 적 처치 시 충전 회복, 적극 활용 권장
+            // PointTarget: 셀 타겟 능력 → MovementPlanner에서 착지 위치 계산
+            { "6f1b7cfb48a0450cb85ce8a8879502de", new AbilityInfo("6f1b7cfb48a0450cb85ce8a8879502de", "DeathFromAbove", AbilityTiming.GapCloser, flags: AbilityFlags.PointTarget) },
+
             // Death Waltz (Heroic Act) - Momentum 175+ 필요
             { "d52b8f3b44434f2798cd3a01c97fd1ed", new AbilityInfo("d52b8f3b44434f2798cd3a01c97fd1ed", "DeathWaltz_Heroic", AbilityTiming.HeroicAct, flags: AbilityFlags.SingleUse | AbilityFlags.EnemyTarget) },
 
@@ -696,8 +701,11 @@ namespace CompanionAI_v3.Data
             // ★ v3.0.37: Veteran (Arch-Militant) 추가 스킬
             // ========================================
 
-            // Reckless Rush - 무모한 돌진 (돌격)
-            { "801926b855d64391b465b6d75796a19a", new AbilityInfo("801926b855d64391b465b6d75796a19a", "RecklessRush", AbilityTiming.GapCloser, flags: AbilityFlags.SelfTargetOnly) },
+            // ★ v3.0.95: Reckless Rush - 무모한 돌진 (MP 회복 버프)
+            // Personal 타겟, 즉시 MP +(3 + AGI 보너스) 획득, Versatility 스택 +3
+            // GapCloser가 아님! 런 앤 건처럼 PostFirstAction으로 처리
+            // ★ v3.0.98: MP 회복량은 CombatAPI.GetAbilityMPRecovery()가 Blueprint에서 자동 감지
+            { "801926b855d64391b465b6d75796a19a", new AbilityInfo("801926b855d64391b465b6d75796a19a", "RecklessRush", AbilityTiming.PostFirstAction, flags: AbilityFlags.SelfTargetOnly) },
 
             // Battle Fury - 전투 광란 (자기 버프)
             { "3f268aa2ef7e4e5d9ce59f3684720265", new AbilityInfo("3f268aa2ef7e4e5d9ce59f3684720265", "BattleFury", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
@@ -1100,6 +1108,39 @@ namespace CompanionAI_v3.Data
             catch { }
 
             return false;
+        }
+
+        /// <summary>
+        /// ★ v3.0.98: MP 회복 능력 여부 - CombatAPI에서 Blueprint 직접 검사
+        /// GUID 하드코딩 대신 게임 데이터에서 직접 읽어옴
+        /// </summary>
+        public static bool IsMPRecovery(AbilityData ability)
+        {
+            return GameInterface.CombatAPI.GetAbilityMPRecovery(ability) > 0;
+        }
+
+        /// <summary>
+        /// ★ v3.0.98: MP 회복량 - CombatAPI에서 Blueprint 직접 검사
+        /// </summary>
+        public static float GetExpectedMPRecovery(AbilityData ability)
+        {
+            return GameInterface.CombatAPI.GetAbilityMPRecovery(ability);
+        }
+
+        /// <summary>
+        /// ★ v3.0.98: AP 회복 능력 여부
+        /// </summary>
+        public static bool IsAPRecovery(AbilityData ability)
+        {
+            return GameInterface.CombatAPI.GetAbilityAPRecovery(ability) > 0;
+        }
+
+        /// <summary>
+        /// ★ v3.0.98: AP 회복량
+        /// </summary>
+        public static float GetExpectedAPRecovery(AbilityData ability)
+        {
+            return GameInterface.CombatAPI.GetAbilityAPRecovery(ability);
         }
 
         #endregion

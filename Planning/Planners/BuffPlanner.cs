@@ -447,6 +447,8 @@ namespace CompanionAI_v3.Planning.Planners
 
         /// <summary>
         /// 턴 종료 능력
+        /// ★ v3.0.88: 디버그 로깅 추가
+        /// ★ v3.0.89: PointTarget 능력 지원 (VeilOfBlades 등)
         /// </summary>
         public static PlannedAction PlanTurnEndingAbility(Situation situation, ref float remainingAP, string roleName)
         {
@@ -454,24 +456,55 @@ namespace CompanionAI_v3.Planning.Planners
                 .Where(a => AbilityDatabase.IsTurnEnding(a))
                 .ToList();
 
-            if (turnEndingAbilities.Count == 0) return null;
+            // ★ v3.0.88: 디버그 로깅
+            Main.LogDebug($"[{roleName}] PlanTurnEnding: TurnEndingAbilities={turnEndingAbilities.Count}, AP={remainingAP:F1}");
 
-            var target = new TargetWrapper(situation.Unit);
+            if (turnEndingAbilities.Count == 0)
+            {
+                Main.LogDebug($"[{roleName}] PlanTurnEnding: No TurnEnding abilities in AvailableBuffs");
+                return null;
+            }
+
+            Main.LogDebug($"[{roleName}] PlanTurnEnding: Found: {string.Join(", ", turnEndingAbilities.Select(a => a.Name))}");
 
             foreach (var ability in turnEndingAbilities)
             {
                 float cost = CombatAPI.GetAbilityAPCost(ability);
-                if (cost > remainingAP) continue;
+                if (cost > remainingAP)
+                {
+                    Main.LogDebug($"[{roleName}] PlanTurnEnding: {ability.Name} skipped - AP cost {cost:F1} > remaining {remainingAP:F1}");
+                    continue;
+                }
+
+                // ★ v3.0.89: PointTarget vs SelfTarget 분기
+                // VeilOfBlades 등: CanTargetPoint=True, CanTargetSelf=False → 위치 타겟
+                bool isPointTarget = ability.Blueprint?.CanTargetPoint == true && ability.Blueprint?.CanTargetSelf != true;
+                TargetWrapper target = isPointTarget
+                    ? new TargetWrapper(situation.Unit.Position)
+                    : new TargetWrapper(situation.Unit);
+
+                Main.LogDebug($"[{roleName}] PlanTurnEnding: {ability.Name} isPointTarget={isPointTarget}");
 
                 string reason;
                 if (CombatAPI.CanUseAbilityOn(ability, target, out reason))
                 {
                     remainingAP -= cost;
                     Main.Log($"[{roleName}] Turn ending: {ability.Name}");
+
+                    // ★ v3.0.89: PointTarget이면 PositionalAction 반환
+                    if (isPointTarget)
+                    {
+                        return PlannedAction.PositionalAttack(ability, situation.Unit.Position, "Turn ending ability (point)", cost);
+                    }
                     return PlannedAction.Buff(ability, situation.Unit, "Turn ending ability", cost);
+                }
+                else
+                {
+                    Main.LogDebug($"[{roleName}] PlanTurnEnding: {ability.Name} CanUseAbilityOn=false, reason={reason}");
                 }
             }
 
+            Main.LogDebug($"[{roleName}] PlanTurnEnding: All abilities failed");
             return null;
         }
 
@@ -490,7 +523,7 @@ namespace CompanionAI_v3.Planning.Planners
                     return true;
             }
 
-            var role = situation.CharacterSettings?.Role ?? AIRole.Balanced;
+            var role = situation.CharacterSettings?.Role ?? AIRole.Auto;
             if (role == AIRole.Tank)
             {
                 if (bpName.Contains("defensive") || bpName.Contains("stance"))

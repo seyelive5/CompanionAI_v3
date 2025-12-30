@@ -40,14 +40,15 @@ namespace CompanionAI_v3.Analysis
                 // 전장 상황
                 AnalyzeBattlefield(situation, unit);
 
-                // 타겟 분석
+                // ★ v3.0.78: 순서 변경 - 능력 분류를 먼저 수행
+                // 이유: AnalyzeTargets()에서 모든 AvailableAttacks를 기준으로 Hittable 계산
+                AnalyzeAbilities(situation, unit);
+
+                // 타겟 분석 (이제 AvailableAttacks 사용 가능)
                 AnalyzeTargets(situation, unit);
 
                 // 위치 분석
                 AnalyzePosition(situation, unit);
-
-                // 능력 분류
-                AnalyzeAbilities(situation, unit);
 
                 // 턴 상태 복사
                 CopyTurnState(situation, turnState);
@@ -124,45 +125,145 @@ namespace CompanionAI_v3.Analysis
             // 공격 가능한 적 찾기
             situation.HittableEnemies = new List<BaseUnitEntity>();
 
-            // 공격 능력 찾기
-            var attackAbility = CombatAPI.FindAnyAttackAbility(unit, situation.RangePreference);
+            // ★ v3.0.78: 모든 AvailableAttacks를 기준으로 Hittable 계산
+            // 이전: 단일 참조 능력 → 쿨다운이면 Hittable=0
+            // 변경: 어떤 공격이든 사용 가능하면 Hittable
+            var attacks = situation.AvailableAttacks;
 
-            // ★ v3.0.14: attackAbility 로깅
-            if (attackAbility == null)
+            if (attacks == null || attacks.Count == 0)
             {
-                Main.LogDebug($"[Analyzer] No attack ability found for {unit.CharacterName} (pref={situation.RangePreference})");
+                // 폴백: 분류된 공격이 없으면 기존 방식
+                var fallbackAbility = CombatAPI.FindAnyAttackAbility(unit, situation.RangePreference);
+                if (fallbackAbility != null)
+                {
+                    attacks = new List<AbilityData> { fallbackAbility };
+                }
+                Main.LogDebug($"[Analyzer] No classified attacks, using fallback: {fallbackAbility?.Name ?? "none"}");
             }
             else
             {
-                Main.LogDebug($"[Analyzer] Using attack ability: {attackAbility.Name} for targeting check");
+                Main.LogDebug($"[Analyzer] Checking hittable with {attacks.Count} available attacks");
             }
 
-            // ★ Target Scoring System 사용
-            var targetScores = CombatAPI.ScoreAllTargets(unit, situation.Enemies, attackAbility, situation.RangePreference);
-
-            foreach (var score in targetScores)
+            // 각 적에 대해 어떤 공격이든 사용 가능한지 확인
+            foreach (var enemy in situation.Enemies)
             {
-                if (score.IsHittable)
+                if (enemy == null || enemy.LifeState.IsDead) continue;
+
+                var targetWrapper = new TargetWrapper(enemy);
+                bool isHittable = false;
+                string hittableBy = null;
+
+                foreach (var attack in attacks)
                 {
-                    situation.HittableEnemies.Add(score.Target);
+                    if (attack == null) continue;
+                    // 재장전, 턴 종료 스킬 제외
+                    if (AbilityDatabase.IsReload(attack)) continue;
+                    if (AbilityDatabase.IsTurnEnding(attack)) continue;
+                    // ★ v3.0.83: GapCloser는 현재 위치에서 타격 불가 - 이동 용도만
+                    // 죽음 강림 등은 PlanMoveOrGapCloser에서 사용
+                    if (AbilityDatabase.IsGapCloser(attack)) continue;
+                    // ★ v3.0.97: DOTIntensify/ChainEffect는 Hittable 계산에서 제외
+                    // 이유: 이 능력만으로 Hittable=true가 되면 이동이 스킵됨
+                    // 특수 능력은 PlanSpecialAbility()에서 별도로 타겟 검증
+                    if (AbilityDatabase.IsDOTIntensify(attack)) continue;
+                    if (AbilityDatabase.IsChainEffect(attack)) continue;
+
+                    string reason;
+                    if (CombatAPI.CanUseAbilityOn(attack, targetWrapper, out reason))
+                    {
+                        isHittable = true;
+                        hittableBy = attack.Name;
+                        break;
+                    }
+                }
+
+                if (isHittable)
+                {
+                    situation.HittableEnemies.Add(enemy);
+                    Main.LogDebug($"[Analyzer] {enemy.CharacterName} hittable by {hittableBy}");
                 }
             }
 
-            // ★ v3.0.14: Hittable 결과 로깅
+            // Hittable 결과 로깅
             if (situation.HittableEnemies.Count == 0 && situation.Enemies?.Count > 0)
             {
-                Main.LogDebug($"[Analyzer] No hittable enemies! (total={situation.Enemies.Count})");
+                Main.LogDebug($"[Analyzer] No hittable enemies! (total={situation.Enemies.Count}, attacks={attacks?.Count ?? 0})");
+
+                // ★ v3.0.79: RangeFilter 폴백 - 필터링된 공격으로 못 맞추면 전체 공격으로 재시도
+                // 예: PreferMelee인데 일격이 쿨다운이면, 원거리 공격(죽음의 속삭임)도 허용
+                var allAttacks = CombatAPI.GetAvailableAbilities(unit)
+                    .Where(a => a.Blueprint?.CanTargetEnemies == true || a.Weapon != null)
+                    .Where(a => !AbilityDatabase.IsReload(a))
+                    .Where(a => !AbilityDatabase.IsTurnEnding(a))
+                    .Where(a => !AbilityDatabase.IsHealing(a))
+                    .Where(a => !AbilityDatabase.IsGapCloser(a))  // ★ v3.0.83: GapCloser 제외
+                    .Where(a => !AbilityDatabase.IsMarker(a))     // ★ v3.0.84: Marker 제외 (실제 공격 아님)
+                    .Where(a => {
+                        var timing = AbilityDatabase.GetTiming(a);
+                        return timing != AbilityTiming.PreCombatBuff &&
+                               timing != AbilityTiming.PreAttackBuff &&
+                               timing != AbilityTiming.PositionalBuff;
+                    })
+                    .ToList();
+
+                if (allAttacks.Count > attacks?.Count)
+                {
+                    Main.Log($"[Analyzer] ★ RangeFilter fallback: trying {allAttacks.Count} unfiltered attacks");
+
+                    foreach (var enemy in situation.Enemies)
+                    {
+                        if (enemy == null || enemy.LifeState.IsDead) continue;
+                        if (situation.HittableEnemies.Contains(enemy)) continue;
+
+                        var targetWrapper = new TargetWrapper(enemy);
+
+                        foreach (var attack in allAttacks)
+                        {
+                            if (attack == null) continue;
+
+                            string reason;
+                            if (CombatAPI.CanUseAbilityOn(attack, targetWrapper, out reason))
+                            {
+                                situation.HittableEnemies.Add(enemy);
+                                Main.LogDebug($"[Analyzer] {enemy.CharacterName} hittable by {attack.Name} (fallback)");
+
+                                // ★ 폴백으로 찾은 공격을 AvailableAttacks에 추가
+                                if (!situation.AvailableAttacks.Contains(attack))
+                                {
+                                    situation.AvailableAttacks.Add(attack);
+                                    Main.Log($"[Analyzer] Added fallback attack: {attack.Name}");
+                                }
+                                break;
+                            }
+                        }
+                    }
+
+                    if (situation.HittableEnemies.Count > 0)
+                    {
+                        Main.Log($"[Analyzer] Fallback success! Hittable: {situation.HittableEnemies.Count}/{situation.Enemies.Count}");
+                    }
+                }
+            }
+            else
+            {
+                Main.LogDebug($"[Analyzer] Hittable: {situation.HittableEnemies.Count}/{situation.Enemies?.Count ?? 0}");
             }
 
-            // ★ 최적 타겟 선택 (CombatAPI.FindBestTarget 사용)
-            situation.BestTarget = CombatAPI.FindBestTarget(unit, situation.Enemies, attackAbility, situation.RangePreference);
+            // ★ 최적 타겟 선택 - Hittable 적 중에서 선택
+            situation.BestTarget = situation.HittableEnemies.Count > 0
+                ? UtilityScorer.SelectBestTarget(situation.HittableEnemies, situation)
+                : situation.NearestEnemy;  // 폴백: 가장 가까운 적
+
+            // ★ v3.0.78: PrimaryAttack 선택 (BestTarget 설정 후)
+            // 이전: AnalyzeAbilities()에서 선택 → BestTarget=null
+            // 변경: AnalyzeTargets() 끝에서 선택 → BestTarget 활용 가능
+            situation.PrimaryAttack = SelectPrimaryAttack(situation, unit);
 
             // 처치 가능 여부
-            if (situation.BestTarget != null)
+            if (situation.BestTarget != null && situation.PrimaryAttack != null)
             {
-                int targetHP = situation.BestTarget.Health?.HitPointsLeft ?? 100;
-                float estimatedDamage = EstimateDamage(unit) * (situation.CurrentAP / 1f);
-                situation.CanKillBestTarget = estimatedDamage >= targetHP;
+                situation.CanKillBestTarget = CombatAPI.CanKillInOneHit(situation.PrimaryAttack, situation.BestTarget);
             }
         }
 
@@ -176,7 +277,8 @@ namespace CompanionAI_v3.Analysis
                 situation.MinSafeDistance);
 
             // 이동 필요: 공격 가능한 적 없음
-            situation.NeedsReposition = !situation.HasHittableEnemies && situation.HasLivingEnemies;
+            // ★ v3.0.93: MP > 0 체크 추가 - MP 없으면 이동 불가능하므로 NeedsReposition=false
+            situation.NeedsReposition = !situation.HasHittableEnemies && situation.HasLivingEnemies && situation.CurrentMP > 0;
 
             // 엄폐 분석
             if (situation.NearestEnemy != null)
@@ -215,9 +317,12 @@ namespace CompanionAI_v3.Analysis
                 var timing = AbilityDatabase.GetTiming(ability);
 
                 // ★ v3.0.20: 분류 과정 디버그 로깅
+                // ★ v3.0.88: CanTargetSelf, CanTargetPoint, Range 추가
                 var bp = ability.Blueprint;
                 Main.LogDebug($"[Analyzer] Ability: {ability.Name} -> Timing={timing}, " +
-                    $"CanTargetFriends={bp?.CanTargetFriends}, CanTargetEnemies={bp?.CanTargetEnemies}, Weapon={ability.Weapon != null}");
+                    $"CanTargetSelf={bp?.CanTargetSelf}, CanTargetFriends={bp?.CanTargetFriends}, " +
+                    $"CanTargetEnemies={bp?.CanTargetEnemies}, CanTargetPoint={bp?.CanTargetPoint}, " +
+                    $"Range={bp?.Range}, Weapon={ability.Weapon != null}");
 
                 switch (timing)
                 {
@@ -293,20 +398,36 @@ namespace CompanionAI_v3.Analysis
                         }
                         break;
 
-                    // ★ 특수 능력 처리 (DOT 강화, 연쇄 효과)
+                    // ★ v3.0.96: 특수 능력 처리 (DOT 강화, 연쇄 효과)
+                    // ★ 중요: AvailableAttacks에도 추가해야 Hittable 체크에 포함됨!
+                    // 이전 버그: AvailableSpecialAbilities에만 추가 → Hittable=0 → 공격 스킵
                     case AbilityTiming.DOTIntensify:
                     case AbilityTiming.ChainEffect:
                         situation.AvailableSpecialAbilities.Add(ability);
+                        situation.AvailableAttacks.Add(ability);  // ★ v3.0.96: Hittable 체크용
+                        Main.LogDebug($"[Analyzer] Special attack added: {ability.Name} (Timing={timing})");
                         break;
 
                     // ★ v3.0.38: 명시적 타이밍 처리 추가
-                    // HeroicAct, Taunt, TurnEnding, RighteousFury -> AvailableBuffs
+                    // HeroicAct, Taunt, RighteousFury -> AvailableBuffs
                     // (TurnPlanner에서 AbilityDatabase.IsXXX()로 필터링)
                     case AbilityTiming.HeroicAct:
                     case AbilityTiming.Taunt:
-                    case AbilityTiming.TurnEnding:
                     case AbilityTiming.RighteousFury:
                         situation.AvailableBuffs.Add(ability);
+                        break;
+
+                    // ★ v3.0.88: TurnEnding은 HP 임계값 체크 필요 (VeilOfBlades 등 HP 소모)
+                    case AbilityTiming.TurnEnding:
+                        {
+                            float hpThreshold = AbilityDatabase.GetHPThreshold(ability);
+                            if (hpThreshold > 0 && situation.HPPercent < hpThreshold)
+                            {
+                                Main.LogDebug($"[Analyzer] Blocked TurnEnding {ability.Name}: HP {situation.HPPercent:F0}% < threshold {hpThreshold}%");
+                                break;  // HP 부족 - 추가하지 않음
+                            }
+                            situation.AvailableBuffs.Add(ability);
+                        }
                         break;
 
                     // Finisher, GapCloser -> AvailableAttacks
@@ -337,26 +458,51 @@ namespace CompanionAI_v3.Analysis
                 }
             }
 
+            // ★ v3.0.82: GapCloser는 RangePreference 필터에서 제외 (Death from Above 등)
+            var gapClosers = situation.AvailableAttacks
+                .Where(a => AbilityDatabase.IsGapCloser(a))
+                .ToList();
+
             // ★ RangePreference 필터 적용 (CombatHelpers 사용)
             situation.AvailableAttacks = CombatHelpers.FilterAbilitiesByRangePreference(
                 situation.AvailableAttacks, situation.RangePreference);
 
-            // 주 공격 및 최적 버프 선택
-            situation.PrimaryAttack = SelectPrimaryAttack(situation, unit);
+            // ★ v3.0.82: 필터링된 GapCloser 복원
+            foreach (var gc in gapClosers)
+            {
+                if (!situation.AvailableAttacks.Contains(gc))
+                {
+                    situation.AvailableAttacks.Add(gc);
+                    Main.LogDebug($"[Analyzer] Restored GapCloser after filter: {gc.Name}");
+                }
+            }
+
+            // ★ v3.0.78: PrimaryAttack 선택은 AnalyzeTargets() 이후로 이동
+            // 이유: BestTarget이 설정된 후 최적 공격 선택 가능
+            // situation.PrimaryAttack = SelectPrimaryAttack(situation, unit);  // -> AnalyzeTargets()로 이동
             situation.BestBuff = SelectBestBuff(situation.AvailableBuffs, situation);
 
             // ★ v3.0.20: 분류 결과 요약 로깅
             // ★ v3.0.21: PositionalBuffs 추가
             // ★ v3.0.23: Stratagems 추가
             // ★ v3.0.33: Markers 추가
+            // ★ v3.0.87: GapClosers 카운트 추가
+            var finalGapClosers = situation.AvailableAttacks.Where(a => AbilityDatabase.IsGapCloser(a)).ToList();
             Main.Log($"[Analyzer] {unit.CharacterName} abilities: " +
                 $"Buffs={situation.AvailableBuffs.Count}, " +
                 $"Heals={situation.AvailableHeals.Count}, " +
                 $"Debuffs={situation.AvailableDebuffs.Count}, " +
                 $"Attacks={situation.AvailableAttacks.Count}, " +
+                $"GapClosers={finalGapClosers.Count}, " +
                 $"PositionalBuffs={situation.AvailablePositionalBuffs.Count}, " +
                 $"Stratagems={situation.AvailableStratagems.Count}, " +
                 $"Markers={situation.AvailableMarkers.Count}");
+
+            // ★ v3.0.87: GapClosers 이름 로깅
+            if (finalGapClosers.Count > 0)
+            {
+                Main.Log($"[Analyzer] GapClosers: {string.Join(", ", finalGapClosers.Select(g => g.Name))}");
+            }
 
             if (situation.AvailableBuffs.Count > 0)
             {
@@ -395,18 +541,19 @@ namespace CompanionAI_v3.Analysis
             // - HasMovedThisTurn=true → 이미 이동함 → 추가 이동 불필요
             if (turnState.HasPerformedFirstAction && situation.PrefersRanged)
             {
-                // 공격 가능 적이 있거나, 이미 이동했으면 → 추가 이동 불필요
-                if (situation.HasHittableEnemies || turnState.HasMovedThisTurn)
+                // 공격 가능 적이 있거나, 이미 이동했거나, MP가 없으면 → 추가 이동 불필요
+                // ★ v3.0.93: MP=0 체크 추가
+                if (situation.HasHittableEnemies || turnState.HasMovedThisTurn || situation.CurrentMP <= 0)
                 {
                     situation.NeedsReposition = false;
                     situation.AllowChaseMove = false;
-                    Main.LogDebug($"[Analyzer] Ranged character: hittable={situation.HasHittableEnemies}, moved={turnState.HasMovedThisTurn} - no reposition needed");
+                    Main.LogDebug($"[Analyzer] Ranged character: hittable={situation.HasHittableEnemies}, moved={turnState.HasMovedThisTurn}, MP={situation.CurrentMP:F1} - no reposition needed");
                 }
                 else
                 {
-                    // Hittable=0 && HasMovedThisTurn=false → 이동해서 공격 위치 찾아야 함
-                    // NeedsReposition은 AnalyzePosition()에서 이미 올바르게 설정됨 (line 179)
-                    Main.LogDebug($"[Analyzer] Ranged character acted but no hittable targets and hasn't moved - allow reposition (NeedsReposition={situation.NeedsReposition})");
+                    // Hittable=0 && HasMovedThisTurn=false && MP>0 → 이동해서 공격 위치 찾아야 함
+                    // NeedsReposition은 AnalyzePosition()에서 이미 올바르게 설정됨
+                    Main.LogDebug($"[Analyzer] Ranged character acted but no hittable targets and hasn't moved - allow reposition (NeedsReposition={situation.NeedsReposition}, MP={situation.CurrentMP:F1})");
                 }
             }
         }

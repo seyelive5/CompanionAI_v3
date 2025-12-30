@@ -21,12 +21,19 @@ namespace CompanionAI_v3.Planning.Planners
         /// <summary>
         /// ★ 이동 또는 GapCloser 계획 (공통화)
         /// 모든 Role에서 사용 - 근접 캐릭터가 적에게 도달 못하면 GapCloser 사용
+        /// ★ v3.0.89: forceMove 파라미터 추가 - 공격 실패 시 이동 강제
+        /// ★ v3.1.00: bypassCanMoveCheck 파라미터 추가 - MP 회복 예측 후 이동 허용
+        /// ★ v3.1.01: predictedMP 파라미터 추가 - MovementAPI에 예측 MP 전달
         /// </summary>
-        public static PlannedAction PlanMoveOrGapCloser(Situation situation, ref float remainingAP, string roleName)
+        public static PlannedAction PlanMoveOrGapCloser(Situation situation, ref float remainingAP, string roleName, bool forceMove = false, bool bypassCanMoveCheck = false, float predictedMP = 0f)
         {
-            if (situation.HasHittableEnemies) return null;
+            // ★ v3.0.89: forceMove=true면 HasHittableEnemies 체크 스킵
+            // 사용 사례: 원거리 fallback으로 Hittable=True인데 PreferMelee라서 공격 못함 → 이동 필요
+            if (!forceMove && situation.HasHittableEnemies) return null;
             if (!situation.HasLivingEnemies) return null;
             if (situation.NearestEnemy == null) return null;
+
+            Main.LogDebug($"[{roleName}] PlanMoveOrGapCloser: forceMove={forceMove}, bypassCanMove={bypassCanMoveCheck}, predictedMP={predictedMP:F1}, PrefersRanged={situation.PrefersRanged}, Distance={situation.NearestEnemyDistance:F1}m");
 
             // ★ 먼저 GapCloser 시도 (근접 선호이고 적이 멀 때)
             if (!situation.PrefersRanged && situation.NearestEnemyDistance > 3f)
@@ -40,47 +47,123 @@ namespace CompanionAI_v3.Planning.Planners
             }
 
             // GapCloser 없으면 일반 이동
-            return PlanMoveToEnemy(situation, roleName);
+            // ★ v3.1.01: bypassCanMoveCheck와 predictedMP 전달
+            return PlanMoveToEnemy(situation, roleName, bypassCanMoveCheck, predictedMP);
         }
 
         /// <summary>
         /// GapCloser 계획 (모든 Role 공통)
+        /// ★ v3.0.81: PointTarget 능력 지원 (Death from Above 등)
+        /// ★ v3.0.87: 디버그 로깅 추가
         /// </summary>
         public static PlannedAction PlanGapCloser(Situation situation, BaseUnitEntity target, ref float remainingAP, string roleName)
         {
+            // ★ v3.0.87: 진입 로깅
+            Main.LogDebug($"[{roleName}] PlanGapCloser: target={target?.CharacterName}, AP={remainingAP:F1}, attacks={situation.AvailableAttacks?.Count ?? 0}");
+
             var gapClosers = situation.AvailableAttacks
                 .Where(a => AbilityDatabase.IsGapCloser(a))
                 .ToList();
 
-            if (gapClosers.Count == 0) return null;
+            if (gapClosers.Count == 0)
+            {
+                Main.LogDebug($"[{roleName}] PlanGapCloser: No GapClosers in AvailableAttacks");
+                return null;
+            }
 
-            var targetWrapper = new TargetWrapper(target);
+            Main.LogDebug($"[{roleName}] PlanGapCloser: Found {gapClosers.Count} GapClosers: {string.Join(", ", gapClosers.Select(g => g.Name))}");
 
             foreach (var gapCloser in gapClosers)
             {
                 float cost = CombatAPI.GetAbilityAPCost(gapCloser);
-                if (cost > remainingAP) continue;
+                if (cost > remainingAP)
+                {
+                    Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} skipped - AP cost {cost:F1} > remaining {remainingAP:F1}");
+                    continue;
+                }
 
                 var info = AbilityDatabase.GetInfo(gapCloser);
                 if (info?.HPThreshold > 0 && situation.HPPercent < info.HPThreshold)
-                    continue;
-
-                string reason;
-                if (CombatAPI.CanUseAbilityOn(gapCloser, targetWrapper, out reason))
                 {
-                    remainingAP -= cost;
-                    Main.Log($"[{roleName}] Gap closer: {gapCloser.Name} -> {target.CharacterName}");
-                    return PlannedAction.Attack(gapCloser, target, $"Gap closer on {target.CharacterName}", cost);
+                    Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} skipped - HP {situation.HPPercent:F0}% < threshold {info.HPThreshold}%");
+                    continue;
+                }
+
+                // ★ v3.0.81: PointTarget 능력 처리 (Death from Above 등)
+                bool isPointTarget = info != null && (info.Flags & AbilityFlags.PointTarget) != 0;
+                Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} isPointTarget={isPointTarget}");
+
+                if (isPointTarget)
+                {
+                    // 적 옆 착지 위치 찾기 (MovementAPI 재사용)
+                    var landingPosition = FindGapCloserLandingPosition(situation.Unit, target);
+                    if (landingPosition.HasValue)
+                    {
+                        Main.LogDebug($"[{roleName}] PlanGapCloser: Landing position found at ({landingPosition.Value.x:F1},{landingPosition.Value.z:F1})");
+                        var pointTarget = new TargetWrapper(landingPosition.Value);
+                        string reason;
+                        if (CombatAPI.CanUseAbilityOn(gapCloser, pointTarget, out reason))
+                        {
+                            remainingAP -= cost;
+                            Main.Log($"[{roleName}] Position gap closer: {gapCloser.Name} -> near {target.CharacterName} ({landingPosition.Value.x:F1},{landingPosition.Value.z:F1})");
+                            return PlannedAction.PositionalAttack(gapCloser, landingPosition.Value, $"Jump to {target.CharacterName}", cost);
+                        }
+                        else
+                        {
+                            Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} CanUseAbilityOn=false, reason={reason}");
+                        }
+                    }
+                    else
+                    {
+                        Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} - no landing position found");
+                    }
+                }
+                else
+                {
+                    // 일반 타겟 능력
+                    var targetWrapper = new TargetWrapper(target);
+                    string reason;
+                    if (CombatAPI.CanUseAbilityOn(gapCloser, targetWrapper, out reason))
+                    {
+                        remainingAP -= cost;
+                        Main.Log($"[{roleName}] Gap closer: {gapCloser.Name} -> {target.CharacterName}");
+                        return PlannedAction.Attack(gapCloser, target, $"Gap closer on {target.CharacterName}", cost);
+                    }
+                    else
+                    {
+                        Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} CanUseAbilityOn=false, reason={reason}");
+                    }
                 }
             }
 
+            Main.LogDebug($"[{roleName}] PlanGapCloser: All GapClosers failed");
             return null;
         }
 
         /// <summary>
-        /// 적에게 이동
+        /// ★ v3.0.81: 갭클로저 착지 위치 찾기
+        /// 적에게 인접한 위치 중 도달 가능한 곳 반환
         /// </summary>
-        public static PlannedAction PlanMoveToEnemy(Situation situation, string roleName)
+        private static Vector3? FindGapCloserLandingPosition(BaseUnitEntity unit, BaseUnitEntity target)
+        {
+            // MovementAPI.FindMeleeAttackPositionSync 재사용
+            var meleePosition = MovementAPI.FindMeleeAttackPositionSync(unit, target, 2f);
+            if (meleePosition != null)
+            {
+                return meleePosition.Position;
+            }
+
+            // 폴백: 적 옆 위치 (단순 계산)
+            var offset = (unit.Position - target.Position).normalized * 1.5f;
+            return target.Position + offset;
+        }
+
+        /// <summary>
+        /// 적에게 이동
+        /// ★ v3.1.00: bypassCanMoveCheck 파라미터 추가
+        /// ★ v3.1.01: predictedMP 파라미터 추가 - MovementAPI에 전달
+        /// </summary>
+        public static PlannedAction PlanMoveToEnemy(Situation situation, string roleName, bool bypassCanMoveCheck = false, float predictedMP = 0f)
         {
             bool isChaseMove = false;
 
@@ -105,21 +188,32 @@ namespace CompanionAI_v3.Planning.Planners
 
             if (isChaseMove)
             {
-                if (situation.CurrentMP <= 0)
+                // ★ v3.1.01: predictedMP가 있으면 chase move 허용
+                if (situation.CurrentMP <= 0 && predictedMP <= 0)
                 {
-                    Main.LogDebug($"[{roleName}] PlanMoveToEnemy: Chase move blocked - no MP");
+                    Main.LogDebug($"[{roleName}] PlanMoveToEnemy: Chase move blocked - no MP (predictedMP={predictedMP:F1})");
                     return null;
                 }
             }
             else
             {
-                if (!situation.CanMove) return null;
+                // ★ v3.1.00: bypassCanMoveCheck=true면 CanMove 체크 스킵
+                // MP 회복 능력(무모한 돌진 등) 계획 후 예측 MP로 이동 가능할 때 사용
+                if (!bypassCanMoveCheck && !situation.CanMove)
+                {
+                    Main.LogDebug($"[{roleName}] PlanMoveToEnemy: CanMove=false, skipping");
+                    return null;
+                }
             }
 
             if (situation.NearestEnemy == null) return null;
 
             var unit = situation.Unit;
             var target = situation.NearestEnemy;
+
+            // ★ v3.1.01: 실제 MP와 예측 MP 중 큰 값 사용
+            float effectiveMP = Math.Max(situation.CurrentMP, predictedMP);
+            Main.LogDebug($"[{roleName}] PlanMoveToEnemy: effectiveMP={effectiveMP:F1} (current={situation.CurrentMP:F1}, predicted={predictedMP:F1})");
 
             if (situation.PrefersRanged)
             {
@@ -146,16 +240,18 @@ namespace CompanionAI_v3.Planning.Planners
                 }
                 catch { }
 
+                // ★ v3.1.01: predictedMP 전달
                 var bestPosition = MovementAPI.FindRangedAttackPositionSync(
                     unit,
                     situation.Enemies,
                     weaponRange,
-                    situation.MinSafeDistance
+                    situation.MinSafeDistance,
+                    effectiveMP
                 );
 
                 if (bestPosition == null)
                 {
-                    Main.LogDebug($"[{roleName}] PlanMoveToEnemy: No safe ranged position found");
+                    Main.LogDebug($"[{roleName}] PlanMoveToEnemy: No safe ranged position found (effectiveMP={effectiveMP:F1})");
                     return null;
                 }
 
@@ -190,10 +286,12 @@ namespace CompanionAI_v3.Planning.Planners
                 }
                 catch { }
 
+                // ★ v3.1.01: predictedMP 전달
                 var bestPosition = MovementAPI.FindMeleeAttackPositionSync(
                     unit,
                     target,
-                    meleeRange
+                    meleeRange,
+                    effectiveMP
                 );
 
                 if (bestPosition == null)

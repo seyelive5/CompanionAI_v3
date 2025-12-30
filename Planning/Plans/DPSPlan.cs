@@ -127,6 +127,10 @@ namespace CompanionAI_v3.Planning.Plans
             var plannedTargetIds = new HashSet<string>();
             var plannedAbilityGuids = new HashSet<string>();
 
+            // ★ v3.0.87: Phase 5 진입 상태 로깅
+            Main.LogDebug($"[DPS] Phase 5 entry: AP={remainingAP:F1}, HasHittable={situation.HasHittableEnemies}, " +
+                $"HittableCount={situation.HittableEnemies?.Count ?? 0}, AvailableAttacks={situation.AvailableAttacks?.Count ?? 0}");
+
             while (remainingAP >= 1f && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
             {
                 var weakestEnemy = FindWeakestEnemy(situation, plannedTargetIds);
@@ -157,16 +161,47 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // ★ Phase 5.5: GapCloser (적이 멀리 있을 때)
-            // DPS는 공격 후에도 GapCloser로 추격 가능
-            if (!situation.HasHittableEnemies && situation.NearestEnemyDistance > 5f && situation.NearestEnemy != null)
+            // ★ v3.0.87: Phase 5 종료 후 상태 로깅
+            if (!didPlanAttack)
             {
+                Main.LogDebug($"[DPS] Phase 5 exit: No attacks planned. AP={remainingAP:F1}, HasHittable={situation.HasHittableEnemies}");
+            }
+            else
+            {
+                Main.LogDebug($"[DPS] Phase 5 exit: {attacksPlanned} attacks planned. AP={remainingAP:F1}");
+            }
+
+            // ★ Phase 5.5: GapCloser (공격 계획 실패 시)
+            // ★ v3.0.86: 거리 조건 제거 - 적이 4m에 있어도 근접 사거리(2m)에 못 들어올 수 있음
+            // 기존: NearestEnemyDistance > 5f → 적이 5m 이내면 스킵 (버그!)
+            // 수정: 공격 계획 실패 시 무조건 GapCloser 시도 (GapCloser 자체가 유효성 검사)
+
+            // ★ v3.0.87: Phase 5.5 진입 전 상태 로깅
+            Main.LogDebug($"[DPS] Phase 5.5 check: didPlanAttack={didPlanAttack}, HasHittableEnemies={situation.HasHittableEnemies}, " +
+                $"NearestEnemy={situation.NearestEnemy?.CharacterName ?? "null"}, Distance={situation.NearestEnemyDistance:F1}m, AP={remainingAP:F1}");
+
+            if (!didPlanAttack && situation.NearestEnemy != null)
+            {
+                Main.Log($"[DPS] Phase 5.5: Trying GapCloser as fallback (attack failed)");
                 var gapCloserAction = PlanGapCloser(situation, situation.NearestEnemy, ref remainingAP);
                 if (gapCloserAction != null)
                 {
                     actions.Add(gapCloserAction);
                     didPlanAttack = true;  // GapCloser도 공격으로 취급
+                    Main.Log($"[DPS] GapCloser fallback: {gapCloserAction.Ability?.Name}");
                 }
+                else
+                {
+                    Main.LogDebug($"[DPS] Phase 5.5: GapCloser returned null");
+                }
+            }
+            else if (didPlanAttack)
+            {
+                Main.LogDebug($"[DPS] Phase 5.5: Skipped - already planned attack");
+            }
+            else
+            {
+                Main.LogDebug($"[DPS] Phase 5.5: Skipped - NearestEnemy is null");
             }
 
             // Phase 6: PostFirstAction
@@ -176,6 +211,45 @@ namespace CompanionAI_v3.Planning.Plans
                 if (postAction != null)
                 {
                     actions.Add(postAction);
+
+                    // ★ v3.0.98: MP 회복 능력 예측 (Blueprint에서 직접 읽어옴)
+                    // 이 능력이 MP를 회복해줌을 예측해서 Phase 8 이동 가능하게 함
+                    float expectedMP = AbilityDatabase.GetExpectedMPRecovery(postAction.Ability);
+                    if (expectedMP > 0)
+                    {
+                        remainingMP += expectedMP;
+                        Main.Log($"[DPS] Phase 6: {postAction.Ability.Name} will restore ~{expectedMP:F0} MP (predicted MP={remainingMP:F1})");
+                    }
+                }
+            }
+
+            // ★ v3.0.96: Phase 6.5: 공격 불가 시 남은 버프 사용
+            // 이전 버그: Hittable=0이면 버프 사용 못함
+            if (!didPlanAttack && remainingAP >= 1f && situation.AvailableBuffs.Count > 0)
+            {
+                Main.Log($"[DPS] Phase 6.5: No attack possible, using remaining buffs (AP={remainingAP:F1})");
+
+                foreach (var buff in situation.AvailableBuffs)
+                {
+                    if (remainingAP < 1f) break;
+
+                    float cost = CombatAPI.GetAbilityAPCost(buff);
+                    if (cost > remainingAP) continue;
+
+                    if (CombatAPI.HasActiveBuff(situation.Unit, buff)) continue;
+
+                    // ★ Self 또는 Ally 타겟 버프
+                    var bp = buff.Blueprint;
+                    if (bp?.CanTargetSelf != true && bp?.CanTargetFriends != true) continue;
+
+                    var target = new TargetWrapper(situation.Unit);
+                    string reason;
+                    if (CombatAPI.CanUseAbilityOn(buff, target, out reason))
+                    {
+                        remainingAP -= cost;
+                        actions.Add(PlannedAction.Buff(buff, situation.Unit, "Fallback buff - no attack available", cost));
+                        Main.Log($"[DPS] Fallback buff: {buff.Name}");
+                    }
                 }
             }
 
@@ -188,10 +262,28 @@ namespace CompanionAI_v3.Planning.Plans
 
             // ★ Phase 8: 이동 또는 GapCloser (공격 불가 시)
             // ★ v3.0.55: remainingMP 체크 - 계획된 능력들의 MP 코스트 반영
+            // ★ v3.0.89: 공격 계획 실패 시에도 이동 허용
+            // ★ v3.0.99: MP 회복 예측 후 이동 가능 - situation.CanMove는 계획 시작 시점 기준
+            //            Phase 6에서 MP 회복을 예측했으면 remainingMP > 0으로 이동 가능
+            // ★ v3.1.01: predictedMP를 MovementAPI에 전달하여 reachable tiles 계산에 사용
             bool hasMoveInPlan = actions.Any(a => a.Type == ActionType.Move);
-            if (!hasMoveInPlan && situation.NeedsReposition && situation.CanMove && remainingMP > 0)
+            bool needsMovement = situation.NeedsReposition || (!didPlanAttack && situation.HasLivingEnemies);
+            // ★ v3.0.99: situation.CanMove는 계획 시작 시점 MP 기준, remainingMP는 예측된 MP 포함
+            bool canMove = situation.CanMove || remainingMP > 0;
+
+            Main.LogDebug($"[DPS] Phase 8 check: hasMoveInPlan={hasMoveInPlan}, NeedsReposition={situation.NeedsReposition}, " +
+                $"didPlanAttack={didPlanAttack}, needsMovement={needsMovement}, CanMove={canMove}, MP={remainingMP:F1}");
+
+            if (!hasMoveInPlan && needsMovement && canMove && remainingMP > 0)
             {
-                var moveOrGapCloser = PlanMoveOrGapCloser(situation, ref remainingAP);
+                Main.Log($"[DPS] Phase 8: Trying move (attack planned={didPlanAttack}, predictedMP={remainingMP:F1})");
+                // ★ v3.0.89: 공격 실패 시 forceMove=true로 이동 강제
+                bool forceMove = !didPlanAttack && situation.HasHittableEnemies;
+                // ★ v3.1.00: MP 회복 예측 후 situation.CanMove=False여도 이동 가능
+                // PlanMoveToEnemy 내부의 CanMove 체크를 우회
+                bool bypassCanMoveCheck = !situation.CanMove && remainingMP > 0;
+                // ★ v3.1.01: remainingMP를 MovementAPI에 전달하여 실제로 이동 가능한 타일 계산
+                var moveOrGapCloser = PlanMoveOrGapCloser(situation, ref remainingAP, forceMove, bypassCanMoveCheck, remainingMP);
                 if (moveOrGapCloser != null)
                 {
                     actions.Add(moveOrGapCloser);
@@ -367,42 +459,40 @@ namespace CompanionAI_v3.Planning.Plans
             if (situation.AvailableSpecialAbilities == null || situation.AvailableSpecialAbilities.Count == 0)
                 return null;
 
-            if (situation.BestTarget == null)
+            var enemies = situation.Enemies;
+            if (enemies == null || enemies.Count == 0)
                 return null;
 
-            var target = situation.BestTarget;
-            var enemies = situation.Enemies;
-            var targetWrapper = new TargetWrapper(target);
             float currentAP = remainingAP;
 
-            var scoredAbilities = situation.AvailableSpecialAbilities
-                .Select(a => new
-                {
-                    Ability = a,
-                    Score = SpecialAbilityHandler.GetSpecialAbilityEffectivenessScore(a, target, enemies),
-                    Cost = CombatAPI.GetAbilityAPCost(a)
-                })
-                .Where(x => x.Cost <= currentAP && x.Score > 0)
-                .OrderByDescending(x => x.Score)
-                .ToList();
-
-            foreach (var entry in scoredAbilities)
+            // ★ v3.0.97: 모든 적을 대상으로 특수 능력 시도
+            // 이전: BestTarget만 사용 → 불타지 않은 적이면 DOTIntensify 스킵
+            // 변경: 모든 적 순회하여 유효한 타겟 찾기
+            foreach (var ability in situation.AvailableSpecialAbilities)
             {
-                var ability = entry.Ability;
+                float cost = CombatAPI.GetAbilityAPCost(ability);
+                if (cost > currentAP) continue;
 
-                if (!SpecialAbilityHandler.CanUseSpecialAbilityEffectively(ability, target, enemies))
-                    continue;
-
-                string reason;
-                if (CombatAPI.CanUseAbilityOn(ability, targetWrapper, out reason))
+                // 모든 적에 대해 이 능력 사용 가능 여부 확인
+                foreach (var enemy in enemies)
                 {
-                    remainingAP -= entry.Cost;
+                    if (enemy == null || enemy.LifeState.IsDead) continue;
 
-                    string abilityType = AbilityDatabase.IsDOTIntensify(ability) ? "DoT Intensify" :
-                                        AbilityDatabase.IsChainEffect(ability) ? "Chain Effect" : "Special";
+                    if (!SpecialAbilityHandler.CanUseSpecialAbilityEffectively(ability, enemy, enemies))
+                        continue;
 
-                    Main.Log($"[DPS] {abilityType}: {ability.Name} -> {target.CharacterName}");
-                    return PlannedAction.Attack(ability, target, $"{abilityType} on {target.CharacterName}", entry.Cost);
+                    var targetWrapper = new TargetWrapper(enemy);
+                    string reason;
+                    if (CombatAPI.CanUseAbilityOn(ability, targetWrapper, out reason))
+                    {
+                        remainingAP -= cost;
+
+                        string abilityType = AbilityDatabase.IsDOTIntensify(ability) ? "DoT Intensify" :
+                                            AbilityDatabase.IsChainEffect(ability) ? "Chain Effect" : "Special";
+
+                        Main.Log($"[DPS] {abilityType}: {ability.Name} -> {enemy.CharacterName}");
+                        return PlannedAction.Attack(ability, enemy, $"{abilityType} on {enemy.CharacterName}", cost);
+                    }
                 }
             }
 

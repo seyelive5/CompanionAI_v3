@@ -208,7 +208,7 @@ namespace CompanionAI_v3.UI
             AIRole.Tank => "#4169E1",
             AIRole.DPS => "#FF6347",
             AIRole.Support => "#FFD700",
-            AIRole.Balanced => "#DDA0DD",
+            AIRole.Auto => "#98FB98",  // ★ v3.0.92: Auto - Light Green
             _ => "#FFFFFF"
         };
 
