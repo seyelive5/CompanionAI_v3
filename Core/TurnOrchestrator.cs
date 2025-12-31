@@ -409,6 +409,7 @@ namespace CompanionAI_v3.Core
             _currentUnitId = null;
             _pendingEndTurn.Clear();
             _pendingMoveDestinations.Clear();
+            Planning.TurnPlanner.ClearDetectedRolesCache();  // ★ v3.1.15: 역할 감지 캐시 정리
         }
 
         #endregion
