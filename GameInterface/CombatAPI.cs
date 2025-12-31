@@ -101,6 +101,7 @@ namespace CompanionAI_v3.GameInterface
         /// <summary>
         /// ★ v3.0.17: 능력이 사용 가능한지 상세 확인 (v2.2에서 포팅)
         /// GetUnavailabilityReasons()로 실제 사용 불가 이유 확인
+        /// ★ v3.1.11: 보너스 사용(런 앤 건 등) 처리 추가
         /// </summary>
         public static bool IsAbilityAvailable(AbilityData ability, out List<string> reasons)
         {
@@ -130,6 +131,19 @@ namespace CompanionAI_v3.GameInterface
 
                 if (unavailabilityReasons.Count > 0)
                 {
+                    // ★ v3.1.11: 쿨다운이어도 보너스 사용이 있으면 허용
+                    // IsAvailable은 IsBonusUsage를 체크하므로, IsAvailable=true면 보너스 사용 가능
+                    bool onlyOnCooldown = unavailabilityReasons.All(r =>
+                        r == AbilityData.UnavailabilityReasonType.IsOnCooldown ||
+                        r == AbilityData.UnavailabilityReasonType.IsOnCooldownUntilEndOfCombat);
+
+                    if (onlyOnCooldown && ability.IsAvailable)
+                    {
+                        // 쿨다운이지만 보너스 사용 가능 (런 앤 건 등)
+                        Main.LogDebug($"[CombatAPI] IsAbilityAvailable: {ability.Name} on cooldown but has bonus usage");
+                        return true;
+                    }
+
                     reasons = unavailabilityReasons.Select(r => r.ToString()).ToList();
                     return false;
                 }
@@ -433,6 +447,7 @@ namespace CompanionAI_v3.GameInterface
         /// ★ v3.0.94: GetUnavailabilityReasons() 체크 추가
         /// 기존: data.IsAvailable만 체크 → 쿨다운 능력도 포함됨!
         /// 수정: GetUnavailabilityReasons()로 쿨다운, 탄약, 충전 등 모두 체크
+        /// ★ v3.1.11: 보너스 사용(런 앤 건 등) 처리 추가
         /// </summary>
         public static List<AbilityData> GetAvailableAbilities(BaseUnitEntity unit)
         {
@@ -451,15 +466,32 @@ namespace CompanionAI_v3.GameInterface
 
                     // ★ v3.0.94: IsAvailable + GetUnavailabilityReasons() 체크
                     // 기존 IsAvailable만으로는 쿨다운을 필터링하지 않음!
+                    // ★ v3.1.11: IsAvailable은 IsBonusUsage 체크를 포함함
+                    // 쿨다운이어도 보너스 사용이 있으면 IsAvailable=true
                     if (!data.IsAvailable) continue;
 
                     // ★ 핵심: GetUnavailabilityReasons()로 실제 사용 가능 여부 체크
                     var unavailabilityReasons = data.GetUnavailabilityReasons();
                     if (unavailabilityReasons.Count > 0)
                     {
-                        // 쿨다운, 탄약 부족, 충전 없음 등 → 스킵
-                        Main.LogDebug($"[CombatAPI] Filtered out {data.Name}: {string.Join(", ", unavailabilityReasons)}");
-                        continue;
+                        // ★ v3.1.11: 쿨다운이어도 보너스 사용이 있으면 허용
+                        // GetUnavailabilityReasons()는 IsBonusUsage를 체크하지 않음
+                        // 하지만 IsAvailable은 체크함 → IsAvailable=true면 보너스 사용 가능
+                        bool onlyOnCooldown = unavailabilityReasons.All(r =>
+                            r == AbilityData.UnavailabilityReasonType.IsOnCooldown ||
+                            r == AbilityData.UnavailabilityReasonType.IsOnCooldownUntilEndOfCombat);
+
+                        if (onlyOnCooldown)
+                        {
+                            // IsAvailable=true이고 쿨다운만 문제라면 → 보너스 사용 가능
+                            Main.Log($"[CombatAPI] {data.Name}: On cooldown but has bonus usage - allowing");
+                        }
+                        else
+                        {
+                            // 쿨다운 이외의 이유가 있음 → 스킵
+                            Main.LogDebug($"[CombatAPI] Filtered out {data.Name}: {string.Join(", ", unavailabilityReasons)}");
+                            continue;
+                        }
                     }
 
                     abilities.Add(data);

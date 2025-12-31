@@ -89,9 +89,17 @@ namespace CompanionAI_v3.Planning.Planners
 
         /// <summary>
         /// 공격 버프 계획 (DPS 전용)
+        /// ★ v3.1.10: 사용 가능한 공격이 없으면 스킵
         /// </summary>
         public static PlannedAction PlanAttackBuffWithReservation(Situation situation, ref float remainingAP, float reservedAP, string roleName)
         {
+            // ★ v3.1.10: 사용 가능한 공격이 없으면 공격 전 버프 사용 금지
+            if (situation.AvailableAttacks == null || situation.AvailableAttacks.Count == 0)
+            {
+                Main.LogDebug($"[{roleName}] PlanAttackBuff skipped: No available attacks");
+                return null;
+            }
+
             var attackBuffs = situation.AvailableBuffs
                 .Where(a => {
                     var timing = AbilityDatabase.GetTiming(a);

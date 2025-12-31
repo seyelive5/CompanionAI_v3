@@ -37,6 +37,9 @@ namespace CompanionAI_v3.Data
         /// <summary>Heroic Act - Momentum 175+ 필요</summary>
         HeroicAct,
 
+        /// <summary>★ v3.1.12: Desperate Measure - Momentum 25 필요</summary>
+        DesperateMeasure,
+
         /// <summary>도발 스킬 - 근접 적 2명 이상일 때</summary>
         Taunt,
 

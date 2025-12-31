@@ -92,16 +92,50 @@ namespace CompanionAI_v3.Analysis
                     break;
 
                 case AbilityTiming.PreAttackBuff:
-                    // 공격 가능할 때 높은 점수
-                    if (situation.HasHittableEnemies) score += 25f;
-                    else score -= 10f;  // 공격 못하면 낮은 점수
+                    // ★ v3.1.10: 공격 가능할 때만 높은 점수
+                    // 사용 가능한 공격이 없으면 (쿨다운 등) 사용 불가
+                    bool hasAvailableAttacks = situation.AvailableAttacks != null && situation.AvailableAttacks.Count > 0;
+                    if (!hasAvailableAttacks)
+                    {
+                        score = -1000f;  // 사용 불가
+                    }
+                    else if (situation.HasHittableEnemies)
+                    {
+                        score += 25f;
+                    }
+                    else
+                    {
+                        score -= 10f;  // 적이 범위 밖
+                    }
                     break;
 
                 case AbilityTiming.HeroicAct:
-                    // 강력한 능력 - 많은 적이 있을 때 유리
-                    int enemyCount = situation.Enemies?.Count ?? 0;
-                    if (enemyCount >= 4) score += 30f;
-                    else if (enemyCount <= 2) score -= 10f;
+                    // ★ v3.1.10: 사용 가능한 공격이 없으면 사용 불가
+                    bool hasAttacksForHeroic = situation.AvailableAttacks != null && situation.AvailableAttacks.Count > 0;
+                    if (!hasAttacksForHeroic)
+                    {
+                        score = -1000f;
+                    }
+                    else
+                    {
+                        // 강력한 능력 - 많은 적이 있을 때 유리
+                        int enemyCount = situation.Enemies?.Count ?? 0;
+                        if (enemyCount >= 4) score += 30f;
+                        else if (enemyCount <= 2) score -= 10f;
+                    }
+                    break;
+
+                case AbilityTiming.RighteousFury:
+                    // ★ v3.1.10: PreAttackBuff와 동일하게 처리
+                    bool hasAttacksForFury = situation.AvailableAttacks != null && situation.AvailableAttacks.Count > 0;
+                    if (!hasAttacksForFury)
+                    {
+                        score = -1000f;
+                    }
+                    else if (situation.HasHittableEnemies)
+                    {
+                        score += 20f;
+                    }
                     break;
 
                 case AbilityTiming.SelfDamage:

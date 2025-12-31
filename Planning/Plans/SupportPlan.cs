@@ -239,6 +239,7 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // ★ v3.0.96: Phase 7.5: 공격 불가 시 남은 버프 사용
+            // ★ v3.1.10: PreAttackBuff, HeroicAct, RighteousFury 제외 (공격 없으면 무의미)
             if (!didPlanAttack && remainingAP >= 1f && situation.AvailableBuffs.Count > 0)
             {
                 Main.Log($"[Support] Phase 7.5: No attack possible, using remaining buffs (AP={remainingAP:F1})");
@@ -246,6 +247,16 @@ namespace CompanionAI_v3.Planning.Plans
                 foreach (var buff in situation.AvailableBuffs)
                 {
                     if (remainingAP < 1f) break;
+
+                    // ★ v3.1.10: 공격 전 버프는 공격이 없으면 의미 없음
+                    var timing = AbilityDatabase.GetTiming(buff);
+                    if (timing == AbilityTiming.PreAttackBuff ||
+                        timing == AbilityTiming.HeroicAct ||
+                        timing == AbilityTiming.RighteousFury)
+                    {
+                        Main.LogDebug($"[Support] Phase 7.5: Skip {buff.Name} (PreAttackBuff without attack)");
+                        continue;
+                    }
 
                     float cost = CombatAPI.GetAbilityAPCost(buff);
                     if (cost > remainingAP) continue;
@@ -353,7 +364,9 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.0.55: MP 추적 로깅
             Main.LogDebug($"[Support] Plan complete: AP={remainingAP:F1}, MP={remainingMP:F1} (started with {situation.CurrentMP:F1})");
 
-            return new TurnPlan(actions, priority, reasoning, situation.HPPercent, situation.NearestEnemyDistance, situation.HittableEnemies?.Count ?? 0);
+            // ★ v3.1.09: InitialAP/InitialMP 전달 (리플랜 감지용)
+            return new TurnPlan(actions, priority, reasoning, situation.HPPercent, situation.NearestEnemyDistance,
+                situation.HittableEnemies?.Count ?? 0, situation.CurrentAP, situation.CurrentMP);
         }
 
         #region Support-Specific Methods

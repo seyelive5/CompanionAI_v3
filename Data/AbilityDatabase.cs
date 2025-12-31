@@ -1,7 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using Kingmaker.Blueprints;
+using Kingmaker.ElementsSystem;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.UnitLogic.Abilities.Blueprints;
+using Kingmaker.UnitLogic.Abilities.Components;
+using Kingmaker.UnitLogic.Mechanics.Actions;
 
 namespace CompanionAI_v3.Data
 {
@@ -823,7 +828,11 @@ namespace CompanionAI_v3.Data
         /// <summary>
         /// 스킬 속성 기반 자동 타이밍 감지
         /// ★ v3.0.20: 아군 버프 감지 로직 추가
-        /// ★ v3.0.21: 위치 타겟 버프 감지 추가 (전방/보조/후방 구역)
+        /// ★ v3.0.21: 위치 타겟 버프 감지 추가
+        /// ★ v3.1.12: 게임 API 기반 자동 감지 강화
+        ///   - EffectOnAlly/EffectOnEnemy 활용
+        ///   - IsHeroicAct/IsMomentum 활용
+        ///   - AbilityEffectRunAction 컴포넌트 분석
         /// </summary>
         private static AbilityTiming AutoDetectTiming(AbilityData ability)
         {
@@ -832,57 +841,125 @@ namespace CompanionAI_v3.Data
                 var bp = ability?.Blueprint;
                 if (bp == null) return AbilityTiming.Normal;
 
+                // ═══════════════════════════════════════════════════════════════
+                // 1단계: 게임 내장 속성 활용 (가장 정확)
+                // ═══════════════════════════════════════════════════════════════
+
+                // ★ v3.1.12: 영웅적 행동 (게임이 직접 판단)
+                if (bp.IsHeroicAct)
+                    return AbilityTiming.HeroicAct;
+
+                // ★ v3.1.12: 필사적 조치 (게임이 직접 판단)
+                if (bp.IsDesperateMeasure)
+                    return AbilityTiming.DesperateMeasure;
+
+                // ★ v3.1.12: 돌진 능력 (게임이 직접 판단)
+                if (bp.IsCharge)
+                    return AbilityTiming.GapCloser;
+
+                // ★ v3.1.12: 이동 능력 (게임이 직접 판단)
+                if (bp.IsMoveUnit)
+                    return AbilityTiming.GapCloser;
+
+                // ★ v3.1.12: 전략 능력 (게임이 직접 판단)
+                if (bp.IsStratagem)
+                    return AbilityTiming.Stratagem;
+
+                // ═══════════════════════════════════════════════════════════════
+                // 2단계: AbilityEffectRunAction 컴포넌트 분석
+                // ═══════════════════════════════════════════════════════════════
+
+                var runAction = bp.GetComponent<AbilityEffectRunAction>();
+                if (runAction?.Actions?.Actions != null)
+                {
+                    var actions = runAction.Actions.Actions;
+
+                    // ★ v3.1.12: 보너스 능력 사용 추가 → PostFirstAction (런 앤 건 등)
+                    if (HasActionOfType<ContextActionAddBonusAbilityUsage>(actions))
+                        return AbilityTiming.PostFirstAction;
+
+                    // ★ v3.1.12: AP/MP 회복 → PostFirstAction (무모한 돌진 등)
+                    if (HasActionOfType<WarhammerContextActionRestoreActionPoints>(actions))
+                        return AbilityTiming.PostFirstAction;
+
+                    // ★ v3.1.12: 힐링 액션 존재 → Healing
+                    if (HasActionOfType<ContextActionHealTarget>(actions))
+                        return AbilityTiming.Healing;
+                }
+
+                // ═══════════════════════════════════════════════════════════════
+                // 3단계: EffectOnAlly/EffectOnEnemy 활용
+                // ═══════════════════════════════════════════════════════════════
+
+                var effectOnAlly = bp.EffectOnAlly;
+                var effectOnEnemy = bp.EffectOnEnemy;
                 bool canTargetSelf = bp.CanTargetSelf;
                 bool canTargetEnemies = bp.CanTargetEnemies;
                 bool canTargetFriends = bp.CanTargetFriends;
-                bool canTargetPoint = bp.CanTargetPoint;  // ★ v3.0.21
+                bool canTargetPoint = bp.CanTargetPoint;
                 bool hasWeapon = ability.Weapon != null;
+                bool notOffensive = bp.NotOffensive;
                 string range = bp.Range.ToString();
                 string bpName = bp.name?.ToLower() ?? "";
 
-                // ★ v3.0.23: 구역 강화 스킬 (Stratagem) - 기존 구역 강화
-                // Blitz, CombatLocus, Killzone, Overwhelming, Stronghold, Trenchline
-                if (bpName.Contains("stratagem"))
-                {
-                    return AbilityTiming.Stratagem;
-                }
-
-                // ★ v3.0.21: 위치 타겟 버프 (전방/보조/후방 구역 등)
-                // CanTargetPoint=true, 적/아군 직접 타겟 불가, 무기 아님
-                // 지역에 배치하면 범위 내 아군에게 버프, 적에게 디버프
-                if (canTargetPoint && !canTargetEnemies && !canTargetFriends && !hasWeapon)
-                {
-                    // 전략가 구역 스킬 (Frontline/Backline/Rear)
-                    if (bpName.Contains("frontline") || bpName.Contains("backline") || bpName.Contains("rear") ||
-                        bpName.Contains("keystone"))
-                    {
-                        return AbilityTiming.PositionalBuff;
-                    }
-
-                    // Range가 Unlimited이면 위치 타겟 버프로 간주
-                    if (range == "Unlimited")
-                        return AbilityTiming.PositionalBuff;
-                }
-
-                // ★ v3.0.41: 위험한 AoE (적과 아군 모두 타겟 가능, 무기 공격 제외)
-                // 무기 공격은 기본적으로 적/아군 모두 타겟 가능하므로 제외
-                if (canTargetEnemies && canTargetFriends && !canTargetSelf && !hasWeapon)
+                // ★ v3.1.12: 적에게 해롭고 아군에게 해로운 AoE → DangerousAoE
+                if (effectOnEnemy == AbilityEffectOnUnit.Harmful &&
+                    effectOnAlly == AbilityEffectOnUnit.Harmful && !hasWeapon)
                     return AbilityTiming.DangerousAoE;
 
-                // ★ v3.0.20: 아군 버프 감지 (적 타겟 불가 + 아군 타겟 가능 + 무기 아님)
-                // Navigator/Psyker 사이킥 버프, 아군 대상 지원 스킬 등
-                if (canTargetFriends && !canTargetEnemies && !hasWeapon)
+                // ★ v3.1.12: 비공격 + 적 타겟 + 적에게 해로움 → Debuff
+                if (notOffensive && canTargetEnemies && effectOnEnemy == AbilityEffectOnUnit.Harmful)
+                    return AbilityTiming.Debuff;
+
+                // ★ v3.1.12: 아군에게 이로움 + 적 타겟 불가 → 버프/힐
+                if (effectOnAlly == AbilityEffectOnUnit.Helpful && !canTargetEnemies && !hasWeapon)
                 {
                     // 힐링 키워드 체크
                     if (bpName.Contains("heal") || bpName.Contains("medikit") || bpName.Contains("mend") ||
                         bpName.Contains("restore") || bpName.Contains("revive"))
                         return AbilityTiming.Healing;
 
-                    // 턴 종료 스킬 키워드
+                    // 자기만 타겟 가능하면 PreAttackBuff
+                    if (canTargetSelf && !canTargetFriends)
+                        return AbilityTiming.PreAttackBuff;
+
+                    // 아군 타겟 가능하면 PreCombatBuff
+                    return AbilityTiming.PreCombatBuff;
+                }
+
+                // ═══════════════════════════════════════════════════════════════
+                // 4단계: 기존 휴리스틱 (폴백)
+                // ═══════════════════════════════════════════════════════════════
+
+                // 구역 강화 스킬 (Stratagem)
+                if (bpName.Contains("stratagem"))
+                    return AbilityTiming.Stratagem;
+
+                // 위치 타겟 버프 (전방/보조/후방 구역 등)
+                if (canTargetPoint && !canTargetEnemies && !canTargetFriends && !hasWeapon)
+                {
+                    if (bpName.Contains("frontline") || bpName.Contains("backline") || bpName.Contains("rear") ||
+                        bpName.Contains("keystone"))
+                        return AbilityTiming.PositionalBuff;
+
+                    if (range == "Unlimited")
+                        return AbilityTiming.PositionalBuff;
+                }
+
+                // 위험한 AoE (적과 아군 모두 타겟 가능, 무기 공격 제외)
+                if (canTargetEnemies && canTargetFriends && !canTargetSelf && !hasWeapon)
+                    return AbilityTiming.DangerousAoE;
+
+                // 아군 버프 감지
+                if (canTargetFriends && !canTargetEnemies && !hasWeapon)
+                {
+                    if (bpName.Contains("heal") || bpName.Contains("medikit") || bpName.Contains("mend") ||
+                        bpName.Contains("restore") || bpName.Contains("revive"))
+                        return AbilityTiming.Healing;
+
                     if (bpName.Contains("overwatch") || bpName.Contains("guard") || bpName.Contains("defend"))
                         return AbilityTiming.TurnEnding;
 
-                    // 그 외 아군 버프로 분류
                     return AbilityTiming.PreCombatBuff;
                 }
 
@@ -923,6 +1000,15 @@ namespace CompanionAI_v3.Data
             {
                 return AbilityTiming.Normal;
             }
+        }
+
+        /// <summary>
+        /// ★ v3.1.12: 액션 배열에서 특정 타입의 액션 존재 여부 확인
+        /// </summary>
+        private static bool HasActionOfType<T>(GameAction[] actions) where T : GameAction
+        {
+            if (actions == null) return false;
+            return actions.Any(a => a is T);
         }
 
         #endregion

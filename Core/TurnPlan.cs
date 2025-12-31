@@ -41,6 +41,12 @@ namespace CompanionAI_v3.Core
         /// <summary>★ v3.0.6: 계획 수립 시점 공격 가능 적 수</summary>
         public int InitialHittableCount { get; private set; }
 
+        /// <summary>★ v3.1.09: 계획 수립 시점 AP (리플랜 감지용)</summary>
+        public float InitialAP { get; private set; }
+
+        /// <summary>★ v3.1.09: 계획 수립 시점 MP (리플랜 감지용)</summary>
+        public float InitialMP { get; private set; }
+
         /// <summary>★ v3.0.6: 계획에 공격이 포함되어 있는지</summary>
         public bool HasAttackActions { get; private set; }
 
@@ -52,7 +58,8 @@ namespace CompanionAI_v3.Core
         #region Constructor
 
         public TurnPlan(List<PlannedAction> actions, TurnPriority priority, string reasoning,
-            float initialHP = 100f, float initialNearestEnemyDist = float.MaxValue, int initialHittable = 0)
+            float initialHP = 100f, float initialNearestEnemyDist = float.MaxValue, int initialHittable = 0,
+            float initialAP = 0f, float initialMP = 0f)  // ★ v3.1.09
         {
             AllActions = actions.AsReadOnly();
             Priority = priority;
@@ -60,6 +67,8 @@ namespace CompanionAI_v3.Core
             InitialHP = initialHP;
             InitialNearestEnemyDistance = initialNearestEnemyDist;
             InitialHittableCount = initialHittable;  // ★ v3.0.6
+            InitialAP = initialAP;  // ★ v3.1.09
+            InitialMP = initialMP;  // ★ v3.1.09
 
             _actionQueue = new Queue<PlannedAction>();
             foreach (var action in actions)
@@ -109,6 +118,12 @@ namespace CompanionAI_v3.Core
         /// <summary>
         /// 계획 재수립 필요 여부 판단
         /// ★ v3.0.93: 능력 Available 및 타겟 Hittable 체크 추가
+        /// ★ v3.1.09: AP/MP 증가 감지 추가, 조건 순서 정리
+        ///
+        /// 조건 순서:
+        /// 1. 실행 불가 조건 (필수 리플랜)
+        /// 2. 긴급 상황 조건 (필수 리플랜)
+        /// 3. 새 기회 조건 (선택적 리플랜)
         /// </summary>
         public bool NeedsReplan(Analysis.Situation currentSituation)
         {
@@ -118,7 +133,11 @@ namespace CompanionAI_v3.Core
             var nextAction = _actionQueue.Peek();
             if (nextAction == null) return false;
 
-            // ★ v3.0.93: 0. 다음 액션의 능력이 더 이상 Available하지 않으면 재계획
+            // ═══════════════════════════════════════════════════════════
+            // 1. 실행 불가 조건 (필수 리플랜)
+            // ═══════════════════════════════════════════════════════════
+
+            // 1-1. 다음 액션의 능력이 사용 불가능해졌는지
             if (nextAction.Ability != null && nextAction.Type != ActionType.EndTurn)
             {
                 List<string> unavailableReasons;
@@ -129,7 +148,7 @@ namespace CompanionAI_v3.Core
                     return true;
                 }
 
-                // ★ v3.0.93: 공격/디버프 액션인 경우 타겟이 여전히 공격 가능한지 체크
+                // 1-2. 공격/디버프 타겟이 공격 불가능해졌는지
                 if ((nextAction.Type == ActionType.Attack || nextAction.Type == ActionType.Debuff)
                     && nextAction.Target != null)
                 {
@@ -144,18 +163,7 @@ namespace CompanionAI_v3.Core
                 }
             }
 
-            // 1. HP 급감 체크 - Emergency가 아니었는데 지금 위험하면 재계획
-            if (Priority != TurnPriority.Emergency && currentSituation.IsHPCritical)
-            {
-                float hpDrop = InitialHP - currentSituation.HPPercent;
-                if (hpDrop >= 20f)  // 20% 이상 감소
-                {
-                    Main.Log($"[TurnPlan] Replan needed: HP dropped {hpDrop:F0}% (was {InitialHP:F0}%, now {currentSituation.HPPercent:F0}%)");
-                    return true;
-                }
-            }
-
-            // 2. 계획된 타겟 사망 체크
+            // 1-3. 계획된 타겟 사망
             if (nextAction.Type == ActionType.Attack)
             {
                 var target = nextAction.Target?.Entity as BaseUnitEntity;
@@ -166,10 +174,31 @@ namespace CompanionAI_v3.Core
                 }
             }
 
-            // 3. 원거리 캐릭터 위협 상황 변화
+            // 1-4. 모든 적 처치됨
+            if (!currentSituation.HasLivingEnemies && Priority != TurnPriority.EndTurn)
+            {
+                Main.Log("[TurnPlan] Replan needed: All enemies dead");
+                return true;
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // 2. 긴급 상황 조건 (필수 리플랜)
+            // ═══════════════════════════════════════════════════════════
+
+            // 2-1. HP 급감 (20% 이상)
+            if (Priority != TurnPriority.Emergency && currentSituation.IsHPCritical)
+            {
+                float hpDrop = InitialHP - currentSituation.HPPercent;
+                if (hpDrop >= 20f)
+                {
+                    Main.Log($"[TurnPlan] Replan needed: HP dropped {hpDrop:F0}% (was {InitialHP:F0}%, now {currentSituation.HPPercent:F0}%)");
+                    return true;
+                }
+            }
+
+            // 2-2. 원거리 캐릭터 위협 상황 변화
             if (currentSituation.PrefersRanged && Priority != TurnPriority.Retreat)
             {
-                // 원래 안전했는데 지금 위험해짐
                 if (InitialNearestEnemyDistance > currentSituation.MinSafeDistance &&
                     currentSituation.NearestEnemyDistance <= currentSituation.MinSafeDistance)
                 {
@@ -178,28 +207,38 @@ namespace CompanionAI_v3.Core
                 }
             }
 
-            // 4. 모든 적 처치됨
-            if (!currentSituation.HasLivingEnemies && Priority != TurnPriority.EndTurn)
+            // ═══════════════════════════════════════════════════════════
+            // 3. 새 기회 조건 (선택적 리플랜)
+            // ═══════════════════════════════════════════════════════════
+
+            // 3-1. ★ v3.1.09: MP 증가 감지 (런앤건, 무모한 돌진 등)
+            // Move가 이미 계획되어 있으면 리플랜 불필요 (Move 실행 기회 보존)
+            if (currentSituation.CurrentMP > InitialMP && !HasMoveActions)
             {
-                Main.Log("[TurnPlan] Replan needed: All enemies dead");
+                Main.Log($"[TurnPlan] Replan needed: MP increased ({InitialMP:F1} -> {currentSituation.CurrentMP:F1}) - movement opportunity");
                 return true;
             }
 
-            // ★ v3.0.6: 5. 새로운 공격 기회 발생
-            // ★ v3.0.61: 조건 수정 - "처음에 공격 불가였는데 지금 가능해진 경우"만
-            // "Skip attack" 결정 시 HasAttackActions=false지만 InitialHittableCount>0
-            // 이 경우는 의도적 스킵이므로 Replan 금지
+            // 3-2. ★ v3.1.09: AP 증가 감지 (전투 트랜스 등 버프)
+            // 이미 행동을 계획했는데 AP가 늘었으면 추가 행동 가능
+            if (currentSituation.CurrentAP > InitialAP + 0.5f)  // 0.5 이상 증가 시
+            {
+                Main.Log($"[TurnPlan] Replan needed: AP increased ({InitialAP:F1} -> {currentSituation.CurrentAP:F1}) - additional action opportunity");
+                return true;
+            }
+
+            // 3-3. 새로운 공격 기회 발생 (처음 0이었는데 지금 > 0)
             if (!HasAttackActions && InitialHittableCount == 0 && currentSituation.HasHittableEnemies)
             {
                 Main.Log($"[TurnPlan] Replan needed: New attack opportunity ({currentSituation.HittableEnemies?.Count ?? 0} targets now available)");
                 return true;
             }
 
-            // ★ v3.0.6: 6. 공격 가능 적 크게 증가 (이동 후 더 많은 적 사정권)
+            // 3-4. 공격 가능 적 크게 증가 (+2명 이상)
             if (InitialHittableCount > 0 && currentSituation.HittableEnemies != null)
             {
                 int currentHittable = currentSituation.HittableEnemies.Count;
-                if (currentHittable >= InitialHittableCount + 2)  // 2명 이상 추가
+                if (currentHittable >= InitialHittableCount + 2)
                 {
                     Main.Log($"[TurnPlan] Replan needed: More targets in range (was {InitialHittableCount}, now {currentHittable})");
                     return true;

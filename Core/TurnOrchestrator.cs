@@ -107,28 +107,11 @@ namespace CompanionAI_v3.Core
                 // 1. 턴 상태 가져오기 또는 생성
                 var turnState = GetOrCreateTurnState(unit);
 
-                // ★ v3.1.03: MP 증가 감지 → 리플랜 (런 앤 건, 무모한 돌진 등)
-                // Execute 직후에는 게임 효과가 아직 적용 안 됨 → 다음 ProcessTurn 호출 시 감지
-                // ★ v3.1.05: 플랜에 Move가 이미 있으면 리플랜하지 않음 (Move 실행 기회 보존)
-                float currentMP = CombatAPI.GetCurrentMP(unit);
-                if (currentMP > turnState.LastKnownMP && turnState.Plan != null)
-                {
-                    // ★ v3.1.05: Move가 이미 계획되어 있으면 리플랜하지 않음
-                    // 문제: MP 증가 → 리플랜 → 버프 먼저 → MP 또 증가 → 리플랜... 무한 루프
-                    // 해결: Move가 플랜에 있으면 그대로 실행하도록 보존
-                    if (turnState.Plan.HasMoveActions)
-                    {
-                        Main.Log($"[Orchestrator] {unitName}: ★ MP increased ({turnState.LastKnownMP:F1} -> {currentMP:F1}) but plan already has Move - keeping plan");
-                    }
-                    else
-                    {
-                        Main.Log($"[Orchestrator] {unitName}: ★ MP increased ({turnState.LastKnownMP:F1} -> {currentMP:F1}) - forcing replan for movement opportunity");
-                        turnState.Plan = null;  // 새 Plan 생성 유도
-                    }
-                }
-                turnState.LastKnownMP = currentMP;  // 업데이트
+                // ★ v3.1.09: MP/AP 증가 감지는 TurnPlan.NeedsReplan()으로 통합
+                // 더 이상 여기서 별도로 체크하지 않음
 
                 // ★ v3.0.69: 게임 AP=0이고 이미 행동했으면 즉시 턴 종료 (안전장치)
+                float currentMP = CombatAPI.GetCurrentMP(unit);
                 // ★ v3.1.06: Move가 남아있고 MP가 있으면 계속 진행 (Move는 AP 안 씀)
                 float gameAP = CombatAPI.GetCurrentAP(unit);
                 if (gameAP <= 0 && turnState.ActionCount > 0)
