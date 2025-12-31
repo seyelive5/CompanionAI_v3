@@ -29,7 +29,7 @@ namespace CompanionAI_v3.UI
         private const float CHAR_NAME_WIDTH = 180f;
         private const float ROLE_LABEL_WIDTH = 120f;
         private const float RANGE_LABEL_WIDTH = 160f;
-        private const float LANG_BUTTON_WIDTH = 100f;
+        private const float LANG_BUTTON_WIDTH = 150f;
 
         private static string L(string key) => Localization.Get(key);
 
@@ -66,11 +66,11 @@ namespace CompanionAI_v3.UI
             }
             if (_boldLabelStyle == null)
             {
-                _boldLabelStyle = new GUIStyle(GUI.skin.label) { fontSize = 14, fontStyle = FontStyle.Bold, richText = true };
+                _boldLabelStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, fontStyle = FontStyle.Bold, richText = true };
             }
             if (_descriptionStyle == null)
             {
-                _descriptionStyle = new GUIStyle(GUI.skin.label) { fontSize = 14, richText = true, wordWrap = true };
+                _descriptionStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, richText = true, wordWrap = true };
             }
             if (_boxStyle == null)
             {
@@ -122,13 +122,13 @@ namespace CompanionAI_v3.UI
         private static bool DrawCheckbox(bool value, string label)
         {
             GUILayout.BeginHorizontal();
-            string checkIcon = value ? "<size=16><b><color=green>[X]</color></b></size>" : "<size=16><b>[ ]</b></size>";
+            string checkIcon = value ? "<size=22><b><color=green>☑</color></b></size>" : "<size=22><b>☐</b></size>";
 
             if (GUILayout.Button(checkIcon, GUI.skin.box, GUILayout.Width(CHECKBOX_SIZE), GUILayout.Height(CHECKBOX_SIZE)))
                 value = !value;
 
             GUILayout.Space(10);
-            if (GUILayout.Button($"<size=14>{label}</size>", GUI.skin.label, GUILayout.Height(CHECKBOX_SIZE)))
+            if (GUILayout.Button($"<size=16>{label}</size>", GUI.skin.label, GUILayout.Height(CHECKBOX_SIZE)))
                 value = !value;
 
             GUILayout.EndHorizontal();
@@ -172,7 +172,7 @@ namespace CompanionAI_v3.UI
             GUILayout.BeginHorizontal("box");
 
             // AI Toggle
-            string checkIcon = settings.EnableCustomAI ? "<size=14><b><color=green>[X]</color></b></size>" : "<size=14><b>[ ]</b></size>";
+            string checkIcon = settings.EnableCustomAI ? "<size=20><b><color=green>☑</color></b></size>" : "<size=20><b>☐</b></size>";
             if (GUILayout.Button(checkIcon, GUI.skin.box, GUILayout.Width(CHECKBOX_SIZE), GUILayout.Height(CHECKBOX_SIZE)))
                 settings.EnableCustomAI = !settings.EnableCustomAI;
 
