@@ -300,7 +300,7 @@ namespace CompanionAI_v3.Analysis
 
             // ★ RangePreference 적합성
             var preference = situation.RangePreference;
-            if (preference == RangePreference.PreferRanged || preference == RangePreference.MaintainRange)
+            if (preference == RangePreference.PreferRanged)
             {
                 if (!attack.IsMelee) score += 15f;
                 else score -= 20f;  // 원거리 선호인데 근접 공격

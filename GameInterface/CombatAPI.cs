@@ -586,7 +586,7 @@ namespace CompanionAI_v3.GameInterface
 
                 // ★ v3.0.21: 선호 무기가 없을 때, RangePreference에 따라 사이킥 공격 우선 검토
                 // 카시아 같은 원거리 사이커는 근접 무기보다 사이킥 공격 우선
-                if (preference == RangePreference.PreferRanged || preference == RangePreference.MaintainRange)
+                if (preference == RangePreference.PreferRanged)
                 {
                     foreach (var ability in rawAbilities)
                     {
@@ -1099,8 +1099,7 @@ namespace CompanionAI_v3.GameInterface
             {
                 score += 15f;  // 근접 범위 내
             }
-            else if ((preference == RangePreference.PreferRanged || preference == RangePreference.MaintainRange)
-                     && distance >= 5f && distance <= 15f)
+            else if (preference == RangePreference.PreferRanged && distance >= 5f && distance <= 15f)
             {
                 score += 12f;  // 최적 원거리
             }
@@ -1260,7 +1259,7 @@ namespace CompanionAI_v3.GameInterface
             float minSafeDistance)
         {
             // 원거리 선호가 아니면 후퇴 불필요
-            if (preference != RangePreference.PreferRanged && preference != RangePreference.MaintainRange)
+            if (preference != RangePreference.PreferRanged)
                 return false;
 
             // 안전 거리 미만이면 후퇴 필요

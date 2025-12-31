@@ -84,7 +84,7 @@ namespace CompanionAI_v3.Planning.Planners
                 .Where(a => !IsAbilityExcluded(a, excludeAbilityGuids))
                 .ToList();
 
-            if (rangePreference == RangePreference.PreferRanged || rangePreference == RangePreference.MaintainRange)
+            if (rangePreference == RangePreference.PreferRanged)
             {
                 var rangedOnly = filteredAttacks.Where(a => !a.IsMelee).ToList();
                 if (rangedOnly.Count > 0)
@@ -128,7 +128,7 @@ namespace CompanionAI_v3.Planning.Planners
                 if (situation.AvailableAttacks.Count > 0)
                 {
                     var rangePreference = situation.RangePreference;
-                    if (rangePreference == RangePreference.PreferRanged || rangePreference == RangePreference.MaintainRange)
+                    if (rangePreference == RangePreference.PreferRanged)
                     {
                         attack = situation.AvailableAttacks.FirstOrDefault(a => !a.IsMelee);
                     }

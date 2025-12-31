@@ -199,9 +199,7 @@ namespace CompanionAI_v3.Analysis
         public bool IsHPLow => HPPercent < 50f;
 
         /// <summary>원거리 선호인가?</summary>
-        public bool PrefersRanged =>
-            RangePreference == RangePreference.PreferRanged ||
-            RangePreference == RangePreference.MaintainRange;
+        public bool PrefersRanged => RangePreference == RangePreference.PreferRanged;
 
         #endregion
 

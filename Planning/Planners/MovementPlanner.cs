@@ -404,8 +404,7 @@ namespace CompanionAI_v3.Planning.Planners
         public static bool ShouldRetreat(Situation situation)
         {
             var rangePreference = situation.RangePreference;
-            if (rangePreference != Settings.RangePreference.PreferRanged &&
-                rangePreference != Settings.RangePreference.MaintainRange)
+            if (rangePreference != Settings.RangePreference.PreferRanged)
                 return false;
 
             return situation.NearestEnemyDistance < situation.MinSafeDistance;

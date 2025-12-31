@@ -582,7 +582,7 @@ namespace CompanionAI_v3.Analysis
                 if (AbilityDatabase.IsReload(ability)) return false;
 
                 // RangePreference 필터
-                if (preference == RangePreference.PreferRanged || preference == RangePreference.MaintainRange)
+                if (preference == RangePreference.PreferRanged)
                 {
                     if (ability.IsMelee) return false;  // 근접 제외
                 }

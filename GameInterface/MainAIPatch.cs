@@ -182,8 +182,7 @@ namespace CompanionAI_v3.GameInterface
 
                 // 원거리 선호가 아니면 게임 AI
                 var rangePreference = settings.RangePreference;
-                if (rangePreference != RangePreference.PreferRanged &&
-                    rangePreference != RangePreference.MaintainRange)
+                if (rangePreference != RangePreference.PreferRanged)
                 {
                     return true;
                 }
@@ -516,8 +515,7 @@ namespace CompanionAI_v3.GameInterface
             if (settings == null) return;
 
             // 원거리 선호면 근접 유닛 취급 안 함 → 적에게 돌진하지 않음
-            if (settings.RangePreference == RangePreference.PreferRanged ||
-                settings.RangePreference == RangePreference.MaintainRange)
+            if (settings.RangePreference == RangePreference.PreferRanged)
             {
                 __result = false;
                 Main.LogDebug($"[MainAIPatch] {unit.CharacterName}: IsUsualMeleeUnit = false (PreferRanged)");

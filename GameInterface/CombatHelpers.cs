@@ -369,8 +369,7 @@ namespace CompanionAI_v3.GameInterface
         public static bool ShouldPreferRanged(CharacterSettings settings)
         {
             if (settings == null) return false;
-            return settings.RangePreference == RangePreference.PreferRanged ||
-                   settings.RangePreference == RangePreference.MaintainRange;
+            return settings.RangePreference == RangePreference.PreferRanged;
         }
 
         /// <summary>
@@ -401,7 +400,6 @@ namespace CompanionAI_v3.GameInterface
             switch (preference)
             {
                 case RangePreference.PreferRanged:
-                case RangePreference.MaintainRange:
                     return isRanged;
                 case RangePreference.PreferMelee:
                     return isMelee;
@@ -421,7 +419,7 @@ namespace CompanionAI_v3.GameInterface
             if (abilities == null || abilities.Count == 0)
                 return abilities;
 
-            if (preference == RangePreference.PreferRanged || preference == RangePreference.MaintainRange)
+            if (preference == RangePreference.PreferRanged)
             {
                 // ★ v3.0.51: Grenade도 원거리 공격에 포함 (수류탄은 투척 원거리 무기)
                 var rangedOnly = abilities.Where(a => {

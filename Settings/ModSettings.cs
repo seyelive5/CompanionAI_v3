@@ -78,7 +78,6 @@ namespace CompanionAI_v3.Settings
             ["Range_Adaptive"] = new() { { Language.English, "Adaptive" }, { Language.Korean, "적응형" } },
             ["Range_PreferMelee"] = new() { { Language.English, "Melee" }, { Language.Korean, "근접" } },
             ["Range_PreferRanged"] = new() { { Language.English, "Ranged" }, { Language.Korean, "원거리" } },
-            ["Range_MaintainRange"] = new() { { Language.English, "Keep Dist." }, { Language.Korean, "거리 유지" } },
 
             // Range preference descriptions
             ["RangeDesc_Adaptive"] = new() {
@@ -92,10 +91,6 @@ namespace CompanionAI_v3.Settings
             ["RangeDesc_PreferRanged"] = new() {
                 { Language.English, "Keeps safe distance from enemies. Prioritizes ranged attacks over melee." },
                 { Language.Korean, "적과 안전 거리 유지. 근접보다 원거리 공격 우선." }
-            },
-            ["RangeDesc_MaintainRange"] = new() {
-                { Language.English, "Tries to stay at optimal weapon range. Moves back if enemies get too close." },
-                { Language.Korean, "최적 무기 사거리 유지 시도. 적이 너무 가까우면 후퇴." }
             },
         };
 
@@ -135,8 +130,7 @@ namespace CompanionAI_v3.Settings
     {
         Adaptive,       // Use whatever is equipped
         PreferMelee,    // Stay close to enemies
-        PreferRanged,   // Keep distance from enemies
-        MaintainRange   // Try to stay at optimal weapon range
+        PreferRanged    // Keep distance from enemies
     }
 
     /// <summary>
