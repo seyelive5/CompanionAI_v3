@@ -1602,5 +1602,385 @@ namespace CompanionAI_v3.GameInterface
         }
 
         #endregion
+
+        #region AOE Support (v3.1.16)
+
+        /// <summary>
+        /// ★ v3.1.16: AOE 패턴 설정 조회
+        /// </summary>
+        public static Kingmaker.UnitLogic.Abilities.Components.Base.IAbilityAoEPatternProvider GetPatternSettings(AbilityData ability)
+        {
+            try
+            {
+                return ability?.GetPatternSettings();
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// ★ v3.1.16: AOE 반경 조회 (타일 단위)
+        /// </summary>
+        public static float GetAoERadius(AbilityData ability)
+        {
+            try
+            {
+                var pattern = ability?.GetPatternSettings()?.Pattern;
+                if (pattern != null)
+                    return pattern.Radius;
+
+                return ability?.Blueprint?.AoERadius ?? 0f;
+            }
+            catch { return 0f; }
+        }
+
+        /// <summary>
+        /// ★ v3.1.16: AOE 패턴 타입 조회
+        /// </summary>
+        public static Kingmaker.Blueprints.PatternType? GetPatternType(AbilityData ability)
+        {
+            try
+            {
+                return ability?.GetPatternSettings()?.Pattern?.Type;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// ★ v3.1.16: AOE 대상 타입 조회 (Enemy/Ally/Any)
+        /// </summary>
+        public static Kingmaker.UnitLogic.Abilities.Components.TargetType GetAoETargetType(AbilityData ability)
+        {
+            try
+            {
+                return ability?.GetPatternSettings()?.Targets ?? Kingmaker.UnitLogic.Abilities.Components.TargetType.Enemy;
+            }
+            catch { return Kingmaker.UnitLogic.Abilities.Components.TargetType.Enemy; }
+        }
+
+        /// <summary>
+        /// ★ v3.1.19: Point 타겟 능력인지 확인 (개선)
+        /// CanTargetPoint + 실제 AOE 반경 필요
+        /// </summary>
+        public static bool IsPointTargetAbility(AbilityData ability)
+        {
+            try
+            {
+                var bp = ability?.Blueprint;
+                if (bp == null || !bp.CanTargetPoint) return false;
+
+                // ★ v3.1.19: 패턴 설정에서 실제 반경 확인
+                var pattern = ability.GetPatternSettings()?.Pattern;
+                if (pattern != null)
+                    return pattern.Radius > 0;  // 실제 AOE 반경 필요
+
+                // Blueprint AOE 반경 폴백
+                return bp.AoERadius > 0;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// ★ v3.1.16: Point 타겟에 능력 사용 가능 검증
+        /// </summary>
+        public static bool CanUseAbilityOnPoint(AbilityData ability, Vector3 point, out string reason)
+        {
+            reason = null;
+            if (ability == null) { reason = "Null ability"; return false; }
+
+            try
+            {
+                var target = new TargetWrapper(point);
+                AbilityData.UnavailabilityReasonType? unavailable;
+                bool canTarget = ability.CanTarget(target, out unavailable);
+
+                if (!canTarget && unavailable.HasValue)
+                    reason = unavailable.Value.ToString();
+
+                return canTarget;
+            }
+            catch (Exception ex)
+            {
+                reason = $"Exception: {ex.Message}";
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.1.19: AOE 패턴 각도 조회 (Cone/Sector용, 단위: degree)
+        /// Reflection 제거 - pattern.Angle 프로퍼티 직접 사용
+        /// </summary>
+        public static float GetPatternAngle(AbilityData ability)
+        {
+            try
+            {
+                var pattern = ability?.GetPatternSettings()?.Pattern;
+                if (pattern == null) return 90f;
+
+                // ★ v3.1.19: 게임 API 직접 사용 (AoEPattern.Angle 프로퍼티)
+                // Reflection 대신 public 프로퍼티 사용 - 이미 full-angle
+                return pattern.Angle;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] GetPatternAngle error: {ex.Message}");
+                return 90f;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.1.18: 패턴이 방향성 패턴인지 확인 (Cone/Ray/Sector)
+        /// </summary>
+        public static bool IsDirectionalPattern(Kingmaker.Blueprints.PatternType? patternType)
+        {
+            if (!patternType.HasValue) return false;
+
+            switch (patternType.Value)
+            {
+                case Kingmaker.Blueprints.PatternType.Cone:
+                case Kingmaker.Blueprints.PatternType.Ray:
+                case Kingmaker.Blueprints.PatternType.Sector:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        #endregion
+
+        #region Self-Targeted AOE (v3.1.23)
+
+        /// <summary>
+        /// ★ v3.1.23: 자신 타겟 AOE 공격인지 확인
+        /// Bladedance 같은 능력: Range=Personal, CanTargetSelf, 인접 유닛 공격
+        /// </summary>
+        public static bool IsSelfTargetedAoEAttack(AbilityData ability)
+        {
+            if (ability == null) return false;
+
+            try
+            {
+                var bp = ability.Blueprint;
+                if (bp == null) return false;
+
+                // Range=Personal + CanTargetSelf 체크
+                if (bp.Range != AbilityRange.Personal) return false;
+                if (!bp.CanTargetSelf) return false;
+
+                // DangerousAoE로 분류된 능력만
+                return AbilityDatabase.IsDangerousAoE(ability);
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// ★ v3.1.23: 인접 아군 수 계산 (Self-Targeted AOE 안전성 체크)
+        /// </summary>
+        public static int CountAdjacentAllies(BaseUnitEntity unit, float radius = 2.5f)
+        {
+            if (unit == null) return 0;
+
+            try
+            {
+                int count = 0;
+                var allUnits = Game.Instance?.State?.AllBaseAwakeUnits;
+                if (allUnits == null) return 0;
+
+                foreach (var other in allUnits)
+                {
+                    if (other == null || other == unit) continue;
+                    if (other.LifeState.IsDead) continue;
+
+                    // 아군 판별
+                    bool isAlly = unit.IsPlayerFaction == other.IsPlayerFaction;
+                    if (!isAlly) continue;
+
+                    // 거리 체크
+                    float dist = Vector3.Distance(unit.Position, other.Position);
+                    if (dist <= radius)
+                        count++;
+                }
+
+                return count;
+            }
+            catch { return 0; }
+        }
+
+        /// <summary>
+        /// ★ v3.1.23: 인접 적 수 계산 (Self-Targeted AOE 효율성 체크)
+        /// </summary>
+        public static int CountAdjacentEnemies(BaseUnitEntity unit, float radius = 2.5f)
+        {
+            if (unit == null) return 0;
+
+            try
+            {
+                int count = 0;
+                var allUnits = Game.Instance?.State?.AllBaseAwakeUnits;
+                if (allUnits == null) return 0;
+
+                foreach (var other in allUnits)
+                {
+                    if (other == null || other == unit) continue;
+                    if (other.LifeState.IsDead) continue;
+
+                    // 적 판별
+                    bool isEnemy = (unit.IsPlayerFaction && other.IsPlayerEnemy) ||
+                                   (!unit.IsPlayerFaction && !other.IsPlayerEnemy);
+                    if (!isEnemy) continue;
+
+                    // 거리 체크
+                    float dist = Vector3.Distance(unit.Position, other.Position);
+                    if (dist <= radius)
+                        count++;
+                }
+
+                return count;
+            }
+            catch { return 0; }
+        }
+
+        #endregion
+
+        #region Pattern Info Cache (v3.1.19)
+
+        /// <summary>
+        /// ★ v3.1.19: AOE 패턴 정보 통합 클래스
+        /// </summary>
+        public class PatternInfo
+        {
+            public Kingmaker.Blueprints.PatternType? Type { get; set; }
+            public float Radius { get; set; }
+            public float Angle { get; set; }
+            public Kingmaker.UnitLogic.Abilities.Components.TargetType TargetType { get; set; }
+            public bool IsDirectional { get; set; }
+            public bool IsValid => Radius > 0;
+        }
+
+        private static Dictionary<string, PatternInfo> PatternCache = new Dictionary<string, PatternInfo>();
+
+        /// <summary>
+        /// ★ v3.1.19: 패턴 정보 조회 (캐싱)
+        /// </summary>
+        public static PatternInfo GetPatternInfo(AbilityData ability)
+        {
+            try
+            {
+                var guid = ability?.Blueprint?.AssetGuid?.ToString();
+                if (string.IsNullOrEmpty(guid)) return null;
+
+                if (PatternCache.TryGetValue(guid, out var cached))
+                    return cached;
+
+                var patternType = GetPatternType(ability);
+                var info = new PatternInfo
+                {
+                    Type = patternType,
+                    Radius = GetAoERadius(ability),
+                    Angle = GetPatternAngle(ability),
+                    TargetType = GetAoETargetType(ability),
+                    IsDirectional = IsDirectionalPattern(patternType)
+                };
+
+                PatternCache[guid] = info;
+                return info;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.1.19: 패턴 캐시 클리어 (전투 종료 시 호출)
+        /// </summary>
+        public static void ClearPatternCache()
+        {
+            PatternCache.Clear();
+            Main.LogDebug("[CombatAPI] Pattern cache cleared");
+        }
+
+        #endregion
+
+        #region Targeting Detection (v3.1.25)
+
+        /// <summary>
+        /// ★ v3.1.25: 적이 특정 유닛을 타겟팅 중인지 확인
+        /// </summary>
+        public static bool IsTargeting(BaseUnitEntity enemy, BaseUnitEntity target)
+        {
+            if (enemy?.CombatState == null || target == null) return false;
+            try
+            {
+                return enemy.CombatState.LastTarget == target;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// ★ v3.1.25: 특정 아군을 타겟팅 중인 적 목록 조회
+        /// </summary>
+        public static List<BaseUnitEntity> GetEnemiesTargeting(
+            BaseUnitEntity ally,
+            List<BaseUnitEntity> enemies)
+        {
+            var targeting = new List<BaseUnitEntity>();
+            if (ally == null || enemies == null) return targeting;
+
+            foreach (var enemy in enemies)
+            {
+                if (enemy?.CombatState?.LastTarget == ally)
+                    targeting.Add(enemy);
+            }
+            return targeting;
+        }
+
+        /// <summary>
+        /// ★ v3.1.25: 아군(특정 유닛 제외)을 타겟팅 중인 모든 적 조회
+        /// 탱커가 호출할 때: excludeUnit = 탱커 자신 (탱커 타겟팅 적은 이미 어그로 잡힌 상태)
+        /// </summary>
+        public static List<BaseUnitEntity> GetEnemiesTargetingAllies(
+            BaseUnitEntity excludeUnit,
+            List<BaseUnitEntity> allies,
+            List<BaseUnitEntity> enemies)
+        {
+            var targeting = new List<BaseUnitEntity>();
+            if (allies == null || enemies == null) return targeting;
+
+            foreach (var enemy in enemies)
+            {
+                if (enemy?.CombatState == null) continue;
+                var lastTarget = enemy.CombatState.LastTarget as BaseUnitEntity;
+                if (lastTarget != null && lastTarget != excludeUnit && allies.Contains(lastTarget))
+                {
+                    targeting.Add(enemy);
+                }
+            }
+            return targeting;
+        }
+
+        /// <summary>
+        /// ★ v3.1.25: 위협받는 아군 수 (탱커 제외)
+        /// </summary>
+        public static int CountAlliesUnderThreat(
+            BaseUnitEntity excludeUnit,
+            List<BaseUnitEntity> allies,
+            List<BaseUnitEntity> enemies)
+        {
+            if (allies == null || enemies == null) return 0;
+
+            var threatenedAllies = new HashSet<BaseUnitEntity>();
+            foreach (var enemy in enemies)
+            {
+                if (enemy?.CombatState == null) continue;
+                var lastTarget = enemy.CombatState.LastTarget as BaseUnitEntity;
+                if (lastTarget != null && lastTarget != excludeUnit && allies.Contains(lastTarget))
+                {
+                    threatenedAllies.Add(lastTarget);
+                }
+            }
+            return threatenedAllies.Count;
+        }
+
+        #endregion
     }
 }

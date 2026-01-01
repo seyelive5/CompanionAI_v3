@@ -486,12 +486,36 @@ namespace CompanionAI_v3.Planning.Planners
 
                 // ★ v3.0.89: PointTarget vs SelfTarget 분기
                 // VeilOfBlades 등: CanTargetPoint=True, CanTargetSelf=False → 위치 타겟
+                // ★ v3.1.28: CanTargetSelf=False인 경우 자기 위치 대신 오프셋 위치 사용
                 bool isPointTarget = ability.Blueprint?.CanTargetPoint == true && ability.Blueprint?.CanTargetSelf != true;
-                TargetWrapper target = isPointTarget
-                    ? new TargetWrapper(situation.Unit.Position)
-                    : new TargetWrapper(situation.Unit);
+                bool canTargetSelf = ability.Blueprint?.CanTargetSelf ?? true;
 
-                Main.LogDebug($"[{roleName}] PlanTurnEnding: {ability.Name} isPointTarget={isPointTarget}");
+                Vector3 targetPoint = situation.Unit.Position;
+                if (isPointTarget && !canTargetSelf)
+                {
+                    // ★ v3.1.28: 적 방향으로 1.5m 오프셋 (CannotTargetSelf 회피)
+                    var nearestEnemy = situation.NearestEnemy;
+                    if (nearestEnemy != null)
+                    {
+                        var direction = (nearestEnemy.Position - situation.Unit.Position).normalized;
+                        if (direction.sqrMagnitude > 0.01f)
+                        {
+                            targetPoint = situation.Unit.Position + direction * 1.5f;
+                        }
+                        else
+                        {
+                            targetPoint = situation.Unit.Position + Vector3.forward * 1.5f;
+                        }
+                    }
+                    else
+                    {
+                        targetPoint = situation.Unit.Position + Vector3.forward * 1.5f;
+                    }
+                    Main.LogDebug($"[{roleName}] PlanTurnEnding: {ability.Name} using offset point ({targetPoint.x:F1},{targetPoint.z:F1})");
+                }
+
+                TargetWrapper target = isPointTarget ? new TargetWrapper(targetPoint) : new TargetWrapper(situation.Unit);
+                Main.LogDebug($"[{roleName}] PlanTurnEnding: {ability.Name} isPointTarget={isPointTarget}, canTargetSelf={canTargetSelf}");
 
                 string reason;
                 if (CombatAPI.CanUseAbilityOn(ability, target, out reason))
@@ -500,9 +524,10 @@ namespace CompanionAI_v3.Planning.Planners
                     Main.Log($"[{roleName}] Turn ending: {ability.Name}");
 
                     // ★ v3.0.89: PointTarget이면 PositionalAction 반환
+                    // ★ v3.1.28: targetPoint 사용 (오프셋 적용된 위치)
                     if (isPointTarget)
                     {
-                        return PlannedAction.PositionalAttack(ability, situation.Unit.Position, "Turn ending ability (point)", cost);
+                        return PlannedAction.PositionalAttack(ability, targetPoint, "Turn ending ability (point)", cost);
                     }
                     return PlannedAction.Buff(ability, situation.Unit, "Turn ending ability", cost);
                 }

@@ -97,6 +97,16 @@ namespace CompanionAI_v3.Analysis
 
         #endregion
 
+        #region Threat Analysis (v3.1.25)
+
+        /// <summary>★ v3.1.25: 타겟팅 당하는 아군 수 (자신 제외)</summary>
+        public int AlliesUnderThreat { get; set; }
+
+        /// <summary>★ v3.1.25: 아군(자신 제외)을 타겟팅 중인 적 수</summary>
+        public int EnemiesTargetingAllies { get; set; }
+
+        #endregion
+
         #region Position Analysis
 
         /// <summary>위험 상태 (원거리인데 적이 가까움)</summary>

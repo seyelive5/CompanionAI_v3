@@ -117,12 +117,31 @@ namespace CompanionAI_v3.Planning.Planners
 
         /// <summary>
         /// 이동 후 공격 계획
+        /// ★ v3.1.23: Self-Targeted AOE (Bladedance 등) 특수 처리 추가
+        /// ★ v3.1.24: moveDestination 파라미터 추가 - 이동 후 위치에서 최근접 적 재계산
         /// </summary>
-        public static PlannedAction PlanPostMoveAttack(Situation situation, BaseUnitEntity target, ref float remainingAP, string roleName)
+        public static PlannedAction PlanPostMoveAttack(Situation situation, BaseUnitEntity target, ref float remainingAP, string roleName, UnityEngine.Vector3? moveDestination = null)
         {
-            if (target == null) return null;
+            // ★ v3.1.24: 이동 목적지가 있으면 해당 위치에서 최근접 적 재계산
+            var effectiveTarget = target;
+            if (moveDestination.HasValue && situation.Enemies != null)
+            {
+                effectiveTarget = FindNearestEnemyFromPosition(moveDestination.Value, situation.Enemies);
+                if (effectiveTarget == null)
+                {
+                    Main.LogDebug($"[{roleName}] PlanPostMoveAttack: No enemy reachable from destination");
+                    return null;
+                }
 
-            var attack = SelectBestAttack(situation, target);
+                if (effectiveTarget != target)
+                {
+                    Main.LogDebug($"[{roleName}] PlanPostMoveAttack: Target changed from {target?.CharacterName} to {effectiveTarget.CharacterName} based on move destination");
+                }
+            }
+
+            if (effectiveTarget == null) return null;
+
+            var attack = SelectBestAttack(situation, effectiveTarget);
             if (attack == null)
             {
                 if (situation.AvailableAttacks.Count > 0)
@@ -151,12 +170,45 @@ namespace CompanionAI_v3.Planning.Planners
 
             if (attack == null) return null;
 
+            // ★ v3.1.23: Self-Targeted AOE 공격 처리 (Bladedance 등)
+            // Range=Personal, CanTargetSelf인 DangerousAoE → 적을 타겟으로 할 수 없음
+            if (CombatAPI.IsSelfTargetedAoEAttack(attack))
+            {
+                return PlanSelfTargetedAoEAttack(situation, attack, ref remainingAP, roleName);
+            }
+
+            // ★ v3.1.24: 이동 후 위치에서 공격 범위 검증
+            if (moveDestination.HasValue)
+            {
+                float distFromDest = UnityEngine.Vector3.Distance(moveDestination.Value, effectiveTarget.Position);
+                float attackRange = CombatAPI.GetAbilityRange(attack);
+                if (distFromDest > attackRange)
+                {
+                    Main.LogDebug($"[{roleName}] PostMoveAttack: {attack.Name} out of range ({distFromDest:F1}m > {attackRange:F1}m)");
+                    return null;
+                }
+            }
+
+            // 일반 공격
             float cost = CombatAPI.GetAbilityAPCost(attack);
             if (cost > remainingAP) return null;
 
             remainingAP -= cost;
-            Main.LogDebug($"[{roleName}] PostMoveAttack: {attack.Name} -> {target.CharacterName}");
-            return PlannedAction.Attack(attack, target, $"Post-move attack with {attack.Name}", cost);
+            Main.LogDebug($"[{roleName}] PostMoveAttack: {attack.Name} -> {effectiveTarget.CharacterName}");
+            return PlannedAction.Attack(attack, effectiveTarget, $"Post-move attack with {attack.Name}", cost);
+        }
+
+        /// <summary>
+        /// ★ v3.1.24: 특정 위치에서 최근접 적 찾기
+        /// </summary>
+        private static BaseUnitEntity FindNearestEnemyFromPosition(UnityEngine.Vector3 position, List<BaseUnitEntity> enemies)
+        {
+            if (enemies == null || enemies.Count == 0) return null;
+
+            return enemies
+                .Where(e => e != null && e.IsConscious)
+                .OrderBy(e => UnityEngine.Vector3.Distance(position, e.Position))
+                .FirstOrDefault();
         }
 
         /// <summary>
@@ -365,10 +417,15 @@ namespace CompanionAI_v3.Planning.Planners
         }
 
         /// <summary>
-        /// 가장 약한 적 찾기 (Utility 스코어링 기반)
+        /// ★ v3.1.21: Role 기반 최적 적 타겟 선택
+        /// TargetScorer를 사용하여 Role별 가중치 적용
         /// </summary>
         public static BaseUnitEntity FindWeakestEnemy(Situation situation, HashSet<string> excludeTargetIds = null)
         {
+            // Role 결정 (Auto면 DPS로 처리)
+            var role = situation.CharacterSettings?.Role ?? Settings.AIRole.Auto;
+            var effectiveRole = role == Settings.AIRole.Auto ? Settings.AIRole.DPS : role;
+
             var candidates = situation.HittableEnemies
                 .Where(e => e != null && !e.LifeState.IsDead)
                 .Where(e => !IsExcluded(e, excludeTargetIds))
@@ -376,16 +433,235 @@ namespace CompanionAI_v3.Planning.Planners
 
             if (candidates.Count > 0)
             {
-                var best = UtilityScorer.SelectBestTarget(candidates, situation);
+                var best = TargetScorer.SelectBestEnemy(candidates, situation, effectiveRole);
                 if (best != null) return best;
             }
 
+            // 폴백: 모든 적
             var allCandidates = situation.Enemies
                 .Where(e => e != null && !e.LifeState.IsDead)
                 .Where(e => !IsExcluded(e, excludeTargetIds))
                 .ToList();
 
-            return UtilityScorer.SelectBestTarget(allCandidates, situation);
+            return TargetScorer.SelectBestEnemy(allCandidates, situation, effectiveRole);
+        }
+
+        #endregion
+
+        #region AOE Attack (v3.1.16)
+
+        /// <summary>
+        /// ★ v3.1.16: AOE 공격 계획 - 안전하고 효율적인 위치 선택
+        /// ★ v3.1.18: 방향성 패턴(Cone/Ray/Sector) 지원 추가
+        /// </summary>
+        public static PlannedAction PlanAoEAttack(
+            Situation situation,
+            ref float remainingAP,
+            string roleName)
+        {
+            // Point 타겟 AOE 능력 찾기
+            var aoEAbilities = situation.AvailableAttacks
+                .Where(a => CombatAPI.IsPointTargetAbility(a))
+                .Where(a => !AbilityDatabase.IsReload(a))
+                .Where(a => !AbilityDatabase.IsTurnEnding(a))
+                .ToList();
+
+            if (aoEAbilities.Count == 0) return null;
+
+            foreach (var ability in aoEAbilities)
+            {
+                float cost = CombatAPI.GetAbilityAPCost(ability);
+                if (cost > remainingAP) continue;
+
+                var patternType = CombatAPI.GetPatternType(ability);
+                AoESafetyChecker.AoEScore bestResult = null;
+
+                // ★ v3.1.18: 패턴 타입에 따른 분기
+                if (CombatAPI.IsDirectionalPattern(patternType))
+                {
+                    // 방향성 패턴 (Cone/Ray/Sector) - 타겟 기반
+                    bestResult = AoESafetyChecker.FindBestDirectionalAoETarget(
+                        ability,
+                        situation.Unit,
+                        situation.Enemies,
+                        situation.Allies,
+                        minEnemiesRequired: 2);
+
+                    if (bestResult == null || !bestResult.IsSafe) continue;
+
+                    // 방향성 패턴은 주 타겟 유닛으로 타겟팅
+                    var primaryTarget = bestResult.AffectedUnits
+                        .FirstOrDefault(u => situation.Unit.CombatGroup.IsEnemy(u));
+
+                    if (primaryTarget == null) continue;
+
+                    // 유닛 타겟 검증
+                    var targetWrapper = new TargetWrapper(primaryTarget);
+                    string reason;
+                    if (!CombatAPI.CanUseAbilityOn(ability, targetWrapper, out reason))
+                    {
+                        Main.LogDebug($"[{roleName}] Directional AOE blocked: {ability.Name} - {reason}");
+                        continue;
+                    }
+
+                    remainingAP -= cost;
+                    Main.Log($"[{roleName}] Directional AOE ({patternType}): {ability.Name} -> {primaryTarget.CharacterName} " +
+                        $"- {bestResult.EnemiesHit} enemies, {bestResult.AlliesHit} allies");
+
+                    return PlannedAction.Attack(
+                        ability,
+                        primaryTarget,
+                        $"Directional AOE ({patternType}) on {bestResult.EnemiesHit} enemies",
+                        cost);
+                }
+                else
+                {
+                    // Circle 패턴 - 위치 기반 (기존 로직)
+                    bestResult = AoESafetyChecker.FindBestAoEPosition(
+                        ability,
+                        situation.Unit,
+                        situation.Enemies,
+                        situation.Allies,
+                        minEnemiesRequired: 2);
+
+                    if (bestResult == null || !bestResult.IsSafe) continue;
+
+                    // Point 타겟 검증
+                    string reason;
+                    if (!CombatAPI.CanUseAbilityOnPoint(ability, bestResult.Position, out reason))
+                    {
+                        Main.LogDebug($"[{roleName}] AOE blocked: {ability.Name} - {reason}");
+                        continue;
+                    }
+
+                    remainingAP -= cost;
+                    Main.Log($"[{roleName}] AOE (Circle): {ability.Name} at ({bestResult.Position.x:F1},{bestResult.Position.z:F1}) " +
+                        $"- {bestResult.EnemiesHit} enemies, {bestResult.AlliesHit} allies");
+
+                    return PlannedAction.PositionalAttack(
+                        ability,
+                        bestResult.Position,
+                        $"AOE on {bestResult.EnemiesHit} enemies",
+                        cost);
+                }
+            }
+
+            return null;
+        }
+
+        #endregion
+
+        #region AOE Taunt (v3.1.17)
+
+        /// <summary>
+        /// ★ v3.1.17: AOE 도발 계획 - 다수 적 도발
+        /// </summary>
+        public static PlannedAction PlanAoETaunt(
+            Situation situation,
+            ref float remainingAP,
+            string roleName)
+        {
+            // Point 타겟 + 도발 능력 찾기
+            var aoeTaunts = situation.AvailableBuffs
+                .Where(a => AbilityDatabase.IsTaunt(a))
+                .Where(a => CombatAPI.IsPointTargetAbility(a))
+                .ToList();
+
+            if (aoeTaunts.Count == 0) return null;
+
+            foreach (var ability in aoeTaunts)
+            {
+                float cost = CombatAPI.GetAbilityAPCost(ability);
+                if (cost > remainingAP) continue;
+
+                // 이미 활성화된 버프 스킵
+                if (CombatAPI.HasActiveBuff(situation.Unit, ability)) continue;
+
+                // 최적 위치 찾기 (적 대상이므로 기존 로직 재사용)
+                var bestPosition = AoESafetyChecker.FindBestAoEPosition(
+                    ability,
+                    situation.Unit,
+                    situation.Enemies,
+                    situation.Allies,
+                    minEnemiesRequired: 2);
+
+                if (bestPosition == null || !bestPosition.IsSafe) continue;
+
+                // Point 타겟 검증
+                string reason;
+                if (!CombatAPI.CanUseAbilityOnPoint(ability, bestPosition.Position, out reason))
+                {
+                    Main.LogDebug($"[{roleName}] AOE Taunt blocked: {ability.Name} - {reason}");
+                    continue;
+                }
+
+                remainingAP -= cost;
+                Main.Log($"[{roleName}] AOE Taunt: {ability.Name} at ({bestPosition.Position.x:F1},{bestPosition.Position.z:F1}) " +
+                    $"- {bestPosition.EnemiesHit} enemies");
+
+                return PlannedAction.PositionalBuff(
+                    ability,
+                    bestPosition.Position,
+                    $"AOE Taunt on {bestPosition.EnemiesHit} enemies",
+                    cost);
+            }
+
+            return null;
+        }
+
+        #endregion
+
+        #region Self-Targeted AOE (v3.1.23)
+
+        /// <summary>
+        /// ★ v3.1.23: Self-Targeted AOE 공격 계획 (Bladedance 등)
+        /// Range=Personal, CanTargetSelf인 DangerousAoE 능력 처리
+        /// </summary>
+        public static PlannedAction PlanSelfTargetedAoEAttack(
+            Situation situation,
+            AbilityData attack,
+            ref float remainingAP,
+            string roleName)
+        {
+            if (attack == null) return null;
+            if (!CombatAPI.IsSelfTargetedAoEAttack(attack)) return null;
+
+            float cost = CombatAPI.GetAbilityAPCost(attack);
+            if (cost > remainingAP) return null;
+
+            var caster = situation.Unit;
+
+            // 안전성 체크: 인접 아군이 있으면 사용 거부 (아군 피해 방지)
+            int adjacentAllies = CombatAPI.CountAdjacentAllies(caster);
+            if (adjacentAllies > 0)
+            {
+                Main.LogDebug($"[{roleName}] Self-AoE {attack.Name} skipped: {adjacentAllies} allies adjacent");
+                return null;
+            }
+
+            // 효율성 체크: 인접 적이 없으면 낭비
+            int adjacentEnemies = CombatAPI.CountAdjacentEnemies(caster);
+            if (adjacentEnemies == 0)
+            {
+                Main.LogDebug($"[{roleName}] Self-AoE {attack.Name} skipped: no adjacent enemies");
+                return null;
+            }
+
+            // 자신에게 사용 가능한지 확인
+            var selfTarget = new TargetWrapper(caster);
+            string reason;
+            if (!CombatAPI.CanUseAbilityOn(attack, selfTarget, out reason))
+            {
+                Main.LogDebug($"[{roleName}] Self-AoE {attack.Name} unavailable: {reason}");
+                return null;
+            }
+
+            remainingAP -= cost;
+            Main.Log($"[{roleName}] Self-AoE: {attack.Name} (hitting {adjacentEnemies} enemies)");
+
+            // ★ 자신을 타겟으로 하는 Buff 형태로 반환
+            return PlannedAction.Buff(attack, caster,
+                $"Self-AoE attack hitting {adjacentEnemies} enemies", cost);
         }
 
         #endregion

@@ -105,6 +105,10 @@ namespace CompanionAI_v3.Planning.Plans
         protected PlannedAction PlanPostMoveAttack(Situation situation, BaseUnitEntity target, ref float remainingAP)
             => AttackPlanner.PlanPostMoveAttack(situation, target, ref remainingAP, RoleName);
 
+        // ★ v3.1.24: 이동 목적지 기반 Post-move 공격
+        protected PlannedAction PlanPostMoveAttack(Situation situation, BaseUnitEntity target, ref float remainingAP, Vector3? moveDestination)
+            => AttackPlanner.PlanPostMoveAttack(situation, target, ref remainingAP, RoleName, moveDestination);
+
         protected PlannedAction PlanFinisher(Situation situation, BaseUnitEntity target, ref float remainingAP)
             => AttackPlanner.PlanFinisher(situation, target, ref remainingAP, RoleName);
 
@@ -126,6 +130,133 @@ namespace CompanionAI_v3.Planning.Plans
 
         protected bool IsAbilityExcluded(AbilityData ability, HashSet<string> excludeAbilityGuids)
             => AttackPlanner.IsAbilityExcluded(ability, excludeAbilityGuids);
+
+        // ★ v3.1.16: AOE 공격 계획 (모든 Role에서 사용 가능)
+        protected PlannedAction PlanAoEAttack(Situation situation, ref float remainingAP)
+            => AttackPlanner.PlanAoEAttack(situation, ref remainingAP, RoleName);
+
+        #endregion
+
+        #region AOE Heal/Buff (v3.1.17)
+
+        /// <summary>
+        /// ★ v3.1.17: AOE 힐 계획 - 다수 부상 아군 힐
+        /// </summary>
+        protected PlannedAction PlanAoEHeal(Situation situation, ref float remainingAP)
+        {
+            // Point 타겟 힐 능력 찾기
+            var aoeHeals = situation.AvailableHeals
+                .Where(a => CombatAPI.IsPointTargetAbility(a))
+                .ToList();
+
+            if (aoeHeals.Count == 0) return null;
+
+            // 부상 아군 필터링 (HP < 80%)
+            var woundedAllies = situation.Allies
+                .Where(a => a != null && a.IsConscious)
+                .Where(a => CombatAPI.GetHPPercent(a) < 80f)
+                .ToList();
+
+            // 캐스터도 부상이면 추가
+            if (CombatAPI.GetHPPercent(situation.Unit) < 80f)
+                woundedAllies.Add(situation.Unit);
+
+            if (woundedAllies.Count < 2) return null;  // AOE 힐은 2명 이상 필요
+
+            foreach (var ability in aoeHeals)
+            {
+                float cost = CombatAPI.GetAbilityAPCost(ability);
+                if (cost > remainingAP) continue;
+
+                var bestPosition = AoESafetyChecker.FindBestAllyAoEPosition(
+                    ability,
+                    situation.Unit,
+                    woundedAllies,
+                    minAlliesRequired: 2,
+                    requiresWounded: true);
+
+                if (bestPosition == null || !bestPosition.IsSafe) continue;
+
+                string reason;
+                if (!CombatAPI.CanUseAbilityOnPoint(ability, bestPosition.Position, out reason))
+                {
+                    Main.LogDebug($"[{RoleName}] AOE Heal blocked: {ability.Name} - {reason}");
+                    continue;
+                }
+
+                remainingAP -= cost;
+                Main.Log($"[{RoleName}] AOE Heal: {ability.Name} at ({bestPosition.Position.x:F1},{bestPosition.Position.z:F1}) " +
+                    $"- {bestPosition.AlliesHit} allies");
+
+                return PlannedAction.PositionalHeal(
+                    ability,
+                    bestPosition.Position,
+                    $"AOE Heal on {bestPosition.AlliesHit} allies",
+                    cost);
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// ★ v3.1.17: AOE 버프 계획 - 다수 아군 버프
+        /// </summary>
+        protected PlannedAction PlanAoEBuff(Situation situation, ref float remainingAP)
+        {
+            // Point 타겟 버프 능력 찾기 (힐, 도발 제외)
+            var aoeBuffs = situation.AvailableBuffs
+                .Where(a => CombatAPI.IsPointTargetAbility(a))
+                .Where(a => !AbilityDatabase.IsTaunt(a))
+                .Where(a => !AbilityDatabase.IsHealing(a))
+                .ToList();
+
+            if (aoeBuffs.Count == 0) return null;
+
+            // 모든 살아있는 아군 (자신 포함)
+            var allAllies = situation.Allies
+                .Where(a => a != null && a.IsConscious)
+                .ToList();
+            allAllies.Add(situation.Unit);
+
+            if (allAllies.Count < 2) return null;  // AOE 버프는 2명 이상 필요
+
+            foreach (var ability in aoeBuffs)
+            {
+                float cost = CombatAPI.GetAbilityAPCost(ability);
+                if (cost > remainingAP) continue;
+
+                // 이미 활성화된 버프 스킵
+                if (CombatAPI.HasActiveBuff(situation.Unit, ability)) continue;
+
+                var bestPosition = AoESafetyChecker.FindBestAllyAoEPosition(
+                    ability,
+                    situation.Unit,
+                    allAllies,
+                    minAlliesRequired: 2,
+                    requiresWounded: false);
+
+                if (bestPosition == null || !bestPosition.IsSafe) continue;
+
+                string reason;
+                if (!CombatAPI.CanUseAbilityOnPoint(ability, bestPosition.Position, out reason))
+                {
+                    Main.LogDebug($"[{RoleName}] AOE Buff blocked: {ability.Name} - {reason}");
+                    continue;
+                }
+
+                remainingAP -= cost;
+                Main.Log($"[{RoleName}] AOE Buff: {ability.Name} at ({bestPosition.Position.x:F1},{bestPosition.Position.z:F1}) " +
+                    $"- {bestPosition.AlliesHit} allies");
+
+                return PlannedAction.PositionalBuff(
+                    ability,
+                    bestPosition.Position,
+                    $"AOE Buff on {bestPosition.AlliesHit} allies",
+                    cost);
+            }
+
+            return null;
+        }
 
         #endregion
 
@@ -176,6 +307,112 @@ namespace CompanionAI_v3.Planning.Plans
         #endregion
 
         #region Common Methods (not delegated)
+
+        /// <summary>
+        /// ★ v3.1.24: 최종 AP 활용 (모든 주요 행동 실패 후)
+        /// Phase 9에서 사용 - 공격/이동 모두 실패했지만 AP가 남았을 때
+        /// </summary>
+        protected PlannedAction PlanFinalAPUtilization(Situation situation, ref float remainingAP)
+        {
+            if (remainingAP < 1f) return null;
+
+            string unitId = situation.Unit.UniqueId;
+            float currentAP = remainingAP;  // 람다에서 사용하기 위해 로컬 변수에 복사
+
+            // 1. 아직 사용 안 한 저우선순위 버프
+            foreach (var buff in situation.AvailableBuffs)
+            {
+                float cost = CombatAPI.GetAbilityAPCost(buff);
+                if (cost > remainingAP) continue;
+
+                string abilityId = buff.Blueprint?.AssetGuid?.ToString();
+                if (string.IsNullOrEmpty(abilityId)) continue;
+
+                // 최근 사용된 능력 스킵
+                if (AbilityUsageTracker.WasUsedRecently(unitId, abilityId, 1000)) continue;
+
+                // 선제 버프 제외 (공격 없으면 무의미)
+                var timing = AbilityDatabase.GetTiming(buff);
+                if (timing == AbilityTiming.PreAttackBuff ||
+                    timing == AbilityTiming.HeroicAct ||
+                    timing == AbilityTiming.RighteousFury)
+                    continue;
+
+                // 턴 종료 능력 제외
+                if (AbilityDatabase.IsTurnEnding(buff)) continue;
+
+                // 자신 대상 버프
+                var selfTarget = new TargetWrapper(situation.Unit);
+                string reason;
+                if (CombatAPI.CanUseAbilityOn(buff, selfTarget, out reason))
+                {
+                    remainingAP -= cost;
+                    Main.Log($"[{RoleName}] Phase 9: Final buff - {buff.Name}");
+                    return PlannedAction.Buff(buff, situation.Unit, "Final AP buff", cost);
+                }
+            }
+
+            // 2. 디버프 (적에게)
+            if (situation.NearestEnemy != null && situation.AvailableDebuffs != null)
+            {
+                foreach (var debuff in situation.AvailableDebuffs)
+                {
+                    float cost = CombatAPI.GetAbilityAPCost(debuff);
+                    if (cost > remainingAP) continue;
+
+                    string abilityId = debuff.Blueprint?.AssetGuid?.ToString();
+                    if (string.IsNullOrEmpty(abilityId)) continue;
+
+                    if (AbilityUsageTracker.WasUsedRecently(unitId, abilityId, 1000)) continue;
+
+                    var target = new TargetWrapper(situation.NearestEnemy);
+                    string reason;
+                    if (CombatAPI.CanUseAbilityOn(debuff, target, out reason))
+                    {
+                        remainingAP -= cost;
+                        Main.Log($"[{RoleName}] Phase 9: Final debuff - {debuff.Name} -> {situation.NearestEnemy.CharacterName}");
+                        return PlannedAction.Attack(debuff, situation.NearestEnemy, "Final AP debuff", cost);
+                    }
+                }
+            }
+
+            // 3. 마커 (적에게)
+            // ★ v3.1.28: 이미 마킹된 타겟에 중복 적용 방지
+            if (situation.NearestEnemy != null && situation.AvailableMarkers != null)
+            {
+                string targetId = situation.NearestEnemy.UniqueId;
+                foreach (var marker in situation.AvailableMarkers)
+                {
+                    float cost = CombatAPI.GetAbilityAPCost(marker);
+                    if (cost > remainingAP) continue;
+
+                    string abilityId = marker.Blueprint?.AssetGuid?.ToString();
+                    if (string.IsNullOrEmpty(abilityId)) continue;
+
+                    // ★ v3.1.28: 타겟별 중복 체크 (같은 타겟에 같은 마커 적용 방지)
+                    string usageKey = $"{abilityId}:{targetId}";
+                    if (AbilityUsageTracker.WasUsedRecently(unitId, usageKey, 5000))
+                    {
+                        Main.LogDebug($"[{RoleName}] Phase 9: Skipping {marker.Name} - already used on {situation.NearestEnemy.CharacterName}");
+                        continue;
+                    }
+
+                    // 능력 자체도 최근 사용 여부 확인
+                    if (AbilityUsageTracker.WasUsedRecently(unitId, abilityId, 1000)) continue;
+
+                    var target = new TargetWrapper(situation.NearestEnemy);
+                    string reason;
+                    if (CombatAPI.CanUseAbilityOn(marker, target, out reason))
+                    {
+                        remainingAP -= cost;
+                        Main.Log($"[{RoleName}] Phase 9: Final marker - {marker.Name} -> {situation.NearestEnemy.CharacterName}");
+                        return PlannedAction.Buff(marker, situation.NearestEnemy, "Final AP marker", cost);
+                    }
+                }
+            }
+
+            return null;
+        }
 
         /// <summary>
         /// ★ v3.0.56: ClearMPAfterUse 능력 사용 전 선제적 후퇴 계획

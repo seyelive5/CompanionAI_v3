@@ -8,6 +8,7 @@ using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
 using CompanionAI_v3.Data;
 using CompanionAI_v3.GameInterface;
+using CompanionAI_v3.Planning.Planners;
 
 namespace CompanionAI_v3.Planning.Plans
 {
@@ -68,13 +69,64 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // Phase 4: 도발 (근접 적 2명 이상)
-            if (CountNearbyEnemies(situation, 5f) >= 2)
+            // ★ v3.1.25: Phase 4 - 스마트 도발 시스템
+            // - 아군 타겟팅 적 탐지
+            // - 이동 후 도발 타당성 스코어링
+            // - AOE 도발 범위 정확 계산
+            var tauntAbilities = situation.AvailableBuffs
+                .Where(a => AbilityDatabase.IsTaunt(a))
+                .ToList();
+
+            if (tauntAbilities.Count > 0 && situation.HasLivingEnemies)
             {
-                var tauntAction = PlanTaunt(situation, ref remainingAP);
-                if (tauntAction != null)
+                // 모든 도발 옵션 평가 (현재 위치 + 이동 가능 위치)
+                var tauntOptions = TauntScorer.EvaluateAllTauntOptions(
+                    situation, tauntAbilities, remainingMP);
+
+                var bestOption = tauntOptions.FirstOrDefault();
+
+                if (TauntScorer.IsTauntWorthwhile(bestOption))
                 {
-                    actions.Add(tauntAction);
+                    Main.Log($"[Tank] SmartTaunt: {bestOption.Ability.Name} " +
+                        $"(enemies={bestOption.EnemiesAffected}, targetingAllies={bestOption.EnemiesTargetingAllies}, " +
+                        $"requiresMove={bestOption.RequiresMove}, score={bestOption.Score:F0})");
+
+                    // 이동이 필요하면 먼저 이동 계획
+                    if (bestOption.RequiresMove)
+                    {
+                        var moveAction = PlannedAction.Move(bestOption.Position, "Move for smart taunt");
+                        actions.Add(moveAction);
+                        remainingMP -= bestOption.MoveCost;
+                        Main.Log($"[Tank] SmartTaunt: Moving to taunt position (cost={bestOption.MoveCost:F1} MP)");
+                    }
+
+                    // 도발 액션 추가
+                    float apCost = CombatAPI.GetAbilityAPCost(bestOption.Ability);
+                    if (apCost <= remainingAP)
+                    {
+                        remainingAP -= apCost;
+
+                        if (CombatAPI.IsPointTargetAbility(bestOption.Ability))
+                        {
+                            // ★ v3.1.26: AOE 도발 - TargetPoint 사용 (적 중심점)
+                            // Position = 캐스터 이동 위치, TargetPoint = 시전 타겟 위치
+                            // CanTargetSelf=false인 스킬의 경우 적 중심점을 타겟으로 지정
+                            actions.Add(PlannedAction.PositionalBuff(
+                                bestOption.Ability, bestOption.TargetPoint,
+                                $"AOE Taunt - {bestOption.EnemiesAffected} enemies ({bestOption.EnemiesTargetingAllies} targeting allies)", apCost));
+                        }
+                        else
+                        {
+                            // 단일 타겟 도발: 자신에게 시전 (Self-Target 도발)
+                            actions.Add(PlannedAction.Buff(bestOption.Ability, situation.Unit,
+                                $"Taunt - protecting {bestOption.EnemiesTargetingAllies} allies from threats", apCost));
+                        }
+                    }
+                }
+                else if (situation.EnemiesTargetingAllies > 0)
+                {
+                    // 도발 옵션이 없지만 아군이 위협받는 상황 → 로그만 남김
+                    Main.LogDebug($"[Tank] SmartTaunt: {situation.EnemiesTargetingAllies} enemies targeting allies, but no worthwhile taunt option");
                 }
             }
 
@@ -106,7 +158,7 @@ namespace CompanionAI_v3.Planning.Plans
                 actions.Add(stratagemAction);
             }
 
-            // Phase 5: 공격 - 가까운 적 우선
+            // Phase 5: 공격 - ★ v3.1.21: Tank 가중치로 최적 타겟 선택
             bool didPlanAttack = false;
             int attacksPlanned = 0;
             var plannedTargetIds = new HashSet<string>();
@@ -114,7 +166,14 @@ namespace CompanionAI_v3.Planning.Plans
 
             while (remainingAP >= 1f && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
             {
-                var attackAction = PlanAttack(situation, ref remainingAP, preferTarget: situation.NearestEnemy,
+                // ★ v3.1.21: Tank 가중치로 최적 타겟 선택 (거리 + 위협도 중시)
+                var candidates = situation.HittableEnemies
+                    .Where(e => e != null && !plannedTargetIds.Contains(e.UniqueId))
+                    .ToList();
+                var bestTarget = TargetScorer.SelectBestEnemy(candidates, situation, Settings.AIRole.Tank)
+                    ?? situation.NearestEnemy;
+
+                var attackAction = PlanAttack(situation, ref remainingAP, preferTarget: bestTarget,
                     excludeTargetIds: plannedTargetIds, excludeAbilityGuids: plannedAbilityGuids);
                 if (attackAction == null) break;
 
@@ -232,14 +291,15 @@ namespace CompanionAI_v3.Planning.Plans
                     actions.Add(moveOrGapCloser);
                     hasMoveInPlan = true;
 
-                    // 이동 후 공격 계획
+                    // ★ v3.1.24: 이동 목적지 추출하여 Post-move 공격에 전달
                     if (reservedAP > 0 && situation.NearestEnemy != null)
                     {
-                        var postMoveAttack = PlanPostMoveAttack(situation, situation.NearestEnemy, ref remainingAP);
+                        UnityEngine.Vector3? moveDestination = moveOrGapCloser.Target?.Point;
+                        var postMoveAttack = PlanPostMoveAttack(situation, situation.NearestEnemy, ref remainingAP, moveDestination);
                         if (postMoveAttack != null)
                         {
                             actions.Add(postMoveAttack);
-                            Main.Log("[Tank] Added post-move attack");
+                            Main.Log($"[Tank] Added post-move attack (from destination={moveDestination.HasValue})");
                         }
                     }
                 }
@@ -250,6 +310,17 @@ namespace CompanionAI_v3.Planning.Plans
             {
                 var postAttackActions = PlanPostAttackActions(situation, ref remainingAP, skipMove: hasMoveInPlan);
                 actions.AddRange(postAttackActions);
+            }
+
+            // ★ v3.1.24: Phase 9 - 최종 AP 활용 (모든 시도 실패 후)
+            if (remainingAP >= 1f && actions.Count > 0)
+            {
+                var finalAction = PlanFinalAPUtilization(situation, ref remainingAP);
+                if (finalAction != null)
+                {
+                    actions.Add(finalAction);
+                    Main.Log($"[Tank] Phase 9: Final AP utilization - {finalAction.Ability?.Name}");
+                }
             }
 
             // 턴 종료

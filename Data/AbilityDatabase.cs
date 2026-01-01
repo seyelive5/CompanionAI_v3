@@ -286,6 +286,12 @@ namespace CompanionAI_v3.Data
             // PointTarget: 셀 타겟 능력 → MovementPlanner에서 착지 위치 계산
             { "6f1b7cfb48a0450cb85ce8a8879502de", new AbilityInfo("6f1b7cfb48a0450cb85ce8a8879502de", "DeathFromAbove", AbilityTiming.GapCloser, flags: AbilityFlags.PointTarget) },
 
+            // ★ v3.1.24: 죽음 강림 (Death Descending) 변형들 - 모두 GapCloser + PointTarget
+            { "780c0fb08c2e4205a8f6df9b9fc2ed3b", new AbilityInfo("780c0fb08c2e4205a8f6df9b9fc2ed3b", "DeathFromAbove_Free", AbilityTiming.GapCloser, flags: AbilityFlags.PointTarget) },
+            { "bdb0bd56d86a45dc914226ea4704f5f6", new AbilityInfo("bdb0bd56d86a45dc914226ea4704f5f6", "DeathFromAbove_Spring", AbilityTiming.GapCloser, flags: AbilityFlags.PointTarget) },
+            { "2fe0f07d130c4af2ab23a9ce75efad5a", new AbilityInfo("2fe0f07d130c4af2ab23a9ce75efad5a", "DeathFromAbove_Targeted", AbilityTiming.GapCloser, flags: AbilityFlags.PointTarget) },
+            { "4c8e11fc01cc4923895e0246be178aea", new AbilityInfo("4c8e11fc01cc4923895e0246be178aea", "DeathFromAbove_Ultimate", AbilityTiming.GapCloser, flags: AbilityFlags.PointTarget) },
+
             // Death Waltz (Heroic Act) - Momentum 175+ 필요
             { "d52b8f3b44434f2798cd3a01c97fd1ed", new AbilityInfo("d52b8f3b44434f2798cd3a01c97fd1ed", "DeathWaltz_Heroic", AbilityTiming.HeroicAct, flags: AbilityFlags.SingleUse | AbilityFlags.EnemyTarget) },
 

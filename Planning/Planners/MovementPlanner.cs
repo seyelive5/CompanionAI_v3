@@ -55,6 +55,7 @@ namespace CompanionAI_v3.Planning.Planners
         /// GapCloser 계획 (모든 Role 공통)
         /// ★ v3.0.81: PointTarget 능력 지원 (Death from Above 등)
         /// ★ v3.0.87: 디버그 로깅 추가
+        /// ★ v3.1.24: 첫 타겟 실패 시 다른 적 타겟도 시도
         /// </summary>
         public static PlannedAction PlanGapCloser(Situation situation, BaseUnitEntity target, ref float remainingAP, string roleName)
         {
@@ -93,69 +94,109 @@ namespace CompanionAI_v3.Planning.Planners
                 bool isPointTarget = info != null && (info.Flags & AbilityFlags.PointTarget) != 0;
                 Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} isPointTarget={isPointTarget}");
 
-                if (isPointTarget)
+                // ★ v3.1.24: 첫 타겟 실패 시 다른 적들도 시도
+                var targetsToTry = new List<BaseUnitEntity>();
+                if (target != null) targetsToTry.Add(target);
+                targetsToTry.AddRange(situation.Enemies.Where(e => e != target && e != null && e.IsConscious));
+
+                foreach (var candidateTarget in targetsToTry)
                 {
-                    // 적 옆 착지 위치 찾기 (MovementAPI 재사용)
-                    var landingPosition = FindGapCloserLandingPosition(situation.Unit, target);
-                    if (landingPosition.HasValue)
+                    if (isPointTarget)
                     {
-                        Main.LogDebug($"[{roleName}] PlanGapCloser: Landing position found at ({landingPosition.Value.x:F1},{landingPosition.Value.z:F1})");
-                        var pointTarget = new TargetWrapper(landingPosition.Value);
-                        string reason;
-                        if (CombatAPI.CanUseAbilityOn(gapCloser, pointTarget, out reason))
+                        // ★ v3.1.28: 능력 정보 전달하여 범위 내 착지 위치 찾기
+                        var landingPosition = FindGapCloserLandingPosition(situation.Unit, candidateTarget, gapCloser);
+                        if (landingPosition.HasValue)
                         {
-                            remainingAP -= cost;
-                            Main.Log($"[{roleName}] Position gap closer: {gapCloser.Name} -> near {target.CharacterName} ({landingPosition.Value.x:F1},{landingPosition.Value.z:F1})");
-                            return PlannedAction.PositionalAttack(gapCloser, landingPosition.Value, $"Jump to {target.CharacterName}", cost);
+                            Main.LogDebug($"[{roleName}] PlanGapCloser: Landing position found at ({landingPosition.Value.x:F1},{landingPosition.Value.z:F1}) for {candidateTarget.CharacterName}");
+                            var pointTarget = new TargetWrapper(landingPosition.Value);
+                            string reason;
+                            if (CombatAPI.CanUseAbilityOn(gapCloser, pointTarget, out reason))
+                            {
+                                remainingAP -= cost;
+                                Main.Log($"[{roleName}] Position gap closer: {gapCloser.Name} -> near {candidateTarget.CharacterName} ({landingPosition.Value.x:F1},{landingPosition.Value.z:F1})");
+                                return PlannedAction.PositionalAttack(gapCloser, landingPosition.Value, $"Jump to {candidateTarget.CharacterName}", cost);
+                            }
+                            else
+                            {
+                                Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} -> {candidateTarget.CharacterName} failed: {reason}");
+                            }
                         }
                         else
                         {
-                            Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} CanUseAbilityOn=false, reason={reason}");
+                            Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} -> {candidateTarget.CharacterName} - no landing position");
                         }
                     }
                     else
                     {
-                        Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} - no landing position found");
-                    }
-                }
-                else
-                {
-                    // 일반 타겟 능력
-                    var targetWrapper = new TargetWrapper(target);
-                    string reason;
-                    if (CombatAPI.CanUseAbilityOn(gapCloser, targetWrapper, out reason))
-                    {
-                        remainingAP -= cost;
-                        Main.Log($"[{roleName}] Gap closer: {gapCloser.Name} -> {target.CharacterName}");
-                        return PlannedAction.Attack(gapCloser, target, $"Gap closer on {target.CharacterName}", cost);
-                    }
-                    else
-                    {
-                        Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} CanUseAbilityOn=false, reason={reason}");
+                        // 일반 타겟 능력
+                        var targetWrapper = new TargetWrapper(candidateTarget);
+                        string reason;
+                        if (CombatAPI.CanUseAbilityOn(gapCloser, targetWrapper, out reason))
+                        {
+                            remainingAP -= cost;
+                            Main.Log($"[{roleName}] Gap closer: {gapCloser.Name} -> {candidateTarget.CharacterName}");
+                            return PlannedAction.Attack(gapCloser, candidateTarget, $"Gap closer on {candidateTarget.CharacterName}", cost);
+                        }
+                        else
+                        {
+                            Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} -> {candidateTarget.CharacterName} failed: {reason}");
+                        }
                     }
                 }
             }
 
-            Main.LogDebug($"[{roleName}] PlanGapCloser: All GapClosers failed");
+            Main.LogDebug($"[{roleName}] PlanGapCloser: All GapClosers failed on all targets");
             return null;
         }
 
         /// <summary>
         /// ★ v3.0.81: 갭클로저 착지 위치 찾기
-        /// 적에게 인접한 위치 중 도달 가능한 곳 반환
+        /// ★ v3.1.28: 능력 범위 고려 - 스킬 범위 내에서만 착지 위치 선택
         /// </summary>
-        private static Vector3? FindGapCloserLandingPosition(BaseUnitEntity unit, BaseUnitEntity target)
+        private static Vector3? FindGapCloserLandingPosition(BaseUnitEntity unit, BaseUnitEntity target, AbilityData gapCloserAbility)
         {
+            // ★ v3.1.28: 능력 범위 확인
+            float abilityRange = CombatAPI.GetAbilityRange(gapCloserAbility);
+            Main.LogDebug($"[MovementPlanner] FindGapCloserLanding: ability={gapCloserAbility.Name}, range={abilityRange:F1}");
+
             // MovementAPI.FindMeleeAttackPositionSync 재사용
             var meleePosition = MovementAPI.FindMeleeAttackPositionSync(unit, target, 2f);
             if (meleePosition != null)
             {
-                return meleePosition.Position;
+                // ★ v3.1.28: 착지 위치가 스킬 범위 내인지 확인
+                float distToLanding = Vector3.Distance(unit.Position, meleePosition.Position);
+                if (distToLanding <= abilityRange)
+                {
+                    Main.LogDebug($"[MovementPlanner] FindGapCloserLanding: melee position at dist={distToLanding:F1}m (within range)");
+                    return meleePosition.Position;
+                }
+                else
+                {
+                    Main.LogDebug($"[MovementPlanner] FindGapCloserLanding: melee position at dist={distToLanding:F1}m exceeds ability range");
+                }
             }
 
-            // 폴백: 적 옆 위치 (단순 계산)
-            var offset = (unit.Position - target.Position).normalized * 1.5f;
-            return target.Position + offset;
+            // ★ v3.1.28: 폴백 - 적 방향으로 스킬 범위 내 위치 계산
+            // 기존: 적 옆 위치 → 문제: 스킬 범위 무시
+            // 수정: 캐스터에서 적 방향으로 범위의 90% 위치
+            var direction = (target.Position - unit.Position).normalized;
+            float targetDistance = Vector3.Distance(unit.Position, target.Position);
+
+            if (targetDistance <= abilityRange)
+            {
+                // 적이 이미 범위 내 - 적 근처 착지
+                var offset = (unit.Position - target.Position).normalized * 1.5f;
+                var landingPos = target.Position + offset;
+                Main.LogDebug($"[MovementPlanner] FindGapCloserLanding: target in range, landing near target");
+                return landingPos;
+            }
+            else
+            {
+                // 적이 범위 밖 - 범위의 90% 지점으로
+                var landingPos = unit.Position + direction * (abilityRange * 0.9f);
+                Main.LogDebug($"[MovementPlanner] FindGapCloserLanding: target out of range ({targetDistance:F1}m), landing at {abilityRange * 0.9f:F1}m");
+                return landingPos;
+            }
         }
 
         /// <summary>

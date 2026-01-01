@@ -118,6 +118,45 @@ namespace CompanionAI_v3.Analysis
                 .Where(a => a != null && !a.LifeState.IsDead && a != unit)
                 .OrderBy(a => CombatAPI.GetHPPercent(a))
                 .FirstOrDefault();
+
+            // ★ v3.1.25: 위협 분석 (아군 타겟팅 적)
+            AnalyzeThreats(situation, unit);
+        }
+
+        /// <summary>
+        /// ★ v3.1.25: 위협 분석 - 아군을 타겟팅하는 적 파악
+        /// </summary>
+        private void AnalyzeThreats(Situation situation, BaseUnitEntity unit)
+        {
+            int alliesUnderThreat = 0;
+            int enemiesTargetingAllies = 0;
+
+            var threatenedAllies = new HashSet<BaseUnitEntity>();
+
+            foreach (var ally in situation.Allies)
+            {
+                if (ally == null || ally == unit) continue;  // 자신 제외
+
+                foreach (var enemy in situation.Enemies)
+                {
+                    if (enemy == null) continue;
+                    if (CombatAPI.IsTargeting(enemy, ally))
+                    {
+                        enemiesTargetingAllies++;
+                        threatenedAllies.Add(ally);
+                    }
+                }
+            }
+
+            alliesUnderThreat = threatenedAllies.Count;
+
+            situation.AlliesUnderThreat = alliesUnderThreat;
+            situation.EnemiesTargetingAllies = enemiesTargetingAllies;
+
+            if (enemiesTargetingAllies > 0)
+            {
+                Main.LogDebug($"[Analyzer] Threat: {enemiesTargetingAllies} enemies targeting {alliesUnderThreat} allies");
+            }
         }
 
         private void AnalyzeTargets(Situation situation, BaseUnitEntity unit)
@@ -168,6 +207,28 @@ namespace CompanionAI_v3.Analysis
                     // 특수 능력은 PlanSpecialAbility()에서 별도로 타겟 검증
                     if (AbilityDatabase.IsDOTIntensify(attack)) continue;
                     if (AbilityDatabase.IsChainEffect(attack)) continue;
+
+                    // ★ v3.1.19: Point 타겟 AOE 처리 개선
+                    if (CombatAPI.IsPointTargetAbility(attack))
+                    {
+                        var patternInfo = CombatAPI.GetPatternInfo(attack);
+                        if (patternInfo == null || !patternInfo.IsValid) continue;
+
+                        float effectiveRange = CombatAPI.GetAbilityRange(attack) + patternInfo.Radius;
+                        float dist = CombatAPI.GetDistance(unit, enemy);
+                        if (dist > effectiveRange) continue;
+
+                        // ★ v3.1.19: AOE 안전성 체크 추가
+                        if (!AoESafetyChecker.IsAoESafe(attack, unit, enemy.Position, situation.Allies))
+                        {
+                            Main.LogDebug($"[Analyzer] AOE unsafe: {attack.Name} -> {enemy.CharacterName}");
+                            continue;
+                        }
+
+                        isHittable = true;
+                        hittableBy = $"{attack.Name} (AOE r={patternInfo.Radius:F0})";
+                        break;
+                    }
 
                     string reason;
                     if (CombatAPI.CanUseAbilityOn(attack, targetWrapper, out reason))
@@ -250,9 +311,11 @@ namespace CompanionAI_v3.Analysis
                 Main.LogDebug($"[Analyzer] Hittable: {situation.HittableEnemies.Count}/{situation.Enemies?.Count ?? 0}");
             }
 
-            // ★ 최적 타겟 선택 - Hittable 적 중에서 선택
+            // ★ v3.1.21: 최적 타겟 선택 - TargetScorer 기반 Role별 가중치 적용
+            var role = situation.CharacterSettings?.Role ?? AIRole.Auto;
+            var effectiveRole = role == AIRole.Auto ? AIRole.DPS : role;
             situation.BestTarget = situation.HittableEnemies.Count > 0
-                ? UtilityScorer.SelectBestTarget(situation.HittableEnemies, situation)
+                ? TargetScorer.SelectBestEnemy(situation.HittableEnemies, situation, effectiveRole)
                 : situation.NearestEnemy;  // 폴백: 가장 가까운 적
 
             // ★ v3.0.78: PrimaryAttack 선택 (BestTarget 설정 후)
@@ -574,6 +637,26 @@ namespace CompanionAI_v3.Analysis
 
             // ★ v3.0.28: 디버프도 공격이 아님
             if (AbilityDatabase.IsDebuff(ability)) return false;
+
+            // ★ v3.1.16: Point 타겟 AOE 공격 추가
+            if (CombatAPI.IsPointTargetAbility(ability))
+            {
+                try
+                {
+                    var targetType = CombatAPI.GetAoETargetType(ability);
+                    if (targetType == Kingmaker.UnitLogic.Abilities.Components.TargetType.Enemy ||
+                        targetType == Kingmaker.UnitLogic.Abilities.Components.TargetType.Any)
+                    {
+                        // 적에게 해로운 AOE → 공격으로 분류
+                        if (ability.Blueprint?.EffectOnEnemy == Kingmaker.UnitLogic.Abilities.Blueprints.AbilityEffectOnUnit.Harmful)
+                        {
+                            Main.LogDebug($"[Analyzer] Point AOE attack detected: {ability.Name}");
+                            return true;
+                        }
+                    }
+                }
+                catch { }
+            }
 
             // 무기 공격
             if (ability.Weapon != null)

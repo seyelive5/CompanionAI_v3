@@ -91,6 +91,9 @@ namespace CompanionAI_v3.GameInterface
             {
                 Main.Log("[TurnEventHandler] Combat ended");
                 TurnOrchestrator.Instance.OnCombatEnd();
+
+                // ★ v3.1.19: 패턴 캐시 클리어
+                CombatAPI.ClearPatternCache();
             }
             else
             {

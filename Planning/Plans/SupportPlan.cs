@@ -64,6 +64,21 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.1.17: Phase 2.5 - AOE 힐 (부상 아군 2명 이상)
+            var woundedAlliesForAoe = situation.Allies
+                .Where(a => a != null && a.IsConscious)
+                .Where(a => CombatAPI.GetHPPercent(a) < 70f)
+                .ToList();
+
+            if (woundedAlliesForAoe.Count >= 2)
+            {
+                var aoeHealAction = PlanAoEHeal(situation, ref remainingAP);
+                if (aoeHealAction != null)
+                {
+                    actions.Add(aoeHealAction);
+                }
+            }
+
             // Phase 3: 선제적 자기 버프
             if (!situation.HasBuffedThisTurn && !situation.HasPerformedFirstAction)
             {
@@ -79,6 +94,20 @@ namespace CompanionAI_v3.Planning.Plans
             if (allyBuffAction != null)
             {
                 actions.Add(allyBuffAction);
+            }
+
+            // ★ v3.1.17: Phase 4.3 - AOE 버프 (아군 2명 이상 근처)
+            int nearbyAllies = situation.Allies.Count(a =>
+                a != null && a.IsConscious &&
+                CombatAPI.GetDistance(situation.Unit, a) <= 8f);
+
+            if (nearbyAllies >= 2)
+            {
+                var aoeBuffAction = PlanAoEBuff(situation, ref remainingAP);
+                if (aoeBuffAction != null)
+                {
+                    actions.Add(aoeBuffAction);
+                }
             }
 
             // Phase 4.5: 위치 버프
@@ -333,13 +362,15 @@ namespace CompanionAI_v3.Planning.Plans
                     actions.Add(moveOrGapCloser);
                     hasMoveInPlan = true;
 
+                    // ★ v3.1.24: 이동 목적지 추출하여 Post-move 공격에 전달
                     if (reservedAP > 0 && situation.NearestEnemy != null)
                     {
-                        var postMoveAttack = PlanPostMoveAttack(situation, situation.NearestEnemy, ref remainingAP);
+                        UnityEngine.Vector3? moveDestination = moveOrGapCloser.Target?.Point;
+                        var postMoveAttack = PlanPostMoveAttack(situation, situation.NearestEnemy, ref remainingAP, moveDestination);
                         if (postMoveAttack != null)
                         {
                             actions.Add(postMoveAttack);
-                            Main.Log("[Support] Added post-move attack");
+                            Main.Log($"[Support] Added post-move attack (from destination={moveDestination.HasValue})");
                         }
                     }
                 }
@@ -350,6 +381,17 @@ namespace CompanionAI_v3.Planning.Plans
             {
                 var postAttackActions = PlanPostAttackActions(situation, ref remainingAP, skipMove: hasMoveInPlan);
                 actions.AddRange(postAttackActions);
+            }
+
+            // ★ v3.1.24: Phase 10 - 최종 AP 활용 (모든 시도 실패 후)
+            if (remainingAP >= 1f && actions.Count > 0)
+            {
+                var finalAction = PlanFinalAPUtilization(situation, ref remainingAP);
+                if (finalAction != null)
+                {
+                    actions.Add(finalAction);
+                    Main.Log($"[Support] Phase 10: Final AP utilization - {finalAction.Ability?.Name}");
+                }
             }
 
             // 턴 종료

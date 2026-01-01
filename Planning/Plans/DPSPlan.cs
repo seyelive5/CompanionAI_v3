@@ -86,8 +86,36 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // Phase 4.5: 특수 능력 (DoT 강화, 연쇄 효과)
-            var specialAction = PlanSpecialAbility(situation, ref remainingAP);
+            // ★ v3.1.16: didPlanAttack 변수를 여기서 미리 선언 (Phase 4.4 AOE용)
+            bool didPlanAttack = false;
+
+            // ★ v3.1.16: Phase 4.4: AOE 공격 (적 2명 이상 근처일 때)
+            if (remainingAP >= 1f && situation.Enemies.Count >= 2)
+            {
+                // 근처에 적 2명 이상인지 확인 (8m 이내)
+                int nearbyEnemies = situation.Enemies.Count(e =>
+                    e != null && e.IsConscious &&
+                    CombatAPI.GetDistance(situation.Unit, e) <= 8f);
+
+                if (nearbyEnemies >= 2)
+                {
+                    var aoE = PlanAoEAttack(situation, ref remainingAP);
+                    if (aoE != null)
+                    {
+                        actions.Add(aoE);
+                        didPlanAttack = true;
+                        Main.Log($"[DPS] Phase 4.4: AOE attack planned ({nearbyEnemies} enemies nearby)");
+                    }
+                }
+            }
+
+            // ★ v3.1.22: Phase 4.5: 특수 능력 + 콤보 연계 감지
+            // GetComboPrerequisite()를 호출하여 DOT 강화 전 DOT 적용 필요 여부 확인
+            AbilityData comboPrereqAbility = null;
+            AbilityData comboFollowUpAbility = null;
+
+            var specialAction = PlanSpecialAbilityWithCombo(situation, ref remainingAP,
+                out comboPrereqAbility, out comboFollowUpAbility);
             if (specialAction != null)
             {
                 actions.Add(specialAction);
@@ -122,20 +150,48 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // Phase 5: 공격 - 약한 적 우선
-            bool didPlanAttack = false;
+            // ★ v3.1.16: didPlanAttack은 Phase 4.4에서 이미 선언됨
+            // ★ v3.1.22: 콤보 선행 능력(comboPrereqAbility) 우선 계획
             int attacksPlanned = 0;
             var plannedTargetIds = new HashSet<string>();
             var plannedAbilityGuids = new HashSet<string>();
+            bool usedComboPrereq = false;
 
             // ★ v3.0.87: Phase 5 진입 상태 로깅
             Main.LogDebug($"[DPS] Phase 5 entry: AP={remainingAP:F1}, HasHittable={situation.HasHittableEnemies}, " +
                 $"HittableCount={situation.HittableEnemies?.Count ?? 0}, AvailableAttacks={situation.AvailableAttacks?.Count ?? 0}");
 
+            // ★ v3.1.22: 콤보 선행 능력 로깅
+            if (comboPrereqAbility != null)
+            {
+                Main.Log($"[DPS] Phase 5: Combo prerequisite detected - will prioritize {comboPrereqAbility.Name}");
+            }
+
             while (remainingAP >= 1f && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
             {
                 var weakestEnemy = FindWeakestEnemy(situation, plannedTargetIds);
-                var attackAction = PlanAttack(situation, ref remainingAP, preferTarget: weakestEnemy ?? situation.BestTarget,
-                    excludeTargetIds: plannedTargetIds, excludeAbilityGuids: plannedAbilityGuids);
+                var preferTarget = weakestEnemy ?? situation.BestTarget;
+                PlannedAction attackAction = null;
+
+                // ★ v3.1.22: 첫 공격에서 콤보 선행 능력 우선 사용
+                if (comboPrereqAbility != null && !usedComboPrereq)
+                {
+                    attackAction = PlanAttackWithPreferredAbility(situation, ref remainingAP,
+                        preferTarget, comboPrereqAbility, plannedTargetIds);
+                    if (attackAction != null)
+                    {
+                        usedComboPrereq = true;
+                        Main.Log($"[DPS] Phase 5: Used combo prerequisite {comboPrereqAbility.Name}");
+                    }
+                }
+
+                // 일반 공격 폴백
+                if (attackAction == null)
+                {
+                    attackAction = PlanAttack(situation, ref remainingAP, preferTarget: preferTarget,
+                        excludeTargetIds: plannedTargetIds, excludeAbilityGuids: plannedAbilityGuids);
+                }
+
                 if (attackAction == null) break;
 
                 actions.Add(attackAction);
@@ -171,18 +227,49 @@ namespace CompanionAI_v3.Planning.Plans
                 Main.LogDebug($"[DPS] Phase 5 exit: {attacksPlanned} attacks planned. AP={remainingAP:F1}");
             }
 
-            // ★ Phase 5.5: GapCloser (공격 계획 실패 시)
+            // ★ v3.1.22: Phase 5.5: 콤보 후속 능력 (DOT 적용 후 DOT 강화)
+            // Phase 5에서 콤보 선행 능력(예: Inferno)을 사용했으면, 이제 후속 능력(예: Shape Flames) 사용
+            if (comboFollowUpAbility != null && usedComboPrereq && remainingAP >= 1f)
+            {
+                float followUpCost = CombatAPI.GetAbilityAPCost(comboFollowUpAbility);
+                if (followUpCost <= remainingAP)
+                {
+                    // 콤보 선행 능력을 맞은 적에게 후속 능력 사용
+                    foreach (var enemy in situation.Enemies)
+                    {
+                        if (enemy == null || enemy.LifeState.IsDead) continue;
+
+                        // DOT가 있는 적에게만 DOT 강화 사용
+                        if (!SpecialAbilityHandler.CanUseSpecialAbilityEffectively(
+                            comboFollowUpAbility, enemy, situation.Enemies))
+                            continue;
+
+                        var targetWrapper = new TargetWrapper(enemy);
+                        string reason;
+                        if (CombatAPI.CanUseAbilityOn(comboFollowUpAbility, targetWrapper, out reason))
+                        {
+                            remainingAP -= followUpCost;
+                            actions.Add(PlannedAction.Attack(comboFollowUpAbility, enemy,
+                                $"Combo followup: {comboFollowUpAbility.Name}", followUpCost));
+                            Main.Log($"[DPS] Phase 5.5: Combo followup {comboFollowUpAbility.Name} -> {enemy.CharacterName}");
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // ★ Phase 5.6: GapCloser (공격 계획 실패 시) - 기존 Phase 5.5
             // ★ v3.0.86: 거리 조건 제거 - 적이 4m에 있어도 근접 사거리(2m)에 못 들어올 수 있음
             // 기존: NearestEnemyDistance > 5f → 적이 5m 이내면 스킵 (버그!)
             // 수정: 공격 계획 실패 시 무조건 GapCloser 시도 (GapCloser 자체가 유효성 검사)
 
-            // ★ v3.0.87: Phase 5.5 진입 전 상태 로깅
-            Main.LogDebug($"[DPS] Phase 5.5 check: didPlanAttack={didPlanAttack}, HasHittableEnemies={situation.HasHittableEnemies}, " +
+            // ★ v3.1.22: Phase 5.6 진입 전 상태 로깅 (기존 Phase 5.5)
+            Main.LogDebug($"[DPS] Phase 5.6 check: didPlanAttack={didPlanAttack}, HasHittableEnemies={situation.HasHittableEnemies}, " +
                 $"NearestEnemy={situation.NearestEnemy?.CharacterName ?? "null"}, Distance={situation.NearestEnemyDistance:F1}m, AP={remainingAP:F1}");
 
             if (!didPlanAttack && situation.NearestEnemy != null)
             {
-                Main.Log($"[DPS] Phase 5.5: Trying GapCloser as fallback (attack failed)");
+                Main.Log($"[DPS] Phase 5.6: Trying GapCloser as fallback (attack failed)");
                 var gapCloserAction = PlanGapCloser(situation, situation.NearestEnemy, ref remainingAP);
                 if (gapCloserAction != null)
                 {
@@ -192,16 +279,16 @@ namespace CompanionAI_v3.Planning.Plans
                 }
                 else
                 {
-                    Main.LogDebug($"[DPS] Phase 5.5: GapCloser returned null");
+                    Main.LogDebug($"[DPS] Phase 5.6: GapCloser returned null");
                 }
             }
             else if (didPlanAttack)
             {
-                Main.LogDebug($"[DPS] Phase 5.5: Skipped - already planned attack");
+                Main.LogDebug($"[DPS] Phase 5.6: Skipped - already planned attack");
             }
             else
             {
-                Main.LogDebug($"[DPS] Phase 5.5: Skipped - NearestEnemy is null");
+                Main.LogDebug($"[DPS] Phase 5.6: Skipped - NearestEnemy is null");
             }
 
             // Phase 6: PostFirstAction
@@ -300,13 +387,15 @@ namespace CompanionAI_v3.Planning.Plans
                     actions.Add(moveOrGapCloser);
                     hasMoveInPlan = true;
 
+                    // ★ v3.1.24: 이동 목적지 추출하여 Post-move 공격에 전달
                     if (reservedAP > 0 && situation.NearestEnemy != null)
                     {
-                        var postMoveAttack = PlanPostMoveAttack(situation, situation.NearestEnemy, ref remainingAP);
+                        UnityEngine.Vector3? moveDestination = moveOrGapCloser.Target?.Point;
+                        var postMoveAttack = PlanPostMoveAttack(situation, situation.NearestEnemy, ref remainingAP, moveDestination);
                         if (postMoveAttack != null)
                         {
                             actions.Add(postMoveAttack);
-                            Main.Log("[DPS] Added post-move attack");
+                            Main.Log($"[DPS] Added post-move attack (from destination={moveDestination.HasValue})");
                         }
                     }
                 }
@@ -317,6 +406,18 @@ namespace CompanionAI_v3.Planning.Plans
             {
                 var postAttackActions = PlanPostAttackActions(situation, ref remainingAP, skipMove: hasMoveInPlan);
                 actions.AddRange(postAttackActions);
+            }
+
+            // ★ v3.1.24: Phase 9 - 최종 AP 활용 (모든 시도 실패 후)
+            // 공격/이동 모두 실패했지만 AP가 남았을 때 저우선순위 버프/디버프/마커 사용
+            if (remainingAP >= 1f && actions.Count > 0)
+            {
+                var finalAction = PlanFinalAPUtilization(situation, ref remainingAP);
+                if (finalAction != null)
+                {
+                    actions.Add(finalAction);
+                    Main.Log($"[DPS] Phase 9: Final AP utilization - {finalAction.Ability?.Name}");
+                }
             }
 
             // 턴 종료
@@ -475,8 +576,16 @@ namespace CompanionAI_v3.Planning.Plans
             return null;
         }
 
-        private new PlannedAction PlanSpecialAbility(Situation situation, ref float remainingAP)
+        /// <summary>
+        /// ★ v3.1.22: 특수 능력 계획 + 콤보 연계 감지
+        /// DOT 강화 같은 능력이 콤보 선행 능력(Inferno 등)을 필요로 하면 감지하여 반환
+        /// </summary>
+        private PlannedAction PlanSpecialAbilityWithCombo(Situation situation, ref float remainingAP,
+            out AbilityData comboPrereqAbility, out AbilityData comboFollowUpAbility)
         {
+            comboPrereqAbility = null;
+            comboFollowUpAbility = null;
+
             if (situation.AvailableSpecialAbilities == null || situation.AvailableSpecialAbilities.Count == 0)
                 return null;
 
@@ -486,9 +595,12 @@ namespace CompanionAI_v3.Planning.Plans
 
             float currentAP = remainingAP;
 
-            // ★ v3.0.97: 모든 적을 대상으로 특수 능력 시도
-            // 이전: BestTarget만 사용 → 불타지 않은 적이면 DOTIntensify 스킵
-            // 변경: 모든 적 순회하여 유효한 타겟 찾기
+            // 콤보 능력 후보 목록 (공격 + 특수)
+            var allAttackAbilities = new List<AbilityData>();
+            if (situation.AvailableAttacks != null)
+                allAttackAbilities.AddRange(situation.AvailableAttacks);
+            allAttackAbilities.AddRange(situation.AvailableSpecialAbilities);
+
             foreach (var ability in situation.AvailableSpecialAbilities)
             {
                 float cost = CombatAPI.GetAbilityAPCost(ability);
@@ -499,8 +611,23 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     if (enemy == null || enemy.LifeState.IsDead) continue;
 
+                    // ★ v3.1.22: 콤보 선행 능력 필요 여부 확인
+                    // 예: Shape Flames가 DOT 없는 적에게 사용 불가 → Inferno 먼저 필요
                     if (!SpecialAbilityHandler.CanUseSpecialAbilityEffectively(ability, enemy, enemies))
+                    {
+                        // 콤보 선행 능력 찾기
+                        var prereq = SpecialAbilityHandler.GetComboPrerequisite(ability, enemy, allAttackAbilities);
+                        if (prereq != null)
+                        {
+                            // 콤보 선행 능력을 Phase 5에서 우선 사용하도록 설정
+                            comboPrereqAbility = prereq;
+                            comboFollowUpAbility = ability;
+                            Main.Log($"[DPS] Phase 4.5: Combo detected - {prereq.Name} → {ability.Name}");
+                            // 특수 능력은 여기서 사용하지 않고, Phase 5.5에서 사용
+                            continue;
+                        }
                         continue;
+                    }
 
                     var targetWrapper = new TargetWrapper(enemy);
                     string reason;
@@ -515,6 +642,52 @@ namespace CompanionAI_v3.Planning.Plans
                         return PlannedAction.Attack(ability, enemy, $"{abilityType} on {enemy.CharacterName}", cost);
                     }
                 }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// ★ v3.1.22: 특정 능력을 우선 사용하는 공격 계획
+        /// 콤보 선행 능력(Inferno 등)을 강제로 사용
+        /// </summary>
+        private PlannedAction PlanAttackWithPreferredAbility(Situation situation, ref float remainingAP,
+            BaseUnitEntity preferTarget, AbilityData preferredAbility, HashSet<string> excludeTargetIds)
+        {
+            if (preferredAbility == null || preferTarget == null) return null;
+
+            float cost = CombatAPI.GetAbilityAPCost(preferredAbility);
+            if (cost > remainingAP) return null;
+
+            // 타겟 제외 목록 체크
+            if (excludeTargetIds != null && excludeTargetIds.Contains(preferTarget.UniqueId))
+            {
+                // 선호 타겟이 제외되어 있으면 다른 적 찾기
+                foreach (var enemy in situation.Enemies)
+                {
+                    if (enemy == null || enemy.LifeState.IsDead) continue;
+                    if (excludeTargetIds.Contains(enemy.UniqueId)) continue;
+
+                    var targetWrapper = new TargetWrapper(enemy);
+                    string reason;
+                    if (CombatAPI.CanUseAbilityOn(preferredAbility, targetWrapper, out reason))
+                    {
+                        remainingAP -= cost;
+                        Main.Log($"[DPS] Preferred ability: {preferredAbility.Name} -> {enemy.CharacterName}");
+                        return PlannedAction.Attack(preferredAbility, enemy, $"Combo prereq on {enemy.CharacterName}", cost);
+                    }
+                }
+                return null;
+            }
+
+            // 선호 타겟에게 능력 사용
+            var target = new TargetWrapper(preferTarget);
+            string unavailReason;
+            if (CombatAPI.CanUseAbilityOn(preferredAbility, target, out unavailReason))
+            {
+                remainingAP -= cost;
+                Main.Log($"[DPS] Preferred ability: {preferredAbility.Name} -> {preferTarget.CharacterName}");
+                return PlannedAction.Attack(preferredAbility, preferTarget, $"Combo prereq on {preferTarget.CharacterName}", cost);
             }
 
             return null;

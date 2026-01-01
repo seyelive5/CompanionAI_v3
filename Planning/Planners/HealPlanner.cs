@@ -93,49 +93,28 @@ namespace CompanionAI_v3.Planning.Planners
         }
 
         /// <summary>
-        /// 부상당한 아군 찾기
+        /// ★ v3.1.21: 부상당한 아군 찾기 - TargetScorer 기반
+        /// Role, 위험도 등 복합 요소 고려
         /// </summary>
         public static BaseUnitEntity FindWoundedAlly(Situation situation, float threshold)
         {
-            var allTargets = new List<BaseUnitEntity> { situation.Unit };
+            var allTargets = new List<BaseUnitEntity>();
             allTargets.AddRange(situation.Allies.Where(a => a != null && !a.LifeState.IsDead));
 
-            return allTargets
-                .Where(a => CombatAPI.GetHPPercent(a) < threshold)
-                .OrderBy(a => CombatAPI.GetHPPercent(a))
-                .FirstOrDefault();
+            // 본인도 힐 대상에 포함
+            if (!allTargets.Contains(situation.Unit))
+                allTargets.Add(situation.Unit);
+
+            // ★ v3.1.21: TargetScorer 사용 (Role 우선순위 + 위험도 고려)
+            return TargetScorer.SelectBestAllyForHealing(allTargets, situation, threshold);
         }
 
         /// <summary>
         /// 아군 버프 (Support 전용)
+        /// ★ v3.1.21: TargetScorer 기반 버프 대상 선택
         /// </summary>
         public static PlannedAction PlanAllyBuff(Situation situation, ref float remainingAP, string roleName)
         {
-            // 버프 대상 우선순위: Tank > DPS > 본인 > 기타
-            var prioritizedTargets = new List<BaseUnitEntity>();
-
-            foreach (var ally in situation.Allies.Where(a => a != null && !a.LifeState.IsDead))
-            {
-                var settings = Settings.ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
-                if (settings?.Role == Settings.AIRole.Tank)
-                    prioritizedTargets.Add(ally);
-            }
-
-            foreach (var ally in situation.Allies.Where(a => a != null && !a.LifeState.IsDead))
-            {
-                var settings = Settings.ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
-                if (settings?.Role == Settings.AIRole.DPS && !prioritizedTargets.Contains(ally))
-                    prioritizedTargets.Add(ally);
-            }
-
-            prioritizedTargets.Add(situation.Unit);
-
-            foreach (var ally in situation.Allies.Where(a => a != null && !a.LifeState.IsDead))
-            {
-                if (!prioritizedTargets.Contains(ally))
-                    prioritizedTargets.Add(ally);
-            }
-
             foreach (var buff in situation.AvailableBuffs)
             {
                 if (buff.Blueprint?.CanTargetFriends != true) continue;
@@ -143,18 +122,27 @@ namespace CompanionAI_v3.Planning.Planners
                 float cost = CombatAPI.GetAbilityAPCost(buff);
                 if (cost > remainingAP) continue;
 
-                foreach (var target in prioritizedTargets)
-                {
-                    if (CombatAPI.HasActiveBuff(target, buff)) continue;
+                // ★ v3.1.21: TargetScorer로 최적 버프 대상 선택
+                // 이미 버프가 있는 아군 제외
+                var candidates = situation.Allies
+                    .Where(a => a != null && !a.LifeState.IsDead)
+                    .Where(a => !CombatAPI.HasActiveBuff(a, buff))
+                    .ToList();
 
-                    var targetWrapper = new TargetWrapper(target);
-                    string reason;
-                    if (CombatAPI.CanUseAbilityOn(buff, targetWrapper, out reason))
-                    {
-                        remainingAP -= cost;
-                        Main.Log($"[{roleName}] Buff ally: {buff.Name} -> {target.CharacterName}");
-                        return PlannedAction.Buff(buff, target, $"Buff {target.CharacterName}", cost);
-                    }
+                // 본인도 후보에 추가 (버프 없으면)
+                if (!CombatAPI.HasActiveBuff(situation.Unit, buff) && !candidates.Contains(situation.Unit))
+                    candidates.Add(situation.Unit);
+
+                var bestTarget = TargetScorer.SelectBestAllyForBuff(candidates, situation);
+                if (bestTarget == null) continue;
+
+                var targetWrapper = new TargetWrapper(bestTarget);
+                string reason;
+                if (CombatAPI.CanUseAbilityOn(buff, targetWrapper, out reason))
+                {
+                    remainingAP -= cost;
+                    Main.Log($"[{roleName}] Buff ally: {buff.Name} -> {bestTarget.CharacterName}");
+                    return PlannedAction.Buff(buff, bestTarget, $"Buff {bestTarget.CharacterName}", cost);
                 }
             }
 

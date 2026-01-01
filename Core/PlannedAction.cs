@@ -162,6 +162,22 @@ namespace CompanionAI_v3.Core
             };
         }
 
+        /// <summary>
+        /// ★ v3.1.17: 위치 타겟 힐 (AOE 힐 등)
+        /// </summary>
+        public static PlannedAction PositionalHeal(AbilityData ability, Vector3 position, string reason, float apCost)
+        {
+            return new PlannedAction
+            {
+                Type = ActionType.Heal,
+                Ability = ability,
+                Target = new TargetWrapper(position),
+                APCost = apCost,
+                Reason = reason,
+                Priority = 2  // 일반 Heal(1)보다 약간 후순위
+            };
+        }
+
         public static PlannedAction EndTurn(string reason = "No more actions available")
         {
             return new PlannedAction
