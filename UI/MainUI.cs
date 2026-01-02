@@ -16,6 +16,7 @@ namespace CompanionAI_v3.UI
         private static string _selectedCharacterId = "";
         private static CharacterSettings _editingSettings = null;
         private static Vector2 _scrollPosition = Vector2.zero;
+        private static bool _showAdvancedSettings = false;  // ★ v3.5.13: 고급 설정 접기/펴기
 
         private static GUIStyle _headerStyle;
         private static GUIStyle _boldLabelStyle;
@@ -220,7 +221,103 @@ namespace CompanionAI_v3.UI
             DrawRoleSelection();
             GUILayout.Space(15);
             DrawRangePreferenceSelection();
+            GUILayout.Space(15);
+            DrawAdvancedSettings();
             GUILayout.Space(10);
+        }
+
+        /// <summary>
+        /// ★ v3.5.13: 고급 설정 섹션 (경고 + 리셋 버튼 포함)
+        /// </summary>
+        private static void DrawAdvancedSettings()
+        {
+            if (_editingSettings == null) return;
+
+            // 접기/펴기 버튼
+            string toggleText = _showAdvancedSettings
+                ? $"<color=#FFA500>▼ {L("AdvancedSettings")}</color>"
+                : $"<color=#888888>▶ {L("AdvancedSettings")}</color>";
+
+            if (GUILayout.Button(toggleText, GUI.skin.label, GUILayout.Height(30)))
+                _showAdvancedSettings = !_showAdvancedSettings;
+
+            if (!_showAdvancedSettings) return;
+
+            GUILayout.BeginVertical("box");
+
+            // 경고 메시지
+            GUILayout.Label($"<color=#FF6600>{L("AdvancedWarning")}</color>", _descriptionStyle);
+            GUILayout.Space(10);
+
+            // 리셋 버튼
+            if (GUILayout.Button($"<color=#FFFF00>{L("ResetToDefault")}</color>", GUILayout.Width(200), GUILayout.Height(35)))
+            {
+                _editingSettings.MinSafeDistance = 7.0f;
+                _editingSettings.HealAtHPPercent = 50;
+                _editingSettings.MinEnemiesForAoE = 2;
+                _editingSettings.UseKillSimulator = true;
+                _editingSettings.UseAoEOptimization = true;
+                _editingSettings.UsePredictiveMovement = true;
+            }
+            GUILayout.Space(15);
+
+            // 토글 옵션들
+            _editingSettings.UseKillSimulator = DrawCheckbox(_editingSettings.UseKillSimulator, L("UseKillSimulator"));
+            GUILayout.Label($"<color=#888888><size=14>{L("UseKillSimulatorDesc")}</size></color>", _descriptionStyle);
+            GUILayout.Space(8);
+
+            _editingSettings.UseAoEOptimization = DrawCheckbox(_editingSettings.UseAoEOptimization, L("UseAoEOptimization"));
+            GUILayout.Label($"<color=#888888><size=14>{L("UseAoEOptimizationDesc")}</size></color>", _descriptionStyle);
+            GUILayout.Space(8);
+
+            _editingSettings.UsePredictiveMovement = DrawCheckbox(_editingSettings.UsePredictiveMovement, L("UsePredictiveMovement"));
+            GUILayout.Label($"<color=#888888><size=14>{L("UsePredictiveMovementDesc")}</size></color>", _descriptionStyle);
+            GUILayout.Space(15);
+
+            // 슬라이더 옵션들
+            _editingSettings.MinSafeDistance = DrawSliderSetting(
+                L("MinSafeDistance"),
+                L("MinSafeDistanceDesc"),
+                _editingSettings.MinSafeDistance,
+                3f, 15f, "0.0", "m");
+
+            _editingSettings.HealAtHPPercent = DrawSliderSettingInt(
+                L("HealAtHPPercent"),
+                L("HealAtHPPercentDesc"),
+                _editingSettings.HealAtHPPercent,
+                20, 80, "%");
+
+            _editingSettings.MinEnemiesForAoE = DrawSliderSettingInt(
+                L("MinEnemiesForAoE"),
+                L("MinEnemiesForAoEDesc"),
+                _editingSettings.MinEnemiesForAoE,
+                1, 5, "");
+
+            GUILayout.EndVertical();
+        }
+
+        private static float DrawSliderSetting(string label, string desc, float value, float min, float max, string format, string suffix)
+        {
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"<b>{label}:</b>", _boldLabelStyle, GUILayout.Width(180));
+            float newValue = GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(200));
+            GUILayout.Label($"<color=#00FF00>{newValue.ToString(format)}{suffix}</color>", GUILayout.Width(80));
+            GUILayout.EndHorizontal();
+            GUILayout.Label($"<color=#888888><size=14>{desc}</size></color>", _descriptionStyle);
+            GUILayout.Space(10);
+            return newValue;
+        }
+
+        private static int DrawSliderSettingInt(string label, string desc, int value, int min, int max, string suffix)
+        {
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"<b>{label}:</b>", _boldLabelStyle, GUILayout.Width(180));
+            int newValue = (int)GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(200));
+            GUILayout.Label($"<color=#00FF00>{newValue}{suffix}</color>", GUILayout.Width(80));
+            GUILayout.EndHorizontal();
+            GUILayout.Label($"<color=#888888><size=14>{desc}</size></color>", _descriptionStyle);
+            GUILayout.Space(10);
+            return newValue;
         }
 
         private static void DrawRoleSelection()

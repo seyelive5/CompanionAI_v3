@@ -122,6 +122,44 @@ namespace CompanionAI_v3.Settings
                 { Language.English, "Predict enemy movement to select safer positions.\nConsiders where enemies can move next turn." },
                 { Language.Korean, "적 이동을 예측하여 더 안전한 위치를 선택합니다.\n다음 턴에 적이 이동할 수 있는 위치를 고려합니다." }
             },
+
+            // ★ v3.5.13: Advanced Settings UI
+            ["AdvancedSettings"] = new() {
+                { Language.English, "Advanced Settings" },
+                { Language.Korean, "고급 설정" }
+            },
+            ["AdvancedWarning"] = new() {
+                { Language.English, "⚠️ Changing these values may negatively affect AI behavior. Use with caution." },
+                { Language.Korean, "⚠️ 이 값들을 변경하면 AI 동작에 부정적인 영향을 줄 수 있습니다. 주의하세요." }
+            },
+            ["ResetToDefault"] = new() {
+                { Language.English, "Reset to Default" },
+                { Language.Korean, "기본값으로 리셋" }
+            },
+            ["MinSafeDistance"] = new() {
+                { Language.English, "Min Safe Distance" },
+                { Language.Korean, "최소 안전 거리" }
+            },
+            ["MinSafeDistanceDesc"] = new() {
+                { Language.English, "Minimum distance ranged characters try to keep from enemies (meters)" },
+                { Language.Korean, "원거리 캐릭터가 적과 유지하려는 최소 거리 (미터)" }
+            },
+            ["HealAtHPPercent"] = new() {
+                { Language.English, "Heal at HP%" },
+                { Language.Korean, "힐 시작 HP%" }
+            },
+            ["HealAtHPPercentDesc"] = new() {
+                { Language.English, "Start healing allies when their HP falls below this percentage" },
+                { Language.Korean, "아군 HP가 이 퍼센트 이하로 떨어지면 힐 시작" }
+            },
+            ["MinEnemiesForAoE"] = new() {
+                { Language.English, "Min Enemies for AOE" },
+                { Language.Korean, "AOE 최소 적 수" }
+            },
+            ["MinEnemiesForAoEDesc"] = new() {
+                { Language.English, "Minimum number of enemies to use AOE abilities" },
+                { Language.Korean, "AOE 능력 사용에 필요한 최소 적 수" }
+            },
         };
 
         public static string Get(string key)
