@@ -1,0 +1,93 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net481</TargetFramework>
+    <AssemblyName>CompanionAI_v3</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <!-- UMM 폴더로 직접 빌드 -->
+    <OutputPath>$(LOCALAPPDATA)Low\Owlcat Games\Warhammer 40000 Rogue Trader\UnityModManager\CompanionAI_v3\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Rogue Trader install path -->
+    <GamePath>C:\Program Files (x86)\Steam\steamapps\common\Warhammer 40,000 Rogue Trader</GamePath>
+    <ManagedPath>$(GamePath)\WH40KRT_Data\Managed</ManagedPath>
+    <ModManagerPath>$(LOCALAPPDATA)Low\Owlcat Games\Warhammer 40000 Rogue Trader\UnityModManager</ModManagerPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Unity Engine -->
+    <Reference Include="UnityEngine">
+      <HintPath>$(ManagedPath)\UnityEngine.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(ManagedPath)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(ManagedPath)\UnityEngine.UI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(ManagedPath)\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(ManagedPath)\UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+
+    <!-- Owlcat Game Assemblies -->
+    <Reference Include="Code">
+      <HintPath>$(ManagedPath)\Code.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="RogueTrader.GameCore">
+      <HintPath>$(ManagedPath)\RogueTrader.GameCore.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Owlcat.Runtime.Core">
+      <HintPath>$(ManagedPath)\Owlcat.Runtime.Core.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Kingmaker.PubSubSystem.Core.Interfaces">
+      <HintPath>$(ManagedPath)\Kingmaker.PubSubSystem.Core.Interfaces.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="StateHasher">
+      <HintPath>$(ManagedPath)\StateHasher.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+
+    <!-- Pathfinding -->
+    <Reference Include="AstarPathfindingProject">
+      <HintPath>$(ManagedPath)\AstarPathfindingProject.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+
+    <!-- Unity Mod Manager -->
+    <Reference Include="UnityModManager">
+      <HintPath>$(ModManagerPath)\UnityModManager.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+
+    <!-- Harmony (UMM이 이미 제공하므로 런타임 복사 안함) -->
+    <PackageReference Include="Lib.Harmony" Version="2.2.2">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+
+    <!-- Json -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <!-- Info.json 자동 복사 -->
+  <ItemGroup>
+    <None Include="Info.json" CopyToOutputDirectory="Always" />
+  </ItemGroup>
+
+</Project>

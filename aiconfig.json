@@ -1,0 +1,77 @@
+{
+  "version": "1.0",
+  "curves": {
+    "damageRatio": {
+      "type": "Logistic",
+      "minInput": 0.0,
+      "maxInput": 1.5,
+      "minOutput": 0,
+      "maxOutput": 100,
+      "steepness": 8.0,
+      "midpoint": 0.5
+    },
+    "oneHitKillBonus": {
+      "type": "Exponential",
+      "minInput": 0.8,
+      "maxInput": 1.2,
+      "minOutput": 0,
+      "maxOutput": 80,
+      "steepness": 5.0
+    },
+    "healUrgency": {
+      "type": "InverseLogistic",
+      "minInput": 0,
+      "maxInput": 100,
+      "minOutput": -30,
+      "maxOutput": 80,
+      "steepness": 0.15,
+      "midpoint": 0.4
+    },
+    "hpPriority": {
+      "type": "InverseLogistic",
+      "minInput": 0,
+      "maxInput": 100,
+      "minOutput": 0,
+      "maxOutput": 50,
+      "steepness": 0.12,
+      "midpoint": 0.35
+    }
+  },
+  "dps": {
+    "hpPercent": 0.8,
+    "threat": 0.4,
+    "distance": 0.2,
+    "finisherBonus": 1.5,
+    "oneHitKillBonus": 2.0
+  },
+  "tank": {
+    "hpPercent": 0.3,
+    "threat": 0.6,
+    "distance": 0.4,
+    "finisherBonus": 1.0,
+    "oneHitKillBonus": 1.2
+  },
+  "support": {
+    "hpPercent": 0.5,
+    "threat": 0.3,
+    "distance": 0.3,
+    "finisherBonus": 1.2,
+    "oneHitKillBonus": 1.5
+  },
+  "thresholds": {
+    "emergencyHealHP": 30,
+    "finisherTargetHP": 30,
+    "healPriorityHP": 50,
+    "skipBuffBelowHP": 40,
+    "safeDistance": 7.0,
+    "dangerDistance": 5.0,
+    "oneHitKillRatio": 0.95,
+    "twoHitKillRatio": 0.5
+  },
+  "performance": {
+    "maxTargetsToEvaluate": 10,
+    "maxPositionsToEvaluate": 20,
+    "enableEarlyExit": true,
+    "enableCaching": true
+  }
+}
