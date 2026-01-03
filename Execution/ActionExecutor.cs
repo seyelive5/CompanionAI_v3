@@ -87,6 +87,14 @@ namespace CompanionAI_v3.Execution
                 return ExecutionResult.Failure("Target is null");
             }
 
+            // ★ v3.5.15: 그룹 쿨다운 체크 (계획과 실행 사이에 쿨다운될 수 있음)
+            // 계획 시점에서는 사용 가능했지만, 이전 액션 실행으로 그룹이 쿨다운될 수 있음
+            if (CombatAPI.IsAbilityOnCooldownWithGroups(ability))
+            {
+                Main.LogWarning($"[Executor] Ability skipped (group cooldown): {ability.Name}");
+                return ExecutionResult.Failure($"Group cooldown: {ability.Name}");
+            }
+
             // ★ v3.0.93: 능력 자체가 사용 가능한지 먼저 체크 (쿨다운, 탄약, 충전 등)
             List<string> unavailableReasons;
             if (!CombatAPI.IsAbilityAvailable(ability, out unavailableReasons))

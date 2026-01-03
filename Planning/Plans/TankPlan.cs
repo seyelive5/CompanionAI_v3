@@ -320,9 +320,16 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.0.99: MP 회복 예측 후 이동 가능
             // ★ v3.1.01: predictedMP를 MovementAPI에 전달하여 reachable tiles 계산에 사용
             // ★ v3.2.25: 전선 유지 로직 - Tank가 전선 뒤에 있으면 전진 필요
+            // ★ v3.5.17: Tank 적극적 접근 - 공격 후에도 근접 거리로 이동
             bool hasMoveInPlan = actions.Any(a => a.Type == ActionType.Move);
-            bool needsMovement = situation.NeedsReposition || (!didPlanAttack && situation.HasLivingEnemies);
             bool canMove = situation.CanMove || remainingMP > 0;
+
+            // ★ v3.5.17: Tank는 근접 캐릭터이므로 적에게 접근해야 함
+            // 공격 후에도 적과 거리가 멀면(근접 공격 불가) 이동 필요
+            float meleeEngageDistance = 3f;  // 근접 공격 거리
+            bool shouldEngageMelee = !situation.PrefersRanged &&
+                                      situation.HasLivingEnemies &&
+                                      situation.NearestEnemyDistance > meleeEngageDistance;
 
             // ★ v3.2.25: Tank 전선 유지 - 전선 뒤에 있으면 전진 필요
             bool shouldAdvanceToFrontline = false;
@@ -333,17 +340,28 @@ namespace CompanionAI_v3.Planning.Plans
                 if (frontlineDist < -5f)
                 {
                     shouldAdvanceToFrontline = true;
-                    needsMovement = true;  // 이동 필요 강제
                     Main.LogDebug($"[Tank] Phase 8: Behind frontline ({frontlineDist:F1}m) - should advance");
                 }
             }
 
+            // ★ v3.5.17: Tank 이동 조건 확장
+            // - 기존: NeedsReposition || 공격 실패 시
+            // - 추가: 적과 근접 거리 밖이면 공격 후에도 이동
+            bool needsMovement = situation.NeedsReposition ||
+                                 (!didPlanAttack && situation.HasLivingEnemies) ||
+                                 shouldAdvanceToFrontline ||
+                                 shouldEngageMelee;
+
             if (!hasMoveInPlan && needsMovement && canMove && remainingMP > 0)
             {
-                Main.Log($"[Tank] Phase 8: Trying move (attack planned={didPlanAttack}, predictedMP={remainingMP:F1}, advanceToFrontline={shouldAdvanceToFrontline})");
+                Main.Log($"[Tank] Phase 8: Trying move (attack={didPlanAttack}, MP={remainingMP:F1}, " +
+                    $"engageMelee={shouldEngageMelee}, advanceFrontline={shouldAdvanceToFrontline}, dist={situation.NearestEnemyDistance:F1}m)");
                 // ★ v3.0.90: 공격 실패 시 forceMove=true로 이동 강제
                 // ★ v3.2.25: 전선 유지 위해 전진 필요해도 forceMove
-                bool forceMove = (!didPlanAttack && situation.HasHittableEnemies) || shouldAdvanceToFrontline;
+                // ★ v3.5.17: Tank 근접 접근 필요해도 forceMove
+                bool forceMove = (!didPlanAttack && situation.HasHittableEnemies) ||
+                                 shouldAdvanceToFrontline ||
+                                 shouldEngageMelee;
                 // ★ v3.1.00: MP 회복 예측 후 situation.CanMove=False여도 이동 가능
                 bool bypassCanMoveCheck = !situation.CanMove && remainingMP > 0;
                 // ★ v3.1.01: remainingMP를 MovementAPI에 전달

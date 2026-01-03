@@ -108,6 +108,9 @@ namespace CompanionAI_v3.GameInterface
         /// ★ v3.5.15: 능력이 쿨다운 그룹 포함 완전 쿨다운 체크
         /// GetUnavailabilityReasons()는 그룹 쿨다운을 감지하지 못함
         /// PartAbilityCooldowns.IsOnCooldown()을 직접 사용해야 정확함
+        /// ★ 주의: IsOnCooldown()은 IsIgnoredByComponent 조건이 있어서 그룹 쿨다운을 놓칠 수 있음
+        /// GroupIsOnCooldown()으로 각 그룹을 직접 체크해야 함
+        /// ★ v3.5.16: 중복 그룹 체크 추가 (게임 데이터 버그 대응)
         /// </summary>
         public static bool IsAbilityOnCooldownWithGroups(AbilityData ability)
         {
@@ -115,22 +118,65 @@ namespace CompanionAI_v3.GameInterface
 
             try
             {
-                var caster = ability.Caster as BaseUnitEntity;
-                if (caster == null) return false;
+                // ★ 안전한 이름 추출 (로컬라이제이션 에러 방지)
+                string abilityName = "Unknown";
+                try { abilityName = ability.Blueprint?.name ?? ability.Name ?? "Unknown"; }
+                catch { /* 로컬라이제이션 에러 무시 */ }
 
-                // ★ 핵심: PartAbilityCooldowns.IsOnCooldown()은 그룹 쿨다운도 체크
-                var cooldownPart = caster.GetOptional<Kingmaker.UnitLogic.Parts.PartAbilityCooldowns>();
-                if (cooldownPart != null && cooldownPart.IsOnCooldown(ability))
+                var caster = ability.Caster as BaseUnitEntity;
+                if (caster == null)
                 {
-                    Main.LogDebug($"[CombatAPI] {ability.Name}: OnCooldown (including group cooldown)");
+                    Main.LogDebug($"[CombatAPI] CooldownCheck: {abilityName} - caster is null");
+                    return false;
+                }
+
+                var cooldownPart = caster.AbilityCooldowns;
+                if (cooldownPart == null)
+                {
+                    Main.LogDebug($"[CombatAPI] CooldownCheck: {abilityName} - cooldownPart is null");
+                    return false;
+                }
+
+                // 1. 능력 자체 쿨다운 체크 (이건 IsIgnoredByComponent를 고려함)
+                bool isOnCooldown = cooldownPart.IsOnCooldown(ability);
+                if (isOnCooldown)
+                {
+                    Main.LogDebug($"[CombatAPI] CooldownCheck: {abilityName} - ability on cooldown");
                     return true;
+                }
+
+                // 2. 그룹 쿨다운 체크
+                var groups = ability.AbilityGroups;
+                if (groups != null && groups.Count > 0)
+                {
+                    // ★ v3.5.16: 중복 그룹 감지 - 게임 데이터 버그로 중복 그룹이 있으면
+                    // StartGroupCooldown()에서 에러 발생. 중복 그룹이 있는 능력은 사용 차단.
+                    var seenGroups = new HashSet<string>();
+                    foreach (var group in groups)
+                    {
+                        if (group == null) continue;
+                        string groupId = group.AssetGuid?.ToString() ?? group.name ?? "unknown";
+                        if (seenGroups.Contains(groupId))
+                        {
+                            Main.Log($"[CombatAPI] ★ {abilityName}: BLOCKED - duplicate group detected (game data bug)");
+                            return true; // 중복 그룹이 있으면 사용 차단
+                        }
+                        seenGroups.Add(groupId);
+
+                        bool groupOnCooldown = cooldownPart.GroupIsOnCooldown(group);
+                        if (groupOnCooldown)
+                        {
+                            Main.LogDebug($"[CombatAPI] CooldownCheck: {abilityName} - Group '{group.name}' on cooldown");
+                            return true;
+                        }
+                    }
                 }
 
                 return false;
             }
             catch (Exception ex)
             {
-                Main.LogDebug($"[CombatAPI] IsAbilityOnCooldownWithGroups error: {ex.Message}");
+                Main.LogError($"[CombatAPI] IsAbilityOnCooldownWithGroups error: {ex.Message}\n{ex.StackTrace}");
                 return false; // 에러 시 일단 허용
             }
         }

@@ -9,6 +9,7 @@ using Kingmaker.View.Covers;
 using Pathfinding;
 using UnityEngine;
 using CompanionAI_v3.Analysis;
+using CompanionAI_v3.Core;
 using CompanionAI_v3.Settings;
 
 namespace CompanionAI_v3.GameInterface
@@ -37,8 +38,15 @@ namespace CompanionAI_v3.GameInterface
             /// <summary>★ v3.2.00: 아군 통제 구역 보너스</summary>
             public float InfluenceControlBonus { get; set; }
 
+            /// <summary>★ v3.5.18: Blackboard 통합 - SharedTarget 접근 보너스</summary>
+            public float SharedTargetBonus { get; set; }
+
+            /// <summary>★ v3.5.18: Blackboard 통합 - 팀 전술 기반 조정</summary>
+            public float TacticalAdjustment { get; set; }
+
             public float TotalScore => CoverScore + DistanceScore - ThreatScore + AttackScore
-                                       - InfluenceThreatScore + InfluenceControlBonus;
+                                       - InfluenceThreatScore + InfluenceControlBonus
+                                       + SharedTargetBonus + TacticalAdjustment;
 
             public bool CanStand { get; set; }
             public bool HasLosToEnemy { get; set; }
@@ -48,7 +56,9 @@ namespace CompanionAI_v3.GameInterface
             public override string ToString() =>
                 $"Pos({Position.x:F1},{Position.z:F1}) Score={TotalScore:F1}" +
                 (InfluenceThreatScore > 0 || InfluenceControlBonus > 0
-                    ? $" [Inf:T{InfluenceThreatScore:F1}/C{InfluenceControlBonus:F1}]" : "");
+                    ? $" [Inf:T{InfluenceThreatScore:F1}/C{InfluenceControlBonus:F1}]" : "") +
+                (SharedTargetBonus > 0 ? $" [ST:{SharedTargetBonus:F1}]" : "") +
+                (TacticalAdjustment != 0 ? $" [Tac:{TacticalAdjustment:F1}]" : "");
         }
 
         public enum MovementGoal
@@ -650,11 +660,14 @@ namespace CompanionAI_v3.GameInterface
         /// <summary>
         /// ★ v3.2.25: 영향력 맵 기반 위협/통제 점수 적용 (Role별 Frontline 점수 포함)
         /// ★ v3.4.00: 예측 위협 맵 지원 추가
+        /// ★ v3.5.18: Response Curves + Blackboard 통합
         ///
-        /// - 적 밀집 지역 회피 (InfluenceThreatScore)
-        /// - 아군 통제 구역 선호 (InfluenceControlBonus)
+        /// - 적 밀집 지역 회피 (InfluenceThreatScore) - ThreatCountPenalty 커브 적용
+        /// - 아군 통제 구역 선호 (InfluenceControlBonus) - SafetyByDistance 커브 적용
         /// - Role별 전선 위치 선호/회피
         /// - 예측 위협 반영 (다음 턴 적 이동 고려)
+        /// - SharedTarget 접근 보너스 (Blackboard)
+        /// - TeamConfidence 기반 전술 조정 (Blackboard)
         /// </summary>
         private static void ApplyInfluenceScores(
             PositionScore score,
@@ -667,24 +680,25 @@ namespace CompanionAI_v3.GameInterface
 
             var pos = score.Position;
 
-            // 적 밀집도 기반 위협 (역제곱 감소 적용된 값)
-            // 값 범위: 0~∞, 일반적으로 0~5 수준
+            // ★ v3.5.18: Response Curves 적용
+            // 적 밀집도 기반 위협 - ThreatCountPenalty 커브 사용
             float threatDensity = influenceMap.GetThreatAt(pos);
-            score.InfluenceThreatScore = threatDensity * 8f;  // 가중치: 높은 밀도 구역 회피
+            float threatMultiplier = CurvePresets.ThreatCountPenalty?.Evaluate(threatDensity) ?? (threatDensity * 8f);
+            score.InfluenceThreatScore = threatMultiplier;
 
-            // 아군 통제 구역 보너스
-            // 아군 근처 = 안전한 위치
+            // 아군 통제 구역 보너스 - SafetyByDistance 커브 개념 적용
             float allyControl = influenceMap.GetControlAt(pos);
-            score.InfluenceControlBonus = allyControl * 4f;  // 아군 근처 선호
+            float safetyMultiplier = CurvePresets.SafetyByDistance?.Evaluate(allyControl * 10f) ?? (allyControl * 4f);
+            score.InfluenceControlBonus = safetyMultiplier;
 
-            // ★ v3.5.00: CoverMap 보너스 (PDF 방법론)
-            // 엄폐 품질이 높은 위치 선호
+            // ★ v3.5.00: CoverMap 보너스 - CoverValue 커브 적용
             float coverQuality = influenceMap.GetCoverAt(pos);
-            score.InfluenceControlBonus += coverQuality * 12f;  // Full=12, Half=6, None=0
+            float coverBonus = CurvePresets.CoverValue?.Evaluate(coverQuality) ?? (coverQuality * 12f);
+            score.InfluenceControlBonus += coverBonus;
 
-            // ★ v3.5.00: PDF 방법론 통합 점수 (CoverMap × 0.4 + (1-Threat) × 0.6)
+            // ★ v3.5.00: PDF 방법론 통합 점수
             float combinedTacticalScore = influenceMap.GetCombinedScore(pos);
-            score.InfluenceControlBonus += combinedTacticalScore * 8f;  // 0-8 추가 보너스
+            score.InfluenceControlBonus += combinedTacticalScore * 8f;
 
             // ★ v3.2.25: Frontline 거리 기반 Role별 점수
             float frontlineDist = influenceMap.GetFrontlineDistance(pos);
@@ -702,14 +716,101 @@ namespace CompanionAI_v3.GameInterface
                 float predictedThreat = predictiveMap.GetPredictedThreatAt(pos);
                 float turnSafety = predictiveMap.GetTurnSafetyScore(pos);
 
-                // 예측 위협이 높으면 해당 위치 회피
                 score.InfluenceThreatScore += predictedThreat * 6f;
 
-                // 안전도가 높으면 해당 위치 선호 (0.7 이상)
                 if (turnSafety > 0.7f)
                 {
                     score.InfluenceControlBonus += turnSafety * 10f;
                 }
+            }
+
+            // ★ v3.5.18: Blackboard 통합 - SharedTarget 접근 보너스
+            ApplyBlackboardScores(score, pos, role);
+        }
+
+        /// <summary>
+        /// ★ v3.5.18: Blackboard 기반 점수 적용
+        /// - SharedTarget에 가까운 위치 보너스
+        /// - TeamConfidence에 따른 전술 조정 (공격/방어 성향)
+        /// - CurrentTactic에 따른 위치 선호
+        /// </summary>
+        private static void ApplyBlackboardScores(PositionScore score, Vector3 pos, AIRole role)
+        {
+            var blackboard = TeamBlackboard.Instance;
+            if (blackboard == null) return;
+
+            // 1. SharedTarget 접근 보너스
+            var sharedTarget = blackboard.SharedTarget;
+            if (sharedTarget != null && !sharedTarget.LifeState.IsDead)
+            {
+                float distToSharedTarget = Vector3.Distance(pos, sharedTarget.Position);
+
+                // 근접 역할(Tank, DPS)은 SharedTarget에 가까울수록 보너스
+                // Support는 SharedTarget 근처에서 힐/버프 가능하도록 적당한 거리 선호
+                switch (role)
+                {
+                    case AIRole.Tank:
+                    case AIRole.DPS:
+                        // 가까울수록 보너스 (최대 20점, 3m 이내)
+                        if (distToSharedTarget <= 3f)
+                            score.SharedTargetBonus = 20f;
+                        else if (distToSharedTarget <= 10f)
+                            score.SharedTargetBonus = 20f - (distToSharedTarget - 3f) * 2f;
+                        break;
+
+                    case AIRole.Support:
+                        // 5-10m 거리 선호 (힐/버프 범위, 하지만 너무 가깝지 않게)
+                        if (distToSharedTarget >= 5f && distToSharedTarget <= 10f)
+                            score.SharedTargetBonus = 10f;
+                        else if (distToSharedTarget < 5f)
+                            score.SharedTargetBonus = distToSharedTarget * 2f;  // 가까우면 페널티
+                        break;
+                }
+            }
+
+            // 2. TeamConfidence 기반 전술 조정
+            float confidence = blackboard.TeamConfidence;
+            // ConfidenceToAggression: 신뢰도 높으면 공격적 (전진 보너스)
+            // ConfidenceToDefenseNeed: 신뢰도 낮으면 방어적 (후방/엄폐 보너스)
+            float aggressionMod = CurvePresets.ConfidenceToAggression?.Evaluate(confidence) ?? 1f;
+            float defenseMod = CurvePresets.ConfidenceToDefenseNeed?.Evaluate(confidence) ?? 1f;
+
+            // 공격 성향이 높으면(>1) 전진 보너스, 방어 필요도 높으면(>1) 엄폐 보너스 증폭
+            if (aggressionMod > 1f)
+            {
+                // 공격적 상황: 적에게 가까운 위치에 약간 보너스
+                score.TacticalAdjustment += (aggressionMod - 1f) * 5f;
+            }
+            if (defenseMod > 1f)
+            {
+                // 방어적 상황: 엄폐/안전 점수에 가중치
+                score.TacticalAdjustment += score.CoverScore * (defenseMod - 1f) * 0.5f;
+            }
+
+            // 3. CurrentTactic에 따른 조정
+            var tactic = blackboard.CurrentTactic;
+            switch (tactic)
+            {
+                case TacticalSignal.Retreat:
+                    // 후퇴 모드: 적에게서 먼 위치 추가 보너스
+                    score.TacticalAdjustment -= score.AttackScore * 0.5f;  // 공격 위치 가치 감소
+                    break;
+
+                case TacticalSignal.Attack:
+                    // 공격 모드: SharedTarget 보너스 증폭, 전진 선호
+                    score.SharedTargetBonus *= 1.5f;
+                    break;
+
+                case TacticalSignal.Defend:
+                    // 방어 모드: 엄폐 보너스 증폭
+                    score.TacticalAdjustment += score.CoverScore * 0.3f;
+                    break;
+            }
+
+            // ★ v3.5.19: Blackboard 적용 결과 로깅 (비-0 값만)
+            if (score.SharedTargetBonus != 0 || score.TacticalAdjustment != 0)
+            {
+                Main.LogDebug($"[MovementAPI] Blackboard: ST={score.SharedTargetBonus:F1}, Tac={score.TacticalAdjustment:F1}, Tactic={tactic}");
             }
         }
 
