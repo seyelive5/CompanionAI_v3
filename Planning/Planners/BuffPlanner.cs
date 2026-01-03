@@ -457,6 +457,7 @@ namespace CompanionAI_v3.Planning.Planners
         /// 턴 종료 능력
         /// ★ v3.0.88: 디버그 로깅 추가
         /// ★ v3.0.89: PointTarget 능력 지원 (VeilOfBlades 등)
+        /// ★ v3.5.15: 그룹 쿨다운 체크 추가 (WeaponAttackAbilityGroup 등)
         /// </summary>
         public static PlannedAction PlanTurnEndingAbility(Situation situation, ref float remainingAP, string roleName)
         {
@@ -474,6 +475,17 @@ namespace CompanionAI_v3.Planning.Planners
             }
 
             Main.LogDebug($"[{roleName}] PlanTurnEnding: Found: {string.Join(", ", turnEndingAbilities.Select(a => a.Name))}");
+
+            // ★ v3.5.15: 그룹 쿨다운으로 인해 사용 불가능한 능력 필터링
+            turnEndingAbilities = turnEndingAbilities
+                .Where(a => !CombatAPI.IsAbilityOnCooldownWithGroups(a))
+                .ToList();
+
+            if (turnEndingAbilities.Count == 0)
+            {
+                Main.LogDebug($"[{roleName}] PlanTurnEnding: All TurnEnding abilities on cooldown (including group cooldowns)");
+                return null;
+            }
 
             foreach (var ability in turnEndingAbilities)
             {

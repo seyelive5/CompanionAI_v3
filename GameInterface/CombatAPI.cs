@@ -9,6 +9,7 @@ using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.UnitLogic.Abilities.Blueprints;
 using Kingmaker.UnitLogic.Abilities.Components;
 using Kingmaker.UnitLogic.Mechanics.Actions;
+using Kingmaker.UnitLogic.Parts;
 using Kingmaker.Utility;
 using Kingmaker.View.Covers;
 using UnityEngine;
@@ -100,6 +101,37 @@ namespace CompanionAI_v3.GameInterface
                 // ★ v3.4.01: P1-2 예외 상세 로깅
                 Main.LogDebug($"[CombatAPI] IsAbilityAvailable error for {ability.Name}: {ex.Message}");
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.5.15: 능력이 쿨다운 그룹 포함 완전 쿨다운 체크
+        /// GetUnavailabilityReasons()는 그룹 쿨다운을 감지하지 못함
+        /// PartAbilityCooldowns.IsOnCooldown()을 직접 사용해야 정확함
+        /// </summary>
+        public static bool IsAbilityOnCooldownWithGroups(AbilityData ability)
+        {
+            if (ability == null) return true;
+
+            try
+            {
+                var caster = ability.Caster as BaseUnitEntity;
+                if (caster == null) return false;
+
+                // ★ 핵심: PartAbilityCooldowns.IsOnCooldown()은 그룹 쿨다운도 체크
+                var cooldownPart = caster.GetOptional<Kingmaker.UnitLogic.Parts.PartAbilityCooldowns>();
+                if (cooldownPart != null && cooldownPart.IsOnCooldown(ability))
+                {
+                    Main.LogDebug($"[CombatAPI] {ability.Name}: OnCooldown (including group cooldown)");
+                    return true;
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] IsAbilityOnCooldownWithGroups error: {ex.Message}");
+                return false; // 에러 시 일단 허용
             }
         }
 
