@@ -14,7 +14,8 @@
       "Bash(find:*)",
       "Bash(\"C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/MSBuild.exe\":*)",
       "Bash(\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"c:\\\\Users\\\\veria\\\\Downloads\\\\CompanionAI_v3-master\\\\CompanionAI_v3.csproj\" /p:Configuration=Release /t:Rebuild /v:minimal /nologo)",
-      "Bash(\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" CompanionAI_v3.csproj -p:Configuration=Release -t:Rebuild -v:minimal -nologo)"
+      "Bash(\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" CompanionAI_v3.csproj -p:Configuration=Release -t:Rebuild -v:minimal -nologo)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nv3.5.14 - GapCloser Distance Limit\n\n## Changes\n- Fix: GapCloser \\(Death From Above\\) no longer wastes ability when enemies are too far\n- Only use GapCloser if landing position allows melee attack\n- Condition: enemy distance ≤ ability range + melee range \\(3m\\)\n- If enemy is farther, skip GapCloser and use normal movement instead\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ]
   }
 }

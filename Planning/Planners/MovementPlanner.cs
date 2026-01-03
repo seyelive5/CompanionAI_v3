@@ -163,12 +163,26 @@ namespace CompanionAI_v3.Planning.Planners
         /// ★ v3.0.81: 갭클로저 착지 위치 찾기
         /// ★ v3.1.28: 능력 범위 고려 - 스킬 범위 내에서만 착지 위치 선택
         /// ★ v3.4.02: P1 수정 - situation 파라미터 추가하여 InfluenceMap/PredictiveThreatMap 전달
+        /// ★ v3.5.14: 적이 너무 멀면 갭클로저 사용 안 함 - 착지 후 공격 가능할 때만 사용
         /// </summary>
         private static Vector3? FindGapCloserLandingPosition(BaseUnitEntity unit, BaseUnitEntity target, AbilityData gapCloserAbility, Situation situation = null)
         {
             // ★ v3.1.28: 능력 범위 확인
             float abilityRange = CombatAPI.GetAbilityRange(gapCloserAbility);
             Main.LogDebug($"[MovementPlanner] FindGapCloserLanding: ability={gapCloserAbility.Name}, range={abilityRange:F1}");
+
+            float targetDistance = Vector3.Distance(unit.Position, target.Position);
+
+            // ★ v3.5.14: 적이 너무 멀면 갭클로저 사용 안 함
+            // 착지 후에도 공격 불가능하면 낭비 - 일반 이동이 더 효율적
+            // 조건: 적 거리 > 갭클로저 범위 + 근접 공격 범위(약 3m)
+            float meleeAttackRange = 3f;
+            float maxEffectiveRange = abilityRange + meleeAttackRange;
+            if (targetDistance > maxEffectiveRange)
+            {
+                Main.LogDebug($"[MovementPlanner] FindGapCloserLanding: target too far ({targetDistance:F1}m > {maxEffectiveRange:F1}m), skipping gap closer");
+                return null;
+            }
 
             // ★ v3.4.02: P1 수정 - InfluenceMap, role, PredictiveThreatMap 전달
             AIRole role = situation?.CharacterSettings?.Role ?? AIRole.Auto;
@@ -193,10 +207,7 @@ namespace CompanionAI_v3.Planning.Planners
             }
 
             // ★ v3.1.28: 폴백 - 적 방향으로 스킬 범위 내 위치 계산
-            // 기존: 적 옆 위치 → 문제: 스킬 범위 무시
-            // 수정: 캐스터에서 적 방향으로 범위의 90% 위치
             var direction = (target.Position - unit.Position).normalized;
-            float targetDistance = Vector3.Distance(unit.Position, target.Position);
 
             if (targetDistance <= abilityRange)
             {
@@ -208,9 +219,10 @@ namespace CompanionAI_v3.Planning.Planners
             }
             else
             {
-                // 적이 범위 밖 - 범위의 90% 지점으로
-                var landingPos = unit.Position + direction * (abilityRange * 0.9f);
-                Main.LogDebug($"[MovementPlanner] FindGapCloserLanding: target out of range ({targetDistance:F1}m), landing at {abilityRange * 0.9f:F1}m");
+                // ★ v3.5.14: 적이 범위 밖이지만 착지 후 공격 가능 (maxEffectiveRange 체크 통과함)
+                // 최대한 가까이 착지 (범위의 95%)
+                var landingPos = unit.Position + direction * (abilityRange * 0.95f);
+                Main.LogDebug($"[MovementPlanner] FindGapCloserLanding: landing at max range ({abilityRange * 0.95f:F1}m), will be {targetDistance - abilityRange * 0.95f:F1}m from target");
                 return landingPos;
             }
         }
