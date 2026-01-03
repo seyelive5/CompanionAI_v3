@@ -309,9 +309,31 @@ namespace CompanionAI_v3.Settings
                 Main.LogError($"[AIConfig] Failed to load: {ex.Message}");
             }
 
-            // 기본 설정 사용
+            // ★ v3.5.21: 기본 설정 사용 및 파일 자동 생성
             Instance = CreateDefault();
-            Main.Log("[AIConfig] Using default settings");
+            SaveDefault(modPath);
+            Main.Log("[AIConfig] Created default aiconfig.json");
+        }
+
+        /// <summary>
+        /// ★ v3.5.21: 기본 설정을 aiconfig.json으로 저장
+        /// </summary>
+        public static void SaveDefault(string modPath)
+        {
+            string configPath = Path.Combine(modPath, "aiconfig.json");
+
+            try
+            {
+                if (Instance == null)
+                    Instance = CreateDefault();
+
+                string json = JsonConvert.SerializeObject(Instance, Formatting.Indented);
+                File.WriteAllText(configPath, json);
+            }
+            catch (Exception ex)
+            {
+                Main.LogError($"[AIConfig] Failed to save default: {ex.Message}");
+            }
         }
 
         /// <summary>

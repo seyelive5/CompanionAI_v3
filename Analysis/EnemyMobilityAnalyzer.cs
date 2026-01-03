@@ -8,6 +8,7 @@ using Pathfinding;
 using UnityEngine;
 using CompanionAI_v3.Data;
 using CompanionAI_v3.GameInterface;
+using CompanionAI_v3.Settings;
 
 namespace CompanionAI_v3.Analysis
 {
@@ -52,11 +53,17 @@ namespace CompanionAI_v3.Analysis
         /// <summary>GapCloser 기본 범위 (미터)</summary>
         private const float DEFAULT_GAPCLOSER_RANGE = 8f;
 
-        /// <summary>최대 분석 대상 적 수 (성능)</summary>
-        private const int MAX_ENEMIES_TO_ANALYZE = 8;
+        /// <summary>
+        /// ★ v3.5.20: 설정에서 최대 분석 적 수 읽기 (기본값 8)
+        /// </summary>
+        private static int MaxEnemiesToAnalyze =>
+            ModSettings.Instance?.MaxEnemiesToAnalyze ?? 8;
 
-        /// <summary>최대 캐시 타일 수 (적당)</summary>
-        private const int MAX_TILES_PER_ENEMY = 100;
+        /// <summary>
+        /// ★ v3.5.20: 설정에서 적당 최대 타일 수 읽기 (기본값 100)
+        /// </summary>
+        private static int MaxTilesPerEnemy =>
+            ModSettings.Instance?.MaxTilesPerEnemy ?? 100;
 
         #endregion
 
@@ -116,10 +123,10 @@ namespace CompanionAI_v3.Analysis
 
             var results = new List<EnemyMobility>();
 
-            // 성능을 위해 최대 수 제한
+            // ★ v3.5.20: 성능을 위해 최대 수 제한 (설정에서 읽음)
             var enemiesToAnalyze = enemies
                 .Where(e => e != null && !e.LifeState.IsDead)
-                .Take(MAX_ENEMIES_TO_ANALYZE)
+                .Take(MaxEnemiesToAnalyze)
                 .ToList();
 
             foreach (var enemy in enemiesToAnalyze)
@@ -269,10 +276,12 @@ namespace CompanionAI_v3.Analysis
                 if (tiles != null && tiles.Count > 0)
                 {
                     // 위치 추출 (성능을 위해 최대 수 제한)
+                    // ★ v3.5.20: 설정에서 타일 제한 읽음
                     int count = 0;
+                    int maxTiles = MaxTilesPerEnemy;
                     foreach (var kvp in tiles)
                     {
-                        if (count >= MAX_TILES_PER_ENEMY) break;
+                        if (count >= maxTiles) break;
 
                         var node = kvp.Key as CustomGridNodeBase;
                         if (node != null)

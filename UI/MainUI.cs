@@ -17,6 +17,7 @@ namespace CompanionAI_v3.UI
         private static CharacterSettings _editingSettings = null;
         private static Vector2 _scrollPosition = Vector2.zero;
         private static bool _showAdvancedSettings = false;  // ★ v3.5.13: 고급 설정 접기/펴기
+        private static bool _showPerformanceSettings = false;  // ★ v3.5.20: 성능 설정 접기/펴기
 
         private static GUIStyle _headerStyle;
         private static GUIStyle _boldLabelStyle;
@@ -117,7 +118,100 @@ namespace CompanionAI_v3.UI
             Main.Settings.EnableDebugLogging = DrawCheckbox(Main.Settings.EnableDebugLogging, L("EnableDebugLogging"));
             Main.Settings.ShowAIThoughts = DrawCheckbox(Main.Settings.ShowAIThoughts, L("ShowAIDecisionLog"));
 
+            GUILayout.Space(15);
+            DrawPerformanceSettings();
+
             GUILayout.EndVertical();
+        }
+
+        /// <summary>
+        /// ★ v3.5.20: 성능 설정 섹션 (전역)
+        /// </summary>
+        private static void DrawPerformanceSettings()
+        {
+            // ★ v3.5.21: 접기/펴기 버튼 - 크게, 눈에 띄게
+            GUILayout.BeginHorizontal();
+            string toggleText = _showPerformanceSettings
+                ? $"<size=20><b><color=#00BFFF>▼ {L("PerformanceSettings")}</color></b></size>"
+                : $"<size=20><b><color=#AAAAAA>▶ {L("PerformanceSettings")}</color></b></size>";
+
+            if (GUILayout.Button(toggleText, _boldLabelStyle, GUILayout.Height(40), GUILayout.Width(400)))
+                _showPerformanceSettings = !_showPerformanceSettings;
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
+
+            if (!_showPerformanceSettings) return;
+
+            // ★ v3.5.21: 박스 넓이 확대
+            GUILayout.BeginVertical("box", GUILayout.MinWidth(700));
+
+            // 경고 메시지 - 크게
+            GUILayout.Label($"<size=18><color=#00BFFF>{L("PerformanceWarning")}</color></size>", _descriptionStyle);
+            GUILayout.Space(15);
+
+            // 리셋 버튼 - 크게
+            if (GUILayout.Button($"<size=18><color=#FFFF00>{L("ResetPerformanceToDefault")}</color></size>", GUILayout.Width(350), GUILayout.Height(45)))
+            {
+                Main.Settings.MaxEnemiesToAnalyze = 8;
+                Main.Settings.MaxPositionsToEvaluate = 25;
+                Main.Settings.MaxClusters = 5;
+                Main.Settings.MaxTilesPerEnemy = 100;
+            }
+            GUILayout.Space(20);
+
+            // 슬라이더 옵션들 - 크게
+            Main.Settings.MaxEnemiesToAnalyze = DrawSliderSettingIntLarge(
+                L("MaxEnemiesToAnalyze"),
+                L("MaxEnemiesToAnalyzeDesc"),
+                Main.Settings.MaxEnemiesToAnalyze,
+                3, 20);
+
+            Main.Settings.MaxPositionsToEvaluate = DrawSliderSettingIntLarge(
+                L("MaxPositionsToEvaluate"),
+                L("MaxPositionsToEvaluateDesc"),
+                Main.Settings.MaxPositionsToEvaluate,
+                10, 50);
+
+            Main.Settings.MaxClusters = DrawSliderSettingIntLarge(
+                L("MaxClusters"),
+                L("MaxClustersDesc"),
+                Main.Settings.MaxClusters,
+                2, 10);
+
+            Main.Settings.MaxTilesPerEnemy = DrawSliderSettingIntLarge(
+                L("MaxTilesPerEnemy"),
+                L("MaxTilesPerEnemyDesc"),
+                Main.Settings.MaxTilesPerEnemy,
+                30, 200);
+
+            GUILayout.EndVertical();
+        }
+
+        /// <summary>
+        /// ★ v3.5.21: 큰 폰트 슬라이더 (성능 설정용)
+        /// </summary>
+        private static int DrawSliderSettingIntLarge(string label, string description, int value, int min, int max)
+        {
+            GUILayout.BeginVertical();
+
+            // 라벨 - 큰 폰트
+            GUILayout.Label($"<size=18><b>{label}</b>: <color=#00FF00>{value}</color></size>", _boldLabelStyle);
+
+            // 설명 - 중간 폰트
+            GUILayout.Label($"<size=16><color=#888888>{description}</color></size>", _descriptionStyle);
+            GUILayout.Space(5);
+
+            // 슬라이더 - 넓게
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"<size=16>{min}</size>", GUILayout.Width(40));
+            value = (int)GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(500), GUILayout.Height(25));
+            GUILayout.Label($"<size=16>{max}</size>", GUILayout.Width(50));
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(15);
+            GUILayout.EndVertical();
+
+            return value;
         }
 
         private static bool DrawCheckbox(bool value, string label)

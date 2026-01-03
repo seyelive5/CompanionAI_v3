@@ -5,6 +5,7 @@ using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Abilities;
 using UnityEngine;
 using CompanionAI_v3.GameInterface;
+using CompanionAI_v3.Settings;
 
 namespace CompanionAI_v3.Analysis
 {
@@ -52,8 +53,17 @@ namespace CompanionAI_v3.Analysis
         /// <summary>클러스터 최소 크기</summary>
         public const int MIN_CLUSTER_SIZE = 2;
 
-        /// <summary>반환할 최대 클러스터 수</summary>
-        public const int MAX_CLUSTERS = 5;
+        /// <summary>
+        /// ★ v3.5.20: 설정에서 최대 클러스터 수 읽기 (기본값 5)
+        /// </summary>
+        private static int MaxClusters =>
+            ModSettings.Instance?.MaxClusters ?? 5;
+
+        /// <summary>
+        /// ★ v3.5.20: 설정에서 최대 평가 위치 수 읽기 (기본값 25)
+        /// </summary>
+        private static int MaxPositionsToEvaluate =>
+            ModSettings.Instance?.MaxPositionsToEvaluate ?? 25;
 
         #endregion
 
@@ -92,10 +102,11 @@ namespace CompanionAI_v3.Analysis
                     CalculateClusterMetrics(cluster);
                 }
 
+                // ★ v3.5.20: 설정에서 최대 클러스터 수 읽음
                 return clusters
                     .Where(c => c.IsValid)
                     .OrderByDescending(c => c.QualityScore)
-                    .Take(MAX_CLUSTERS)
+                    .Take(MaxClusters)
                     .ToList();
             }
             catch (Exception ex)
@@ -185,16 +196,16 @@ namespace CompanionAI_v3.Analysis
                 Vector3 bestPosition = cluster.Center;
                 int bestHits = CountEnemiesInRadius(cluster.Center, cluster.Enemies, aoERadius);
 
-                // 중심 주변 그리드 탐색 (성능 제한)
+                // ★ v3.5.20: 중심 주변 그리드 탐색 (설정에서 성능 제한 읽음)
                 float searchStep = aoERadius / 3f;  // 반경당 3단계
                 float searchRadius = cluster.Radius + searchStep;
 
                 int positionsChecked = 0;
-                const int MAX_POSITIONS = 25;  // 성능 제한
+                int maxPositions = MaxPositionsToEvaluate;
 
-                for (float dx = -searchRadius; dx <= searchRadius && positionsChecked < MAX_POSITIONS; dx += searchStep)
+                for (float dx = -searchRadius; dx <= searchRadius && positionsChecked < maxPositions; dx += searchStep)
                 {
-                    for (float dz = -searchRadius; dz <= searchRadius && positionsChecked < MAX_POSITIONS; dz += searchStep)
+                    for (float dz = -searchRadius; dz <= searchRadius && positionsChecked < maxPositions; dz += searchStep)
                     {
                         positionsChecked++;
 

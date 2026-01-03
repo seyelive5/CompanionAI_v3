@@ -160,6 +160,52 @@ namespace CompanionAI_v3.Settings
                 { Language.English, "Minimum number of enemies to use AOE abilities" },
                 { Language.Korean, "AOE 능력 사용에 필요한 최소 적 수" }
             },
+
+            // ★ v3.5.20: Performance Settings
+            ["PerformanceSettings"] = new() {
+                { Language.English, "Performance Settings" },
+                { Language.Korean, "성능 설정" }
+            },
+            ["PerformanceWarning"] = new() {
+                { Language.English, "⚠️ Lower values = faster but less accurate AI. Higher values = smarter but slower." },
+                { Language.Korean, "⚠️ 낮은 값 = 빠르지만 부정확한 AI. 높은 값 = 똑똑하지만 느림." }
+            },
+            ["MaxEnemiesToAnalyze"] = new() {
+                { Language.English, "Max Enemies to Analyze" },
+                { Language.Korean, "최대 분석 적 수" }
+            },
+            ["MaxEnemiesToAnalyzeDesc"] = new() {
+                { Language.English, "How many enemies to evaluate when predicting threats.\nMore = accurate threat prediction, but slower.\n(Affects: Movement safety, retreat decisions)" },
+                { Language.Korean, "위협 예측 시 분석할 최대 적 수.\n많을수록 위협 예측이 정확하지만 느려집니다.\n(영향: 이동 안전성, 후퇴 결정)" }
+            },
+            ["MaxPositionsToEvaluate"] = new() {
+                { Language.English, "Max Positions to Evaluate" },
+                { Language.Korean, "최대 평가 위치 수" }
+            },
+            ["MaxPositionsToEvaluateDesc"] = new() {
+                { Language.English, "How many positions to check for optimal AOE placement.\nMore = better AOE targeting, but slower.\n(Affects: AOE ability targeting)" },
+                { Language.Korean, "AOE 최적 위치 탐색 시 체크할 최대 위치 수.\n많을수록 AOE 타겟팅이 정확하지만 느려집니다.\n(영향: AOE 능력 타겟팅)" }
+            },
+            ["MaxClusters"] = new() {
+                { Language.English, "Max Enemy Clusters" },
+                { Language.Korean, "최대 클러스터 수" }
+            },
+            ["MaxClustersDesc"] = new() {
+                { Language.English, "How many enemy groups to track for AOE opportunities.\nMore = finds more AOE chances, but slower.\n(Affects: AOE ability decisions)" },
+                { Language.Korean, "AOE 기회 탐색을 위해 추적할 적 그룹 수.\n많을수록 AOE 기회를 더 많이 찾지만 느려집니다.\n(영향: AOE 능력 결정)" }
+            },
+            ["MaxTilesPerEnemy"] = new() {
+                { Language.English, "Max Tiles per Enemy" },
+                { Language.Korean, "적당 최대 타일 수" }
+            },
+            ["MaxTilesPerEnemyDesc"] = new() {
+                { Language.English, "Movement tiles to analyze per enemy for threat prediction.\nMore = precise threat zones, but slower.\n(Affects: Predictive movement, safe positioning)" },
+                { Language.Korean, "적 위협 예측을 위해 분석할 이동 타일 수.\n많을수록 위협 구역 예측이 정밀하지만 느려집니다.\n(영향: 예측적 이동, 안전 위치 선정)" }
+            },
+            ["ResetPerformanceToDefault"] = new() {
+                { Language.English, "Reset Performance to Default" },
+                { Language.Korean, "성능 설정 기본값으로" }
+            },
         };
 
         public static string Get(string key)
@@ -254,6 +300,34 @@ namespace CompanionAI_v3.Settings
         /// ★ v3.0.15: 주인공도 AI 제어 여부
         /// </summary>
         public bool ControlMainCharacter { get; set; } = true;
+
+        #region ★ v3.5.20: Performance Settings (Global)
+
+        /// <summary>
+        /// 위협 예측 시 분석할 최대 적 수
+        /// 높을수록 정확하지만 느림
+        /// </summary>
+        public int MaxEnemiesToAnalyze { get; set; } = 8;
+
+        /// <summary>
+        /// AOE 최적 위치 탐색 시 체크할 최대 위치 수
+        /// 높을수록 AOE 타겟팅 정확, 느림
+        /// </summary>
+        public int MaxPositionsToEvaluate { get; set; } = 25;
+
+        /// <summary>
+        /// AOE 기회 탐색을 위해 추적할 최대 클러스터 수
+        /// 높을수록 AOE 기회 많이 찾음, 느림
+        /// </summary>
+        public int MaxClusters { get; set; } = 5;
+
+        /// <summary>
+        /// 적 위협 예측을 위해 분석할 이동 타일 수
+        /// 높을수록 위협 구역 정밀, 느림
+        /// </summary>
+        public int MaxTilesPerEnemy { get; set; } = 100;
+
+        #endregion
         public CharacterSettings DefaultSettings { get; set; } = new CharacterSettings();
         public Dictionary<string, CharacterSettings> CharacterSettings { get; set; }
             = new Dictionary<string, CharacterSettings>();
@@ -324,8 +398,10 @@ namespace CompanionAI_v3.Settings
                 }
                 else
                 {
-                    Main.Log("Using default settings");
+                    // ★ v3.5.21: 설정 파일이 없으면 기본값으로 자동 생성
+                    Main.Log("Settings file not found, creating default settings.json");
                     Instance = new ModSettings();
+                    Save();  // 기본 설정 파일 생성
                 }
             }
             catch (Exception ex)
