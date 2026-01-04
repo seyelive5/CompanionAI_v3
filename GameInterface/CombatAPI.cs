@@ -2149,5 +2149,131 @@ namespace CompanionAI_v3.GameInterface
         }
 
         #endregion
+
+        #region Strategist Zones (v3.5.23)
+
+        /// <summary>
+        /// ★ v3.5.23: 기존 전략가 구역들의 위치 가져오기
+        /// </summary>
+        public static List<(Vector3 position, string type)> GetExistingStrategistZones()
+        {
+            var zones = new List<(Vector3, string)>();
+
+            try
+            {
+                foreach (var areaEffect in Game.Instance.State.AreaEffects)
+                {
+                    if (areaEffect?.Blueprint?.IsStrategistAbility != true) continue;
+
+                    var zoneType = areaEffect.Blueprint.TacticsAreaEffectType.ToString();
+                    zones.Add((areaEffect.Position, zoneType));
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] GetExistingStrategistZones error: {ex.Message}");
+            }
+
+            return zones;
+        }
+
+        /// <summary>
+        /// ★ v3.5.23: 전략가 구역 능력인지 확인
+        /// </summary>
+        public static bool IsStrategistZoneAbility(AbilityData ability)
+        {
+            if (ability == null) return false;
+
+            try
+            {
+                return ability.Blueprint?.GetComponent<Kingmaker.UnitLogic.ActivatableAbilities.Restrictions.AbilityRestrictionStrategist>() != null;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// ★ v3.5.23: 기존 전략가 구역과 너무 가까운지 확인 (거리 기반)
+        /// 정확한 패턴 겹침 체크는 게임이 하므로, 여기서는 거리 기반으로 대략적 체크
+        /// </summary>
+        public static bool IsPositionTooCloseToExistingZones(Vector3 position, float minDistance = 6f)
+        {
+            try
+            {
+                var existingZones = GetExistingStrategistZones();
+                foreach (var zone in existingZones)
+                {
+                    if (Vector3.Distance(position, zone.position) < minDistance)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] IsPositionTooCloseToExistingZones error: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.5.23: 전략가 구역의 겹치지 않는 위치 찾기 (거리 기반)
+        /// </summary>
+        public static Vector3? FindNonOverlappingZonePosition(AbilityData ability, Vector3 preferredPosition, float searchRadius = 10f)
+        {
+            if (ability == null) return null;
+
+            try
+            {
+                // 전략가 구역이 아니면 그냥 선호 위치 반환
+                if (!IsStrategistZoneAbility(ability)) return preferredPosition;
+
+                // 기존 구역과 거리 체크
+                if (!IsPositionTooCloseToExistingZones(preferredPosition, 6f))
+                {
+                    return preferredPosition;
+                }
+
+                // 겹치면 주변에서 겹치지 않는 위치 탐색
+                var existingZones = GetExistingStrategistZones();
+                if (existingZones.Count == 0) return preferredPosition;
+
+                // 기존 구역들의 평균 중심에서 멀어지는 방향으로 오프셋
+                Vector3 avgCenter = Vector3.zero;
+                foreach (var zone in existingZones)
+                {
+                    avgCenter += zone.position;
+                }
+                avgCenter /= existingZones.Count;
+
+                Vector3 offsetDir = (preferredPosition - avgCenter).normalized;
+                if (offsetDir.magnitude < 0.1f)
+                {
+                    offsetDir = Vector3.forward;
+                }
+
+                // 점진적으로 거리를 늘려가며 겹치지 않는 위치 찾기
+                for (float offset = 3f; offset <= searchRadius; offset += 1.5f)
+                {
+                    Vector3 testPos = preferredPosition + offsetDir * offset;
+                    if (!IsPositionTooCloseToExistingZones(testPos, 6f))
+                    {
+                        Main.Log($"[CombatAPI] Found non-overlapping position at offset {offset:F1}m");
+                        return testPos;
+                    }
+                }
+
+                // 찾지 못하면 null
+                Main.LogDebug($"[CombatAPI] Could not find non-overlapping position for {ability.Name}");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] FindNonOverlappingZonePosition error: {ex.Message}");
+                return null;
+            }
+        }
+
+        #endregion
     }
 }

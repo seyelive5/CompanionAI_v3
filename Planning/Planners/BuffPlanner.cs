@@ -317,6 +317,10 @@ namespace CompanionAI_v3.Planning.Planners
 
         /// <summary>
         /// 위치 버프 계획 (Grand Strategist 등)
+        /// ★ v3.5.23: 역할 기반 구역 배치
+        /// - Frontline → Tank or Melee DPS
+        /// - Backline → Support or Ranged DPS
+        /// - Rear → Ranged DPS or Support
         /// </summary>
         public static PlannedAction PlanPositionalBuff(Situation situation, ref float remainingAP, HashSet<string> usedBuffGuids, string roleName)
         {
@@ -328,21 +332,13 @@ namespace CompanionAI_v3.Planning.Planners
 
             if (allies.Count == 0) return null;
 
-            Vector3 enemyCenter = CalculateEnemyCenter(situation);
+            // ★ v3.5.23: 역할 기반 구역 위치 계산
+            var zonePositions = CalculateRoleBasedZonePositions(allies, situation);
+            Vector3 frontlinePos = zonePositions.frontline;
+            Vector3 backlinePos = zonePositions.backline;
+            Vector3 rearPos = zonePositions.rear;
 
-            var alliesByDistance = allies
-                .OrderBy(a => Vector3.Distance(a.Position, enemyCenter))
-                .ToList();
-
-            int count = alliesByDistance.Count;
-            int frontCount = Math.Max(1, count / 3);
-            int rearStart = count - Math.Max(1, count / 3);
-
-            Vector3 frontlinePos = CalculateAveragePosition(alliesByDistance.Take(frontCount));
-            Vector3 rearPos = CalculateAveragePosition(alliesByDistance.Skip(rearStart));
-            Vector3 backlinePos = count > 2 && rearStart > frontCount
-                ? CalculateAveragePosition(alliesByDistance.Skip(frontCount).Take(rearStart - frontCount))
-                : (frontlinePos + rearPos) / 2f;
+            Main.LogDebug($"[{roleName}] Zone positions - Frontline: {frontlinePos}, Backline: {backlinePos}, Rear: {rearPos}");
 
             foreach (var buff in positionalBuffs)
             {
@@ -354,28 +350,50 @@ namespace CompanionAI_v3.Planning.Planners
                 if (cost > remainingAP) continue;
 
                 string bpName = buff.Blueprint?.name?.ToLower() ?? "";
-                Vector3 targetPosition;
+                Vector3 preferredPosition;
                 string zoneType;
 
                 if (bpName.Contains("frontline") || bpName.Contains("front"))
                 {
-                    targetPosition = frontlinePos;
+                    preferredPosition = frontlinePos;
                     zoneType = "Frontline";
                 }
                 else if (bpName.Contains("rear"))
                 {
-                    targetPosition = rearPos;
+                    preferredPosition = rearPos;
                     zoneType = "Rear";
                 }
                 else if (bpName.Contains("backline") || bpName.Contains("back"))
                 {
-                    targetPosition = backlinePos;
+                    preferredPosition = backlinePos;
                     zoneType = "Backline";
                 }
                 else
                 {
-                    targetPosition = CalculateAveragePosition(allies);
+                    preferredPosition = CalculateAveragePosition(allies);
                     zoneType = "Zone";
+                }
+
+                // ★ v3.5.23: 전략가 구역 겹침 체크 및 대체 위치 찾기
+                Vector3 targetPosition = preferredPosition;
+                if (CombatAPI.IsStrategistZoneAbility(buff))
+                {
+                    // 겹침 체크
+                    if (CombatAPI.IsPositionTooCloseToExistingZones(preferredPosition, 5f))
+                    {
+                        var nonOverlappingPos = CombatAPI.FindNonOverlappingZonePosition(buff, preferredPosition, 10f);
+                        if (nonOverlappingPos.HasValue)
+                        {
+                            targetPosition = nonOverlappingPos.Value;
+                            Main.Log($"[{roleName}] PositionalBuff: {buff.Name} adjusted position to avoid overlap");
+                        }
+                        else
+                        {
+                            Main.LogDebug($"[{roleName}] PositionalBuff: {buff.Name} skipped - no non-overlapping position found");
+                            usedBuffGuids?.Add(buffGuid);
+                            continue;
+                        }
+                    }
                 }
 
                 var target = new TargetWrapper(targetPosition);
@@ -384,12 +402,106 @@ namespace CompanionAI_v3.Planning.Planners
                 {
                     remainingAP -= cost;
                     usedBuffGuids?.Add(buffGuid);
-                    Main.Log($"[{roleName}] PositionalBuff: {buff.Name} ({zoneType})");
+                    Main.Log($"[{roleName}] PositionalBuff: {buff.Name} ({zoneType}) at ({targetPosition.x:F1}, {targetPosition.z:F1})");
                     return PlannedAction.PositionalBuff(buff, targetPosition, $"{zoneType} zone", cost);
                 }
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// ★ v3.5.23: 역할 기반 구역 위치 계산
+        /// - Frontline → Tank or Melee DPS (최전방)
+        /// - Backline → Support or Ranged DPS
+        /// - Rear → Ranged DPS or Support (후방)
+        /// </summary>
+        private static (Vector3 frontline, Vector3 backline, Vector3 rear) CalculateRoleBasedZonePositions(
+            List<BaseUnitEntity> allies, Situation situation)
+        {
+            var tankOrMelee = new List<BaseUnitEntity>();
+            var supportOrRanged = new List<BaseUnitEntity>();
+
+            foreach (var ally in allies)
+            {
+                var settings = ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
+                var role = settings?.Role ?? AIRole.Auto;
+                var rangePreference = settings?.RangePreference ?? RangePreference.Adaptive;
+
+                // Auto 역할은 RoleDetector로 감지
+                if (role == AIRole.Auto)
+                {
+                    role = RoleDetector.DetectOptimalRole(ally);
+                }
+
+                // Tank or Melee DPS → Frontline 후보
+                if (role == AIRole.Tank ||
+                    (role == AIRole.DPS && rangePreference == RangePreference.PreferMelee))
+                {
+                    tankOrMelee.Add(ally);
+                }
+                // Support or Ranged DPS → Backline/Rear 후보
+                else if (role == AIRole.Support ||
+                         (role == AIRole.DPS && rangePreference == RangePreference.PreferRanged))
+                {
+                    supportOrRanged.Add(ally);
+                }
+                // Adaptive DPS → 현재 위치 기준 (적에게 가까우면 전방, 멀면 후방)
+                else
+                {
+                    var enemyCenter = CalculateEnemyCenter(situation);
+                    var allyCenter = CalculateAveragePosition(allies);
+                    float distToEnemy = Vector3.Distance(ally.Position, enemyCenter);
+                    float avgDist = Vector3.Distance(allyCenter, enemyCenter);
+
+                    if (distToEnemy < avgDist)
+                        tankOrMelee.Add(ally);
+                    else
+                        supportOrRanged.Add(ally);
+                }
+            }
+
+            // Fallback: 빈 리스트면 전체 아군 사용
+            if (tankOrMelee.Count == 0)
+            {
+                // 적에게 가장 가까운 아군을 전방으로
+                var enemyCenter = CalculateEnemyCenter(situation);
+                var nearest = allies.OrderBy(a => Vector3.Distance(a.Position, enemyCenter)).FirstOrDefault();
+                if (nearest != null) tankOrMelee.Add(nearest);
+            }
+            if (supportOrRanged.Count == 0)
+            {
+                // 적에게 가장 먼 아군을 후방으로
+                var enemyCenter = CalculateEnemyCenter(situation);
+                var farthest = allies.OrderByDescending(a => Vector3.Distance(a.Position, enemyCenter)).FirstOrDefault();
+                if (farthest != null) supportOrRanged.Add(farthest);
+            }
+
+            // 위치 계산
+            Vector3 frontlinePos = CalculateAveragePosition(tankOrMelee);
+            Vector3 rearPos = CalculateAveragePosition(supportOrRanged);
+
+            // Backline = Frontline과 Rear 중간 (약간 Rear 쪽)
+            // Support/Ranged DPS가 있으면 그들 위치, 없으면 중간점
+            Vector3 backlinePos;
+            if (supportOrRanged.Count > 0)
+            {
+                // 후방 캐릭터들 중 적에게 가장 가까운 쪽을 Backline으로
+                var enemyCenter = CalculateEnemyCenter(situation);
+                var closerSupport = supportOrRanged.OrderBy(a => Vector3.Distance(a.Position, enemyCenter)).FirstOrDefault();
+                backlinePos = closerSupport != null ? closerSupport.Position : (frontlinePos + rearPos) / 2f;
+            }
+            else
+            {
+                backlinePos = (frontlinePos + rearPos) / 2f;
+            }
+
+            // 로깅
+            string tankNames = string.Join(", ", tankOrMelee.Select(a => a.CharacterName));
+            string supportNames = string.Join(", ", supportOrRanged.Select(a => a.CharacterName));
+            Main.LogDebug($"[BuffPlanner] Role-based zones: Frontline=[{tankNames}], Backline/Rear=[{supportNames}]");
+
+            return (frontlinePos, backlinePos, rearPos);
         }
 
         /// <summary>

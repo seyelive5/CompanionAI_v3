@@ -245,8 +245,19 @@ namespace CompanionAI_v3.Core
 
                 // ★ v3.0.93: 실패 시 게임 AI로 위임하지 않고 EndTurn 반환
                 // 게임 AI가 제어권을 가져가면 메디킷 오사용 등 이상 행동 발생
+                // ★ v3.5.23: 회복 가능한 실패는 해당 액션만 스킵하고 계속 진행
                 if (result.Type == ResultType.Failure)
                 {
+                    // 회복 가능한 에러 목록 (해당 액션만 스킵, 다음 액션 계속)
+                    bool isRecoverable = IsRecoverableFailure(result.Reason);
+
+                    if (isRecoverable && turnState.Plan?.RemainingActionCount > 0)
+                    {
+                        Main.LogWarning($"[Orchestrator] {unitName}: Recoverable failure ({result.Reason}) - skipping action and continuing");
+                        // 다음 액션으로 계속 진행하도록 Continue 반환
+                        return ExecutionResult.Continue();
+                    }
+
                     Main.LogWarning($"[Orchestrator] {unitName}: Execution failed ({result.Reason}) - ending turn instead of delegating to game AI");
                     turnState.Plan?.Cancel("Execution failed");
                     return ExecutionResult.EndTurn($"Execution failed: {result.Reason}");
@@ -261,6 +272,38 @@ namespace CompanionAI_v3.Core
                 // ★ v3.0.93: 예외 시에도 EndTurn 반환 (게임 AI 위임 방지)
                 return ExecutionResult.EndTurn($"Exception: {ex.Message}");
             }
+        }
+
+        #endregion
+
+        #region Helper Methods
+
+        /// <summary>
+        /// ★ v3.5.23: 회복 가능한 실패인지 확인
+        /// 이 에러들은 해당 액션만 스킵하고 다음 액션으로 계속 진행
+        /// </summary>
+        private bool IsRecoverableFailure(string reason)
+        {
+            if (string.IsNullOrEmpty(reason)) return false;
+
+            // 회복 가능한 에러 목록
+            var recoverableErrors = new[]
+            {
+                "StrategistZonesCantOverlap",   // 전략가 구역 겹침 - 다른 위치에 배치하면 됨
+                "AlreadyHasBuff",               // 이미 버프 있음 - 스킵 가능
+                "BuffAlreadyActive",            // 버프 이미 활성 - 스킵 가능
+                "TargetHasHigherBuff",          // 더 좋은 버프 있음 - 스킵 가능
+                "NotEnoughResources",           // 리소스 부족 - 스킵하고 다른 액션 시도
+                "CasterMoved"                   // 시전자 이동 - 위치 기반 능력 스킵
+            };
+
+            foreach (var error in recoverableErrors)
+            {
+                if (reason.Contains(error))
+                    return true;
+            }
+
+            return false;
         }
 
         #endregion
