@@ -450,6 +450,9 @@ namespace CompanionAI_v3.Core
             // ★ v3.5.00: 킬 스냅샷 초기화
             _executor.ClearSnapshots();
 
+            // ★ v3.5.29: 전투 캐시 초기화 (거리/타겟팅)
+            CombatCache.ClearAll();
+
             Main.Log($"[Orchestrator] Turn started for {unit.CharacterName} (via event)");
         }
 

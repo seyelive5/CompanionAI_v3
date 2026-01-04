@@ -221,7 +221,7 @@ namespace CompanionAI_v3.GameInterface
             {
                 if (enemy == null || enemy.LifeState.IsDead) continue;
 
-                var enemyNode = enemy.Position.GetNearestNodeXZ();
+                var enemyNode = enemy.Position.GetNearestNodeXZ() as CustomGridNodeBase;
                 if (enemyNode == null) continue;
 
                 float dist = Vector3.Distance(node.Vector3Position, enemy.Position);
@@ -229,16 +229,12 @@ namespace CompanionAI_v3.GameInterface
 
                 try
                 {
-                    var los = LosCalculations.GetWarhammerLos(
-                        enemyNode,
-                        enemy.SizeRect,
-                        node,
-                        unit.SizeRect
-                    );
+                    var los = LosCalculations.GetWarhammerLos(enemyNode, enemy.SizeRect, node, unit.SizeRect);
+                    var coverType = los.CoverType;
 
-                    if (los.CoverType != LosCalculations.CoverType.Invisible) hasAnyLos = true;
+                    if (coverType != LosCalculations.CoverType.Invisible) hasAnyLos = true;
 
-                    switch (los.CoverType)
+                    switch (coverType)
                     {
                         case LosCalculations.CoverType.Invisible:
                             totalCoverScore += 40f;
@@ -251,8 +247,8 @@ namespace CompanionAI_v3.GameInterface
                             break;
                     }
 
-                    if (los.CoverType > score.BestCover)
-                        score.BestCover = los.CoverType;
+                    if (coverType > score.BestCover)
+                        score.BestCover = coverType;
                 }
                 catch { }
             }

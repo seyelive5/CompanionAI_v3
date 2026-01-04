@@ -126,7 +126,8 @@ namespace CompanionAI_v3.Analysis
                 score += hpScore * weights.HPPercent;
 
                 // 2. 거리 점수 (가까울수록 좋음, but Role별 차이)
-                float distance = CombatAPI.GetDistance(situation.Unit, target);
+                // ★ v3.5.29: 캐시된 거리 사용
+                float distance = CombatCache.GetDistance(situation.Unit, target);
                 float distanceScore = -distance * 2f;  // 거리 패널티
 
                 // Tank는 근접 보너스 (★ v3.5.00: ThresholdConfig)
@@ -311,7 +312,8 @@ namespace CompanionAI_v3.Analysis
                 else score -= 30f;  // 힐 불필요
 
                 // 2. 거리 패널티
-                float distance = CombatAPI.GetDistance(situation.Unit, ally);
+                // ★ v3.5.29: 캐시된 거리 사용
+                float distance = CombatCache.GetDistance(situation.Unit, ally);
                 score -= distance * 2f * weights.Distance;
 
                 // 3. 역할 우선순위 (Tank > DPS > Support)
@@ -451,7 +453,8 @@ namespace CompanionAI_v3.Analysis
                 }
 
                 // 거리 - 가까우면 더 위협적 (★ v3.5.00: ThresholdConfig)
-                float distance = CombatAPI.GetDistance(situation.Unit, target);
+                // ★ v3.5.29: 캐시된 거리 사용
+                float distance = CombatCache.GetDistance(situation.Unit, target);
                 if (distance <= t.ThreatProximity) threat += 0.2f;
 
                 // 저HP = 덜 위협적 (★ v3.5.00: ThresholdConfig)
@@ -537,13 +540,14 @@ namespace CompanionAI_v3.Analysis
 
             try
             {
+                // ★ v3.5.29: 캐시된 거리 사용
                 return situation.Enemies
                     .Where(e => e != null)
                     .Where(e => {
                         try { return e.LifeState?.IsDead != true; }
                         catch { return true; }
                     })
-                    .Select(e => CombatAPI.GetDistance(ally, e))
+                    .Select(e => CombatCache.GetDistance(ally, e))
                     .DefaultIfEmpty(float.MaxValue)
                     .Min();
             }

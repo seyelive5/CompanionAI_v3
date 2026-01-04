@@ -104,13 +104,14 @@ namespace CompanionAI_v3.Analysis
             situation.Allies = CombatAPI.GetAllies(unit);
 
             // 가장 가까운 적
+            // ★ v3.5.29: 캐시된 거리 사용
             situation.NearestEnemy = situation.Enemies
                 .Where(e => e != null && !e.LifeState.IsDead)
-                .OrderBy(e => CombatAPI.GetDistance(unit, e))
+                .OrderBy(e => CombatCache.GetDistance(unit, e))
                 .FirstOrDefault();
 
             situation.NearestEnemyDistance = situation.NearestEnemy != null
-                ? CombatAPI.GetDistance(unit, situation.NearestEnemy)
+                ? CombatCache.GetDistance(unit, situation.NearestEnemy)
                 : float.MaxValue;
 
             // 가장 부상당한 아군
@@ -221,7 +222,8 @@ namespace CompanionAI_v3.Analysis
                         if (patternInfo == null || !patternInfo.IsValid) continue;
 
                         float effectiveRange = CombatAPI.GetAbilityRange(attack) + patternInfo.Radius;
-                        float dist = CombatAPI.GetDistance(unit, enemy);
+                        // ★ v3.5.29: 캐시된 거리 사용
+                        float dist = CombatCache.GetDistance(unit, enemy);
                         if (dist > effectiveRange) continue;
 
                         // ★ v3.1.19: AOE 안전성 체크 추가
@@ -234,9 +236,10 @@ namespace CompanionAI_v3.Analysis
                         // ★ v3.5.13: Point AOE에 대해 LOS 체크 추가
                         // 문제: 거리/안전성 체크만 하면 Hittable=true지만 실제 시전 시 HasNoLosToTarget
                         // 해결: 적 위치를 타겟 포인트로 CanUseAbilityOn 체크
+                        // ★ v3.5.29: 캐시 사용
                         var pointTarget = new TargetWrapper(enemy.Position);
                         string aoeReason;
-                        if (!CombatAPI.CanUseAbilityOn(attack, pointTarget, out aoeReason))
+                        if (!CombatCache.CanUseAbilityOn(attack, pointTarget, out aoeReason))
                         {
                             Main.LogDebug($"[Analyzer] AOE LOS failed: {attack.Name} -> {enemy.CharacterName} ({aoeReason})");
                             continue;
@@ -247,8 +250,9 @@ namespace CompanionAI_v3.Analysis
                         break;
                     }
 
+                    // ★ v3.5.29: 캐시 사용
                     string reason;
-                    if (CombatAPI.CanUseAbilityOn(attack, targetWrapper, out reason))
+                    if (CombatCache.CanUseAbilityOn(attack, targetWrapper, out reason))
                     {
                         isHittable = true;
                         hittableBy = attack.Name;
@@ -302,8 +306,9 @@ namespace CompanionAI_v3.Analysis
                         {
                             if (attack == null) continue;
 
+                            // ★ v3.5.29: 캐시 사용
                             string reason;
-                            if (CombatAPI.CanUseAbilityOn(attack, targetWrapper, out reason))
+                            if (CombatCache.CanUseAbilityOn(attack, targetWrapper, out reason))
                             {
                                 situation.HittableEnemies.Add(enemy);
                                 Main.LogDebug($"[Analyzer] {enemy.CharacterName} hittable by {attack.Name} (fallback)");

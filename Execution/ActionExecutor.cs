@@ -134,6 +134,17 @@ namespace CompanionAI_v3.Execution
                 }
             }
 
+            // ★ v3.5.29: 캐시 무효화 - 타겟 위치가 변할 수 있는 능력
+            // Attack, Debuff 등 적에게 사용하는 능력은 밀치기/이동 효과가 있을 수 있음
+            if (action.Type == ActionType.Attack || action.Type == ActionType.Debuff)
+            {
+                var cacheTarget = target.Entity as BaseUnitEntity;
+                if (cacheTarget != null)
+                {
+                    CombatCache.InvalidateTarget(cacheTarget);
+                }
+            }
+
             // 실행 명령 반환
             Main.Log($"[Executor] Cast: {ability.Name} -> {GetTargetName(target)}");
             return ExecutionResult.CastAbility(ability, target);
