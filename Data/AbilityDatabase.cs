@@ -1083,6 +1083,29 @@ namespace CompanionAI_v3.Data
             return GetTiming(ability) == AbilityTiming.TurnEnding;
         }
 
+        /// <summary>
+        /// ★ v3.5.22: SpringAttack 능력인지 확인 (Acrobatic Artistry)
+        /// CustomSpringAttackQueue 컴포넌트를 가진 능력
+        /// - 갭클로저 사용 후 시작 위치로 복귀하는 능력
+        /// </summary>
+        public static bool IsSpringAttackAbility(AbilityData ability)
+        {
+            if (ability == null) return false;
+
+            try
+            {
+                // GUID로 직접 확인 (Acrobatic Artistry)
+                string guid = ability?.Blueprint?.AssetGuid?.ToString() ?? "";
+                if (guid == "1798e1237504457db15655280481d549")  // AcrobaticArtistry
+                    return true;
+
+                // 컴포넌트 기반 확인
+                var component = ability.Blueprint?.GetComponent<Kingmaker.UnitLogic.Abilities.Components.CustomSpringAttackQueue>();
+                return component != null;
+            }
+            catch { return false; }
+        }
+
         public static bool IsRighteousFury(AbilityData ability)
         {
             if (GetTiming(ability) == AbilityTiming.RighteousFury)

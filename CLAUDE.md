@@ -1,26 +1,35 @@
-# CompanionAI v3.0 - Warhammer 40K Rogue Trader AI Mod
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+---
+
+# CompanionAI v3.5 - Warhammer 40K Rogue Trader AI Mod
 
 ## 프로젝트 개요
 - **언어**: C# (.NET Framework 4.8.1)
 - **타입**: Unity Mod Manager 기반 게임 모드
 - **목적**: 동료 AI 완전 대체 - TurnPlanner 중심 아키텍처
 
-## v3.0 핵심 설계 원칙
+## 핵심 설계 원칙
 1. **TurnPlanner가 두뇌**: 모든 결정은 TurnPlanner가 담당
 2. **단일 진입점**: MainAIPatch 하나만 게임과 통신
 3. **게임 AI는 실행만**: 게임은 우리 결정을 실행하는 역할
 4. **무한 루프 방지**: TurnState에서 중앙화된 추적
+5. **팀 협동 (v3.5+)**: TeamBlackboard로 팀 전체 상태 공유
 
 ## 폴더 구조
 ```
 CompanionAI_v3/
 ├── Core/           - 중앙 컨트롤러 (TurnOrchestrator, TurnState, TurnPlan)
-├── Analysis/       - 상황 분석 (SituationAnalyzer, TargetScorer, PositionEvaluator)
-├── Planning/       - 전략 기획 (TurnPlanner - 핵심!)
+├── Analysis/       - 상황 분석 (SituationAnalyzer, TargetScorer, ClusterDetector)
+├── Planning/       - 전략 기획 (TurnPlanner, DPSPlan, TankPlan, SupportPlan)
 ├── Execution/      - 행동 실행 (ActionExecutor)
 ├── Data/           - 데이터 (AbilityDatabase, AbilityInfo)
-├── GameInterface/  - 게임 연동 (CombatAPI, MainAIPatch)
-└── Settings/       - 설정 (ModSettings, UnitSettings)
+├── GameInterface/  - 게임 연동 (CombatAPI, MainAIPatch, MovementAPI)
+├── Settings/       - 설정 (ModSettings, AIConfig, UnitSettings)
+├── UI/             - Unity Mod Manager UI (MainUI)
+└── Coordination/   - 팀 협동 (TeamBlackboard, RoleDetector)
 ```
 
 ## 빌드 명령
@@ -28,15 +37,26 @@ CompanionAI_v3/
 **⚠️ 중요: Visual Studio 2018 (버전 18) 사용**
 
 ```powershell
-# MSBuild 직접 사용
-"C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" "c:\Users\veria\Downloads\CompanionAI_v3\CompanionAI_v3.csproj" /p:Configuration=Release /t:Rebuild /v:minimal /nologo
-
-# 또는 PowerShell에서
-& 'C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe' 'c:\Users\veria\Downloads\CompanionAI_v3\CompanionAI_v3.csproj' /p:Configuration=Release /t:Rebuild /v:normal
+"C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" CompanionAI_v3.csproj -p:Configuration=Release -t:Rebuild -v:minimal -nologo
 ```
 
 **빌드 출력 경로**: `C:\Users\veria\AppData\LocalLow\Owlcat Games\Warhammer 40000 Rogue Trader\UnityModManager\CompanionAI_v3\`
 (csproj에서 UMM 폴더로 직접 출력 설정됨)
+
+## 릴리즈 배포 규칙
+
+**⚠️ 중요: zip 파일에는 dll + Info.json만 포함**
+
+```powershell
+# 임시 폴더에 dll, Info.json만 복사 후 압축
+# 절대로 사용자 설정 파일(settings.json, aiconfig.json)을 포함하지 말 것!
+```
+
+배포 파일:
+- `CompanionAI_v3.dll` - 필수
+- `Info.json` - 필수
+- `settings.json` - ❌ 포함 금지 (사용자 설정)
+- `aiconfig.json` - ❌ 포함 금지 (자동 생성됨)
 
 ## 아키텍처 흐름
 ```
@@ -547,7 +567,7 @@ public static List<AbilityData> GetAvailableAbilities(BaseUnitEntity unit)
 ---
 
 ## 참조 리소스
-- **게임 디컴파일 소스**: `D:\RogueTraderDecompiled-master`
+- **게임 디컴파일 소스**: `C:\Users\veria\Downloads\EnhancedCompanionAI (2)\RogueTraderDecompiled-master`
 
 ## 게임 API 핵심 사항
 

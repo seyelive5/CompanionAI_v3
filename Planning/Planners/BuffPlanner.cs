@@ -496,6 +496,18 @@ namespace CompanionAI_v3.Planning.Planners
                     continue;
                 }
 
+                // ★ v3.5.22: SpringAttack 능력(Acrobatic Artistry) 조건 체크
+                // 갭클로저 사용 이력이 있거나 시작 위치에서 이동한 경우에만 사용
+                if (AbilityDatabase.IsSpringAttackAbility(ability))
+                {
+                    if (!CombatAPI.CanUseSpringAttackAbility(situation.Unit))
+                    {
+                        Main.LogDebug($"[{roleName}] PlanTurnEnding: {ability.Name} skipped - no gap closer used and at start position");
+                        continue;
+                    }
+                    Main.Log($"[{roleName}] SpringAttack condition met - can use {ability.Name}");
+                }
+
                 // ★ v3.0.89: PointTarget vs SelfTarget 분기
                 // VeilOfBlades 등: CanTargetPoint=True, CanTargetSelf=False → 위치 타겟
                 // ★ v3.1.28: CanTargetSelf=False인 경우 자기 위치 대신 오프셋 위치 사용

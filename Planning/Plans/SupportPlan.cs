@@ -289,12 +289,21 @@ namespace CompanionAI_v3.Planning.Plans
                     if (remainingAP < 1f) break;
 
                     // ★ v3.1.10: 공격 전 버프는 공격이 없으면 의미 없음
+                    // ★ v3.5.22: TurnEnding, SpringAttack 능력도 폴백에서 제외
                     var timing = AbilityDatabase.GetTiming(buff);
                     if (timing == AbilityTiming.PreAttackBuff ||
                         timing == AbilityTiming.HeroicAct ||
-                        timing == AbilityTiming.RighteousFury)
+                        timing == AbilityTiming.RighteousFury ||
+                        timing == AbilityTiming.TurnEnding)
                     {
-                        Main.LogDebug($"[Support] Phase 7.5: Skip {buff.Name} (PreAttackBuff without attack)");
+                        Main.LogDebug($"[Support] Phase 7.5: Skip {buff.Name} (timing={timing} not suitable for fallback)");
+                        continue;
+                    }
+
+                    // ★ v3.5.22: SpringAttack 능력은 조건 충족 시에만 TurnEnding에서 사용
+                    if (AbilityDatabase.IsSpringAttackAbility(buff))
+                    {
+                        Main.LogDebug($"[Support] Phase 7.5: Skip {buff.Name} (SpringAttack - use in TurnEnding only)");
                         continue;
                     }
 

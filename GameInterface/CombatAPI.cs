@@ -2088,5 +2088,66 @@ namespace CompanionAI_v3.GameInterface
         }
 
         #endregion
+
+        #region SpringAttack (v3.5.22)
+
+        /// <summary>
+        /// ★ v3.5.22: 유닛이 SpringAttack(Acrobatic Artistry)을 사용할 수 있는 조건인지 확인
+        /// - 갭클로저 2회 이상 사용 → 사용 (역순 공격 2번 가치)
+        /// - 단, 노렸던 적이 전부 죽었으면 사용 X (역순 공격해도 의미 없음)
+        /// </summary>
+        public static bool CanUseSpringAttackAbility(BaseUnitEntity unit)
+        {
+            if (unit == null) return false;
+
+            try
+            {
+                var springAttackPart = unit.GetOptional<UnitPartSpringAttack>();
+                if (springAttackPart == null) return false;
+
+                int entryCount = springAttackPart.Entries?.Count ?? 0;
+
+                // ★ 갭클로저 2회 미만 → 사용 안 함
+                if (entryCount < 2)
+                {
+                    Main.LogDebug($"[CombatAPI] {unit.CharacterName}: SpringAttack skip (entries={entryCount}, need 2+)");
+                    return false;
+                }
+
+                // ★ 살아있는 적이 있는지 확인 (전부 죽었으면 역순 공격 의미 없음)
+                var enemies = GetEnemies(unit);
+                int livingEnemies = enemies.Count;
+
+                if (livingEnemies == 0)
+                {
+                    Main.Log($"[CombatAPI] {unit.CharacterName}: SpringAttack skip - all enemies dead");
+                    return false;
+                }
+
+                Main.Log($"[CombatAPI] {unit.CharacterName}: SpringAttack {entryCount} entries + {livingEnemies} living enemies - use!");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] CanUseSpringAttackAbility error: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.5.22: 유닛이 UnitPartSpringAttack를 가지고 있는지 확인
+        /// </summary>
+        public static bool HasSpringAttackPart(BaseUnitEntity unit)
+        {
+            if (unit == null) return false;
+
+            try
+            {
+                return unit.GetOptional<UnitPartSpringAttack>() != null;
+            }
+            catch { return false; }
+        }
+
+        #endregion
     }
 }
