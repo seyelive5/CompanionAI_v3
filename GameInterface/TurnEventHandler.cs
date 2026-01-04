@@ -62,6 +62,9 @@ namespace CompanionAI_v3.GameInterface
 
             // TurnOrchestrator에 새 턴 시작 알림
             TurnOrchestrator.Instance.OnTurnStart(unit);
+
+            // ★ v3.5.26: 턴 시작 시간 기록 (IsActingEnabled 구현용)
+            CustomBehaviourTreePatch.RecordTurnStart(unit.UniqueId);
         }
 
         /// <summary>
@@ -79,6 +82,9 @@ namespace CompanionAI_v3.GameInterface
 
             // TurnOrchestrator에 턴 종료 알림
             TurnOrchestrator.Instance.OnTurnEnd(unit);
+
+            // ★ v3.5.26: 턴 시작 시간 정리
+            CustomBehaviourTreePatch.ClearTurnStart(unit.UniqueId);
         }
 
         /// <summary>

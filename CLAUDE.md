@@ -106,6 +106,21 @@ MainAIPatch → 게임에 결과 전달
 
 # Claude 행동 방침
 
+## ⚠️ 새 세션 시작 시 필수 작업
+
+**새 대화 세션이 시작되면 반드시:**
+1. 전체 코드베이스 구조 파악 (폴더별 역할 이해)
+2. 최근 변경사항 확인 (git log, 주요 파일 버전 주석)
+3. 현재 게임 로그 확인 (문제 있는지 파악)
+4. LESSONS_LEARNED 섹션 전부 읽기
+
+**왜?**
+- 이전 세션의 컨텍스트가 없으면 같은 실수 반복
+- 게임 메커니즘을 모르면 잘못된 해결책 제시
+- 부분만 보면 전체 아키텍처 파괴
+
+---
+
 ## 핵심 원칙: "나무를 보지 말고 숲을 봐라"
 
 ### v3 특화 지침
@@ -563,6 +578,53 @@ public static List<AbilityData> GetAvailableAbilities(BaseUnitEntity unit)
 - SituationAnalyzer.AnalyzeAbilities() → 쿨다운 능력이 애초에 제외됨
 - TurnPlanner → 실제 사용 가능한 능력만으로 계획 수립
 - 더 이상 NeedsReplan→Replan→동일 쿨다운 능력 포함 문제 없음
+
+---
+
+## ⚠️ 인위적인 제한 금지 (v3.5.25+)
+
+### 문제 (v3.5.24 이전)
+```csharp
+// ❌ 잘못된 접근 - 인위적인 숫자 제한
+public const int MaxActionsPerTurn = 15;  // 왜 15? 근거 없음
+```
+
+**실제 발생한 문제:**
+```
+Action #12: Debuff (죽음의 맹세)
+Action #13: Buff (무모한 결단) → MP 회복
+Action #14: Buff (???리?) → MP 추가 회복
+Action #15: Move → 적 접근
+→ "Max actions reached (15)" 강제 종료
+→ 플랜에 남아있던 Attack 실행 못함!
+→ AP=2.0, MP=9.0 남아있는데 강제 종료
+```
+
+**이건 정상적인 키벨라 플레이:**
+- 죽음 강림(갭클로저) 범위 밖 → MP 회복 버프 → 이동 → 공격
+- 게임 메커니즘대로 작동 중인데 인위적 제한에 막힘
+
+### 해결: 게임의 자연스러운 제한을 따름 (v3.5.25+)
+```csharp
+// ✅ 사실상 무제한 - 게임 메커니즘이 알아서 제한
+public const int MaxActionsPerTurn = 9999;
+```
+
+**게임의 자연스러운 종료 조건:**
+- AP=0 AND 공격/스킬 불가
+- MP=0 AND 이동 불필요
+- 모든 스킬 쿨다운
+- 타겟 없음
+
+**이미 있는 안전장치:**
+- `ConsecutiveFailures >= 3` → 턴 종료
+- `Plan.IsComplete` → 턴 종료
+- `gameAP <= 0 && turnState.ActionCount > 0` → 턴 종료 (Move 예외 처리됨)
+
+### 핵심 교훈
+- 인위적인 숫자 제한(15개)은 버그를 숨기는 bandaid
+- "루프 감지" 같은 휴리스틱도 정상 플레이를 막을 수 있음
+- **게임 메커니즘을 신뢰하라**
 
 ---
 

@@ -11,8 +11,12 @@ namespace CompanionAI_v3.Core
     {
         #region Constants
 
-        /// <summary>턴당 최대 행동 수 (안전 장치)</summary>
-        public const int MaxActionsPerTurn = 15;
+        /// <summary>
+        /// 턴당 최대 행동 수 (최후의 안전장치)
+        /// ★ v3.5.25: 15 → 9999 (사실상 무제한)
+        /// 게임의 자연스러운 제한(AP/MP/쿨다운)을 따름
+        /// </summary>
+        public const int MaxActionsPerTurn = 9999;
 
         #endregion
 

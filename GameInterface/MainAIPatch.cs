@@ -16,13 +16,33 @@ using CompanionAI_v3.Settings;
 namespace CompanionAI_v3.GameInterface
 {
     /// <summary>
-    /// 메인 AI 패치 - 단일 진입점
+    /// 메인 AI 패치 - 폴백 및 게임 상태 제어
+    ///
+    /// ★ v3.5.28: BehaviourTree 완전 대체 후 역할
+    ///
+    /// 패치 체인:
+    /// 1. CustomBehaviourTreePatch.UpdateBehaviourTree_Postfix (CustomBehaviourTree.cs)
+    ///    └─ CompanionAI 유닛에 커스텀 트리 적용 (정상 경로)
+    ///    └─ CompanionAIDecisionNode가 모든 AI 결정 처리
+    ///
+    /// 2. MainAIPatch (이 파일) - 폴백 및 게임 상태 제어
+    ///    ├─ SelectAbilityTarget_Prefix: 커스텀 트리 미적용 시 폴백
+    ///    ├─ FindBetterPlace_Prefix: 이동 로직 폴백 + 원거리 포지셔닝
+    ///    ├─ IsAiTurn_Postfix: 게임에 "AI 턴" 보고
+    ///    ├─ IsPlayerTurn_Postfix: 게임에 "플레이어 턴 아님" 보고
+    ///    ├─ IsAIEnabled_Postfix: Brain 활성화 상태 제어
+    ///    └─ IsUsualMeleeUnit_Postfix: 원거리 유닛 돌진 방지
     /// </summary>
     [HarmonyPatch]
     public static class MainAIPatch
     {
-        #region Patch Target - TaskNodeSelectAbilityTarget
+        #region Patch Target - TaskNodeSelectAbilityTarget (폴백)
 
+        /// <summary>
+        /// ★ v3.5.28: 폴백 패치
+        /// - 정상 경로: CustomBehaviourTree의 CompanionAIDecisionNode가 처리
+        /// - 폴백 경로: 커스텀 트리 미적용 유닛 (모드 로드 전 생성된 트리, 호환 문제 등)
+        /// </summary>
         [HarmonyPatch(typeof(TaskNodeSelectAbilityTarget), "TickInternal")]
         [HarmonyPrefix]
         [HarmonyPriority(Priority.High)]
