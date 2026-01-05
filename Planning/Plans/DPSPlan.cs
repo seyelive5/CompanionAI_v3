@@ -378,7 +378,8 @@ namespace CompanionAI_v3.Planning.Plans
             if (!didPlanAttack && situation.NearestEnemy != null)
             {
                 Main.Log($"[DPS] Phase 5.6: Trying GapCloser as fallback (attack failed)");
-                var gapCloserAction = PlanGapCloser(situation, situation.NearestEnemy, ref remainingAP);
+                // ★ v3.5.34: MP 비용 예측 버전 사용
+                var gapCloserAction = PlanGapCloser(situation, situation.NearestEnemy, ref remainingAP, ref remainingMP);
                 if (gapCloserAction != null)
                 {
                     actions.Add(gapCloserAction);

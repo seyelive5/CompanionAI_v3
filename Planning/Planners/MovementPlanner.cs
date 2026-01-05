@@ -55,9 +55,12 @@ namespace CompanionAI_v3.Planning.Planners
 
             // ★ 먼저 GapCloser 시도 (근접 선호이고 적이 멀 때)
             // ★ v3.5.18: tacticalTarget 사용
+            // ★ v3.5.34: MP 비용 예측 추가
             if (!situation.PrefersRanged && tacticalTargetDistance > 3f)
             {
-                var gapCloserAction = PlanGapCloser(situation, tacticalTarget, ref remainingAP, roleName);
+                // ★ v3.5.34: effectiveMP 계산 (predictedMP 고려)
+                float effectiveMP = Math.Max(situation.CurrentMP, predictedMP);
+                var gapCloserAction = PlanGapCloser(situation, tacticalTarget, ref remainingAP, ref effectiveMP, roleName);
                 if (gapCloserAction != null)
                 {
                     Main.Log($"[{roleName}] GapCloser instead of move: {gapCloserAction.Ability?.Name}");
@@ -103,11 +106,12 @@ namespace CompanionAI_v3.Planning.Planners
         /// ★ v3.0.81: PointTarget 능력 지원 (Death from Above 등)
         /// ★ v3.0.87: 디버그 로깅 추가
         /// ★ v3.1.24: 첫 타겟 실패 시 다른 적 타겟도 시도
+        /// ★ v3.5.34: MP 비용 예측 추가 - 실제 타일 경로 기반 계산
         /// </summary>
-        public static PlannedAction PlanGapCloser(Situation situation, BaseUnitEntity target, ref float remainingAP, string roleName)
+        public static PlannedAction PlanGapCloser(Situation situation, BaseUnitEntity target, ref float remainingAP, ref float remainingMP, string roleName)
         {
             // ★ v3.0.87: 진입 로깅
-            Main.LogDebug($"[{roleName}] PlanGapCloser: target={target?.CharacterName}, AP={remainingAP:F1}, attacks={situation.AvailableAttacks?.Count ?? 0}");
+            Main.LogDebug($"[{roleName}] PlanGapCloser: target={target?.CharacterName}, AP={remainingAP:F1}, MP={remainingMP:F1}, attacks={situation.AvailableAttacks?.Count ?? 0}");
 
             var gapClosers = situation.AvailableAttacks
                 .Where(a => AbilityDatabase.IsGapCloser(a))
@@ -148,6 +152,14 @@ namespace CompanionAI_v3.Planning.Planners
 
                 foreach (var candidateTarget in targetsToTry)
                 {
+                    // ★ v3.5.34: MP 비용 체크 (실제 타일 경로 기반)
+                    float mpCost = CombatAPI.GetAbilityExpectedMPCost(gapCloser, candidateTarget);
+                    if (mpCost > remainingMP && mpCost < float.MaxValue)
+                    {
+                        Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} -> {candidateTarget.CharacterName} skipped - MP cost {mpCost:F1} > remaining {remainingMP:F1}");
+                        continue;
+                    }
+
                     if (isPointTarget)
                     {
                         // ★ v3.1.28: 능력 정보 전달하여 범위 내 착지 위치 찾기
@@ -161,7 +173,13 @@ namespace CompanionAI_v3.Planning.Planners
                             if (CombatAPI.CanUseAbilityOn(gapCloser, pointTarget, out reason))
                             {
                                 remainingAP -= cost;
-                                Main.Log($"[{roleName}] Position gap closer: {gapCloser.Name} -> near {candidateTarget.CharacterName} ({landingPosition.Value.x:F1},{landingPosition.Value.z:F1})");
+                                // ★ v3.5.34: MP도 차감
+                                if (mpCost < float.MaxValue)
+                                {
+                                    remainingMP -= mpCost;
+                                    if (remainingMP < 0) remainingMP = 0;
+                                }
+                                Main.Log($"[{roleName}] Position gap closer: {gapCloser.Name} -> near {candidateTarget.CharacterName} (AP:{cost:F1}, MP:{mpCost:F1})");
                                 return PlannedAction.PositionalAttack(gapCloser, landingPosition.Value, $"Jump to {candidateTarget.CharacterName}", cost);
                             }
                             else
@@ -182,7 +200,13 @@ namespace CompanionAI_v3.Planning.Planners
                         if (CombatAPI.CanUseAbilityOn(gapCloser, targetWrapper, out reason))
                         {
                             remainingAP -= cost;
-                            Main.Log($"[{roleName}] Gap closer: {gapCloser.Name} -> {candidateTarget.CharacterName}");
+                            // ★ v3.5.34: MP도 차감
+                            if (mpCost < float.MaxValue)
+                            {
+                                remainingMP -= mpCost;
+                                if (remainingMP < 0) remainingMP = 0;
+                            }
+                            Main.Log($"[{roleName}] Gap closer: {gapCloser.Name} -> {candidateTarget.CharacterName} (AP:{cost:F1}, MP:{mpCost:F1})");
                             return PlannedAction.Attack(gapCloser, candidateTarget, $"Gap closer on {candidateTarget.CharacterName}", cost);
                         }
                         else
@@ -195,6 +219,15 @@ namespace CompanionAI_v3.Planning.Planners
 
             Main.LogDebug($"[{roleName}] PlanGapCloser: All GapClosers failed on all targets");
             return null;
+        }
+
+        /// <summary>
+        /// ★ v3.5.34: PlanGapCloser 오버로드 (remainingMP 없는 버전 - 레거시 호환)
+        /// </summary>
+        public static PlannedAction PlanGapCloser(Situation situation, BaseUnitEntity target, ref float remainingAP, string roleName)
+        {
+            float remainingMP = situation.CurrentMP;
+            return PlanGapCloser(situation, target, ref remainingAP, ref remainingMP, roleName);
         }
 
         /// <summary>

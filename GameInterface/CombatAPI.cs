@@ -5,9 +5,11 @@ using Kingmaker;
 using Kingmaker.Blueprints;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Items;
+using Kingmaker.Pathfinding;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.UnitLogic.Abilities.Blueprints;
 using Kingmaker.UnitLogic.Abilities.Components;
+using Kingmaker.UnitLogic.Abilities.Components.CasterCheckers;
 using Kingmaker.UnitLogic.Mechanics.Actions;
 using Kingmaker.UnitLogic.Parts;
 using Kingmaker.Utility;
@@ -177,6 +179,38 @@ namespace CompanionAI_v3.GameInterface
             catch (Exception ex)
             {
                 Main.LogError($"[CombatAPI] IsAbilityOnCooldownWithGroups error: {ex.Message}\n{ex.StackTrace}");
+                return false; // 에러 시 일단 허용
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.5.32: 중복 그룹 체크 (쿨다운 체크 없이 그룹 중복만 확인)
+        /// 게임 데이터 버그로 일부 능력이 동일 그룹에 중복 등록되어 있음
+        /// </summary>
+        public static bool HasDuplicateAbilityGroups(AbilityData ability)
+        {
+            if (ability == null) return false;
+
+            try
+            {
+                var groups = ability.AbilityGroups;
+                if (groups == null || groups.Count <= 1) return false;
+
+                var seenGroups = new HashSet<string>();
+                foreach (var group in groups)
+                {
+                    if (group == null) continue;
+                    string groupId = group.AssetGuid?.ToString() ?? group.name ?? "unknown";
+                    if (seenGroups.Contains(groupId))
+                    {
+                        return true; // 중복 그룹 발견
+                    }
+                    seenGroups.Add(groupId);
+                }
+                return false;
+            }
+            catch
+            {
                 return false; // 에러 시 일단 허용
             }
         }
@@ -589,6 +623,14 @@ namespace CompanionAI_v3.GameInterface
                         }
                     }
 
+                    // ★ v3.5.32: 중복 그룹 체크 - 계획 단계에서 필터링
+                    // 게임 데이터 버그로 중복 그룹이 있는 능력은 실행 시 에러 발생
+                    if (HasDuplicateAbilityGroups(data))
+                    {
+                        Main.LogDebug($"[CombatAPI] Filtered out {data.Name}: duplicate ability groups (game data bug)");
+                        continue;
+                    }
+
                     abilities.Add(data);
                 }
             }
@@ -783,6 +825,106 @@ namespace CompanionAI_v3.GameInterface
                 return ability.ClearMPAfterUse;
             }
             catch { return false; }
+        }
+
+        /// <summary>
+        /// ★ v3.5.34: GapCloser/Charge 능력의 MP 비용 계산
+        /// 게임의 패스파인딩 API를 사용하여 실제 타일 경로 비용 계산
+        /// MP 비용 = 경로 타일 수 - 1 (출발점 제외)
+        /// </summary>
+        public static float GetGapCloserMPCost(BaseUnitEntity unit, Vector3 targetPosition)
+        {
+            if (unit == null) return float.MaxValue;
+
+            try
+            {
+                var agent = unit.View?.MovementAgent;
+                if (agent == null)
+                {
+                    Main.LogDebug($"[CombatAPI] GetGapCloserMPCost: agent is null");
+                    return float.MaxValue;
+                }
+
+                // 게임의 Charge 경로 계산 API 사용
+                var path = PathfindingService.Instance.FindPathChargeTB_Blocking(
+                    agent,
+                    unit.Position,
+                    targetPosition,
+                    false,  // ignoreBlockers
+                    null    // targetEntity
+                );
+
+                if (path == null || path.path == null || path.path.Count < 2)
+                {
+                    Main.LogDebug($"[CombatAPI] GetGapCloserMPCost: invalid path (count={path?.path?.Count ?? 0})");
+                    return float.MaxValue;
+                }
+
+                // MP 비용 = 경로 타일 수 - 1 (출발점 제외)
+                // 게임의 AbilityCustomDirectMovement.Deliver()와 동일한 계산
+                float mpCost = Math.Max(0, path.path.Count - 1);
+                Main.LogDebug($"[CombatAPI] GetGapCloserMPCost: path={path.path.Count} tiles -> MP cost={mpCost}");
+                return mpCost;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] GetGapCloserMPCost error: {ex.Message}");
+                return float.MaxValue;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.5.34: 능력의 MP 비용 계산 (통합 API)
+        /// GapCloser/Charge 능력은 실제 경로 기반, 그 외는 컴포넌트 기반
+        /// </summary>
+        public static float GetAbilityExpectedMPCost(AbilityData ability, BaseUnitEntity target = null)
+        {
+            if (ability == null) return 0f;
+
+            try
+            {
+                // 1. ClearMPAfterUse 체크 - 전체 MP 소모
+                if (ability.ClearMPAfterUse)
+                {
+                    Main.LogDebug($"[CombatAPI] {ability.Name}: ClearMPAfterUse -> MP cost=MAX");
+                    return float.MaxValue;
+                }
+
+                // 2. WarhammerAbilityManageResources 체크 (고정 MP 비용)
+                var manageResources = ability.Blueprint?.GetComponent<WarhammerAbilityManageResources>();
+                if (manageResources != null)
+                {
+                    if (manageResources.CostsMaximumMovePoints)
+                    {
+                        Main.LogDebug($"[CombatAPI] {ability.Name}: CostsMaximumMovePoints -> MP cost=MAX");
+                        return float.MaxValue;
+                    }
+                    if (manageResources.shouldSpendMovePoints > 0)
+                    {
+                        Main.LogDebug($"[CombatAPI] {ability.Name}: shouldSpendMovePoints={manageResources.shouldSpendMovePoints}");
+                        return manageResources.shouldSpendMovePoints;
+                    }
+                }
+
+                // 3. IsMoveUnit (Charge/GapCloser 등) - 패스파인딩으로 실제 비용 계산
+                if (ability.Blueprint?.IsMoveUnit == true && target != null)
+                {
+                    var caster = ability.Caster as BaseUnitEntity;
+                    if (caster != null)
+                    {
+                        float mpCost = GetGapCloserMPCost(caster, target.Position);
+                        Main.LogDebug($"[CombatAPI] {ability.Name}: IsMoveUnit -> MP cost={mpCost:F1}");
+                        return mpCost;
+                    }
+                }
+
+                return 0f;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] GetAbilityExpectedMPCost error: {ex.Message}");
+                return 0f;
+            }
         }
 
         public static bool HasActiveBuff(BaseUnitEntity unit, AbilityData ability)

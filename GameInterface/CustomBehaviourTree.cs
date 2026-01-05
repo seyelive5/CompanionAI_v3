@@ -141,8 +141,11 @@ namespace CompanionAI_v3.GameInterface
                                         new TaskNodeCastAbility()
                                     ),
                                     // Path 2: 이동 실행
+                                    // ★ v3.5.33: CombatAPI.CanMove() 체크 추가 - 이동 불가 시 이동 브랜치 스킵
                                     new Condition(
-                                        b => b.DecisionContext != null && !b.DecisionContext.FoundBetterPlace.PathData.IsZero,
+                                        b => b.DecisionContext != null &&
+                                             !b.DecisionContext.FoundBetterPlace.PathData.IsZero &&
+                                             CombatAPI.CanMove(b.DecisionContext.Unit),
                                         new Sequence(
                                             TaskNodeSetupMoveCommand.ToBetterPosition(),
                                             new TaskNodeExecuteMoveCommand()
@@ -272,6 +275,8 @@ namespace CompanionAI_v3.GameInterface
                         // 능력 시전 → context에 설정하고 Success
                         context.Ability = result.Ability;
                         context.AbilityTarget = result.Target;
+                        // ★ v3.5.33: Stale 이동 데이터 클리어 - Charge 후 이동 버그 방지
+                        context.FoundBetterPlace = default;
                         Main.Log($"[CompanionAIDecisionNode] {unit.CharacterName}: Cast {result.Ability?.Name} -> {result.Target?.Entity}");
                         return Status.Success;  // → Selector가 TaskNodeCastAbility 실행
 
@@ -330,6 +335,9 @@ namespace CompanionAI_v3.GameInterface
         /// </summary>
         private bool SetupMovement(BaseUnitEntity unit, Vector3 destination, DecisionContext context)
         {
+            // ★ v3.5.33: 기존 stale 데이터 클리어
+            context.FoundBetterPlace = default;
+
             try
             {
                 // UnitMoveVariants 확인

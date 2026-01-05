@@ -109,6 +109,10 @@ namespace CompanionAI_v3.Planning.Plans
         protected PlannedAction PlanGapCloser(Situation situation, BaseUnitEntity target, ref float remainingAP)
             => MovementPlanner.PlanGapCloser(situation, target, ref remainingAP, RoleName);
 
+        // ★ v3.5.34: MP 비용 예측 버전 추가
+        protected PlannedAction PlanGapCloser(Situation situation, BaseUnitEntity target, ref float remainingAP, ref float remainingMP)
+            => MovementPlanner.PlanGapCloser(situation, target, ref remainingAP, ref remainingMP, RoleName);
+
         protected PlannedAction PlanMoveToEnemy(Situation situation)
             => MovementPlanner.PlanMoveToEnemy(situation, RoleName);
 
