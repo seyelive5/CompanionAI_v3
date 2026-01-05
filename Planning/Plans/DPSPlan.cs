@@ -188,11 +188,12 @@ namespace CompanionAI_v3.Planning.Plans
                 }
                 else
                 {
-                    // 레거시: 근처에 적 2명 이상인지 확인 (8m 이내)
+                    // ★ v3.5.37: 레거시 경로도 MinEnemiesForAoE 설정 적용
+                    int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
                     int nearbyEnemies = situation.Enemies.Count(e =>
                         e != null && e.IsConscious &&
                         CombatAPI.GetDistance(situation.Unit, e) <= 8f);
-                    hasAoEOpportunity = nearbyEnemies >= 2;
+                    hasAoEOpportunity = nearbyEnemies >= minEnemies;
                 }
 
                 if (hasAoEOpportunity)

@@ -159,9 +159,54 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.5.37: Phase 5.5 - AOE 공격 기회 (Support도 DangerousAoE 사용)
+            bool didPlanAttack = false;
+            var pointAoEAttacks = situation.AvailableAttacks
+                .Where(a => CombatAPI.IsPointTargetAbility(a) || AbilityDatabase.IsDangerousAoE(a))
+                .ToList();
+            if (situation.HasLivingEnemies && pointAoEAttacks.Count > 0)
+            {
+                bool useAoEOptimization = situation.CharacterSettings?.UseAoEOptimization ?? true;
+                int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+                bool hasAoEOpportunity = false;
+
+                if (useAoEOptimization)
+                {
+                    // 클러스터 기반 AOE 기회 탐지
+                    foreach (var aoEAbility in pointAoEAttacks)
+                    {
+                        float aoERadius = CombatAPI.GetAoERadius(aoEAbility);
+                        var clusters = ClusterDetector.FindClusters(situation.Enemies, aoERadius);
+                        if (clusters.Any(c => c.Count >= minEnemies))
+                        {
+                            hasAoEOpportunity = true;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    // 레거시: 8m 이내 적 수 확인
+                    int nearbyEnemies = situation.Enemies.Count(e =>
+                        e != null && e.IsConscious &&
+                        CombatAPI.GetDistance(situation.Unit, e) <= 8f);
+                    hasAoEOpportunity = nearbyEnemies >= minEnemies;
+                }
+
+                if (hasAoEOpportunity)
+                {
+                    var aoE = PlanAoEAttack(situation, ref remainingAP);
+                    if (aoE != null)
+                    {
+                        actions.Add(aoE);
+                        didPlanAttack = true;
+                        Main.Log($"[Support] Phase 5.5: AOE attack planned");
+                    }
+                }
+            }
+
             // ★ v3.0.57: Phase 6 - SequenceOptimizer 기반 최적 공격 시퀀스 선택
             // "현재 위치에서 공격" vs "후퇴 → 공격" 조합을 점수화하여 비교
-            bool didPlanAttack = false;
             int attacksPlanned = 0;
             var plannedTargetIds = new HashSet<string>();
             var plannedAbilityGuids = new HashSet<string>();
