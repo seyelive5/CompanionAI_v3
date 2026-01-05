@@ -326,7 +326,9 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.1.01: predictedMP를 MovementAPI에 전달하여 reachable tiles 계산에 사용
             // ★ v3.2.25: 전선 유지 로직 - Tank가 전선 뒤에 있으면 전진 필요
             // ★ v3.5.17: Tank 적극적 접근 - 공격 후에도 근접 거리로 이동
-            bool hasMoveInPlan = actions.Any(a => a.Type == ActionType.Move);
+            // ★ v3.5.36: GapCloser도 이동으로 취급 (중복 계획 방지)
+            bool hasMoveInPlan = actions.Any(a => a.Type == ActionType.Move ||
+                (a.Type == ActionType.Attack && a.Ability != null && AbilityDatabase.IsGapCloser(a.Ability)));
             bool canMove = situation.CanMove || remainingMP > 0;
 
             // ★ v3.5.17: Tank는 근접 캐릭터이므로 적에게 접근해야 함

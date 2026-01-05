@@ -383,7 +383,9 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.0.90: 공격 계획 실패 시에도 이동 허용
             // ★ v3.0.99: MP 회복 예측 후 이동 가능
             // ★ v3.1.01: predictedMP를 MovementAPI에 전달하여 reachable tiles 계산에 사용
-            bool hasMoveInPlan = actions.Any(a => a.Type == ActionType.Move);
+            // ★ v3.5.36: GapCloser도 이동으로 취급 (중복 계획 방지)
+            bool hasMoveInPlan = actions.Any(a => a.Type == ActionType.Move ||
+                (a.Type == ActionType.Attack && a.Ability != null && AbilityDatabase.IsGapCloser(a.Ability)));
             bool needsMovement = situation.NeedsReposition || (!didPlanAttack && situation.HasLivingEnemies);
             bool canMove = situation.CanMove || remainingMP > 0;
 

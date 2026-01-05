@@ -469,12 +469,8 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // Phase 7: 턴 종료 스킬
-            var turnEndAction = PlanTurnEndingAbility(situation, ref remainingAP);
-            if (turnEndAction != null)
-            {
-                actions.Add(turnEndAction);
-            }
+            // ★ v3.5.35: Phase 7 (TurnEnding) → 맨 마지막으로 이동
+            // TurnEnding 능력은 턴을 종료시키므로 다른 모든 행동 후에 계획해야 함
 
             // ★ Phase 8: 이동 또는 GapCloser (공격 불가 시)
             // ★ v3.0.55: remainingMP 체크 - 계획된 능력들의 MP 코스트 반영
@@ -483,7 +479,9 @@ namespace CompanionAI_v3.Planning.Plans
             //            Phase 6에서 MP 회복을 예측했으면 remainingMP > 0으로 이동 가능
             // ★ v3.1.01: predictedMP를 MovementAPI에 전달하여 reachable tiles 계산에 사용
             // ★ v3.1.29: 원거리가 위험하면 공격 후에도 후퇴 이동 허용
-            bool hasMoveInPlan = actions.Any(a => a.Type == ActionType.Move);
+            // ★ v3.5.36: GapCloser도 이동으로 취급 (Phase 5.6에서 GapCloser 계획 시 Phase 8 스킵)
+            bool hasMoveInPlan = actions.Any(a => a.Type == ActionType.Move ||
+                (a.Type == ActionType.Attack && a.Ability != null && AbilityDatabase.IsGapCloser(a.Ability)));
             // ★ v3.1.29: 원거리가 위험하면 이동 필요
             bool isRangedInDanger = situation.PrefersRanged && situation.IsInDanger;
             bool needsMovement = situation.NeedsReposition || (!didPlanAttack && situation.HasLivingEnemies) || isRangedInDanger;
@@ -540,6 +538,14 @@ namespace CompanionAI_v3.Planning.Plans
                     actions.Add(finalAction);
                     Main.Log($"[DPS] Phase 9: Final AP utilization - {finalAction.Ability?.Name}");
                 }
+            }
+
+            // ★ v3.5.35: Phase 10 - 턴 종료 스킬 (항상 마지막!)
+            // TurnEnding 능력은 턴을 즉시 종료하므로 반드시 마지막에 배치
+            var turnEndAction = PlanTurnEndingAbility(situation, ref remainingAP);
+            if (turnEndAction != null)
+            {
+                actions.Add(turnEndAction);
             }
 
             // 턴 종료
