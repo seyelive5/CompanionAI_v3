@@ -9,7 +9,9 @@ using Kingmaker.Pathfinding;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.UnitLogic.Abilities.Blueprints;
 using Kingmaker.UnitLogic.Abilities.Components;
+using Kingmaker.UnitLogic.Abilities.Components.Base;
 using Kingmaker.UnitLogic.Abilities.Components.CasterCheckers;
+using Kingmaker.UnitLogic.Abilities.Components.Patterns;
 using Kingmaker.UnitLogic.Mechanics.Actions;
 using Kingmaker.UnitLogic.Parts;
 using Kingmaker.Utility;
@@ -2145,6 +2147,236 @@ namespace CompanionAI_v3.GameInterface
         {
             PatternCache.Clear();
             Main.LogDebug("[CombatAPI] Pattern cache cleared");
+        }
+
+        #endregion
+
+        #region Game Pattern API (v3.5.39)
+
+        /// <summary>
+        /// ★ v3.5.39: 게임 API를 통해 AOE 패턴의 영향받는 노드들 조회
+        /// 게임과 동일한 정확한 타일 기반 계산
+        /// </summary>
+        public static OrientedPatternData GetAffectedNodes(
+            AbilityData ability,
+            Vector3 targetPosition,
+            Vector3 casterPosition)
+        {
+            try
+            {
+                if (ability == null) return OrientedPatternData.Empty;
+
+                var target = new TargetWrapper(targetPosition);
+                return ability.GetPattern(target, casterPosition);
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] GetAffectedNodes error: {ex.Message}");
+                return OrientedPatternData.Empty;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.5.39: 게임 API를 통해 패턴 내 적 수 계산
+        /// Circle, Cone, Ray 모든 패턴에서 정확하게 작동
+        /// </summary>
+        public static int CountEnemiesInPattern(
+            AbilityData ability,
+            Vector3 targetPosition,
+            Vector3 casterPosition,
+            List<BaseUnitEntity> enemies)
+        {
+            try
+            {
+                if (ability == null || enemies == null || enemies.Count == 0)
+                    return 0;
+
+                var pattern = GetAffectedNodes(ability, targetPosition, casterPosition);
+                if (pattern.IsEmpty) return 0;
+
+                int count = 0;
+                var enemySet = new HashSet<BaseUnitEntity>(enemies);
+
+                foreach (var node in pattern.Nodes)
+                {
+                    if (node.TryGetUnit(out var unit) &&
+                        unit is BaseUnitEntity baseUnit &&
+                        enemySet.Contains(baseUnit))
+                    {
+                        count++;
+                    }
+                }
+
+                return count;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] CountEnemiesInPattern error: {ex.Message}");
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.5.39: 게임 API를 통해 패턴 내 아군 수 계산 (자신 제외)
+        /// </summary>
+        public static int CountAlliesInPattern(
+            AbilityData ability,
+            Vector3 targetPosition,
+            Vector3 casterPosition,
+            BaseUnitEntity caster,
+            List<BaseUnitEntity> allies)
+        {
+            try
+            {
+                if (ability == null || allies == null || allies.Count == 0)
+                    return 0;
+
+                var pattern = GetAffectedNodes(ability, targetPosition, casterPosition);
+                if (pattern.IsEmpty) return 0;
+
+                int count = 0;
+                var allySet = new HashSet<BaseUnitEntity>(allies);
+
+                foreach (var node in pattern.Nodes)
+                {
+                    if (node.TryGetUnit(out var unit) &&
+                        unit is BaseUnitEntity baseUnit &&
+                        baseUnit != caster &&
+                        allySet.Contains(baseUnit))
+                    {
+                        count++;
+                    }
+                }
+
+                return count;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] CountAlliesInPattern error: {ex.Message}");
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.5.39: 특정 유닛이 패턴 내에 있는지 확인
+        /// </summary>
+        public static bool IsUnitInPattern(
+            AbilityData ability,
+            Vector3 targetPosition,
+            Vector3 casterPosition,
+            BaseUnitEntity unit)
+        {
+            try
+            {
+                if (ability == null || unit == null) return false;
+
+                var pattern = GetAffectedNodes(ability, targetPosition, casterPosition);
+                if (pattern.IsEmpty) return false;
+
+                // 유닛이 점유한 모든 노드 확인
+                foreach (var occupiedNode in unit.GetOccupiedNodes())
+                {
+                    if (pattern.Contains(occupiedNode))
+                        return true;
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] IsUnitInPattern error: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.5.39: 패턴 내 모든 유닛 조회 (적/아군 구분 없이)
+        /// </summary>
+        public static List<BaseUnitEntity> GetUnitsInPattern(
+            AbilityData ability,
+            Vector3 targetPosition,
+            Vector3 casterPosition)
+        {
+            var result = new List<BaseUnitEntity>();
+            try
+            {
+                if (ability == null) return result;
+
+                var pattern = GetAffectedNodes(ability, targetPosition, casterPosition);
+                if (pattern.IsEmpty) return result;
+
+                var seen = new HashSet<BaseUnitEntity>();
+                foreach (var node in pattern.Nodes)
+                {
+                    if (node.TryGetUnit(out var unit) &&
+                        unit is BaseUnitEntity baseUnit &&
+                        !seen.Contains(baseUnit))
+                    {
+                        seen.Add(baseUnit);
+                        result.Add(baseUnit);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] GetUnitsInPattern error: {ex.Message}");
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// ★ v3.5.39: AOE 평가 - 적 점수와 아군 피해를 함께 계산
+        /// </summary>
+        public static (int enemyHits, int allyHits, int playerPartyHits) EvaluateAoEPosition(
+            AbilityData ability,
+            Vector3 targetPosition,
+            Vector3 casterPosition,
+            BaseUnitEntity caster,
+            List<BaseUnitEntity> enemies,
+            List<BaseUnitEntity> allies)
+        {
+            try
+            {
+                if (ability == null) return (0, 0, 0);
+
+                var pattern = GetAffectedNodes(ability, targetPosition, casterPosition);
+                if (pattern.IsEmpty) return (0, 0, 0);
+
+                int enemyHits = 0;
+                int allyHits = 0;
+                int playerPartyHits = 0;
+
+                var enemySet = new HashSet<BaseUnitEntity>(enemies ?? new List<BaseUnitEntity>());
+                var allySet = new HashSet<BaseUnitEntity>(allies ?? new List<BaseUnitEntity>());
+                var counted = new HashSet<BaseUnitEntity>();
+
+                foreach (var node in pattern.Nodes)
+                {
+                    if (!node.TryGetUnit(out var unit) || !(unit is BaseUnitEntity baseUnit))
+                        continue;
+
+                    if (counted.Contains(baseUnit)) continue;
+                    counted.Add(baseUnit);
+
+                    if (enemySet.Contains(baseUnit))
+                    {
+                        enemyHits++;
+                    }
+                    else if (baseUnit != caster && allySet.Contains(baseUnit))
+                    {
+                        allyHits++;
+                        if (baseUnit.IsInPlayerParty)
+                            playerPartyHits++;
+                    }
+                }
+
+                return (enemyHits, allyHits, playerPartyHits);
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] EvaluateAoEPosition error: {ex.Message}");
+                return (0, 0, 0);
+            }
         }
 
         #endregion
