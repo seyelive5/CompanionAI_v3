@@ -327,12 +327,8 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // Phase 8: 턴 종료 스킬
-            var turnEndAction = PlanTurnEndingAbility(situation, ref remainingAP);
-            if (turnEndAction != null)
-            {
-                actions.Add(turnEndAction);
-            }
+            // ★ v3.5.35: Phase 8 (TurnEnding) → 맨 마지막으로 이동
+            // TurnEnding 능력은 턴을 종료시키므로 다른 모든 행동 후에 계획해야 함
 
             // Phase 8.5: 행동 완료 후 안전 이동
             // ★ v3.2.25: 전선 기반 안전 거리 - 전선 앞에 있으면 후퇴 필요
@@ -435,6 +431,14 @@ namespace CompanionAI_v3.Planning.Plans
                     actions.Add(finalAction);
                     Main.Log($"[Support] Phase 10: Final AP utilization - {finalAction.Ability?.Name}");
                 }
+            }
+
+            // ★ v3.5.35: Phase 11 - 턴 종료 스킬 (항상 마지막!)
+            // TurnEnding 능력은 턴을 즉시 종료하므로 반드시 마지막에 배치
+            var turnEndAction = PlanTurnEndingAbility(situation, ref remainingAP);
+            if (turnEndAction != null)
+            {
+                actions.Add(turnEndAction);
             }
 
             // 턴 종료
