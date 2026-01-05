@@ -163,7 +163,9 @@ namespace CompanionAI_v3.Planning.Plans
 
             // ★ v3.1.16: Phase 4.4: AOE 공격 (적 2명 이상 근처일 때)
             // ★ v3.3.00: 클러스터 기반 AOE 기회 탐색
-            if (remainingAP >= 1f && situation.Enemies.Count >= 2)
+            // ★ v3.5.37: MinEnemiesForAoE 설정 적용
+            int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+            if (remainingAP >= 1f && situation.Enemies.Count >= minEnemies)
             {
                 bool hasAoEOpportunity = false;
                 bool useAoEOptimization = situation.CharacterSettings?.UseAoEOptimization ?? true;
@@ -178,7 +180,7 @@ namespace CompanionAI_v3.Planning.Plans
                         if (aoERadius <= 0) aoERadius = 5f;
 
                         var clusters = Analysis.ClusterDetector.FindClusters(situation.Enemies, aoERadius);
-                        if (clusters.Any(c => c.Count >= 2))
+                        if (clusters.Any(c => c.Count >= minEnemies))
                         {
                             hasAoEOpportunity = true;
                             Main.LogDebug($"[DPS] Phase 4.4: Cluster found for {aoeAbility.Name} (radius={aoERadius:F1}m)");
@@ -189,7 +191,6 @@ namespace CompanionAI_v3.Planning.Plans
                 else
                 {
                     // ★ v3.5.37: 레거시 경로도 MinEnemiesForAoE 설정 적용
-                    int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
                     int nearbyEnemies = situation.Enemies.Count(e =>
                         e != null && e.IsConscious &&
                         CombatAPI.GetDistance(situation.Unit, e) <= 8f);
