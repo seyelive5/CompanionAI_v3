@@ -44,9 +44,13 @@ namespace CompanionAI_v3.GameInterface
             /// <summary>★ v3.5.18: Blackboard 통합 - 팀 전술 기반 조정</summary>
             public float TacticalAdjustment { get; set; }
 
+            /// <summary>★ v3.5.41: Larian 방법론 - 경로 위험도 점수</summary>
+            public float PathRiskScore { get; set; }
+
             public float TotalScore => CoverScore + DistanceScore - ThreatScore + AttackScore
                                        - InfluenceThreatScore + InfluenceControlBonus
-                                       + SharedTargetBonus + TacticalAdjustment;
+                                       + SharedTargetBonus + TacticalAdjustment
+                                       - PathRiskScore;
 
             public bool CanStand { get; set; }
             public bool HasLosToEnemy { get; set; }
@@ -58,7 +62,8 @@ namespace CompanionAI_v3.GameInterface
                 (InfluenceThreatScore > 0 || InfluenceControlBonus > 0
                     ? $" [Inf:T{InfluenceThreatScore:F1}/C{InfluenceControlBonus:F1}]" : "") +
                 (SharedTargetBonus > 0 ? $" [ST:{SharedTargetBonus:F1}]" : "") +
-                (TacticalAdjustment != 0 ? $" [Tac:{TacticalAdjustment:F1}]" : "");
+                (TacticalAdjustment != 0 ? $" [Tac:{TacticalAdjustment:F1}]" : "") +
+                (PathRiskScore > 0 ? $" [Path:{PathRiskScore:F1}]" : "");
         }
 
         public enum MovementGoal
@@ -159,6 +164,130 @@ namespace CompanionAI_v3.GameInterface
             }
 
             return threatScore;
+        }
+
+        /// <summary>
+        /// ★ v3.5.41: Larian Combat AI 방법론 - 경로 위험도 평가
+        /// 시작점에서 끝점까지 경로 상의 모든 타일에 대해 위협 점수를 합산
+        ///
+        /// Larian AI 참조: MovementScore = A→B 경로상 PositionScore 합산
+        /// 목적지만이 아닌 경로 전체의 위험도를 평가하여
+        /// 안전한 경로를 선택하도록 유도
+        /// </summary>
+        /// <param name="unit">이동하는 유닛</param>
+        /// <param name="startPos">시작 위치</param>
+        /// <param name="endNode">목표 노드</param>
+        /// <param name="pathCell">경로 셀 (경로 정보 포함)</param>
+        /// <param name="influenceMap">영향력 맵 (위협 조회용)</param>
+        /// <returns>경로 평균 위험도 (0 = 안전, 높을수록 위험)</returns>
+        public static float EvaluatePathRisk(
+            BaseUnitEntity unit,
+            Vector3 startPos,
+            CustomGridNodeBase endNode,
+            WarhammerPathPlayerCell pathCell,
+            BattlefieldInfluenceMap influenceMap)
+        {
+            if (unit == null || endNode == null || pathCell.Node == null)
+                return 0f;
+
+            float totalRisk = 0f;
+            int nodeCount = 0;
+
+            try
+            {
+                // 경로를 역추적하여 모든 노드의 위협 점수 합산
+                // ParentNode 체인을 따라 시작점까지 역추적
+                var currentNode = endNode;
+                var visited = new HashSet<CustomGridNodeBase>();
+
+                while (currentNode != null && !visited.Contains(currentNode))
+                {
+                    visited.Add(currentNode);
+                    var nodePos = currentNode.Vector3Position;
+
+                    // 1. 게임 API 기반 위협 (AoO, AoE, Overwatch)
+                    float nodeThreat = CalculateThreatScore(unit, currentNode);
+                    totalRisk += nodeThreat * 0.5f;  // 경로 상 위협은 목적지보다 가중치 낮음
+
+                    // 2. 영향력 맵 기반 위협 (적 밀집도)
+                    if (influenceMap != null && influenceMap.IsValid)
+                    {
+                        float influenceThreat = influenceMap.GetThreatAt(nodePos);
+                        totalRisk += influenceThreat * 3f;  // 적 밀집 구역 통과 페널티
+                    }
+
+                    nodeCount++;
+
+                    // 시작점에 도달하면 종료
+                    if (Vector3.Distance(nodePos, startPos) < 1f)
+                        break;
+
+                    // 다음 노드로 이동 (부모 노드)
+                    currentNode = pathCell.ParentNode as CustomGridNodeBase;
+
+                    // 순환 방지: 100개 노드 이상이면 중단
+                    if (nodeCount > 100)
+                    {
+                        Main.LogDebug($"[MovementAPI] EvaluatePathRisk: Path too long, breaking");
+                        break;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[MovementAPI] EvaluatePathRisk error: {ex.Message}");
+                return 0f;
+            }
+
+            // 평균 위험도 반환 (경로가 길어도 불이익 없도록)
+            float averageRisk = nodeCount > 0 ? totalRisk / nodeCount : 0f;
+
+            if (averageRisk > 0)
+            {
+                Main.LogDebug($"[MovementAPI] PathRisk: {averageRisk:F1} (nodes={nodeCount})");
+            }
+
+            return averageRisk;
+        }
+
+        /// <summary>
+        /// ★ v3.5.41: 단순 거리 기반 경로 위험도 평가 (ParentNode 없을 때 사용)
+        /// 경로 정보 없이 시작점과 끝점 사이를 샘플링하여 위협 평가
+        /// </summary>
+        public static float EvaluatePathRiskSimple(
+            BaseUnitEntity unit,
+            Vector3 startPos,
+            Vector3 endPos,
+            BattlefieldInfluenceMap influenceMap)
+        {
+            if (unit == null || influenceMap == null || !influenceMap.IsValid)
+                return 0f;
+
+            float totalRisk = 0f;
+            int sampleCount = 0;
+
+            try
+            {
+                float distance = Vector3.Distance(startPos, endPos);
+                int samples = Math.Max(3, (int)(distance / 3f));  // 3m 간격으로 샘플링
+
+                for (int i = 0; i <= samples; i++)
+                {
+                    float t = samples > 0 ? (float)i / samples : 0f;
+                    var samplePos = Vector3.Lerp(startPos, endPos, t);
+
+                    float threatAtSample = influenceMap.GetThreatAt(samplePos);
+                    totalRisk += threatAtSample;
+                    sampleCount++;
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[MovementAPI] EvaluatePathRiskSimple error: {ex.Message}");
+                return 0f;
+            }
+
+            return sampleCount > 0 ? totalRisk / sampleCount * 3f : 0f;
         }
 
         #endregion
@@ -368,6 +497,7 @@ namespace CompanionAI_v3.GameInterface
 
             // ★ v3.0.62: 위협 점수 추가 (AoE, AoO, Overwatch)
             // ★ v3.2.00: 영향력 맵 기반 위협/통제 점수 추가
+            // ★ v3.5.41: 경로 위험도 점수 추가 (Larian 방법론)
             foreach (var score in scores)
             {
                 score.ThreatScore += CalculateThreatScore(unit, score.Node);
@@ -377,6 +507,24 @@ namespace CompanionAI_v3.GameInterface
                 if (influenceMap != null && influenceMap.IsValid)
                 {
                     ApplyInfluenceScores(score, influenceMap, role, predictiveMap);
+
+                    // ★ v3.5.41: 경로 위험도 평가 (Larian MovementScore 개념)
+                    // 원본 WarhammerPathPlayerCell 조회
+                    var originalTile = tiles.Values.FirstOrDefault(t =>
+                        t.Node == score.Node);
+
+                    if (originalTile.Node != null && originalTile.ParentNode != null)
+                    {
+                        // 경로 정보가 있으면 정확한 경로 위험도 계산
+                        score.PathRiskScore = EvaluatePathRisk(
+                            unit, unit.Position, score.Node, originalTile, influenceMap);
+                    }
+                    else
+                    {
+                        // 경로 정보 없으면 단순 샘플링 방식 사용
+                        score.PathRiskScore = EvaluatePathRiskSimple(
+                            unit, unit.Position, score.Position, influenceMap);
+                    }
                 }
             }
 
@@ -495,9 +643,22 @@ namespace CompanionAI_v3.GameInterface
 
                 // ★ v3.2.25: 영향력 맵 + Role별 Frontline 점수 적용
                 // ★ v3.4.00: 예측 위협 맵 점수 추가
+                // ★ v3.5.41: 경로 위험도 점수 추가
                 if (influenceMap != null && influenceMap.IsValid)
                 {
                     ApplyInfluenceScores(posScore, influenceMap, role, predictiveMap);
+
+                    // ★ v3.5.41: 경로 위험도 평가
+                    if (playerCell.ParentNode != null)
+                    {
+                        posScore.PathRiskScore = EvaluatePathRisk(
+                            unit, unitPos, node, playerCell, influenceMap);
+                    }
+                    else
+                    {
+                        posScore.PathRiskScore = EvaluatePathRiskSimple(
+                            unit, unitPos, pos, influenceMap);
+                    }
                 }
 
                 candidates.Add(posScore);
@@ -610,9 +771,22 @@ namespace CompanionAI_v3.GameInterface
 
                 // ★ v3.2.25: 영향력 맵 + Role별 Frontline 점수 적용
                 // ★ v3.4.00: 예측 위협 맵 점수 추가
+                // ★ v3.5.41: 경로 위험도 점수 추가
                 if (influenceMap != null && influenceMap.IsValid)
                 {
                     ApplyInfluenceScores(score, influenceMap, role, predictiveMap);
+
+                    // ★ v3.5.41: 경로 위험도 평가 (후퇴 시 특히 중요)
+                    if (playerCell.ParentNode != null)
+                    {
+                        score.PathRiskScore = EvaluatePathRisk(
+                            unit, unit.Position, node, playerCell, influenceMap);
+                    }
+                    else
+                    {
+                        score.PathRiskScore = EvaluatePathRiskSimple(
+                            unit, unit.Position, pos, influenceMap);
+                    }
                 }
 
                 // 엄폐 점수 추가

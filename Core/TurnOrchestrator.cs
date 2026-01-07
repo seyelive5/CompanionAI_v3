@@ -71,6 +71,7 @@ namespace CompanionAI_v3.Core
         /// <summary>
         /// 게임에서 호출되는 메인 진입점
         /// SelectAbilityTargetPatch에서 호출됨
+        /// ★ v3.5.36: 서브 메서드로 분해하여 가독성 향상
         /// </summary>
         public ExecutionResult ProcessTurn(BaseUnitEntity unit)
         {
@@ -84,192 +85,34 @@ namespace CompanionAI_v3.Core
 
             try
             {
-                // ★ v3.0.70: 새 턴 시작 시 이전 턴의 pendingEndTurn 클리어
-                // (쳐부숴라 등 즉시 턴 부여 스킬 사용 후 실제 턴에서 문제 방지)
-                if (IsGameTurnStart(unit))
-                {
-                    if (_pendingEndTurn.Contains(unitId))
-                    {
-                        Main.Log($"[Orchestrator] {unitName}: New turn started - clearing stale pendingEndTurn");
-                        _pendingEndTurn.Remove(unitId);
-                    }
-                    // 새 턴이면 TurnState도 리셋
-                    _turnStates.Remove(unitId);
-                }
+                // 1. 검증 및 준비
+                var validateResult = ValidateAndPrepare(unit, unitId, unitName, out var turnState);
+                if (validateResult != null)
+                    return validateResult;
 
-                // ★ v3.0.67: 이미 턴 종료가 결정되었으면 반복 처리 방지
-                bool isPending = _pendingEndTurn.Contains(unitId);
-                Main.LogDebug($"[Orchestrator] {unitName}: pendingEndTurn check - isPending={isPending}, setCount={_pendingEndTurn.Count}");
+                // 2. 이전 명령 완료 대기
+                var waitResult = WaitForPendingCommands(unit, unitName, turnState);
+                if (waitResult != null)
+                    return waitResult;
 
-                if (isPending)
-                {
-                    Main.Log($"[Orchestrator] {unitName}: Already pending end turn - skipping");
-                    return ExecutionResult.EndTurn("Already pending end turn");
-                }
-
-                // 1. 턴 상태 가져오기 또는 생성
-                var turnState = GetOrCreateTurnState(unit);
-
-                // ★ v3.1.09: MP/AP 증가 감지는 TurnPlan.NeedsReplan()으로 통합
-                // 더 이상 여기서 별도로 체크하지 않음
-
-                // ★ v3.0.69: 게임 AP=0이고 이미 행동했으면 즉시 턴 종료 (안전장치)
-                float currentMP = CombatAPI.GetCurrentMP(unit);
-                // ★ v3.1.06: Move가 남아있고 MP가 있으면 계속 진행 (Move는 AP 안 씀)
-                float gameAP = CombatAPI.GetCurrentAP(unit);
-                if (gameAP <= 0 && turnState.ActionCount > 0)
-                {
-                    // ★ v3.1.06: 플랜에 Move가 남아있으면 계속 진행
-                    var pendingAction = turnState.Plan?.PeekNextAction();
-                    if (pendingAction?.Type == ActionType.Move && currentMP > 0)
-                    {
-                        Main.Log($"[Orchestrator] {unitName}: AP=0 but Move pending with MP={currentMP:F1} - continuing");
-                    }
-                    else
-                    {
-                        Main.Log($"[Orchestrator] {unitName}: Game AP=0 with {turnState.ActionCount} actions done - ending turn");
-                        return ExecutionResult.EndTurn("No AP remaining");
-                    }
-                }
-
-                // 2. 안전 체크
-                if (turnState.HasReachedMaxActions)
-                {
-                    Main.LogWarning($"[Orchestrator] {unitName}: Max actions reached ({TurnState.MaxActionsPerTurn})");
-                    return ExecutionResult.EndTurn("Max actions reached");
-                }
-
-                if (turnState.ConsecutiveFailures >= 3)
-                {
-                    Main.LogWarning($"[Orchestrator] {unitName}: Too many consecutive failures");
-                    return ExecutionResult.EndTurn("Too many failures");
-                }
-
-                // ★ v3.0.10: 이전 명령이 완료될 때까지 대기
-                // 게임의 TaskNodeWaitCommandsDone과 동일한 접근법
-                // ★ v3.0.46: 무한 대기 방지 타임아웃 추가
-                if (!CombatAPI.IsReadyForNextAction(unit))
-                {
-                    turnState.WaitCount++;
-                    if (turnState.WaitCount > 120)  // 약 2초 대기 후 강제 진행
-                    {
-                        Main.LogWarning($"[Orchestrator] {unitName}: Wait timeout ({turnState.WaitCount} frames) - forcing end turn");
-                        turnState.WaitCount = 0;
-                        return ExecutionResult.EndTurn("Wait timeout");
-                    }
-                    Main.LogDebug($"[Orchestrator] {unitName}: Waiting for previous command to complete (wait={turnState.WaitCount})");
-                    return ExecutionResult.Waiting("Command in progress");
-                }
-                turnState.WaitCount = 0;  // 대기 성공 시 초기화
-
-                // ★ v3.5.00: 이전 공격의 킬 확인 (명령 완료 후)
+                // 3. 명령 완료 후 처리
                 _executor.CheckForKills();
+                NotifyRoundChangeIfNeeded();
 
-                // ★ v3.5.00: 라운드 변경 감지 및 TeamBlackboard 알림
-                var turnController = Kingmaker.Game.Instance?.TurnController;
-                if (turnController != null)
+                // 4. 계획 생성/업데이트
+                var situation = CreateOrUpdatePlan(unit, unitId, unitName, turnState);
+                if (situation == null)
                 {
-                    int currentRound = turnController.CombatRound;
-                    if (_lastProcessedRound != currentRound)
-                    {
-                        Main.Log($"[Orchestrator] Round changed: {_lastProcessedRound} → {currentRound}");
-                        TeamBlackboard.Instance.OnRoundStart(currentRound);
-                        _lastProcessedRound = currentRound;
-                    }
+                    return ExecutionResult.EndTurn("Situation analysis failed");
                 }
 
-                // 3. 상황 분석
-                var situation = _analyzer.Analyze(unit, turnState);
-
-                // ★ v3.2.10: TeamBlackboard에 상황 등록
-                TeamBlackboard.Instance.RegisterUnitSituation(unitId, situation);
-
-                // 4. 계획이 없거나 완료되면 새 계획 생성
-                // ★ v3.0.63: 연속 계획 생성 허용 (SituationAnalyzer에서 맥락 반영)
-                if (turnState.Plan == null || turnState.Plan.IsComplete)
-                {
-                    Main.Log($"[Orchestrator] {unitName}: Creating new turn plan (continuation={turnState.Plan?.IsComplete ?? false})");
-                    turnState.Plan = _planner.CreatePlan(situation, turnState);
-
-                    // ★ v3.2.10: TeamBlackboard에 계획 등록
-                    TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
-                }
-
-                // 5. 계획 재수립 필요 여부 확인
-                if (turnState.Plan.NeedsReplan(situation))
-                {
-                    Main.Log($"[Orchestrator] {unitName}: Replanning due to situation change");
-                    turnState.Plan = _planner.CreatePlan(situation, turnState);
-
-                    // ★ v3.2.10: 재계획 시에도 Blackboard 업데이트
-                    TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
-                }
-
-                // 6. 다음 행동 가져오기
-                var nextAction = turnState.Plan.GetNextAction();
-
-                if (nextAction == null)
-                {
-                    Main.Log($"[Orchestrator] {unitName}: No more actions in plan");
-                    return ExecutionResult.EndTurn("Plan complete");
-                }
-
-                // 7. 행동 실행
-                Main.Log($"[Orchestrator] {unitName}: Executing {nextAction}");
-                var result = _executor.Execute(nextAction, situation);
-
-                // 8. 결과 기록
-                bool success = result.Type == ResultType.CastAbility || result.Type == ResultType.MoveTo;
-                turnState.RecordAction(nextAction, success);
-
-                // ★ v3.1.08: pendingEndTurn 설정 제거 - MainAIPatch에서 Commands 체크로 대체
-                // 이동 애니메이션 중에는 Commands가 비어있지 않으므로 MainAIPatch에서 Running 반환
-
-                // ★ v3.0.4: 능력 사용 추적 - 중앙화
-                if (success && nextAction.Ability != null)
-                {
-                    AbilityUsageTracker.MarkUsed(unit.UniqueId, nextAction.Ability);
-
-                    // 타겟이 있는 경우 타겟별 추적도
-                    var targetEntity = nextAction.Target?.Entity as BaseUnitEntity;
-                    if (targetEntity != null && nextAction.Type != ActionType.Attack)
-                    {
-                        AbilityUsageTracker.MarkUsedOnTarget(unit.UniqueId, nextAction.Ability, targetEntity.UniqueId);
-                    }
-                }
-                else if (!success && nextAction.Ability != null)
-                {
-                    // 실패 시 실패 추적
-                    AbilityUsageTracker.MarkFailed(unit.UniqueId, nextAction.Ability);
-                }
-
-                // ★ v3.0.93: 실패 시 게임 AI로 위임하지 않고 EndTurn 반환
-                // 게임 AI가 제어권을 가져가면 메디킷 오사용 등 이상 행동 발생
-                // ★ v3.5.23: 회복 가능한 실패는 해당 액션만 스킵하고 계속 진행
-                if (result.Type == ResultType.Failure)
-                {
-                    // 회복 가능한 에러 목록 (해당 액션만 스킵, 다음 액션 계속)
-                    bool isRecoverable = IsRecoverableFailure(result.Reason);
-
-                    if (isRecoverable && turnState.Plan?.RemainingActionCount > 0)
-                    {
-                        Main.LogWarning($"[Orchestrator] {unitName}: Recoverable failure ({result.Reason}) - skipping action and continuing");
-                        // 다음 액션으로 계속 진행하도록 Continue 반환
-                        return ExecutionResult.Continue();
-                    }
-
-                    Main.LogWarning($"[Orchestrator] {unitName}: Execution failed ({result.Reason}) - ending turn instead of delegating to game AI");
-                    turnState.Plan?.Cancel("Execution failed");
-                    return ExecutionResult.EndTurn($"Execution failed: {result.Reason}");
-                }
-
-                return result;
+                // 5. 다음 행동 실행
+                return ExecuteNextAction(unit, unitName, turnState, situation);
             }
             catch (Exception ex)
             {
                 Main.LogError($"[Orchestrator] {unitName}: Critical error - {ex.Message}");
                 Main.LogError($"[Orchestrator] Stack: {ex.StackTrace}");
-                // ★ v3.0.93: 예외 시에도 EndTurn 반환 (게임 AI 위임 방지)
                 return ExecutionResult.EndTurn($"Exception: {ex.Message}");
             }
         }
@@ -280,30 +123,240 @@ namespace CompanionAI_v3.Core
 
         /// <summary>
         /// ★ v3.5.23: 회복 가능한 실패인지 확인
+        /// ★ v3.5.36: ExecutionErrorType Enum으로 리팩토링
         /// 이 에러들은 해당 액션만 스킵하고 다음 액션으로 계속 진행
         /// </summary>
         private bool IsRecoverableFailure(string reason)
         {
-            if (string.IsNullOrEmpty(reason)) return false;
+            var errorType = ExecutionErrorTypeExtensions.ParseFromReason(reason);
+            return errorType.IsRecoverable();
+        }
 
-            // 회복 가능한 에러 목록
-            var recoverableErrors = new[]
-            {
-                "StrategistZonesCantOverlap",   // 전략가 구역 겹침 - 다른 위치에 배치하면 됨
-                "AlreadyHasBuff",               // 이미 버프 있음 - 스킵 가능
-                "BuffAlreadyActive",            // 버프 이미 활성 - 스킵 가능
-                "TargetHasHigherBuff",          // 더 좋은 버프 있음 - 스킵 가능
-                "NotEnoughResources",           // 리소스 부족 - 스킵하고 다른 액션 시도
-                "CasterMoved"                   // 시전자 이동 - 위치 기반 능력 스킵
-            };
+        #endregion
 
-            foreach (var error in recoverableErrors)
+        #region ProcessTurn Sub-Methods (v3.5.36)
+
+        /// <summary>
+        /// ★ v3.5.36: 턴 시작 전 검증 및 준비
+        /// - 새 턴 시 stale 데이터 정리
+        /// - pendingEndTurn 체크
+        /// - AP=0 안전장치
+        /// </summary>
+        /// <returns>null이면 계속 진행, ExecutionResult면 즉시 반환</returns>
+        private ExecutionResult ValidateAndPrepare(BaseUnitEntity unit, string unitId, string unitName, out TurnState turnState)
+        {
+            turnState = null;
+
+            // 새 턴 시작 시 이전 턴의 stale 데이터 정리
+            if (IsGameTurnStart(unit))
             {
-                if (reason.Contains(error))
-                    return true;
+                if (_pendingEndTurn.Contains(unitId))
+                {
+                    Main.Log($"[Orchestrator] {unitName}: New turn started - clearing stale pendingEndTurn");
+                    _pendingEndTurn.Remove(unitId);
+                }
+                _turnStates.Remove(unitId);
             }
 
-            return false;
+            // 이미 턴 종료가 결정되었으면 반복 처리 방지
+            bool isPending = _pendingEndTurn.Contains(unitId);
+            Main.LogDebug($"[Orchestrator] {unitName}: pendingEndTurn check - isPending={isPending}, setCount={_pendingEndTurn.Count}");
+
+            if (isPending)
+            {
+                Main.Log($"[Orchestrator] {unitName}: Already pending end turn - skipping");
+                return ExecutionResult.EndTurn("Already pending end turn");
+            }
+
+            // 턴 상태 가져오기 또는 생성
+            turnState = GetOrCreateTurnState(unit);
+
+            // AP=0이고 이미 행동했으면 안전장치로 턴 종료
+            float currentMP = CombatAPI.GetCurrentMP(unit);
+            float gameAP = CombatAPI.GetCurrentAP(unit);
+            if (gameAP <= 0 && turnState.ActionCount > 0)
+            {
+                // 플랜에 Move가 남아있고 MP가 있으면 계속 진행 (Move는 AP 안 씀)
+                var pendingAction = turnState.Plan?.PeekNextAction();
+                if (pendingAction?.Type == ActionType.Move && currentMP > 0)
+                {
+                    Main.Log($"[Orchestrator] {unitName}: AP=0 but Move pending with MP={currentMP:F1} - continuing");
+                }
+                else
+                {
+                    Main.Log($"[Orchestrator] {unitName}: Game AP=0 with {turnState.ActionCount} actions done - ending turn");
+                    return ExecutionResult.EndTurn("No AP remaining");
+                }
+            }
+
+            // 안전 체크: 최대 행동 수
+            if (turnState.HasReachedMaxActions)
+            {
+                Main.LogWarning($"[Orchestrator] {unitName}: Max actions reached ({TurnState.MaxActionsPerTurn})");
+                return ExecutionResult.EndTurn("Max actions reached");
+            }
+
+            // 안전 체크: 연속 실패 횟수
+            if (turnState.ConsecutiveFailures >= GameConstants.MAX_CONSECUTIVE_FAILURES)
+            {
+                Main.LogWarning($"[Orchestrator] {unitName}: Too many consecutive failures ({GameConstants.MAX_CONSECUTIVE_FAILURES})");
+                return ExecutionResult.EndTurn("Too many failures");
+            }
+
+            return null;  // 검증 통과
+        }
+
+        /// <summary>
+        /// ★ v3.5.36: 이전 명령 완료 대기
+        /// </summary>
+        /// <returns>null이면 계속 진행, ExecutionResult면 즉시 반환</returns>
+        private ExecutionResult WaitForPendingCommands(BaseUnitEntity unit, string unitName, TurnState turnState)
+        {
+            if (!CombatAPI.IsReadyForNextAction(unit))
+            {
+                turnState.WaitCount++;
+                if (turnState.WaitCount > GameConstants.COMMAND_WAIT_TIMEOUT_FRAMES)
+                {
+                    Main.LogWarning($"[Orchestrator] {unitName}: Wait timeout ({turnState.WaitCount} frames) - forcing end turn");
+                    turnState.WaitCount = 0;
+                    return ExecutionResult.EndTurn("Wait timeout");
+                }
+                Main.LogDebug($"[Orchestrator] {unitName}: Waiting for previous command to complete (wait={turnState.WaitCount})");
+                return ExecutionResult.Waiting("Command in progress");
+            }
+            turnState.WaitCount = 0;  // 대기 성공 시 초기화
+            return null;  // 대기 완료
+        }
+
+        /// <summary>
+        /// ★ v3.5.36: 라운드 변경 감지 및 알림
+        /// </summary>
+        private void NotifyRoundChangeIfNeeded()
+        {
+            var turnController = Kingmaker.Game.Instance?.TurnController;
+            if (turnController != null)
+            {
+                int currentRound = turnController.CombatRound;
+                if (_lastProcessedRound != currentRound)
+                {
+                    Main.Log($"[Orchestrator] Round changed: {_lastProcessedRound} → {currentRound}");
+                    TeamBlackboard.Instance.OnRoundStart(currentRound);
+                    _lastProcessedRound = currentRound;
+                }
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.5.36: 계획 생성 또는 업데이트
+        /// </summary>
+        /// <returns>분석된 Situation, null이면 분석 실패</returns>
+        private Situation CreateOrUpdatePlan(BaseUnitEntity unit, string unitId, string unitName, TurnState turnState)
+        {
+            // 상황 분석
+            var situation = _analyzer.Analyze(unit, turnState);
+
+            if (situation == null)
+            {
+                Main.LogWarning($"[Orchestrator] {unitName}: Situation analysis returned null");
+                return null;
+            }
+
+            // TeamBlackboard에 상황 등록
+            TeamBlackboard.Instance.RegisterUnitSituation(unitId, situation);
+
+            // 계획이 없거나 완료되면 새 계획 생성
+            if (turnState.Plan == null || turnState.Plan.IsComplete)
+            {
+                Main.Log($"[Orchestrator] {unitName}: Creating new turn plan (continuation={turnState.Plan?.IsComplete ?? false})");
+                turnState.Plan = _planner.CreatePlan(situation, turnState);
+                TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
+            }
+
+            // 계획 재수립 필요 여부 확인
+            if (turnState.Plan.NeedsReplan(situation))
+            {
+                Main.Log($"[Orchestrator] {unitName}: Replanning due to situation change");
+                turnState.Plan = _planner.CreatePlan(situation, turnState);
+                TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
+            }
+
+            return situation;
+        }
+
+        /// <summary>
+        /// ★ v3.5.36: 다음 행동 실행 및 결과 처리
+        /// </summary>
+        private ExecutionResult ExecuteNextAction(BaseUnitEntity unit, string unitName, TurnState turnState, Situation situation)
+        {
+            // 다음 행동 가져오기
+            var nextAction = turnState.Plan.GetNextAction();
+
+            if (nextAction == null)
+            {
+                Main.Log($"[Orchestrator] {unitName}: No more actions in plan");
+                return ExecutionResult.EndTurn("Plan complete");
+            }
+
+            // 행동 실행
+            Main.Log($"[Orchestrator] {unitName}: Executing {nextAction}");
+            var result = _executor.Execute(nextAction, situation);
+
+            // 결과 기록
+            bool success = result.Type == ResultType.CastAbility || result.Type == ResultType.MoveTo;
+            turnState.RecordAction(nextAction, success);
+
+            // 능력 사용 추적
+            TrackAbilityUsage(unit, nextAction, success);
+
+            // 실패 처리
+            if (result.Type == ResultType.Failure)
+            {
+                return HandleExecutionFailure(unitName, turnState, result);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// ★ v3.5.36: 능력 사용 추적
+        /// </summary>
+        private void TrackAbilityUsage(BaseUnitEntity unit, PlannedAction action, bool success)
+        {
+            if (action.Ability == null) return;
+
+            if (success)
+            {
+                AbilityUsageTracker.MarkUsed(unit.UniqueId, action.Ability);
+
+                // 타겟이 있는 경우 타겟별 추적도 (공격 제외)
+                var targetEntity = action.Target?.Entity as BaseUnitEntity;
+                if (targetEntity != null && action.Type != ActionType.Attack)
+                {
+                    AbilityUsageTracker.MarkUsedOnTarget(unit.UniqueId, action.Ability, targetEntity.UniqueId);
+                }
+            }
+            else
+            {
+                AbilityUsageTracker.MarkFailed(unit.UniqueId, action.Ability);
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.5.36: 실행 실패 처리
+        /// </summary>
+        private ExecutionResult HandleExecutionFailure(string unitName, TurnState turnState, ExecutionResult result)
+        {
+            bool isRecoverable = IsRecoverableFailure(result.Reason);
+
+            if (isRecoverable && turnState.Plan?.RemainingActionCount > 0)
+            {
+                Main.LogWarning($"[Orchestrator] {unitName}: Recoverable failure ({result.Reason}) - skipping action and continuing");
+                return ExecutionResult.Continue();
+            }
+
+            Main.LogWarning($"[Orchestrator] {unitName}: Execution failed ({result.Reason}) - ending turn instead of delegating to game AI");
+            turnState.Plan?.Cancel("Execution failed");
+            return ExecutionResult.EndTurn($"Execution failed: {result.Reason}");
         }
 
         #endregion

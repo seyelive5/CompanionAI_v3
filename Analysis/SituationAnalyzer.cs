@@ -57,7 +57,10 @@ namespace CompanionAI_v3.Analysis
             }
             catch (Exception ex)
             {
+                // ★ v3.5.36: 분석 실패 시 null 반환 - TurnOrchestrator에서 처리
                 Main.LogError($"[Analyzer] Error analyzing situation: {ex.Message}");
+                Main.LogError($"[Analyzer] Stack: {ex.StackTrace}");
+                return null;
             }
 
             return situation;

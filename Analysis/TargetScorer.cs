@@ -430,40 +430,73 @@ namespace CompanionAI_v3.Analysis
         #region Helper Methods
 
         /// <summary>
-        /// 위협도 평가 (0.0 ~ 1.0)
+        /// ★ v3.5.40: 위협도 평가 (0.0 ~ 1.0)
+        /// 추정/추측 금지 원칙: 게임 API에서 직접 조회 가능한 값만 사용
+        ///
+        /// 구성요소:
+        /// 1. Lethality (HP 기반) - 만피일수록 위협적
+        /// 2. Proximity (거리 기반) - 가까울수록 위협적
+        /// 3. RoleBonus (역할 기반) - Healer/Caster/원거리 보너스
+        ///
+        /// 미구현 (API 제약):
+        /// - 적 데미지 예측 (GetDamagePrediction은 우리 능력 전용)
         /// </summary>
         private static float EvaluateThreat(BaseUnitEntity target, Situation situation)
         {
-            float threat = 0.5f;
+            float threat = 0f;
 
             try
             {
-                var t = AIConfig.GetThresholds();  // ★ v3.5.00: ThresholdConfig 적용
+                var t = AIConfig.GetThresholds();
 
-                // 무기 체크
-                var weapon = target.Body?.PrimaryHand?.Weapon;
-                if (weapon != null)
-                {
-                    // 원거리 무기 = 더 위협적
-                    if (!weapon.Blueprint.IsMelee) threat += 0.2f;
-
-                    // 긴 사거리 = 더 위협적
-                    int range = weapon.AttackRange;
-                    if (range > 10) threat += 0.2f;
-                }
-
-                // 거리 - 가까우면 더 위협적 (★ v3.5.00: ThresholdConfig)
-                // ★ v3.5.29: 캐시된 거리 사용
-                float distance = CombatCache.GetDistance(situation.Unit, target);
-                if (distance <= t.ThreatProximity) threat += 0.2f;
-
-                // 저HP = 덜 위협적 (★ v3.5.00: ThresholdConfig)
+                // 1. Lethality (HP 기반) - Response Curve 적용
+                // API: CombatAPI.GetHPPercent() ✅ 검증됨
                 float hpPercent = CombatAPI.GetHPPercent(target);
-                if (hpPercent < t.LowThreatHP) threat -= 0.2f;
+                float hpNormalized = hpPercent / 100f;  // 0~1 (0=빈사, 1=만피)
+                float lethalityScore = CurvePresets.EnemyLethality.Evaluate(hpNormalized);
+                threat += lethalityScore * t.LethalityWeight;
+
+                // 2. Proximity (거리 기반) - Response Curve 적용
+                // API: CombatCache.GetDistance() ✅ 검증됨
+                float distance = CombatCache.GetDistance(situation.Unit, target);
+                float maxRange = t.ThreatMaxDistance;
+                float proximityNormalized = 1f - Math.Min(1f, distance / maxRange);  // 0~1 (0=멀리, 1=가까이)
+                float proximityScore = CurvePresets.EnemyProximity.Evaluate(proximityNormalized);
+                threat += proximityScore * t.ProximityWeight;
+
+                // 3. RoleBonus (역할 기반) - 게임 API 직접 조회
+                // API: unit.Abilities.Enumerable ✅ 검증됨
+                if (IsHealer(target))
+                    threat += t.HealerRoleBonus;
+                if (IsCaster(target))
+                    threat += t.CasterRoleBonus;
+
+                // 무기 기반 보너스 (데미지 예측 대체)
+                // API: weapon.Blueprint.IsMelee ✅ 검증됨
+                if (HasRangedWeapon(target))
+                    threat += t.RangedWeaponBonus;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[TargetScorer] EvaluateThreat error: {ex.Message}");
+                return 0.5f;  // 폴백: 중간 위협도
+            }
 
             return Math.Max(0f, Math.Min(1f, threat));
+        }
+
+        /// <summary>
+        /// ★ v3.5.40: 원거리 무기 소지 여부 확인
+        /// </summary>
+        private static bool HasRangedWeapon(BaseUnitEntity unit)
+        {
+            try
+            {
+                var weapon = unit.Body?.PrimaryHand?.Weapon;
+                if (weapon == null) return false;
+                return weapon.Blueprint?.IsMelee == false;
+            }
+            catch { return false; }
         }
 
         /// <summary>

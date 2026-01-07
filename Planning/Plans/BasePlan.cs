@@ -39,6 +39,13 @@ namespace CompanionAI_v3.Planning.Plans
             => TeamBlackboard.Instance.TeamConfidence;
 
         /// <summary>
+        /// ★ v3.5.36: 현재 팀 신뢰도 상태 조회
+        /// Heroic/Confident/Neutral/Worried/Panicked 상태 반환
+        /// </summary>
+        protected ConfidenceState GetConfidenceState()
+            => TeamBlackboard.Instance.GetConfidenceState();
+
+        /// <summary>
         /// ★ v3.2.20: 신뢰도 기반 공격 적극도 배율 (0.3 ~ 1.5)
         /// 높을수록 공격적 행동 선호
         /// </summary>

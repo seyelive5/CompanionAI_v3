@@ -217,6 +217,20 @@ namespace CompanionAI_v3.Analysis
         /// </summary>
         public static ResponseCurve DistancePenalty { get; private set; }
 
+        /// <summary>
+        /// ★ v3.5.40: 적 치명도 (1 - HP%)
+        /// HP가 낮을수록 덜 위협적 (죽어가는 적)
+        /// 입력: 0~1 (1 = 만피, 0 = 빈사)
+        /// </summary>
+        public static ResponseCurve EnemyLethality { get; private set; }
+
+        /// <summary>
+        /// ★ v3.5.40: 적 근접도 (1 - Distance/MaxRange)
+        /// 가까울수록 더 위협적
+        /// 입력: 0~1 (1 = 바로 옆, 0 = 최대 거리)
+        /// </summary>
+        public static ResponseCurve EnemyProximity { get; private set; }
+
         #endregion
 
         #region Position Scoring Curves
@@ -361,6 +375,27 @@ namespace CompanionAI_v3.Analysis
                     MaxOutput = -60f  // 멀수록 감점
                 };
 
+                // ★ v3.5.40: 적 위협 평가용 곡선
+                EnemyLethality = new ResponseCurve
+                {
+                    Type = CurveType.Quadratic,
+                    MinInput = 0f,      // HP% 0 (빈사)
+                    MaxInput = 1f,      // HP% 100 (만피)
+                    MinOutput = 0f,     // 빈사 = 위협 없음
+                    MaxOutput = 1f,     // 만피 = 최대 위협
+                    Exponent = 1.5f     // 약간 급격한 상승
+                };
+
+                EnemyProximity = new ResponseCurve
+                {
+                    Type = CurveType.Quadratic,
+                    MinInput = 0f,      // 최대 거리 (정규화 후)
+                    MaxInput = 1f,      // 바로 옆 (정규화 후)
+                    MinOutput = 0f,     // 멀리 = 위협 없음
+                    MaxOutput = 1f,     // 가까이 = 최대 위협
+                    Exponent = 2f       // 가까울수록 급격히 증가
+                };
+
                 // Position Scoring
                 SafetyByDistance = new ResponseCurve
                 {
@@ -451,6 +486,8 @@ namespace CompanionAI_v3.Analysis
                     case "hppriority": HPPriority = curve; break;
                     case "threatbydistance": ThreatByDistance = curve; break;
                     case "distancepenalty": DistancePenalty = curve; break;
+                    case "enemylethality": EnemyLethality = curve; break;
+                    case "enemyproximity": EnemyProximity = curve; break;
                     case "safetybydistance": SafetyByDistance = curve; break;
                     case "covervalue": CoverValue = curve; break;
                     case "threatcountpenalty": ThreatCountPenalty = curve; break;

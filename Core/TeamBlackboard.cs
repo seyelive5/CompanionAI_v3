@@ -94,6 +94,19 @@ namespace CompanionAI_v3.Core
         /// <summary>★ v3.2.20: 팀 신뢰도 (0.0=절망 ~ 1.0=압도)</summary>
         public float TeamConfidence { get; private set; } = 0.5f;
 
+        /// <summary>
+        /// ★ v3.5.36: 신뢰도 값을 상태로 변환
+        /// PDF 방법론의 Heroic/Confident/Neutral/Worried/Panicked 상태 분류
+        /// </summary>
+        public ConfidenceState GetConfidenceState()
+        {
+            if (TeamConfidence > 0.8f) return ConfidenceState.Heroic;
+            if (TeamConfidence > 0.6f) return ConfidenceState.Confident;
+            if (TeamConfidence > 0.4f) return ConfidenceState.Neutral;
+            if (TeamConfidence > 0.2f) return ConfidenceState.Worried;
+            return ConfidenceState.Panicked;
+        }
+
         /// <summary>전투 활성화 여부</summary>
         public bool IsCombatActive { get; private set; }
 
@@ -268,9 +281,10 @@ namespace CompanionAI_v3.Core
             // 4. ★ v3.2.20: 팀 신뢰도 계산
             CalculateConfidence();
 
+            // ★ v3.5.36: ConfidenceState 포함
             Main.LogDebug($"[TeamBlackboard] Team: AvgHP={AverageAllyHP:F0}%, " +
                 $"LowHP={LowHPAlliesCount}, Critical={CriticalHPAlliesCount}, " +
-                $"Tactic={CurrentTactic}, Confidence={TeamConfidence:F2}, Target={SharedTarget?.CharacterName ?? "None"}");
+                $"Tactic={CurrentTactic}, Confidence={TeamConfidence:F2} ({GetConfidenceState()}), Target={SharedTarget?.CharacterName ?? "None"}");
         }
 
         private void CalculateTeamHP()
@@ -389,15 +403,17 @@ namespace CompanionAI_v3.Core
                 damageRatioFactor * 0.10f
             ));
 
-            Main.LogDebug($"[TeamBlackboard] Confidence={TeamConfidence:F2} " +
+            // ★ v3.5.36: ConfidenceState 포함
+            Main.LogDebug($"[TeamBlackboard] Confidence={TeamConfidence:F2} ({GetConfidenceState()}) " +
                 $"(AllyHP={allyHPFactor:F2}, EnemyDmg={enemyDamageFactor:F2}, Numbers={numberFactor:F2}, " +
                 $"Momentum={momentumFactor:F2}, DmgRatio={damageRatioFactor:F2})");
         }
 
+        // ★ v3.5.36: null 방어 강화 - Enemies 컬렉션이 null이 아니고 비어있지 않은 경우만 처리
         private float GetAverageEnemyHP()
         {
             var enemies = _unitSituations.Values
-                .Where(s => s?.Enemies != null)
+                .Where(s => s?.Enemies != null && s.Enemies.Count > 0)
                 .SelectMany(s => s.Enemies)
                 .Where(e => e != null && !e.LifeState.IsDead)
                 .Distinct()
@@ -410,7 +426,7 @@ namespace CompanionAI_v3.Core
         private int GetTotalEnemyCount()
         {
             return _unitSituations.Values
-                .Where(s => s?.Enemies != null)
+                .Where(s => s?.Enemies != null && s.Enemies.Count > 0)
                 .SelectMany(s => s.Enemies)
                 .Where(e => e != null && !e.LifeState.IsDead)
                 .Distinct()
@@ -610,5 +626,27 @@ namespace CompanionAI_v3.Core
 
         /// <summary>철수 - 힐/후퇴 우선, 생존 최우선</summary>
         Retreat
+    }
+
+    /// <summary>
+    /// ★ v3.5.36: 팀 신뢰도 상태 (PDF 방법론)
+    /// TeamConfidence 값에 따른 전술 상태 분류
+    /// </summary>
+    public enum ConfidenceState
+    {
+        /// <summary>영웅적 (>0.8) - 측면 공격, 공격적 포지셔닝, 적극 추격</summary>
+        Heroic,
+
+        /// <summary>자신감 (0.6~0.8) - 지속 공격, 이니셔티브 유지</summary>
+        Confident,
+
+        /// <summary>중립 (0.4~0.6) - 현 위치 유지, 기회주의적 공격</summary>
+        Neutral,
+
+        /// <summary>우려 (0.2~0.4) - 후퇴 고려, 방어적 행동, 엄폐 우선</summary>
+        Worried,
+
+        /// <summary>공황 (≤0.2) - 즉시 엄폐/후퇴, 생존 최우선</summary>
+        Panicked
     }
 }

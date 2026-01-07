@@ -397,6 +397,7 @@ namespace CompanionAI_v3.GameInterface
                 }
 
                 // MP 체크 및 경로 축소
+                // ★ v3.5.36: 경로 길이가 실제로 줄어드는지 확인하는 안전장치 추가
                 float availableMP = unit.CombatState?.ActionPointsBlue ?? 0f;
                 if (bestCell.Length > availableMP)
                 {
@@ -407,7 +408,16 @@ namespace CompanionAI_v3.GameInterface
                     {
                         if (cells.TryGetValue(trimmedCell.ParentNode, out var parentCell))
                         {
-                            trimmedCell = parentCell;
+                            // 경로 길이가 실제로 줄어드는지 확인
+                            if (parentCell.Length < trimmedCell.Length)
+                            {
+                                trimmedCell = parentCell;
+                            }
+                            else
+                            {
+                                Main.LogDebug($"[CompanionAIDecisionNode] Parent path not shorter, stopping trim");
+                                break;
+                            }
                         }
                         else break;
                     }

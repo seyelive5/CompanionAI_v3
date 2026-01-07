@@ -185,11 +185,12 @@ namespace CompanionAI_v3.Core
             // 2. 긴급 상황 조건 (필수 리플랜)
             // ═══════════════════════════════════════════════════════════
 
-            // 2-1. HP 급감 (20% 이상)
+            // 2-1. HP 급감 (임계값 이상)
+            // ★ v3.5.36: 매직 넘버를 GameConstants로 교체
             if (Priority != TurnPriority.Emergency && currentSituation.IsHPCritical)
             {
                 float hpDrop = InitialHP - currentSituation.HPPercent;
-                if (hpDrop >= 20f)
+                if (hpDrop >= GameConstants.HP_CRITICAL_DROP_THRESHOLD)
                 {
                     Main.Log($"[TurnPlan] Replan needed: HP dropped {hpDrop:F0}% (was {InitialHP:F0}%, now {currentSituation.HPPercent:F0}%)");
                     return true;
@@ -221,7 +222,8 @@ namespace CompanionAI_v3.Core
 
             // 3-2. ★ v3.1.09: AP 증가 감지 (전투 트랜스 등 버프)
             // 이미 행동을 계획했는데 AP가 늘었으면 추가 행동 가능
-            if (currentSituation.CurrentAP > InitialAP + 0.5f)  // 0.5 이상 증가 시
+            // ★ v3.5.36: 매직 넘버를 GameConstants로 교체
+            if (currentSituation.CurrentAP > InitialAP + GameConstants.AP_RECOVERY_EPSILON)
             {
                 Main.Log($"[TurnPlan] Replan needed: AP increased ({InitialAP:F1} -> {currentSituation.CurrentAP:F1}) - additional action opportunity");
                 return true;
@@ -234,11 +236,12 @@ namespace CompanionAI_v3.Core
                 return true;
             }
 
-            // 3-4. 공격 가능 적 크게 증가 (+2명 이상)
+            // 3-4. 공격 가능 적 크게 증가
+            // ★ v3.5.36: 매직 넘버를 GameConstants로 교체
             if (InitialHittableCount > 0 && currentSituation.HittableEnemies != null)
             {
                 int currentHittable = currentSituation.HittableEnemies.Count;
-                if (currentHittable >= InitialHittableCount + 2)
+                if (currentHittable >= InitialHittableCount + GameConstants.MIN_ADDITIONAL_HITTABLE_TARGETS)
                 {
                     Main.Log($"[TurnPlan] Replan needed: More targets in range (was {InitialHittableCount}, now {currentHittable})");
                     return true;

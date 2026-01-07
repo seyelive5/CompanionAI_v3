@@ -100,8 +100,9 @@ namespace CompanionAI_v3.GameInterface
             }
 
             // 키 생성: 능력 UniqueId + 타겟 Id
+            // ★ v3.5.36: Point 좌표를 F1(0.1m 단위)로 반올림하여 캐시 히트율 향상
             string abilityId = ability.UniqueId ?? ability.Blueprint?.name ?? "unknown";
-            string targetId = target.Entity?.UniqueId ?? $"point_{target.Point.x:F2}_{target.Point.z:F2}";
+            string targetId = target.Entity?.UniqueId ?? $"point_{target.Point.x:F1}_{target.Point.z:F1}";
             var key = (abilityId, targetId);
 
             if (_targetingCache.TryGetValue(key, out var cached))

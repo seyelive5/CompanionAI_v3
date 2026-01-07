@@ -172,6 +172,48 @@ namespace CompanionAI_v3.Settings
         public float PreAttackBuffMinHP { get; set; } = 50f;
 
         #endregion
+
+        #region ★ v3.5.40: 위협 평가 가중치 (추정/추측 금지 원칙)
+
+        /// <summary>
+        /// Lethality 가중치: 적 HP 기반 위협도
+        /// 높을수록 만피 적이 더 위협적
+        /// </summary>
+        [JsonProperty("lethalityWeight")]
+        public float LethalityWeight { get; set; } = 0.3f;
+
+        /// <summary>
+        /// Proximity 가중치: 거리 기반 위협도
+        /// 높을수록 가까운 적이 더 위협적
+        /// </summary>
+        [JsonProperty("proximityWeight")]
+        public float ProximityWeight { get; set; } = 0.4f;
+
+        /// <summary>
+        /// Healer 역할 보너스: 힐러 적 추가 위협도
+        /// </summary>
+        [JsonProperty("healerRoleBonus")]
+        public float HealerRoleBonus { get; set; } = 0.15f;
+
+        /// <summary>
+        /// Caster 역할 보너스: 캐스터 적 추가 위협도
+        /// </summary>
+        [JsonProperty("casterRoleBonus")]
+        public float CasterRoleBonus { get; set; } = 0.1f;
+
+        /// <summary>
+        /// 원거리 무기 보너스: 원거리 무기 적 추가 위협도
+        /// </summary>
+        [JsonProperty("rangedWeaponBonus")]
+        public float RangedWeaponBonus { get; set; } = 0.05f;
+
+        /// <summary>
+        /// 위협 평가 최대 거리 (정규화 기준)
+        /// </summary>
+        [JsonProperty("threatMaxDistance")]
+        public float ThreatMaxDistance { get; set; } = 30f;
+
+        #endregion
     }
 
     /// <summary>
