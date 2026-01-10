@@ -300,19 +300,8 @@ namespace CompanionAI_v3.Settings
         [JsonProperty("clusterNpcAllyPenalty")]
         public float ClusterNpcAllyPenalty { get; set; } = 20f;
 
-        /// <summary>
-        /// ★ v3.5.76: DangerousAoE 아군 근접 감점 (per ally)
-        /// 기존 30 → 20으로 완화
-        /// UtilityScorer에서 사용
-        /// </summary>
-        [JsonProperty("dangerousAoEAllyPenalty")]
-        public float DangerousAoEAllyPenalty { get; set; } = 20f;
-
-        /// <summary>
-        /// AOE 탐색 반경 (아군 위치 체크)
-        /// </summary>
-        [JsonProperty("aoeAllyCheckRadius")]
-        public float AoEAllyCheckRadius { get; set; } = 5f;
+        // ★ v3.6.15: DangerousAoEAllyPenalty, AoEAllyCheckRadius 삭제
+        // 이제 실제 AOE 반경을 사용하고 아군 있으면 무조건 차단
     }
 
     /// <summary>

@@ -376,14 +376,18 @@ namespace CompanionAI_v3.Analysis
                 }
             }
 
-            // ★ v3.5.76: 위험한 AoE 감점 (설정 기반)
+            // ★ v3.6.15: 위험한 AoE - 실제 AOE 반경으로 아군 체크
             if (AbilityDatabase.IsDangerousAoE(attack))
             {
-                var aoeConfig = AIConfig.GetAoEConfig();
-                float checkRadius = aoeConfig?.AoEAllyCheckRadius ?? 5f;
-                float allyPenalty = aoeConfig?.DangerousAoEAllyPenalty ?? 20f;
+                float checkRadius = CombatAPI.GetAoERadius(attack);
+                if (checkRadius <= 0f) checkRadius = 3f;  // 최소 안전 반경
+
                 int nearbyAllies = CountAlliesNear(target, situation, checkRadius);
-                score -= nearbyAllies * allyPenalty;  // 아군 피해 위험
+                if (nearbyAllies > 0)
+                {
+                    score -= 1000f;  // 아군 피해 절대 방지
+                    Main.LogDebug($"[Scorer] DangerousAoE {attack.Name}: {nearbyAllies} allies in {checkRadius:F0} tiles - BLOCKED");
+                }
             }
 
             return score;

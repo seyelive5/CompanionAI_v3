@@ -241,19 +241,24 @@ namespace CompanionAI_v3.Planning.Planners
             {
                 if (situation.AvailableAttacks.Count > 0)
                 {
+                    // ★ v3.6.15: DangerousAoE fallback 필터링 - 아군 피해 방지
+                    var safeAttacks = situation.AvailableAttacks
+                        .Where(a => !AbilityDatabase.IsDangerousAoE(a))
+                        .ToList();
+
                     var rangePreference = situation.RangePreference;
                     if (rangePreference == RangePreference.PreferRanged)
                     {
-                        attack = situation.AvailableAttacks.FirstOrDefault(a => !a.IsMelee);
+                        attack = safeAttacks.FirstOrDefault(a => !a.IsMelee);
                     }
                     else if (rangePreference == RangePreference.PreferMelee)
                     {
-                        attack = situation.AvailableAttacks.FirstOrDefault(a => a.IsMelee);
+                        attack = safeAttacks.FirstOrDefault(a => a.IsMelee);
                     }
 
                     if (attack == null)
                     {
-                        attack = situation.AvailableAttacks.FirstOrDefault();
+                        attack = safeAttacks.FirstOrDefault();
                     }
                 }
 
