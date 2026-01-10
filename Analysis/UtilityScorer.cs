@@ -376,17 +376,20 @@ namespace CompanionAI_v3.Analysis
                 }
             }
 
-            // ★ v3.6.15: 위험한 AoE - 실제 AOE 반경으로 아군 체크
-            if (AbilityDatabase.IsDangerousAoE(attack))
-            {
-                float checkRadius = CombatAPI.GetAoERadius(attack);
-                if (checkRadius <= 0f) checkRadius = 3f;  // 최소 안전 반경
+            // ★ v3.6.16: 모든 Point AOE 능력에 아군 체크 적용
+            // DangerousAoE뿐만 아니라 Point 타겟 AOE (플라스마 과충전 등)도 포함
+            float aoeRadius = CombatAPI.GetAoERadius(attack);
+            bool isPointAoE = CombatAPI.IsPointTargetAbility(attack) && aoeRadius > 0f;
+            bool isDangerousAoE = AbilityDatabase.IsDangerousAoE(attack);
 
+            if (isPointAoE || isDangerousAoE)
+            {
+                float checkRadius = aoeRadius > 0f ? aoeRadius : 3f;
                 int nearbyAllies = CountAlliesNear(target, situation, checkRadius);
                 if (nearbyAllies > 0)
                 {
                     score -= 1000f;  // 아군 피해 절대 방지
-                    Main.LogDebug($"[Scorer] DangerousAoE {attack.Name}: {nearbyAllies} allies in {checkRadius:F0} tiles - BLOCKED");
+                    Main.LogDebug($"[Scorer] AOE ally check {attack.Name}: {nearbyAllies} allies in {checkRadius:F0} tiles - BLOCKED");
                 }
             }
 

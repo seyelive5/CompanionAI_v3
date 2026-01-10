@@ -241,9 +241,9 @@ namespace CompanionAI_v3.Planning.Planners
             {
                 if (situation.AvailableAttacks.Count > 0)
                 {
-                    // ★ v3.6.15: DangerousAoE fallback 필터링 - 아군 피해 방지
+                    // ★ v3.6.16: AOE 아군 안전 체크 (타겟 기준)
                     var safeAttacks = situation.AvailableAttacks
-                        .Where(a => !AbilityDatabase.IsDangerousAoE(a))
+                        .Where(a => IsAoESafeForTarget(a, effectiveTarget, situation))
                         .ToList();
 
                     var rangePreference = situation.RangePreference;
@@ -309,6 +309,50 @@ namespace CompanionAI_v3.Planning.Planners
                 .Where(e => e != null && e.IsConscious)
                 .OrderBy(e => UnityEngine.Vector3.Distance(position, e.Position))
                 .FirstOrDefault();
+        }
+
+        /// <summary>
+        /// ★ v3.6.16: AOE 능력이 타겟에 대해 안전한지 확인
+        /// - 비 AOE 능력: 항상 안전
+        /// - AOE 능력: 타겟 주변에 아군이 없으면 안전
+        /// </summary>
+        private static bool IsAoESafeForTarget(AbilityData ability, BaseUnitEntity target, Situation situation)
+        {
+            if (ability == null || target == null) return false;
+
+            // DangerousAoE 체크
+            if (AbilityDatabase.IsDangerousAoE(ability))
+            {
+                float radius = CombatAPI.GetAoERadius(ability);
+                if (radius <= 0f) radius = 3f;
+                return CountAlliesNearTarget(target, situation, radius) == 0;
+            }
+
+            // Point AOE 체크
+            if (CombatAPI.IsPointTargetAbility(ability))
+            {
+                float radius = CombatAPI.GetAoERadius(ability);
+                if (radius > 0f)
+                {
+                    return CountAlliesNearTarget(target, situation, radius) == 0;
+                }
+            }
+
+            // 비 AOE 능력은 안전
+            return true;
+        }
+
+        /// <summary>
+        /// ★ v3.6.16: 타겟 주변 아군 수 계산
+        /// </summary>
+        private static int CountAlliesNearTarget(BaseUnitEntity target, Situation situation, float radius)
+        {
+            if (target == null || situation.Allies == null) return 0;
+
+            return situation.Allies.Count(ally =>
+                ally != null &&
+                !ally.LifeState.IsDead &&
+                CombatAPI.GetDistance(target, ally) <= radius);
         }
 
         /// <summary>
