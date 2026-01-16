@@ -262,8 +262,18 @@ namespace CompanionAI_v3.Planning.Plans
                     attacksPlanned++;
 
                     var targetEntity = fallbackAction.Target?.Entity as BaseUnitEntity;
+                    // ★ v3.6.22: Hittable 적이 2명 이상일 때만 타겟 제외
                     if (targetEntity != null)
-                        plannedTargetIds.Add(targetEntity.UniqueId);
+                    {
+                        if (situation.HittableEnemies.Count > 1)
+                        {
+                            plannedTargetIds.Add(targetEntity.UniqueId);
+                        }
+                        else
+                        {
+                            Main.LogDebug($"[Support] Phase 4: Allow re-attack on {targetEntity.CharacterName} (only 1 hittable enemy)");
+                        }
+                    }
 
                     if (fallbackAction.Ability != null)
                     {
@@ -289,7 +299,8 @@ namespace CompanionAI_v3.Planning.Plans
                     foreach (var action in optimalActions)
                     {
                         var targetEntity = action.Target?.Entity as BaseUnitEntity;
-                        if (targetEntity != null)
+                        // ★ v3.6.22: Hittable 적이 2명 이상일 때만 타겟 제외
+                        if (targetEntity != null && situation.HittableEnemies.Count > 1)
                             plannedTargetIds.Add(targetEntity.UniqueId);
 
                         if (action.Ability != null)

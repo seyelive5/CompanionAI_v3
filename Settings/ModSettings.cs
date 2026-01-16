@@ -498,7 +498,8 @@ namespace CompanionAI_v3.Settings
                     UsePredictiveMovement = DefaultSettings.UsePredictiveMovement
                 };
                 perSave.CharacterSettings[characterId] = settings;
-                PerSaveSettings.Save();  // 세이브에 저장
+                // ★ v3.6.23: 자동 저장 제거 - 매 턴 NPC 분석 시 파일 크기가 계속 증가하는 문제 해결
+                // 저장은 UI에서 설정 변경 시 (SaveCharacterSettings) 또는 게임 저장 시 (SaveRoutine_Prefix)에만 수행
             }
 
             if (!string.IsNullOrEmpty(characterName))

@@ -162,15 +162,47 @@ namespace CompanionAI_v3.Analysis
                 // ★ v3.6.2: AOE/Self 도발 - 타일 단위로 통일 (기본 4타일 ≈ 5.4m)
                 float effectiveRadiusTiles = aoERadius > 0 ? aoERadius : 4f;
 
+                // ★ v3.6.24: AOE 중심점 계산 - TargetPoint 기준으로 거리 계산해야 함!
+                // isTouchRange인 경우 AOE 중심은 캐스터에서 1.5m 오프셋된 위치
+                // isSelfTarget인 경우 AOE 중심은 캐스터 위치
+                Vector3 aoeCenterForPrediction = position;
+                if (!isSelfTarget && isTouchRange && enemies.Count > 0)
+                {
+                    // 적들의 중심점 방향으로 1.5m 오프셋 (실제 TargetPoint 계산 로직과 동일)
+                    Vector3 sum = Vector3.zero;
+                    int validCount = 0;
+                    foreach (var e in enemies)
+                    {
+                        if (e != null && e.IsConscious)
+                        {
+                            sum += e.Position;
+                            validCount++;
+                        }
+                    }
+                    if (validCount > 0)
+                    {
+                        Vector3 centroid = sum / validCount;
+                        Vector3 toEnemies = centroid - position;
+                        if (toEnemies.magnitude > 0.1f)
+                        {
+                            aoeCenterForPrediction = position + toEnemies.normalized * 1.5f;
+                        }
+                    }
+                }
+
+                Main.LogDebug($"[TauntScorer] AOE center for prediction: ({aoeCenterForPrediction.x:F1}, {aoeCenterForPrediction.z:F1}), radius={effectiveRadiusTiles:F1} tiles");
+
                 foreach (var enemy in enemies)
                 {
                     if (enemy == null || !enemy.IsConscious) continue;
-                    float distTiles = CombatAPI.MetersToTiles(Vector3.Distance(position, enemy.Position));
+                    // ★ v3.6.24: AOE 중심점에서 거리 계산 (캐스터 위치가 아님!)
+                    float distTiles = CombatAPI.MetersToTiles(Vector3.Distance(aoeCenterForPrediction, enemy.Position));
                     if (distTiles <= effectiveRadiusTiles)
                     {
                         affectedEnemies.Add(enemy);
                         if (enemiesTargetingAllies.Contains(enemy))
                             targetingAlliesCount++;
+                        Main.LogDebug($"[TauntScorer] Enemy in range: {enemy.CharacterName} at {distTiles:F1} tiles");
                     }
                 }
             }

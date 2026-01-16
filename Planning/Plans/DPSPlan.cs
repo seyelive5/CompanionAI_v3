@@ -362,8 +362,19 @@ namespace CompanionAI_v3.Planning.Plans
                 }
 
                 var targetEntity = attackAction.Target?.Entity as BaseUnitEntity;
+                // ★ v3.6.22: Hittable 적이 2명 이상일 때만 타겟 제외 (다중 적 분산 공격)
+                // 1명뿐이면 계속 공격할 수 있도록 제외하지 않음
                 if (targetEntity != null)
-                    plannedTargetIds.Add(targetEntity.UniqueId);
+                {
+                    if (situation.HittableEnemies.Count > 1)
+                    {
+                        plannedTargetIds.Add(targetEntity.UniqueId);
+                    }
+                    else
+                    {
+                        Main.LogDebug($"[DPS] Phase 5: Allow re-attack on {targetEntity.CharacterName} (only 1 hittable enemy)");
+                    }
+                }
 
                 if (attackAction.Ability != null)
                 {
