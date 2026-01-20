@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.Enums;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Utility;
+using Kingmaker.Pathfinding;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
 using CompanionAI_v3.Data;
@@ -49,6 +51,124 @@ namespace CompanionAI_v3.Planning.Plans
                 actions.Add(reloadAction);
             }
 
+            // ★ v3.7.02: Phase 1.75 - Familiar support (키스톤 확산 최우선)
+            // ★ v3.7.07: 실제 사용된 능력 GUID 추적 (Phase 4에서 스킵 판단용)
+            // ★ v3.7.09: 버프 + 디버프 (Raven Warp Relay) 모두 추적
+            // ★ v3.7.12: 모든 사역마 능력 통합 (Priority Signal, Fast, Hex, Cycle, Roam)
+            var usedKeystoneAbilityGuids = new HashSet<string>();
+            bool usedWarpRelay = false;
+
+            if (situation.HasFamiliar)
+            {
+                // ★ v3.7.12: 1. Servo-Skull Priority Signal (선제 버프)
+                var prioritySignal = PlanFamiliarPrioritySignal(situation, ref remainingAP);
+                if (prioritySignal != null)
+                    actions.Add(prioritySignal);
+
+                // ★ v3.7.12: 2. Mastiff Fast (Apprehend 전 이동 버프)
+                var mastiffFast = PlanFamiliarFast(situation, ref remainingAP);
+                if (mastiffFast != null)
+                    actions.Add(mastiffFast);
+
+                // 3. Relocate: 사역마를 최적 위치로 이동 (Mastiff 제외)
+                var familiarRelocate = PlanFamiliarRelocate(situation, ref remainingAP);
+                if (familiarRelocate != null)
+                    actions.Add(familiarRelocate);
+
+                // ★ v3.7.02: 4. 키스톤 능력 루프 (Servo-Skull/Raven)
+                // ★ v3.7.09: 버프 + 디버프 (Raven Warp Relay) 모두 처리
+                var keystoneActions = PlanAllFamiliarKeystoneBuffs(situation, ref remainingAP);
+                if (keystoneActions.Count > 0)
+                {
+                    actions.AddRange(keystoneActions);
+                    Main.Log($"[Support] Phase 1.75: {keystoneActions.Count} keystone abilities planned (buffs/debuffs)");
+
+                    // ★ v3.7.07: 실제 사용된 능력 GUID 추적
+                    foreach (var action in keystoneActions)
+                    {
+                        if (action.Ability?.Blueprint != null)
+                        {
+                            string guid = action.Ability.Blueprint.AssetGuid?.ToString();
+                            if (!string.IsNullOrEmpty(guid))
+                                usedKeystoneAbilityGuids.Add(guid);
+                        }
+                    }
+
+                    // ★ v3.7.12: Raven Warp Relay 사용 여부 추적 (Cycle용)
+                    usedWarpRelay = situation.FamiliarType == PetType.Raven;
+                }
+
+                // ★ v3.7.12: 5. Raven Cycle (Warp Relay 후 재시전)
+                if (usedWarpRelay)
+                {
+                    var cycle = PlanFamiliarCycle(situation, ref remainingAP, usedWarpRelay);
+                    if (cycle != null)
+                        actions.Add(cycle);
+                }
+
+                // ★ v3.7.12: 6. Raven Hex (적 디버프)
+                var hex = PlanFamiliarHex(situation, ref remainingAP);
+                if (hex != null)
+                    actions.Add(hex);
+
+                // 7. Mastiff: Apprehend → JumpClaws → Claws → Roam (폴백 체인)
+                // ★ v3.7.14: JumpClaws, Claws 폴백 추가
+                var apprehend = PlanFamiliarApprehend(situation, ref remainingAP);
+                if (apprehend != null)
+                    actions.Add(apprehend);
+                else
+                {
+                    var jumpClaws = PlanFamiliarJumpClaws(situation, ref remainingAP);
+                    if (jumpClaws != null)
+                        actions.Add(jumpClaws);
+                    else
+                    {
+                        var mastiffClaws = PlanFamiliarClaws(situation, ref remainingAP);
+                        if (mastiffClaws != null)
+                            actions.Add(mastiffClaws);
+                        else
+                        {
+                            var roam = PlanFamiliarRoam(situation, ref remainingAP);
+                            if (roam != null)
+                                actions.Add(roam);
+                        }
+                    }
+                }
+
+                // 8. Mastiff Protect: 위협받는 아군 호위
+                var familiarProtect = PlanFamiliarProtect(situation, ref remainingAP);
+                if (familiarProtect != null)
+                    actions.Add(familiarProtect);
+
+                // 9. Eagle Obstruct (Support에서도 사용)
+                var obstruct = PlanFamiliarObstruct(situation, ref remainingAP);
+                if (obstruct != null)
+                    actions.Add(obstruct);
+
+                // ★ v3.7.14: 10. Eagle Blinding Dive: 이동+실명 공격
+                var blindingDive = PlanFamiliarBlindingDive(situation, ref remainingAP);
+                if (blindingDive != null)
+                    actions.Add(blindingDive);
+
+                // 11. Eagle Screen: HP 낮은 아군 보호
+                var familiarScreen = PlanFamiliarScreen(situation, ref remainingAP);
+                if (familiarScreen != null)
+                    actions.Add(familiarScreen);
+
+                // 12. Eagle Aerial Rush: 돌진 공격 (경로상 적 타격)
+                var aerialRush = PlanFamiliarAerialRush(situation, ref remainingAP);
+                if (aerialRush != null)
+                    actions.Add(aerialRush);
+
+                // ★ v3.7.14: 13. Eagle Claws: 폴백 근접 공격
+                if (blindingDive == null && aerialRush == null)
+                {
+                    var eagleClaws = PlanFamiliarClaws(situation, ref remainingAP);
+                    if (eagleClaws != null)
+                        actions.Add(eagleClaws);
+                }
+            }
+
             // ★ v3.0.57: Phase 1.6 제거 - 이동은 Phase 6에서 SequenceOptimizer가 결정
             // 기존: 무조건 후퇴 → 공격
             // 신규: "현재 위치 공격" vs "후퇴 → 공격" 비교 후 최적 선택
@@ -60,6 +180,18 @@ namespace CompanionAI_v3.Planning.Plans
             float healThreshold = confidence > 0.7f ? 30f :  // 높은 신뢰도: HP<30%만 힐
                                   confidence > 0.3f ? 50f :  // 보통: HP<50%
                                                       70f;   // 낮은 신뢰도: HP<70%도 힐
+
+            // ★ v3.7.12: Vitality Signal (Servo-Skull AoE 힐) - 개별 힐보다 우선
+            // 여러 아군이 부상 시 효율적
+            if (situation.FamiliarType == PetType.ServoskullSwarm)
+            {
+                var vitalitySignal = PlanFamiliarVitalitySignal(situation, ref remainingAP);
+                if (vitalitySignal != null)
+                {
+                    actions.Add(vitalitySignal);
+                    Main.Log($"[Support] Phase 2: Vitality Signal (AoE heal) planned");
+                }
+            }
 
             var woundedAlly = TeamBlackboard.Instance.GetMostWoundedAlly();
             if (woundedAlly == null || CombatAPI.GetHPPercent(woundedAlly) >= 80f)
@@ -101,9 +233,23 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // Phase 4: 아군 버프 (Tank > DPS > 기타 우선순위)
-            var allyBuffAction = PlanAllyBuff(situation, ref remainingAP);
-            if (allyBuffAction != null)
+            // ★ v3.7.07: 실제 사용된 키스톤 버프만 스킵 (실패한 건 아군에게 시전)
+            // ★ v3.7.08 Fix: 계획된 버프 GUID 추적하여 무한 루프 방지 (0 AP 버프 문제)
+            // ★ v3.7.09: 키스톤 디버프도 추적 (Raven Warp Relay)
+            // AP가 남아있는 동안 계속 버프 (제한 없음)
+            var usedAllyBuffGuids = new HashSet<string>(usedKeystoneAbilityGuids);  // 키스톤 + 아군 버프 통합 추적
+            while (remainingAP >= 1f)
             {
+                var allyBuffAction = PlanAllyBuff(situation, ref remainingAP, usedAllyBuffGuids);
+                if (allyBuffAction == null) break;
+
+                // ★ v3.7.08: 계획된 버프 GUID 추가 (무한 루프 방지)
+                string buffGuid = allyBuffAction.Ability?.Blueprint?.AssetGuid?.ToString();
+                if (!string.IsNullOrEmpty(buffGuid))
+                {
+                    usedAllyBuffGuids.Add(buffGuid);
+                }
+
                 actions.Add(allyBuffAction);
             }
 
@@ -442,12 +588,39 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.0.99: MP 회복 예측 후 이동 가능
             // ★ v3.1.01: predictedMP를 MovementAPI에 전달하여 reachable tiles 계산에 사용
             // ★ v3.5.36: GapCloser도 이동으로 취급 (중복 계획 방지)
+            // ★ v3.7.06: 사역마 Master는 아군 방향으로 이동 (버프 시전을 위해)
             bool hasMoveInPlan = actions.Any(a => a.Type == ActionType.Move ||
                 (a.Type == ActionType.Attack && a.Ability != null && AbilityDatabase.IsGapCloser(a.Ability)));
             bool needsMovement = situation.NeedsReposition || (!didPlanAttack && situation.HasLivingEnemies);
             bool canMove = situation.CanMove || remainingMP > 0;
 
-            if (!hasMoveInPlan && needsMovement && canMove && remainingMP > 0)
+            // ★ v3.7.06: 사역마 Master가 사역마/아군과 너무 멀면 접근
+            bool needsMoveToAlly = false;
+            if (!hasMoveInPlan && canMove && remainingMP > 0 && situation.HasFamiliar &&
+                (situation.FamiliarType == PetType.ServoskullSwarm || situation.FamiliarType == PetType.Raven))
+            {
+                // 사역마와의 거리 체크 (15m 이상이면 버프 시전 불가)
+                float distToFamiliar = UnityEngine.Vector3.Distance(
+                    situation.Unit.Position, situation.FamiliarPosition);
+                if (distToFamiliar > 15f)
+                {
+                    needsMoveToAlly = true;
+                    Main.Log($"[Support] Phase 9: Too far from familiar ({distToFamiliar:F1}m > 15m), moving toward allies");
+                }
+            }
+
+            if (needsMoveToAlly && remainingMP > 0)
+            {
+                // 아군 밀집 지역 방향으로 이동
+                var moveToAlly = PlanMoveTowardAllies(situation, remainingMP);
+                if (moveToAlly != null)
+                {
+                    actions.Add(moveToAlly);
+                    hasMoveInPlan = true;
+                    Main.Log($"[Support] Phase 9: Moving toward allies for buff range");
+                }
+            }
+            else if (!hasMoveInPlan && needsMovement && canMove && remainingMP > 0)
             {
                 Main.Log($"[Support] Phase 9: Trying move (attack planned={didPlanAttack}, predictedMP={remainingMP:F1})");
                 // ★ v3.0.90: 공격 실패 시 forceMove=true로 이동 강제
@@ -545,7 +718,12 @@ namespace CompanionAI_v3.Planning.Plans
             return null;
         }
 
-        private PlannedAction PlanAllyBuff(Situation situation, ref float remainingAP)
+        /// <summary>
+        /// ★ v3.7.07: usedKeystoneGuids 파라미터 추가
+        /// Phase 1.75에서 사역마에게 실제 성공한 버프만 스킵
+        /// 실패한 버프(쳐부숴라! 등)는 아군에게 시전 가능
+        /// </summary>
+        private PlannedAction PlanAllyBuff(Situation situation, ref float remainingAP, HashSet<string> usedKeystoneGuids)
         {
             // ★ v3.2.15: 팀 전술에 따라 버프 대상 우선순위 조정
             var tactic = TeamBlackboard.Instance.CurrentTactic;
@@ -609,6 +787,16 @@ namespace CompanionAI_v3.Planning.Plans
             foreach (var buff in situation.AvailableBuffs)
             {
                 if (buff.Blueprint?.CanTargetFriends != true) continue;
+
+                // ★ v3.7.07 Fix: 실제 사역마에게 성공한 버프만 스킵
+                // 기존: IsExtrapolationTarget() → 실패한 버프도 무조건 스킵 (버그)
+                // 수정: usedKeystoneGuids.Contains() → 실제 성공한 것만 스킵
+                string buffGuid = buff.Blueprint?.AssetGuid?.ToString();
+                if (!string.IsNullOrEmpty(buffGuid) && usedKeystoneGuids != null && usedKeystoneGuids.Contains(buffGuid))
+                {
+                    Main.LogDebug($"[Support] Skip {buff.Name} - successfully used on familiar in Phase 1.75");
+                    continue;
+                }
 
                 float cost = CombatAPI.GetAbilityAPCost(buff);
                 if (cost > remainingAP) continue;
@@ -703,6 +891,92 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            return null;
+        }
+
+        /// <summary>
+        /// ★ v3.7.06: 사역마/아군 방향으로 이동 (버프 시전 범위 확보)
+        /// </summary>
+        private PlannedAction PlanMoveTowardAllies(Situation situation, float remainingMP)
+        {
+            if (remainingMP <= 0) return null;
+
+            var unit = situation.Unit;
+            if (unit == null) return null;
+
+            // 목표 위치 결정: 사역마 위치 또는 아군 밀집 중심
+            UnityEngine.Vector3 targetPos;
+            string moveReason;
+
+            if (situation.HasFamiliar && situation.Familiar != null)
+            {
+                // 사역마가 있으면 사역마 위치로 이동
+                targetPos = situation.FamiliarPosition;
+                var typeName = FamiliarAPI.GetFamiliarTypeName(situation.FamiliarType);
+                moveReason = $"Move toward {typeName} for buff range";
+            }
+            else if (situation.Allies != null && situation.Allies.Any(a => a != null && !a.LifeState.IsDead))
+            {
+                // 아군 밀집 중심점 계산
+                var livingAllies = situation.Allies.Where(a => a != null && !a.LifeState.IsDead).ToList();
+                var centerX = livingAllies.Average(a => a.Position.x);
+                var centerY = livingAllies.Average(a => a.Position.y);
+                var centerZ = livingAllies.Average(a => a.Position.z);
+                targetPos = new UnityEngine.Vector3(centerX, centerY, centerZ);
+                moveReason = "Move toward ally cluster";
+            }
+            else
+            {
+                return null;
+            }
+
+            // 현재 거리 확인
+            float currentDist = UnityEngine.Vector3.Distance(unit.Position, targetPos);
+            if (currentDist <= 10f)  // 이미 충분히 가까움
+            {
+                Main.LogDebug($"[Support] Already close to target position ({currentDist:F1}m)");
+                return null;
+            }
+
+            // 도달 가능한 타일 획득
+            var tiles = MovementAPI.FindAllReachableTilesSync(unit, remainingMP);
+            if (tiles == null || tiles.Count == 0)
+            {
+                Main.LogDebug($"[Support] No reachable tiles for ally approach");
+                return null;
+            }
+
+            // 목표 위치에 가장 가까운 타일 찾기
+            UnityEngine.Vector3? bestPos = null;
+            float bestDist = currentDist;  // 현재보다 가까워야 함
+
+            foreach (var kvp in tiles)
+            {
+                var cell = kvp.Value;
+                if (!cell.IsCanStand) continue;
+
+                var node = kvp.Key as CustomGridNodeBase;
+                if (node == null) continue;
+
+                var pos = node.Vector3Position;
+                float dist = UnityEngine.Vector3.Distance(pos, targetPos);
+
+                // 현재보다 가깝고, 지금까지 중 최고면 선택
+                if (dist < bestDist - 1f)  // 최소 1m 이상 가까워야 함
+                {
+                    bestDist = dist;
+                    bestPos = pos;
+                }
+            }
+
+            if (bestPos.HasValue)
+            {
+                float improvement = currentDist - bestDist;
+                Main.Log($"[Support] Move toward allies: {currentDist:F1}m -> {bestDist:F1}m (improvement: {improvement:F1}m)");
+                return PlannedAction.Move(bestPos.Value, moveReason);
+            }
+
+            Main.LogDebug($"[Support] No better position toward allies found");
             return null;
         }
 

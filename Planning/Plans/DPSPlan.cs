@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.Enums;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Utility;
 using CompanionAI_v3.Core;
@@ -72,6 +73,97 @@ namespace CompanionAI_v3.Planning.Plans
                     {
                         actions.Add(retreatAction);
                     }
+                }
+            }
+
+            // ★ v3.7.02: Phase 1.75 - Familiar support (키스톤 확산 포함)
+            // ★ v3.7.12: 모든 사역마 능력 통합
+            bool usedWarpRelay = false;
+
+            if (situation.HasFamiliar)
+            {
+                // ★ v3.7.12: 1. Servo-Skull Priority Signal (선제 버프)
+                var prioritySignal = PlanFamiliarPrioritySignal(situation, ref remainingAP);
+                if (prioritySignal != null)
+                    actions.Add(prioritySignal);
+
+                // ★ v3.7.12: 2. Mastiff Fast (Apprehend 전 이동 버프)
+                var mastiffFast = PlanFamiliarFast(situation, ref remainingAP);
+                if (mastiffFast != null)
+                    actions.Add(mastiffFast);
+
+                // 3. Relocate: 사역마를 최적 위치로 이동 (Mastiff 제외)
+                var familiarRelocate = PlanFamiliarRelocate(situation, ref remainingAP);
+                if (familiarRelocate != null)
+                    actions.Add(familiarRelocate);
+
+                // ★ v3.7.02: 4. 키스톤 버프/디버프 루프 (Servo-Skull/Raven)
+                var keystoneActions = PlanAllFamiliarKeystoneBuffs(situation, ref remainingAP);
+                if (keystoneActions.Count > 0)
+                {
+                    actions.AddRange(keystoneActions);
+                    Main.Log($"[DPS] Phase 1.75: {keystoneActions.Count} keystone abilities planned");
+                    usedWarpRelay = situation.FamiliarType == PetType.Raven;
+                }
+
+                // ★ v3.7.12: 5. Raven Cycle (Warp Relay 후 재시전)
+                if (usedWarpRelay)
+                {
+                    var cycle = PlanFamiliarCycle(situation, ref remainingAP, usedWarpRelay);
+                    if (cycle != null)
+                        actions.Add(cycle);
+                }
+
+                // ★ v3.7.12: 6. Raven Hex (적 디버프)
+                var hex = PlanFamiliarHex(situation, ref remainingAP);
+                if (hex != null)
+                    actions.Add(hex);
+
+                // 7. Mastiff: Apprehend → JumpClaws → Claws → Roam (폴백 체인)
+                // ★ v3.7.14: JumpClaws, Claws 폴백 추가
+                var familiarApprehend = PlanFamiliarApprehend(situation, ref remainingAP);
+                if (familiarApprehend != null)
+                    actions.Add(familiarApprehend);
+                else
+                {
+                    var jumpClaws = PlanFamiliarJumpClaws(situation, ref remainingAP);
+                    if (jumpClaws != null)
+                        actions.Add(jumpClaws);
+                    else
+                    {
+                        var mastiffClaws = PlanFamiliarClaws(situation, ref remainingAP);
+                        if (mastiffClaws != null)
+                            actions.Add(mastiffClaws);
+                        else
+                        {
+                            var roam = PlanFamiliarRoam(situation, ref remainingAP);
+                            if (roam != null)
+                                actions.Add(roam);
+                        }
+                    }
+                }
+
+                // 8. Eagle: 시야 방해 (적 클러스터 교란)
+                var familiarObstruct = PlanFamiliarObstruct(situation, ref remainingAP);
+                if (familiarObstruct != null)
+                    actions.Add(familiarObstruct);
+
+                // ★ v3.7.14: 9. Eagle Blinding Dive: 이동+실명 공격
+                var blindingDive = PlanFamiliarBlindingDive(situation, ref remainingAP);
+                if (blindingDive != null)
+                    actions.Add(blindingDive);
+
+                // 10. Eagle Aerial Rush: 돌진 공격 (경로상 적 타격)
+                var aerialRush = PlanFamiliarAerialRush(situation, ref remainingAP);
+                if (aerialRush != null)
+                    actions.Add(aerialRush);
+
+                // ★ v3.7.14: 11. Eagle Claws: 폴백 근접 공격
+                if (blindingDive == null && aerialRush == null)
+                {
+                    var eagleClaws = PlanFamiliarClaws(situation, ref remainingAP);
+                    if (eagleClaws != null)
+                        actions.Add(eagleClaws);
                 }
             }
 

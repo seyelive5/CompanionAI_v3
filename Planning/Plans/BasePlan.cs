@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.Enums;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Utility;
 using UnityEngine;
@@ -671,6 +672,1312 @@ namespace CompanionAI_v3.Planning.Plans
             if (!situation.HasHittableEnemies) return "No hittable targets";
 
             return "No valid actions";
+        }
+
+        #endregion
+
+        #region Familiar Support (v3.7.00)
+
+        /// <summary>
+        /// ★ v3.7.02: 모든 키스톤 버프를 사역마에게 시전 (루프)
+        /// ★ v3.7.09: Raven의 경우 디버프도 포함 (적에게 확산)
+        /// AP가 남아있는 동안 적용 가능한 모든 버프/디버프를 사역마에게 시전
+        /// </summary>
+        protected List<PlannedAction> PlanAllFamiliarKeystoneBuffs(Situation situation, ref float remainingAP)
+        {
+            var actions = new List<PlannedAction>();
+
+            // Servo-Skull/Raven만 해당 (Mastiff/Eagle은 버프 확산 없음)
+            if (!situation.HasFamiliar || situation.Familiar == null)
+                return actions;
+            if (situation.FamiliarType != PetType.ServoskullSwarm &&
+                situation.FamiliarType != PetType.Raven)
+                return actions;
+
+            var optimalPos = situation.OptimalFamiliarPosition;
+            if (optimalPos == null)
+            {
+                Main.LogDebug($"[{RoleName}] Keystone Loop: No optimal position");
+                return actions;
+            }
+
+            // 키스톤 대상 버프 필터링
+            var keystoneBuffs = FamiliarAbilities.FilterAbilitiesForFamiliarSpread(
+                situation.AvailableBuffs.ToList(),
+                situation.FamiliarType.Value);
+
+            // ★ v3.7.09: Raven의 경우 디버프도 추가 (Warp Relay로 적에게 확산)
+            // ★ v3.7.10: AvailableDebuffs + AvailableAttacks 모두 검사
+            // 감각 박탈 등이 Timing=Normal로 분류되어 AvailableAttacks에 있을 수 있음
+            var keystoneDebuffs = new List<AbilityData>();
+            if (situation.FamiliarType == PetType.Raven)
+            {
+                // 1. AvailableDebuffs에서 검색
+                if (situation.AvailableDebuffs != null)
+                {
+                    var debuffCandidates = FamiliarAbilities.FilterAbilitiesForFamiliarSpread(
+                        situation.AvailableDebuffs.ToList(),
+                        PetType.Raven);
+                    keystoneDebuffs.AddRange(debuffCandidates);
+                }
+
+                // 2. ★ v3.7.10: AvailableAttacks에서도 검색 (Timing=Normal인 디버프)
+                // 비피해 사이킥 + 적 타겟 가능 = Warp Relay 디버프 후보
+                if (situation.AvailableAttacks != null)
+                {
+                    foreach (var attack in situation.AvailableAttacks)
+                    {
+                        // 이미 추가된 건 스킵
+                        string guid = attack.Blueprint?.AssetGuid?.ToString();
+                        if (keystoneDebuffs.Any(d => d.Blueprint?.AssetGuid?.ToString() == guid))
+                            continue;
+
+                        // Warp Relay 대상인지 확인 (비피해 사이킹, 적 타겟)
+                        if (FamiliarAbilities.IsWarpRelayTarget(attack) &&
+                            attack.Blueprint?.CanTargetEnemies == true)
+                        {
+                            keystoneDebuffs.Add(attack);
+                            Main.LogDebug($"[{RoleName}] Keystone Loop: Found {attack.Name} in AvailableAttacks for Warp Relay");
+                        }
+                    }
+                }
+
+                if (keystoneDebuffs.Count > 0)
+                {
+                    Main.LogDebug($"[{RoleName}] Keystone Loop: {keystoneDebuffs.Count} debuffs eligible for Warp Relay");
+                }
+            }
+
+            // 버프/디버프 모두 없으면 종료
+            if (keystoneBuffs.Count == 0 && keystoneDebuffs.Count == 0)
+            {
+                Main.LogDebug($"[{RoleName}] Keystone Loop: No keystone-eligible abilities found");
+                return actions;
+            }
+
+            // 사용된 능력 추적
+            var usedAbilityGuids = new HashSet<string>();
+            var familiarTarget = new TargetWrapper(situation.Familiar);
+            var typeName = FamiliarAPI.GetFamiliarTypeName(situation.FamiliarType);
+
+            // ★ 버프 처리 (아군 2명+ 필요)
+            if (keystoneBuffs.Count > 0 && optimalPos.AlliesInRange >= 2)
+            {
+                foreach (var buff in keystoneBuffs)
+                {
+                    if (remainingAP < 1f) break;
+
+                    string guid = buff.Blueprint?.AssetGuid?.ToString();
+                    if (!string.IsNullOrEmpty(guid) && usedAbilityGuids.Contains(guid))
+                        continue;
+
+                    float cost = CombatAPI.GetAbilityAPCost(buff);
+                    if (cost > remainingAP) continue;
+
+                    // 이미 활성화된 버프 스킵
+                    if (CombatAPI.HasActiveBuff(situation.Familiar, buff)) continue;
+
+                    string reason;
+                    if (!CombatAPI.CanUseAbilityOn(buff, familiarTarget, out reason))
+                    {
+                        Main.LogDebug($"[{RoleName}] Keystone Loop: {buff.Name} blocked - {reason}");
+                        continue;
+                    }
+
+                    remainingAP -= cost;
+                    if (!string.IsNullOrEmpty(guid))
+                        usedAbilityGuids.Add(guid);
+
+                    Main.Log($"[{RoleName}] ★ Familiar Keystone Buff: {buff.Name} on {typeName} " +
+                        $"({optimalPos.AlliesInRange} allies in range)");
+
+                    actions.Add(PlannedAction.Buff(
+                        buff,
+                        situation.Familiar,
+                        $"Keystone spread: {buff.Name} ({optimalPos.AlliesInRange} allies)",
+                        cost));
+                }
+            }
+
+            // ★ v3.7.09: 디버프 처리 (적 2명+ 필요) - Raven Warp Relay
+            if (keystoneDebuffs.Count > 0 && optimalPos.EnemiesInRange >= 2)
+            {
+                foreach (var debuff in keystoneDebuffs)
+                {
+                    if (remainingAP < 1f) break;
+
+                    string guid = debuff.Blueprint?.AssetGuid?.ToString();
+                    if (!string.IsNullOrEmpty(guid) && usedAbilityGuids.Contains(guid))
+                        continue;
+
+                    float cost = CombatAPI.GetAbilityAPCost(debuff);
+                    if (cost > remainingAP) continue;
+
+                    // 디버프를 Raven에게 시전 가능한지 확인
+                    // (게임이 Warp Relay 메커니즘으로 허용하는 경우에만 성공)
+                    string reason;
+                    if (!CombatAPI.CanUseAbilityOn(debuff, familiarTarget, out reason))
+                    {
+                        Main.LogDebug($"[{RoleName}] Keystone Debuff: {debuff.Name} can't target Raven - {reason}");
+                        continue;
+                    }
+
+                    remainingAP -= cost;
+                    if (!string.IsNullOrEmpty(guid))
+                        usedAbilityGuids.Add(guid);
+
+                    Main.Log($"[{RoleName}] ★ Familiar Keystone Debuff: {debuff.Name} on {typeName} " +
+                        $"({optimalPos.EnemiesInRange} enemies in range) - Warp Relay spread");
+
+                    actions.Add(PlannedAction.Attack(  // 디버프는 Attack 타입으로 (적 대상)
+                        debuff,
+                        situation.Familiar,
+                        $"Warp Relay debuff: {debuff.Name} ({optimalPos.EnemiesInRange} enemies)",
+                        cost));
+                }
+            }
+            else if (keystoneDebuffs.Count > 0)
+            {
+                Main.LogDebug($"[{RoleName}] Keystone Debuff: Not enough enemies in range ({optimalPos.EnemiesInRange})");
+            }
+
+            if (actions.Count > 0)
+            {
+                Main.Log($"[{RoleName}] Keystone Loop: {actions.Count} abilities planned for familiar");
+            }
+
+            return actions;
+        }
+
+        /// <summary>
+        /// ★ v3.7.00: 사역마 Relocate 계획 (턴 초반에 최적 위치로 이동)
+        /// ★ v3.7.02: Mastiff는 Relocate 없음
+        /// </summary>
+        protected PlannedAction PlanFamiliarRelocate(Situation situation, ref float remainingAP)
+        {
+            // 사역마 없거나 Relocate 불필요
+            if (!situation.HasFamiliar || !situation.NeedsFamiliarRelocate)
+                return null;
+
+            // ★ v3.7.02: Mastiff는 Relocate 능력이 없음
+            if (situation.FamiliarType == PetType.Mastiff)
+            {
+                Main.LogDebug($"[{RoleName}] Familiar Relocate: Mastiff has no Relocate ability");
+                return null;
+            }
+
+            // Relocate 능력 찾기
+            var relocate = situation.FamiliarAbilities?
+                .FirstOrDefault(a => FamiliarAbilities.IsRelocateAbility(a));
+
+            if (relocate == null)
+            {
+                Main.LogDebug($"[{RoleName}] Familiar Relocate: No relocate ability found");
+                return null;
+            }
+
+            // AP 비용 확인
+            float apCost = CombatAPI.GetAbilityAPCost(relocate);
+            if (remainingAP < apCost)
+            {
+                Main.LogDebug($"[{RoleName}] Familiar Relocate: Not enough AP ({remainingAP:F1} < {apCost:F1})");
+                return null;
+            }
+
+            // 최적 위치 확인
+            var optimalPos = situation.OptimalFamiliarPosition;
+            if (optimalPos == null)
+            {
+                Main.LogDebug($"[{RoleName}] Familiar Relocate: No optimal position");
+                return null;
+            }
+
+            // LOS/타겟 가능 여부 확인
+            string reason;
+            if (!CombatAPI.CanUseAbilityOnPoint(relocate, optimalPos.Position, out reason))
+            {
+                Main.LogDebug($"[{RoleName}] Familiar Relocate blocked: {reason}");
+                return null;
+            }
+
+            remainingAP -= apCost;
+
+            var typeName = FamiliarAPI.GetFamiliarTypeName(situation.FamiliarType);
+            Main.Log($"[{RoleName}] ★ Familiar Relocate: {typeName} to optimal position " +
+                $"({optimalPos.AlliesInRange} allies, {optimalPos.EnemiesInRange} enemies in range)");
+
+            return PlannedAction.PositionalBuff(
+                relocate,
+                optimalPos.Position,
+                $"Relocate {typeName} to optimal position",
+                apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.7.00: 사역마 키스톤 능력 계획 (Extrapolation/Warp Relay)
+        /// 단일 버프/사이킥을 사역마에 시전 → 4타일 내 모든 아군에게 확산
+        /// </summary>
+        protected PlannedAction PlanFamiliarKeystone(
+            Situation situation,
+            AbilityData buffAbility,
+            ref float remainingAP)
+        {
+            // 사역마 없음
+            if (!situation.HasFamiliar || situation.Familiar == null)
+                return null;
+
+            // 사역마 타입별 키스톤 조건 확인
+            bool canUseKeystone = situation.FamiliarType switch
+            {
+                PetType.ServoskullSwarm => FamiliarAbilities.IsExtrapolationTarget(buffAbility),
+                PetType.Raven => FamiliarAbilities.IsWarpRelayTarget(buffAbility),
+                _ => false
+            };
+
+            if (!canUseKeystone)
+                return null;
+
+            // 4타일 내 아군이 2명 이상이어야 의미 있음
+            var optimalPos = situation.OptimalFamiliarPosition;
+            if (optimalPos == null || optimalPos.AlliesInRange < 2)
+            {
+                Main.LogDebug($"[{RoleName}] Familiar Keystone: Not enough allies in range ({optimalPos?.AlliesInRange ?? 0})");
+                return null;
+            }
+
+            // AP 비용 확인
+            float apCost = CombatAPI.GetAbilityAPCost(buffAbility);
+            if (remainingAP < apCost)
+                return null;
+
+            // 사역마에게 시전 가능한지 확인
+            var familiarTarget = new TargetWrapper(situation.Familiar);
+            string reason;
+            if (!CombatAPI.CanUseAbilityOn(buffAbility, familiarTarget, out reason))
+            {
+                Main.LogDebug($"[{RoleName}] Familiar Keystone blocked: {buffAbility.Name} -> {reason}");
+                return null;
+            }
+
+            remainingAP -= apCost;
+
+            var typeName = FamiliarAPI.GetFamiliarTypeName(situation.FamiliarType);
+            Main.Log($"[{RoleName}] ★ Familiar Keystone: {buffAbility.Name} on {typeName} " +
+                $"for AoE spread ({optimalPos.AlliesInRange} allies)");
+
+            return PlannedAction.Buff(
+                buffAbility,
+                situation.Familiar,
+                $"Cast on {typeName} for AoE spread ({optimalPos.AlliesInRange} allies)",
+                apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.7.00: 사역마 Apprehend 계획 (Cyber-Mastiff)
+        /// ★ v3.7.04: 연대공격을 위해 Master가 공격할 타겟과 동일한 적 우선
+        /// Mastiff Apprehend → Master Attack 순서로 같은 적 공격 시 연대공격 발동
+        /// </summary>
+        protected PlannedAction PlanFamiliarApprehend(Situation situation, ref float remainingAP)
+        {
+            // Cyber-Mastiff만 해당
+            if (situation.FamiliarType != PetType.Mastiff)
+                return null;
+
+            // Apprehend 능력 찾기
+            var apprehend = situation.FamiliarAbilities?
+                .FirstOrDefault(a => FamiliarAbilities.IsApprehendAbility(a));
+
+            if (apprehend == null)
+                return null;
+
+            // AP 비용 확인
+            float apCost = CombatAPI.GetAbilityAPCost(apprehend);
+            if (remainingAP < apCost)
+                return null;
+
+            // ★ v3.7.04: 연대공격을 위해 Master가 공격할 타겟을 최우선 타겟으로
+            // Mastiff Apprehend → Master Attack 같은 적 → 연대공격 보너스
+            BaseUnitEntity targetEnemy = null;
+            bool isCoordinated = false;
+
+            // 1순위: Master가 공격 가능한 적 중 가장 좋은 타겟 (HittableEnemies)
+            // HP가 낮은 적을 우선 (Master가 마무리하기 좋음)
+            if (situation.HittableEnemies != null && situation.HittableEnemies.Count > 0)
+            {
+                // HP%가 낮은 순으로 정렬 (마무리 타겟)
+                var bestHittable = situation.HittableEnemies
+                    .Where(e => e != null && e.IsConscious)
+                    .OrderBy(e => CombatAPI.GetHPPercent(e))
+                    .FirstOrDefault();
+
+                if (bestHittable != null)
+                {
+                    var bestTarget = new TargetWrapper(bestHittable);
+                    string bestReason;
+                    if (CombatAPI.CanUseAbilityOn(apprehend, bestTarget, out bestReason))
+                    {
+                        targetEnemy = bestHittable;
+                        isCoordinated = true;
+                        Main.Log($"[{RoleName}] Mastiff Apprehend: Targeting hittable enemy for coordinated attack");
+                    }
+                    else
+                    {
+                        Main.LogDebug($"[{RoleName}] Mastiff Apprehend: Hittable enemy blocked - {bestReason}");
+                    }
+                }
+            }
+
+            // 2순위: NearestEnemy (이동 후 공격 가능)
+            if (targetEnemy == null && situation.NearestEnemy != null && situation.NearestEnemy.IsConscious)
+            {
+                var nearTarget = new TargetWrapper(situation.NearestEnemy);
+                string nearReason;
+                if (CombatAPI.CanUseAbilityOn(apprehend, nearTarget, out nearReason))
+                {
+                    targetEnemy = situation.NearestEnemy;
+                    isCoordinated = true;  // NearestEnemy도 Master가 공격할 가능성 높음
+                    Main.Log($"[{RoleName}] Mastiff Apprehend: Targeting NearestEnemy for coordinated attack");
+                }
+            }
+
+            // 3순위: 원거리 위협 적
+            if (targetEnemy == null)
+            {
+                targetEnemy = situation.Enemies
+                    .Where(e => e != null && e.IsConscious)
+                    .Where(e => CombatAPI.HasRangedWeapon(e))  // 원거리 적
+                    .OrderByDescending(e => e.Health?.MaxHitPoints ?? 0)  // HP가 높은 적이 더 위협적
+                    .FirstOrDefault();
+            }
+
+            // 4순위: 아무 적이라도
+            if (targetEnemy == null)
+            {
+                targetEnemy = situation.Enemies
+                    .Where(e => e != null && e.IsConscious)
+                    .OrderByDescending(e => e.Health?.MaxHitPoints ?? 0)
+                    .FirstOrDefault();
+            }
+
+            if (targetEnemy == null)
+            {
+                Main.LogDebug($"[{RoleName}] Mastiff Apprehend: No valid target found");
+                return null;
+            }
+
+            // 타겟 가능 여부 확인 (3순위/4순위용)
+            if (!isCoordinated)
+            {
+                var targetWrapper = new TargetWrapper(targetEnemy);
+                string reason;
+                if (!CombatAPI.CanUseAbilityOn(apprehend, targetWrapper, out reason))
+                {
+                    Main.LogDebug($"[{RoleName}] Mastiff Apprehend blocked: {reason}");
+                    return null;
+                }
+            }
+
+            remainingAP -= apCost;
+
+            string coordMsg = isCoordinated ? " (Coordinated Attack)" : "";
+            Main.Log($"[{RoleName}] ★ Mastiff Apprehend: {targetEnemy.CharacterName}{coordMsg}");
+
+            return PlannedAction.Attack(
+                apprehend,
+                targetEnemy,
+                $"Mastiff Apprehend on {targetEnemy.CharacterName}{coordMsg}",
+                apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.7.00: 사역마 Obstruct Vision 계획 (Cyber-Eagle)
+        /// 적 밀집 지역에 시야 방해 → 아군 오사 유발 / 적 명중률 감소
+        /// </summary>
+        protected PlannedAction PlanFamiliarObstruct(Situation situation, ref float remainingAP)
+        {
+            // Cyber-Eagle만 해당
+            if (situation.FamiliarType != PetType.Eagle)
+                return null;
+
+            // Obstruct Vision 능력 찾기
+            var obstruct = situation.FamiliarAbilities?
+                .FirstOrDefault(a => FamiliarAbilities.IsObstructVisionAbility(a));
+
+            if (obstruct == null)
+            {
+                // Blinding Strike 폴백
+                obstruct = situation.FamiliarAbilities?
+                    .FirstOrDefault(a => FamiliarAbilities.IsBlindingStrikeAbility(a));
+            }
+
+            if (obstruct == null)
+                return null;
+
+            // AP 비용 확인
+            float apCost = CombatAPI.GetAbilityAPCost(obstruct);
+            if (remainingAP < apCost)
+                return null;
+
+            // 적 밀집 지역 (2명 이상) 또는 위협적 적 찾기
+            var targetEnemy = situation.Enemies
+                .Where(e => e != null && e.IsConscious)
+                .OrderByDescending(e =>
+                {
+                    // 주변 적 수 (클러스터링)
+                    int nearbyEnemies = situation.Enemies.Count(other =>
+                        other != null && other.IsConscious && other != e &&
+                        CombatCache.GetDistanceInTiles(e, other) <= 3f);
+                    return nearbyEnemies;
+                })
+                .ThenByDescending(e => e.Health?.MaxHitPoints ?? 0)
+                .FirstOrDefault();
+
+            if (targetEnemy == null)
+            {
+                Main.LogDebug($"[{RoleName}] Eagle Obstruct: No suitable target found");
+                return null;
+            }
+
+            // 타겟 가능 여부 확인
+            var targetWrapper = new TargetWrapper(targetEnemy);
+            string reason;
+            if (!CombatAPI.CanUseAbilityOn(obstruct, targetWrapper, out reason))
+            {
+                Main.LogDebug($"[{RoleName}] Eagle Obstruct blocked: {reason}");
+                return null;
+            }
+
+            remainingAP -= apCost;
+
+            Main.Log($"[{RoleName}] ★ Eagle Obstruct Vision: {targetEnemy.CharacterName}");
+
+            return PlannedAction.Attack(
+                obstruct,
+                targetEnemy,
+                $"Eagle Obstruct Vision on {targetEnemy.CharacterName}",
+                apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.7.01: 사역마 Protect! 계획 (Cyber-Mastiff)
+        /// 위협받거나 HP가 낮은 아군 호위
+        /// </summary>
+        protected PlannedAction PlanFamiliarProtect(Situation situation, ref float remainingAP)
+        {
+            // Cyber-Mastiff만 해당
+            if (situation.FamiliarType != PetType.Mastiff)
+                return null;
+
+            // Protect! 능력 찾기
+            var protect = situation.FamiliarAbilities?
+                .FirstOrDefault(a => FamiliarAbilities.IsProtectAbility(a));
+
+            if (protect == null)
+                return null;
+
+            // AP 비용 확인
+            float apCost = CombatAPI.GetAbilityAPCost(protect);
+            if (remainingAP < apCost)
+                return null;
+
+            // 보호할 아군 찾기 (HP 낮거나 주변 적이 많은 아군)
+            var allyToProtect = situation.Allies
+                .Where(a => a != null && a.IsConscious)
+                .Where(a => !FamiliarAPI.IsFamiliar(a))  // 사역마 제외
+                .Where(a => a != situation.Unit)  // 자신 제외
+                .OrderBy(a => CombatAPI.GetHPPercent(a))  // HP 낮은 순
+                .ThenByDescending(a =>  // 주변 적이 많은 순
+                {
+                    return situation.Enemies.Count(e =>
+                        e != null && e.IsConscious &&
+                        CombatCache.GetDistanceInTiles(a, e) <= 3f);
+                })
+                .FirstOrDefault();
+
+            if (allyToProtect == null)
+            {
+                Main.LogDebug($"[{RoleName}] Mastiff Protect: No ally to protect");
+                return null;
+            }
+
+            // HP가 70% 이상이고 주변 적이 없으면 스킵
+            float allyHP = CombatAPI.GetHPPercent(allyToProtect);
+            int nearbyEnemies = situation.Enemies.Count(e =>
+                e != null && e.IsConscious &&
+                CombatCache.GetDistanceInTiles(allyToProtect, e) <= 3f);
+
+            if (allyHP > 70f && nearbyEnemies == 0)
+            {
+                Main.LogDebug($"[{RoleName}] Mastiff Protect: {allyToProtect.CharacterName} doesn't need protection (HP={allyHP:F0}%, enemies nearby=0)");
+                return null;
+            }
+
+            // 타겟 가능 여부 확인
+            var targetWrapper = new TargetWrapper(allyToProtect);
+            string reason;
+            if (!CombatAPI.CanUseAbilityOn(protect, targetWrapper, out reason))
+            {
+                Main.LogDebug($"[{RoleName}] Mastiff Protect blocked: {reason}");
+                return null;
+            }
+
+            remainingAP -= apCost;
+
+            Main.Log($"[{RoleName}] ★ Mastiff Protect: {allyToProtect.CharacterName} (HP={allyHP:F0}%, nearby enemies={nearbyEnemies})");
+
+            return PlannedAction.Buff(
+                protect,
+                allyToProtect,
+                $"Mastiff Protect {allyToProtect.CharacterName}",
+                apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.7.13: 사역마 Aerial Rush 계획 (Cyber-Eagle)
+        /// 이동 + 공격 능력 - 타겟까지 돌진하며 경로상 적에게 피해
+        /// AbilityCustomDirectMovement 기반: 경로상 모든 적 히트 가능
+        /// </summary>
+        protected PlannedAction PlanFamiliarAerialRush(Situation situation, ref float remainingAP)
+        {
+            // Cyber-Eagle만 해당
+            if (situation.FamiliarType != PetType.Eagle)
+                return null;
+
+            // Aerial Rush 능력 찾기
+            var aerialRush = situation.FamiliarAbilities?
+                .FirstOrDefault(a => FamiliarAbilities.IsAerialRushAbility(a));
+
+            if (aerialRush == null)
+                return null;
+
+            // AP 비용 확인
+            float apCost = CombatAPI.GetAbilityAPCost(aerialRush);
+            if (remainingAP < apCost)
+                return null;
+
+            // ★ Aerial Rush 타겟 선정 전략:
+            // 1. HP 낮은 적 (마무리 타겟) - 돌진하면서 경로상 다른 적도 타격
+            // 2. 원거리 위협 적 - 사거리를 줄이기 위해 돌진
+            // 3. 적 밀집 지역의 끝에 있는 적 - 경로상 최대 피해
+            BaseUnitEntity targetEnemy = null;
+
+            // 1순위: HP 30% 미만인 적 (마무리 기회)
+            var lowHPEnemy = situation.Enemies
+                .Where(e => e != null && e.IsConscious)
+                .Where(e => CombatAPI.GetHPPercent(e) < 30f)
+                .OrderBy(e => CombatAPI.GetHPPercent(e))
+                .FirstOrDefault();
+
+            if (lowHPEnemy != null)
+            {
+                var lowHPTarget = new TargetWrapper(lowHPEnemy);
+                string lowHPReason;
+                if (CombatAPI.CanUseAbilityOn(aerialRush, lowHPTarget, out lowHPReason))
+                {
+                    targetEnemy = lowHPEnemy;
+                    Main.LogDebug($"[{RoleName}] Aerial Rush: Targeting low HP enemy {lowHPEnemy.CharacterName}");
+                }
+            }
+
+            // 2순위: 원거리 적 (위협 감소)
+            if (targetEnemy == null)
+            {
+                var rangedEnemy = situation.Enemies
+                    .Where(e => e != null && e.IsConscious)
+                    .Where(e => CombatAPI.HasRangedWeapon(e))
+                    .OrderByDescending(e => e.Health?.MaxHitPoints ?? 0)
+                    .FirstOrDefault();
+
+                if (rangedEnemy != null)
+                {
+                    var rangedTarget = new TargetWrapper(rangedEnemy);
+                    string rangedReason;
+                    if (CombatAPI.CanUseAbilityOn(aerialRush, rangedTarget, out rangedReason))
+                    {
+                        targetEnemy = rangedEnemy;
+                        Main.LogDebug($"[{RoleName}] Aerial Rush: Targeting ranged enemy {rangedEnemy.CharacterName}");
+                    }
+                }
+            }
+
+            // 3순위: 경로상 가장 많은 적을 통과할 수 있는 타겟
+            // (단순화: 가장 먼 적을 타겟하면 경로가 길어져 더 많은 적 타격 가능)
+            if (targetEnemy == null)
+            {
+                var farthestEnemy = situation.Enemies
+                    .Where(e => e != null && e.IsConscious)
+                    .OrderByDescending(e => CombatCache.GetDistanceInTiles(situation.Unit, e))
+                    .FirstOrDefault();
+
+                if (farthestEnemy != null)
+                {
+                    var farthestTarget = new TargetWrapper(farthestEnemy);
+                    string farthestReason;
+                    if (CombatAPI.CanUseAbilityOn(aerialRush, farthestTarget, out farthestReason))
+                    {
+                        targetEnemy = farthestEnemy;
+                        Main.LogDebug($"[{RoleName}] Aerial Rush: Targeting farthest enemy {farthestEnemy.CharacterName} for max path damage");
+                    }
+                }
+            }
+
+            // 4순위: 아무 적이라도
+            if (targetEnemy == null)
+            {
+                targetEnemy = situation.Enemies
+                    .Where(e => e != null && e.IsConscious)
+                    .FirstOrDefault();
+            }
+
+            if (targetEnemy == null)
+            {
+                Main.LogDebug($"[{RoleName}] Aerial Rush: No valid target found");
+                return null;
+            }
+
+            // 최종 타겟 사용 가능 여부 확인
+            var targetWrapper = new TargetWrapper(targetEnemy);
+            string reason;
+            if (!CombatAPI.CanUseAbilityOn(aerialRush, targetWrapper, out reason))
+            {
+                Main.LogDebug($"[{RoleName}] Aerial Rush blocked: {reason}");
+                return null;
+            }
+
+            // ★ 경로상 예상 적 수 계산 (디버그/로깅용)
+            int estimatedPathTargets = CountEnemiesInPath(situation.Unit.Position, targetEnemy.Position, situation.Enemies);
+
+            remainingAP -= apCost;
+
+            Main.Log($"[{RoleName}] ★ Eagle Aerial Rush: {targetEnemy.CharacterName} (estimated {estimatedPathTargets} enemies in path)");
+
+            return PlannedAction.Attack(
+                aerialRush,
+                targetEnemy,
+                $"Aerial Rush to {targetEnemy.CharacterName} ({estimatedPathTargets} in path)",
+                apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.7.13: 두 지점 사이 경로상 적 수 추정
+        /// Aerial Rush 타겟 선정용 - 정확한 경로가 아닌 직선 근사
+        /// </summary>
+        private int CountEnemiesInPath(UnityEngine.Vector3 start, UnityEngine.Vector3 end, List<BaseUnitEntity> enemies)
+        {
+            if (enemies == null || enemies.Count == 0) return 0;
+
+            int count = 0;
+            UnityEngine.Vector3 direction = (end - start).normalized;
+            float pathLength = UnityEngine.Vector3.Distance(start, end);
+
+            foreach (var enemy in enemies)
+            {
+                if (enemy == null || !enemy.IsConscious) continue;
+
+                // 적이 경로에서 얼마나 떨어져 있는지 계산 (수직 거리)
+                UnityEngine.Vector3 toEnemy = enemy.Position - start;
+                float projectionLength = UnityEngine.Vector3.Dot(toEnemy, direction);
+
+                // 경로 범위 내에 있는지 확인
+                if (projectionLength < 0 || projectionLength > pathLength) continue;
+
+                // 경로로부터의 수직 거리
+                UnityEngine.Vector3 closestPointOnPath = start + direction * projectionLength;
+                float perpendicularDistance = UnityEngine.Vector3.Distance(enemy.Position, closestPointOnPath);
+
+                // 약 2타일(2.7m) 이내면 경로상에 있다고 간주
+                if (perpendicularDistance <= 2.7f)
+                    count++;
+            }
+
+            return count;
+        }
+
+        /// <summary>
+        /// ★ v3.7.14: 사역마 Blinding Dive 계획 (Cyber-Eagle)
+        /// 이동+공격+실명 디버프 - 원거리 적 우선 (실명 효과 극대화)
+        /// </summary>
+        protected PlannedAction PlanFamiliarBlindingDive(Situation situation, ref float remainingAP)
+        {
+            // Cyber-Eagle만 해당
+            if (situation.FamiliarType != PetType.Eagle)
+                return null;
+
+            // Blinding Dive 능력 찾기 (BlindingStrike와 동일 GUID)
+            var blindingDive = situation.FamiliarAbilities?
+                .FirstOrDefault(a => FamiliarAbilities.IsBlindingDiveAbility(a));
+
+            if (blindingDive == null)
+                return null;
+
+            // AP 비용 확인
+            float apCost = CombatAPI.GetAbilityAPCost(blindingDive);
+            if (remainingAP < apCost)
+                return null;
+
+            // 타겟 선정: 원거리 적 > 고HP 적 > 아무 적
+            var enemies = situation.Enemies
+                .Where(e => e != null && e.IsConscious)
+                .ToList();
+
+            if (enemies.Count == 0)
+                return null;
+
+            BaseUnitEntity targetEnemy = null;
+
+            // 1순위: 원거리 적 (실명 효과 극대화)
+            var rangedEnemies = enemies
+                .Where(e => CombatAPI.HasRangedWeapon(e))
+                .OrderByDescending(e => CombatAPI.GetHPPercent(e)) // HP 높은 적 (오래 살아남아 실명 효과 지속)
+                .ToList();
+
+            foreach (var enemy in rangedEnemies)
+            {
+                var targetWrapper = new TargetWrapper(enemy);
+                if (CombatAPI.CanUseAbilityOn(blindingDive, targetWrapper, out _))
+                {
+                    targetEnemy = enemy;
+                    break;
+                }
+            }
+
+            // 2순위: 고HP 적 (실명 지속 효과)
+            if (targetEnemy == null)
+            {
+                var highHPEnemies = enemies
+                    .OrderByDescending(e => CombatAPI.GetHPPercent(e))
+                    .ToList();
+
+                foreach (var enemy in highHPEnemies)
+                {
+                    var targetWrapper = new TargetWrapper(enemy);
+                    if (CombatAPI.CanUseAbilityOn(blindingDive, targetWrapper, out _))
+                    {
+                        targetEnemy = enemy;
+                        break;
+                    }
+                }
+            }
+
+            if (targetEnemy == null)
+                return null;
+
+            remainingAP -= apCost;
+            bool isRanged = CombatAPI.HasRangedWeapon(targetEnemy);
+
+            Main.Log($"[{RoleName}] ★ Eagle Blinding Dive: {targetEnemy.CharacterName} ({(isRanged ? "Ranged" : "Melee")}, HP={CombatAPI.GetHPPercent(targetEnemy):F0}%)");
+
+            return PlannedAction.Attack(
+                blindingDive,
+                targetEnemy,
+                $"Blinding Dive to {targetEnemy.CharacterName} (Blind debuff)",
+                apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.7.14: 사역마 Jump Claws 계획 (Cyber-Mastiff)
+        /// 점프+클로우 공격 - 클러스터 중심 타겟 우선
+        /// </summary>
+        protected PlannedAction PlanFamiliarJumpClaws(Situation situation, ref float remainingAP)
+        {
+            // Cyber-Mastiff만 해당
+            if (situation.FamiliarType != PetType.Mastiff)
+                return null;
+
+            // Jump Claws 능력 찾기
+            var jumpClaws = situation.FamiliarAbilities?
+                .FirstOrDefault(a => FamiliarAbilities.IsJumpClawsAbility(a));
+
+            if (jumpClaws == null)
+                return null;
+
+            // AP 비용 확인
+            float apCost = CombatAPI.GetAbilityAPCost(jumpClaws);
+            if (remainingAP < apCost)
+                return null;
+
+            // 타겟 선정: 클러스터 중심 > 저HP 적 > 가장 가까운 적
+            var enemies = situation.Enemies
+                .Where(e => e != null && e.IsConscious)
+                .ToList();
+
+            if (enemies.Count == 0)
+                return null;
+
+            BaseUnitEntity targetEnemy = null;
+
+            // 1순위: 적 클러스터 중심 (주변 적이 많은 적)
+            var clusteredEnemies = enemies
+                .Select(e => new {
+                    Enemy = e,
+                    NearbyCount = enemies.Count(other =>
+                        other != e &&
+                        UnityEngine.Vector3.Distance(e.Position, other.Position) <= 4f) // 4m 이내
+                })
+                .Where(x => x.NearbyCount >= 1) // 최소 1명 이상 주변에 있어야
+                .OrderByDescending(x => x.NearbyCount)
+                .ThenBy(x => CombatAPI.GetHPPercent(x.Enemy))
+                .ToList();
+
+            foreach (var cluster in clusteredEnemies)
+            {
+                var targetWrapper = new TargetWrapper(cluster.Enemy);
+                if (CombatAPI.CanUseAbilityOn(jumpClaws, targetWrapper, out _))
+                {
+                    targetEnemy = cluster.Enemy;
+                    Main.LogDebug($"[{RoleName}] Jump Claws cluster target: {cluster.NearbyCount} nearby");
+                    break;
+                }
+            }
+
+            // 2순위: 저HP 적 (마무리)
+            if (targetEnemy == null)
+            {
+                var lowHPEnemies = enemies
+                    .OrderBy(e => CombatAPI.GetHPPercent(e))
+                    .ToList();
+
+                foreach (var enemy in lowHPEnemies)
+                {
+                    var targetWrapper = new TargetWrapper(enemy);
+                    if (CombatAPI.CanUseAbilityOn(jumpClaws, targetWrapper, out _))
+                    {
+                        targetEnemy = enemy;
+                        break;
+                    }
+                }
+            }
+
+            // 3순위: 가장 가까운 적
+            if (targetEnemy == null)
+            {
+                var nearestEnemies = enemies
+                    .OrderBy(e => UnityEngine.Vector3.Distance(situation.Unit.Position, e.Position))
+                    .ToList();
+
+                foreach (var enemy in nearestEnemies)
+                {
+                    var targetWrapper = new TargetWrapper(enemy);
+                    if (CombatAPI.CanUseAbilityOn(jumpClaws, targetWrapper, out _))
+                    {
+                        targetEnemy = enemy;
+                        break;
+                    }
+                }
+            }
+
+            if (targetEnemy == null)
+                return null;
+
+            remainingAP -= apCost;
+
+            Main.Log($"[{RoleName}] ★ Mastiff Jump Claws: {targetEnemy.CharacterName} (HP={CombatAPI.GetHPPercent(targetEnemy):F0}%)");
+
+            return PlannedAction.Attack(
+                jumpClaws,
+                targetEnemy,
+                $"Jump Claws to {targetEnemy.CharacterName}",
+                apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.7.14: 사역마 Claws 계획 (Cyber-Eagle/Cyber-Mastiff 공통)
+        /// 순수 근접 공격 - 폴백용 기본 공격
+        /// </summary>
+        protected PlannedAction PlanFamiliarClaws(Situation situation, ref float remainingAP)
+        {
+            // Eagle 또는 Mastiff만 해당
+            if (situation.FamiliarType != PetType.Eagle && situation.FamiliarType != PetType.Mastiff)
+                return null;
+
+            // Claws 능력 찾기 (타입별로 다른 GUID)
+            var claws = situation.FamiliarAbilities?
+                .FirstOrDefault(a => FamiliarAbilities.IsClawsAbility(a, situation.FamiliarType));
+
+            if (claws == null)
+                return null;
+
+            // AP 비용 확인
+            float apCost = CombatAPI.GetAbilityAPCost(claws);
+            if (remainingAP < apCost)
+                return null;
+
+            // 타겟 선정: 저HP 적 > 가장 가까운 적
+            var enemies = situation.Enemies
+                .Where(e => e != null && e.IsConscious)
+                .ToList();
+
+            if (enemies.Count == 0)
+                return null;
+
+            BaseUnitEntity targetEnemy = null;
+
+            // 1순위: 저HP 적 (마무리)
+            var lowHPEnemies = enemies
+                .OrderBy(e => CombatAPI.GetHPPercent(e))
+                .ToList();
+
+            foreach (var enemy in lowHPEnemies)
+            {
+                var targetWrapper = new TargetWrapper(enemy);
+                if (CombatAPI.CanUseAbilityOn(claws, targetWrapper, out _))
+                {
+                    targetEnemy = enemy;
+                    break;
+                }
+            }
+
+            // 2순위: 가장 가까운 적
+            if (targetEnemy == null)
+            {
+                var nearestEnemies = enemies
+                    .OrderBy(e => UnityEngine.Vector3.Distance(situation.Unit.Position, e.Position))
+                    .ToList();
+
+                foreach (var enemy in nearestEnemies)
+                {
+                    var targetWrapper = new TargetWrapper(enemy);
+                    if (CombatAPI.CanUseAbilityOn(claws, targetWrapper, out _))
+                    {
+                        targetEnemy = enemy;
+                        break;
+                    }
+                }
+            }
+
+            if (targetEnemy == null)
+                return null;
+
+            remainingAP -= apCost;
+            string familiarName = situation.FamiliarType == PetType.Eagle ? "Eagle" : "Mastiff";
+
+            Main.Log($"[{RoleName}] ★ {familiarName} Claws: {targetEnemy.CharacterName} (HP={CombatAPI.GetHPPercent(targetEnemy):F0}%)");
+
+            return PlannedAction.Attack(
+                claws,
+                targetEnemy,
+                $"{familiarName} Claws to {targetEnemy.CharacterName}",
+                apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.7.01: 사역마 Screen 계획 (Cyber-Eagle)
+        /// 아군 보호/지원
+        /// </summary>
+        protected PlannedAction PlanFamiliarScreen(Situation situation, ref float remainingAP)
+        {
+            // Cyber-Eagle만 해당
+            if (situation.FamiliarType != PetType.Eagle)
+                return null;
+
+            // Screen 능력 찾기
+            var screen = situation.FamiliarAbilities?
+                .FirstOrDefault(a => FamiliarAbilities.IsScreenAbility(a));
+
+            if (screen == null)
+                return null;
+
+            // AP 비용 확인
+            float apCost = CombatAPI.GetAbilityAPCost(screen);
+            if (remainingAP < apCost)
+                return null;
+
+            // 보호할 아군 찾기 (HP 낮거나 위협받는 아군)
+            var allyToScreen = situation.Allies
+                .Where(a => a != null && a.IsConscious)
+                .Where(a => !FamiliarAPI.IsFamiliar(a))
+                .Where(a => a != situation.Unit)
+                .OrderBy(a => CombatAPI.GetHPPercent(a))
+                .FirstOrDefault();
+
+            if (allyToScreen == null)
+                return null;
+
+            // HP가 60% 이상이면 스킵
+            float allyHP = CombatAPI.GetHPPercent(allyToScreen);
+            if (allyHP > 60f)
+                return null;
+
+            // 타겟 가능 여부 확인
+            var targetWrapper = new TargetWrapper(allyToScreen);
+            string reason;
+            if (!CombatAPI.CanUseAbilityOn(screen, targetWrapper, out reason))
+            {
+                Main.LogDebug($"[{RoleName}] Eagle Screen blocked: {reason}");
+                return null;
+            }
+
+            remainingAP -= apCost;
+
+            Main.Log($"[{RoleName}] ★ Eagle Screen: {allyToScreen.CharacterName} (HP={allyHP:F0}%)");
+
+            return PlannedAction.Buff(
+                screen,
+                allyToScreen,
+                $"Eagle Screen {allyToScreen.CharacterName}",
+                apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.7.00: 버프 시전 시 사역마 Keystone 우선 검토
+        /// 직접 아군에게 버프하는 대신 사역마에게 버프 → 확산
+        /// </summary>
+        protected PlannedAction PlanBuffWithFamiliarCheck(
+            Situation situation,
+            AbilityData buff,
+            BaseUnitEntity normalTarget,
+            ref float remainingAP)
+        {
+            // 사역마 Keystone 가능하면 그쪽 우선
+            if (situation.HasFamiliar)
+            {
+                var keystoneAction = PlanFamiliarKeystone(situation, buff, ref remainingAP);
+                if (keystoneAction != null)
+                    return keystoneAction;
+            }
+
+            // 일반 버프 폴백
+            float apCost = CombatAPI.GetAbilityAPCost(buff);
+            if (remainingAP < apCost)
+                return null;
+
+            var target = new TargetWrapper(normalTarget);
+            string reason;
+            if (!CombatAPI.CanUseAbilityOn(buff, target, out reason))
+                return null;
+
+            remainingAP -= apCost;
+            return PlannedAction.Buff(buff, normalTarget, $"Buff on {normalTarget.CharacterName}", apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.7.12: Priority Signal 계획 (Servo-Skull)
+        /// Servo-Skull 방어력 상승 + 적 주의 분산
+        /// </summary>
+        protected PlannedAction PlanFamiliarPrioritySignal(Situation situation, ref float remainingAP)
+        {
+            if (situation.FamiliarType != PetType.ServoskullSwarm)
+                return null;
+
+            var signal = situation.FamiliarAbilities?
+                .FirstOrDefault(a => FamiliarAbilities.IsPrioritySignal(a));
+
+            if (signal == null) return null;
+
+            float apCost = CombatAPI.GetAbilityAPCost(signal);
+            if (remainingAP < apCost) return null;
+
+            // 이미 버프 활성화 확인
+            if (CombatAPI.HasActiveBuff(situation.Familiar, signal)) return null;
+
+            // Self-target이므로 Unit에게 시전
+            var selfTarget = new TargetWrapper(situation.Unit);
+            string reason;
+            if (!CombatAPI.CanUseAbilityOn(signal, selfTarget, out reason))
+            {
+                Main.LogDebug($"[{RoleName}] Priority Signal blocked: {reason}");
+                return null;
+            }
+
+            remainingAP -= apCost;
+            Main.Log($"[{RoleName}] ★ Servo-Skull Priority Signal");
+
+            return PlannedAction.Buff(signal, situation.Unit,
+                "Priority Signal (Servo-Skull defense)", apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.7.12: Vitality Signal 계획 (Servo-Skull)
+        /// 4타일 범위 AoE 힐 - 개별 힐보다 효율적
+        /// </summary>
+        protected PlannedAction PlanFamiliarVitalitySignal(Situation situation, ref float remainingAP)
+        {
+            if (situation.FamiliarType != PetType.ServoskullSwarm)
+                return null;
+
+            var signal = situation.FamiliarAbilities?
+                .FirstOrDefault(a => FamiliarAbilities.IsVitalitySignal(a));
+
+            if (signal == null) return null;
+
+            float apCost = CombatAPI.GetAbilityAPCost(signal);
+            if (remainingAP < apCost) return null;
+
+            // 범위 내 부상 아군 수 계산 (4타일 = 약 5.4m)
+            int woundedInRange = situation.Allies
+                .Where(a => a != null && a.IsConscious)
+                .Where(a => CombatAPI.GetHPPercent(a) < 70f)
+                .Count(a => situation.Familiar != null &&
+                    CombatCache.GetDistanceInTiles(situation.Familiar, a) <= 4f);
+
+            // 2명 이상 부상 아군이 범위 내 있어야 의미
+            if (woundedInRange < 2)
+            {
+                Main.LogDebug($"[{RoleName}] Vitality Signal: Only {woundedInRange} wounded in range (need 2+)");
+                return null;
+            }
+
+            var selfTarget = new TargetWrapper(situation.Unit);
+            string reason;
+            if (!CombatAPI.CanUseAbilityOn(signal, selfTarget, out reason))
+            {
+                Main.LogDebug($"[{RoleName}] Vitality Signal blocked: {reason}");
+                return null;
+            }
+
+            remainingAP -= apCost;
+            Main.Log($"[{RoleName}] ★ Servo-Skull Vitality Signal ({woundedInRange} wounded in range)");
+
+            return PlannedAction.Buff(signal, situation.Unit,
+                $"Vitality Signal (AoE heal, {woundedInRange} wounded)", apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.7.12: Hex 계획 (Psyber-Raven)
+        /// 적 디버프 - Warp Relay 확산 가능
+        /// </summary>
+        protected PlannedAction PlanFamiliarHex(Situation situation, ref float remainingAP)
+        {
+            if (situation.FamiliarType != PetType.Raven)
+                return null;
+
+            var hex = situation.FamiliarAbilities?
+                .FirstOrDefault(a => FamiliarAbilities.IsHexAbility(a));
+
+            if (hex == null) return null;
+
+            float apCost = CombatAPI.GetAbilityAPCost(hex);
+            if (remainingAP < apCost) return null;
+
+            // 고위협 적 선택 (HP 높은 순)
+            var target = situation.Enemies
+                .Where(e => e != null && e.IsConscious)
+                .OrderByDescending(e => e.Health?.MaxHitPoints ?? 0)
+                .FirstOrDefault();
+
+            if (target == null)
+            {
+                Main.LogDebug($"[{RoleName}] Hex: No valid target");
+                return null;
+            }
+
+            var targetWrapper = new TargetWrapper(target);
+            string reason;
+            if (!CombatAPI.CanUseAbilityOn(hex, targetWrapper, out reason))
+            {
+                Main.LogDebug($"[{RoleName}] Hex blocked: {reason}");
+                return null;
+            }
+
+            remainingAP -= apCost;
+            Main.Log($"[{RoleName}] ★ Raven Hex: {target.CharacterName}");
+
+            return PlannedAction.Attack(hex, target,
+                $"Hex on {target.CharacterName}", apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.7.12: Cycle 계획 (Psyber-Raven)
+        /// Warp Relay로 확산된 사이킹 재시전
+        /// </summary>
+        protected PlannedAction PlanFamiliarCycle(Situation situation, ref float remainingAP,
+            bool hasUsedWarpRelayThisTurn)
+        {
+            // Warp Relay를 이번 턴에 사용하지 않았으면 무의미
+            if (!hasUsedWarpRelayThisTurn)
+                return null;
+
+            if (situation.FamiliarType != PetType.Raven)
+                return null;
+
+            var cycle = situation.FamiliarAbilities?
+                .FirstOrDefault(a => FamiliarAbilities.IsCycleAbility(a));
+
+            if (cycle == null) return null;
+
+            float apCost = CombatAPI.GetAbilityAPCost(cycle);
+            if (remainingAP < apCost) return null;
+
+            var selfTarget = new TargetWrapper(situation.Unit);
+            string reason;
+            if (!CombatAPI.CanUseAbilityOn(cycle, selfTarget, out reason))
+            {
+                Main.LogDebug($"[{RoleName}] Cycle blocked: {reason}");
+                return null;
+            }
+
+            remainingAP -= apCost;
+            Main.Log($"[{RoleName}] ★ Raven Complete the Cycle");
+
+            return PlannedAction.Buff(cycle, situation.Unit,
+                "Complete the Cycle (re-cast relay)", apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.7.12: Fast 계획 (Cyber-Mastiff)
+        /// 이동/속도 버프 - Apprehend 전 사용
+        /// </summary>
+        protected PlannedAction PlanFamiliarFast(Situation situation, ref float remainingAP)
+        {
+            if (situation.FamiliarType != PetType.Mastiff)
+                return null;
+
+            var fast = situation.FamiliarAbilities?
+                .FirstOrDefault(a => FamiliarAbilities.IsFastAbility(a));
+
+            if (fast == null) return null;
+
+            float apCost = CombatAPI.GetAbilityAPCost(fast);
+            if (remainingAP < apCost) return null;
+
+            // 이미 버프 활성화 확인
+            if (CombatAPI.HasActiveBuff(situation.Familiar, fast)) return null;
+
+            var selfTarget = new TargetWrapper(situation.Unit);
+            string reason;
+            if (!CombatAPI.CanUseAbilityOn(fast, selfTarget, out reason))
+            {
+                Main.LogDebug($"[{RoleName}] Fast blocked: {reason}");
+                return null;
+            }
+
+            remainingAP -= apCost;
+            Main.Log($"[{RoleName}] ★ Mastiff Fast (mobility buff)");
+
+            return PlannedAction.Buff(fast, situation.Unit,
+                "Mastiff Fast (mobility)", apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.7.12: Roam 계획 (Cyber-Mastiff)
+        /// 자동 공격 모드 - Apprehend 대상 없을 때
+        /// </summary>
+        protected PlannedAction PlanFamiliarRoam(Situation situation, ref float remainingAP)
+        {
+            if (situation.FamiliarType != PetType.Mastiff)
+                return null;
+
+            var roam = situation.FamiliarAbilities?
+                .FirstOrDefault(a => FamiliarAbilities.IsRoamAbility(a));
+
+            if (roam == null) return null;
+
+            float apCost = CombatAPI.GetAbilityAPCost(roam);
+            if (remainingAP < apCost) return null;
+
+            var selfTarget = new TargetWrapper(situation.Unit);
+            string reason;
+            if (!CombatAPI.CanUseAbilityOn(roam, selfTarget, out reason))
+            {
+                Main.LogDebug($"[{RoleName}] Roam blocked: {reason}");
+                return null;
+            }
+
+            remainingAP -= apCost;
+            Main.Log($"[{RoleName}] ★ Mastiff Roam (auto-attack mode)");
+
+            return PlannedAction.Buff(roam, situation.Unit,
+                "Mastiff Roam (autonomous)", apCost);
         }
 
         #endregion
