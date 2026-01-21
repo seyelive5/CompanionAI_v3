@@ -10,9 +10,10 @@ namespace CompanionAI_v3.Core
 
         /// <summary>
         /// 명령 완료 대기 타임아웃 (프레임)
-        /// 약 2초 @ 60fps
+        /// ★ v3.6.21: 120 → 1800 (2초 → 30초)
+        /// 긴 애니메이션 스킬(사이킥, 다중타격 AOE 등) 허용
         /// </summary>
-        public const int COMMAND_WAIT_TIMEOUT_FRAMES = 120;
+        public const int COMMAND_WAIT_TIMEOUT_FRAMES = 1800;
 
         /// <summary>
         /// 연속 실패 허용 횟수

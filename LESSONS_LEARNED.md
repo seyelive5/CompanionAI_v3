@@ -449,3 +449,307 @@ if (CombatAPI.GetAoERadius(ability) > 0)
 3. **게임 API로 검증** - `GetPatternType()` 사용
 4. **높이 제한은 패턴별로 다름** - Circle(1.6m) vs Directional(0.3m)
 5. **추측 금지** - "AOE니까 Circle" 같은 가정하지 말 것
+
+---
+
+## 12. IsAvailable vs GetUnavailabilityReasons() 불일치 (v3.6.20)
+
+### 문제
+
+```csharp
+// ❌ 불일치 문제 발생
+var reasons = ability.GetUnavailabilityReasons();
+if (reasons.Count == 0) {
+    // "사용 가능!"이라고 판단
+}
+
+// 하지만...
+if (!data.IsAvailable) {
+    // "사용 불가!"
+}
+```
+
+**실제 로그:**
+```
+[CombatAPI] Filtered out 일반 공격: IsAvailable=false (no explicit reason)
+[CombatAPI] Analyzing 0 abilities ← 모든 능력이 필터링됨!
+```
+
+### 원인 분석 (게임 소스: AbilityData.cs)
+
+```csharp
+// GetUnavailabilityReasons()가 체크하는 것:
+// - 쿨다운 (IsOnCooldown)
+// - 탄약 (HasEnoughAmmo)
+// - 지역 제한 (BlueprintAbilityAreaEffect)
+
+// IsAvailable이 **추가로** 체크하는 것:
+public bool IsAvailable {
+    get {
+        if (GetAvailableForCastCount() != 0
+            && HasEnoughActionPoint
+            && HasEnoughAmmo
+            && !IsRestricted)  // ★ 이것!
+        {
+            if (IsOnCooldown) return IsBonusUsage;
+            return true;
+        }
+        return false;
+    }
+}
+```
+
+| 체크 항목 | GetUnavailabilityReasons() | IsAvailable |
+|----------|---------------------------|-------------|
+| 쿨다운 | ✅ | ✅ |
+| 탄약 | ✅ | ✅ |
+| 지역 제한 | ✅ | ✅ |
+| **IsRestricted** | ❌ | ✅ |
+| **GetAvailableForCastCount()** | ❌ | ✅ |
+| **HasEnoughActionPoint** | ❌ | ✅ |
+
+### 해결
+
+```csharp
+// ✅ 올바른 방법: 통합 함수 사용
+public static bool IsAbilityAvailable(AbilityData data, out List<string> reasons)
+{
+    reasons = new List<string>();
+
+    // 1. GetUnavailabilityReasons() 체크
+    var unavailReasons = data.GetUnavailabilityReasons();
+    if (unavailReasons.Count > 0) {
+        reasons.AddRange(unavailReasons.Select(r => r.ToString()));
+        return false;
+    }
+
+    // 2. 추가 체크 (IsRestricted 등)
+    // 게임의 IsAvailable 로직을 따름
+    ...
+}
+```
+
+### 교훈
+
+1. **게임 API 두 개가 같은 걸 체크한다고 가정하지 말 것**
+2. **"no explicit reason"이면 숨겨진 조건이 있다는 뜻**
+3. **디컴파일 소스로 실제 로직 검증 필수**
+
+---
+
+## 13. 명령 완료 대기 타임아웃 (v3.6.21)
+
+### 문제
+
+```csharp
+// 기존: 2초 타임아웃
+public const int COMMAND_WAIT_TIMEOUT_FRAMES = 120;  // 2초 @ 60fps
+```
+
+**발생한 문제:**
+```
+상황: AI가 사이킥 폭풍 사용 (긴 애니메이션 3초)
+2초 시점: "Wait timeout" → 강제 턴 종료
+결과: AP가 남아있는데 턴이 끝남
+```
+
+### 스킬별 예상 애니메이션 시간
+
+| 스킬 유형 | 예상 시간 | 2초 타임아웃 |
+|----------|----------|-------------|
+| 일반 공격 | 0.3~0.5초 | ✅ |
+| 연사 (Burst) | 1.0~1.5초 | ✅ |
+| 다중 타격 AOE | 2.0~3.0초 | ⚠️ |
+| 사이킥 연출 | 2.0~4.0초 | ❌ |
+| 넉백 + 낙하 | 2.5~3.5초 | ❌ |
+
+### 해결
+
+```csharp
+// ✅ 30초로 증가 - 어떤 애니메이션도 충분히 완료
+public const int COMMAND_WAIT_TIMEOUT_FRAMES = 1800;  // 30초 @ 60fps
+```
+
+### 타임아웃의 목적
+
+```
+타임아웃 = 무한 대기 방지용 안전장치
+
+정상 상황:
+  명령 실행 → 애니메이션 → Commands.Empty = true → 다음 액션
+
+버그 상황 (타임아웃 필요):
+  명령 실행 → 게임 버그로 완료 신호 안옴 → 무한 대기
+  → 30초 후 강제 턴 종료 → 다음 유닛 진행
+```
+
+### 교훈
+
+1. **타임아웃은 정상 동작이 아닌 예외 처리용**
+2. **가장 긴 애니메이션보다 충분히 길게 설정**
+3. **너무 짧으면 정상 동작을 방해함**
+
+---
+
+## 14. 무기 세트 - 비활성 세트 능력 접근 불가 (v3.7.00 계획)
+
+### 핵심 발견
+
+**비활성 무기 세트의 능력은 AbilityCollection에서 완전히 제거됨!**
+
+```
+세트 0 활성 시:
+  unit.Abilities.RawFacts = [볼터 공격, 볼터 AOE, 클래스 능력들...]
+
+세트 1로 전환 후:
+  unit.Abilities.RawFacts = [화염방사기 공격, 화염방사기 AOE, 클래스 능력들...]
+
+→ 볼터 능력들이 완전히 사라짐!
+```
+
+### 게임 메커니즘 (ItemEntityWeapon.cs)
+
+```csharp
+// 무기 장착 시
+public void ReapplyAbilitiesImpl()
+{
+    // 무기가 부여하는 능력들을 AbilityCollection에 추가
+    foreach (var ability in weapon.GrantedAbilities)
+        unit.Abilities.Add(ability);
+}
+
+// 무기 해제 시
+// → ReapplyAbilitiesImpl()가 반대로 능력 제거
+```
+
+### 영향
+
+```csharp
+// ❌ 다른 세트 능력 접근 불가
+var abilities = CombatAPI.GetAvailableAbilities(unit);
+// → 현재 세트 능력만 반환됨
+
+// ❌ 다른 세트 무기 정보도 능력에서 접근 불가
+var weapon = ability.Weapon;
+// → 현재 세트 무기만
+```
+
+### 해결 방안 (무기 세트 로테이션 구현 시)
+
+```csharp
+// ✅ 임시 전환으로 양쪽 세트 능력 캐시
+int originalSet = unit.Body.CurrentHandEquipmentSetIndex;
+
+try
+{
+    // 세트 0 능력 수집
+    unit.Body.CurrentHandEquipmentSetIndex = 0;
+    var set0Abilities = GetAvailableAbilities(unit);
+
+    // 세트 1 능력 수집
+    unit.Body.CurrentHandEquipmentSetIndex = 1;
+    var set1Abilities = GetAvailableAbilities(unit);
+}
+finally
+{
+    // 원래 세트 복원
+    unit.Body.CurrentHandEquipmentSetIndex = originalSet;
+}
+```
+
+### 무기 세트 전환 비용
+
+| 항목 | 값 |
+|-----|---|
+| AP 비용 | **0** (무료) |
+| MP 비용 | **0** |
+| 쿨다운 | 없음 |
+| 제한 | 인덱스 0-1만 |
+
+### 교훈
+
+1. **게임의 AbilityCollection은 현재 장비 기준**
+2. **다른 세트 정보는 직접 접근 필요** (Body.HandsEquipmentSets[])
+3. **임시 전환은 안전** - 게임 커맨드 큐 사용 안하면 UI 영향 없음
+4. **계획(Planning) 단계에서 캐시 필수**
+
+---
+
+## 15. 명중률 계산 시스템 (RuleCalculateHitChances)
+
+### 핵심 공식
+
+```
+명중률 = (사격술 + 30) × 거리계수 + 보정치들
+```
+
+### 거리 계수 (RuleCalculateAbilityDistanceFactor.cs)
+
+```csharp
+float distance = 현재 거리;
+float maxRange = 무기 최대 사거리;
+
+if (distance <= maxRange / 2)
+    Result = 1.0f;      // 유효 사거리: 100%
+else if (distance <= maxRange)
+    Result = 0.5f;      // 장거리: 50%
+else
+    Result = 0.0f;      // 사거리 초과: 자동 빗나감
+```
+
+### 실전 계산 예시
+
+```
+아이들풀 (BS 55) → 적 (20칸 거리) / 무기 사거리 24칸
+
+1. 거리 판정: 20 > 24/2(12) → 거리계수 = 0.5
+2. 기본 명중률: (55 + 30) × 0.5 = 42.5%
+3. 무기 보정: +10% (정밀 조준기)
+4. 엄폐 페널티: -15% (반엄폐)
+5. 최종: 42.5 + 10 - 15 = 37.5%
+
+만약 10칸으로 이동하면:
+1. 거리계수 = 1.0 (유효 사거리)
+2. 기본: (55 + 30) × 1.0 = 85%
+3. 보정: +10 - 15 = -5%
+4. 최종: 80% (약 2배 향상!)
+```
+
+### 특수 케이스
+
+| 공격 유형 | 명중률 | 이유 |
+|----------|-------|------|
+| 근접 (Melee) | 100% | 회피는 별도 WS vs WS 판정 |
+| 산탄 (Scatter) | 100% | 넓은 범위 → 자동 명중 |
+| 파괴물 | 100% | 배럴, 장애물 등 |
+
+### 명중률 상한 (HitChanceOverkillBorder)
+
+```csharp
+// 통상 95%가 상한
+ResultHitChance = Mathf.Clamp(RawResult, 0, hitChanceOverkillBorder);
+
+// 95% 초과분은 크리티컬 보너스로 전환
+if (RawResult > 95)
+{
+    int overkill = RawResult - 95;
+    RighteousFuryChanceRule.Add(overkill);  // 크리티컬 확률 증가
+}
+```
+
+### AI 활용
+
+```csharp
+// 이동 위치 평가 시 명중률 고려
+float hitChanceBonus = CalculateHitChanceBonus(unit, position, ability);
+
+// 유효 사거리(거리계수 1.0) 내로 이동하면 명중률 2배!
+// → 이동 점수에 반영하여 공격 위치 최적화
+```
+
+### 교훈
+
+1. **거리계수가 핵심** - 유효 사거리 내 이동이 매우 중요
+2. **Scatter/Melee는 명중률 계산 불필요** - 항상 100%
+3. **95% 상한 존재** - 초과분은 크리티컬로 전환
+4. **위치 평가 시 명중률 고려 필수**

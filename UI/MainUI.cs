@@ -475,8 +475,10 @@ namespace CompanionAI_v3.UI
                 var partyMembers = Game.Instance.Player.PartyAndPets;
                 if (partyMembers == null || partyMembers.Count == 0) return new List<CharacterInfo>();
 
+                // ★ v3.7.15: 사역마(Familiar/Pet) 제외 - IsPet 체크
                 return partyMembers
                     .Where(unit => unit != null)
+                    .Where(unit => !unit.IsPet)  // 사역마 제외
                     .Select(unit => new CharacterInfo { Id = unit.UniqueId ?? "unknown", Name = unit.CharacterName ?? "Unnamed", Unit = unit })
                     .ToList();
             }

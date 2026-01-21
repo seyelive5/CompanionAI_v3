@@ -50,6 +50,9 @@ namespace CompanionAI_v3.GameInterface
             /// <summary>★ v3.6.7: 명중률 보너스 (원거리 공격 시 최적 거리 보너스)</summary>
             public float HitChanceBonus { get; set; }
 
+            /// <summary>★ v3.6.18: 실제 공격 가능 적 수 (CanTargetFromNode 검증)</summary>
+            public int HittableEnemyCount { get; set; }
+
             public float TotalScore => CoverScore + DistanceScore - ThreatScore + AttackScore
                                        - InfluenceThreatScore + InfluenceControlBonus
                                        + SharedTargetBonus + TacticalAdjustment
@@ -618,22 +621,45 @@ namespace CompanionAI_v3.GameInterface
                 // ★ v3.6.7/v3.6.8: 명중률 기반 위치 보너스 (Scatter/근접 예외)
                 // 최적 사거리 내 위치에 높은 보너스, 멀수록 패널티
                 score.HitChanceBonus = CalculateHitChanceBonus(score.Position, enemies, weaponRange, isScatter, isMelee);
+
+                // ★ v3.6.18: 실제 공격 가능 적 수 계산 (CanTargetFromNode 검증)
+                // 기본 LOS 체크만으로는 불충분 - 실제 능력 사용 가능 여부 확인 필요
+                score.HittableEnemyCount = CombatAPI.CountHittableEnemiesFromPosition(
+                    unit, score.Node, enemies, primaryAttack);
             }
 
             // 위협 점수가 반영된 후 재정렬
             scores = scores.OrderByDescending(s => s.TotalScore).ToList();
 
+            // ★ v3.6.18: 실제 공격 가능한 위치 우선 선택 (HittableEnemyCount > 0)
             var best = scores.FirstOrDefault(s =>
                 s.CanStand &&
-                s.HasLosToEnemy &&
+                s.HittableEnemyCount > 0 &&
                 s.DistanceScore >= 20f);
 
             if (best == null)
             {
                 best = scores.FirstOrDefault(s =>
                     s.CanStand &&
-                    s.HasLosToEnemy &&
+                    s.HittableEnemyCount > 0 &&
                     s.DistanceScore > 0f);
+            }
+
+            if (best == null)
+            {
+                best = scores.FirstOrDefault(s =>
+                    s.CanStand &&
+                    s.HittableEnemyCount > 0);
+            }
+
+            // ★ v3.6.18: 공격 가능 위치 없으면 기존 LOS 기반 폴백 (접근 이동용)
+            if (best == null)
+            {
+                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No hittable position found, fallback to LOS-based");
+                best = scores.FirstOrDefault(s =>
+                    s.CanStand &&
+                    s.HasLosToEnemy &&
+                    s.DistanceScore >= 20f);
             }
 
             if (best == null)
@@ -645,7 +671,11 @@ namespace CompanionAI_v3.GameInterface
 
             if (best != null)
             {
-                Main.Log($"[MovementAPI] {unit.CharacterName}: Ranged position at ({best.Position.x:F1},{best.Position.z:F1}) - {best}");
+                Main.Log($"[MovementAPI] FindRangedAttackPosition: Best=({best.Position.x:F1},{best.Position.z:F1}), score={best.TotalScore:F1}, dist={CombatAPI.MetersToTiles(Vector3.Distance(best.Position, enemies.FirstOrDefault()?.Position ?? best.Position)):F1}m, hittable={best.HittableEnemyCount}, cover={best.BestCover}, enemyLoS={(best.HasLosToEnemy ? 1 : 0)}");
+            }
+            else
+            {
+                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No better position found for ranged character with MP={predictedMP:F1}");
             }
 
             return best;
@@ -790,6 +820,29 @@ namespace CompanionAI_v3.GameInterface
             AIRole role = AIRole.Auto,
             Analysis.PredictiveThreatMap predictiveMap = null)
         {
+            // 기본 호출 - maxSafeDistance는 무제한 (0)
+            return FindRetreatPositionSync(unit, enemies, minSafeDistance, 0f, predictedMP,
+                influenceMap, role, predictiveMap, null, 0f);
+        }
+
+        /// <summary>
+        /// ★ v3.7.04: 사역마 거리 제약을 고려한 후퇴 위치 찾기
+        /// ★ v3.7.11: maxSafeDistance 파라미터 추가 - 무기 사거리 기반 최대 후퇴 거리
+        /// familiarPosition이 지정되면 해당 위치에서 maxFamiliarDistance 이내로 제한
+        /// maxSafeDistance > 0이면 해당 거리 초과 시 큰 패널티 적용
+        /// </summary>
+        public static PositionScore FindRetreatPositionSync(
+            BaseUnitEntity unit,
+            List<BaseUnitEntity> enemies,
+            float minSafeDistance,
+            float maxSafeDistance,
+            float predictedMP,
+            BattlefieldInfluenceMap influenceMap,
+            AIRole role,
+            Analysis.PredictiveThreatMap predictiveMap,
+            Vector3? familiarPosition,
+            float maxFamiliarDistanceMeters)
+        {
             if (unit == null || enemies == null || enemies.Count == 0)
                 return null;
 
@@ -840,8 +893,36 @@ namespace CompanionAI_v3.GameInterface
                 // 안전 거리 미달이면 스킵 (minSafeDistance는 타일 단위)
                 if (nearestEnemyDist < minSafeDistance) continue;
 
+                // ★ v3.7.04: 사역마 거리 제약 체크
+                float familiarDistPenalty = 0f;
+                if (familiarPosition.HasValue && maxFamiliarDistanceMeters > 0)
+                {
+                    float distToFamiliar = Vector3.Distance(pos, familiarPosition.Value);
+                    if (distToFamiliar > maxFamiliarDistanceMeters)
+                    {
+                        // 사역마와 너무 멀면 큰 패널티 (하지만 완전히 제외하진 않음)
+                        familiarDistPenalty = (distToFamiliar - maxFamiliarDistanceMeters) * 5f;
+                        Main.LogDebug($"[MovementAPI] Retreat pos ({pos.x:F1},{pos.z:F1}) too far from familiar: {distToFamiliar:F1}m > {maxFamiliarDistanceMeters:F1}m, penalty={familiarDistPenalty:F1}");
+                    }
+                }
+
+                // ★ v3.7.11: 무기 사거리 초과 패널티 (너무 멀리 후퇴하면 공격 불가)
+                float weaponRangePenalty = 0f;
+                if (maxSafeDistance > 0 && nearestEnemyDist > maxSafeDistance)
+                {
+                    // 무기 사거리를 초과하면 큰 패널티 적용
+                    // 초과한 거리의 제곱에 비례하여 패널티 (급격히 증가)
+                    float excess = nearestEnemyDist - maxSafeDistance;
+                    weaponRangePenalty = excess * excess * 10f;
+                    Main.LogDebug($"[MovementAPI] Retreat pos ({pos.x:F1},{pos.z:F1}) exceeds weapon range: {nearestEnemyDist:F1} > {maxSafeDistance:F1}, penalty={weaponRangePenalty:F1}");
+                }
+
                 // 점수 계산: 적에게서 멀수록 + 후퇴 방향 보너스
-                float distScore = nearestEnemyDist * 2f;
+                // ★ v3.7.11: 하지만 무기 사거리를 넘으면 더 이상 보너스 없음
+                float effectiveDistForScore = maxSafeDistance > 0
+                    ? Math.Min(nearestEnemyDist, maxSafeDistance)
+                    : nearestEnemyDist;
+                float distScore = effectiveDistForScore * 2f;
 
                 // 후퇴 방향과의 일치도
                 var moveDir = (pos - unit.Position).normalized;
@@ -856,7 +937,9 @@ namespace CompanionAI_v3.GameInterface
                     Node = node,
                     CanStand = true,
                     APCost = playerCell.Length,
-                    DistanceScore = distScore + directionBonus - moveDistPenalty
+                    // ★ v3.7.04: 사역마 거리 패널티 적용
+                    // ★ v3.7.11: 무기 사거리 초과 패널티 적용
+                    DistanceScore = distScore + directionBonus - moveDistPenalty - familiarDistPenalty - weaponRangePenalty
                 };
 
                 // ★ v3.0.62: AoE/위협 점수 계산

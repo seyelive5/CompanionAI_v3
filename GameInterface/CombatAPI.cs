@@ -111,6 +111,102 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
+        /// ★ v3.6.18: 가상 위치에서 타겟 공격 가능 여부 확인
+        /// 이동 계획 시 해당 위치에서 실제 공격이 가능한지 검증
+        /// </summary>
+        /// <param name="ability">체크할 능력</param>
+        /// <param name="fromNode">가상 시전 위치</param>
+        /// <param name="target">타겟 유닛</param>
+        /// <param name="unavailableReason">실패 이유 (출력)</param>
+        /// <returns>해당 위치에서 공격 가능 여부</returns>
+        public static bool CanTargetFromPosition(
+            AbilityData ability,
+            CustomGridNodeBase fromNode,
+            BaseUnitEntity target,
+            out string unavailableReason)
+        {
+            unavailableReason = null;
+
+            if (ability == null || fromNode == null || target == null)
+            {
+                unavailableReason = "Null parameter";
+                return false;
+            }
+
+            try
+            {
+                var targetNode = target.CurrentUnwalkableNode;
+                if (targetNode == null)
+                {
+                    unavailableReason = "NoTargetNode";
+                    return false;
+                }
+
+                // ★ 게임의 CanTargetFromNode 사용 - 실제 LOS/거리 검증
+                var targetWrapper = new TargetWrapper(target);
+                int distance;
+                LosCalculations.CoverType coverType;
+                AbilityData.UnavailabilityReasonType? gameReason;
+
+                bool canTarget = ability.CanTargetFromNode(
+                    fromNode,
+                    targetNode,
+                    targetWrapper,
+                    out distance,
+                    out coverType,
+                    out gameReason);
+
+                if (!canTarget && gameReason.HasValue)
+                {
+                    unavailableReason = gameReason.Value.ToString();
+                }
+
+                return canTarget;
+            }
+            catch (Exception ex)
+            {
+                unavailableReason = $"Exception: {ex.Message}";
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.6.18: 가상 위치에서 공격 가능한 적 수 계산
+        /// </summary>
+        public static int CountHittableEnemiesFromPosition(
+            BaseUnitEntity unit,
+            CustomGridNodeBase fromNode,
+            List<BaseUnitEntity> enemies,
+            AbilityData primaryAttack = null)
+        {
+            if (unit == null || fromNode == null || enemies == null || enemies.Count == 0)
+                return 0;
+
+            // 공격 능력이 없으면 가장 기본 공격 찾기
+            if (primaryAttack == null)
+            {
+                primaryAttack = FindAnyAttackAbility(unit, Settings.RangePreference.PreferRanged);
+            }
+
+            if (primaryAttack == null)
+                return 0;
+
+            int count = 0;
+            foreach (var enemy in enemies)
+            {
+                if (enemy == null || enemy.LifeState.IsDead) continue;
+
+                string reason;
+                if (CanTargetFromPosition(primaryAttack, fromNode, enemy, out reason))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>
         /// ★ v3.5.15: 능력이 쿨다운 그룹 포함 완전 쿨다운 체크
         /// GetUnavailabilityReasons()는 그룹 쿨다운을 감지하지 못함
         /// PartAbilityCooldowns.IsOnCooldown()을 직접 사용해야 정확함
@@ -606,34 +702,16 @@ namespace CompanionAI_v3.GameInterface
                     var data = ability?.Data;
                     if (data == null) continue;
 
-                    // ★ v3.0.94: IsAvailable + GetUnavailabilityReasons() 체크
-                    // 기존 IsAvailable만으로는 쿨다운을 필터링하지 않음!
-                    // ★ v3.1.11: IsAvailable은 IsBonusUsage 체크를 포함함
-                    // 쿨다운이어도 보너스 사용이 있으면 IsAvailable=true
-                    if (!data.IsAvailable) continue;
-
-                    // ★ 핵심: GetUnavailabilityReasons()로 실제 사용 가능 여부 체크
-                    var unavailabilityReasons = data.GetUnavailabilityReasons();
-                    if (unavailabilityReasons.Count > 0)
+                    // ★ v3.6.20: IsAbilityAvailable(out reasons)와 동일한 로직 사용
+                    // 핵심: FindAnyAttackAbility()와 완전히 일관된 가용성 체크
+                    // 게임 API 검증: data.IsAvailable은 IsRestricted 등 추가 체크를 하여
+                    //              GetUnavailabilityReasons()와 결과가 다를 수 있음
+                    // 해결: data.IsAvailable 직접 체크 제거, IsAbilityAvailable(out)만 사용
+                    List<string> reasons;
+                    if (!IsAbilityAvailable(data, out reasons))
                     {
-                        // ★ v3.1.11: 쿨다운이어도 보너스 사용이 있으면 허용
-                        // GetUnavailabilityReasons()는 IsBonusUsage를 체크하지 않음
-                        // 하지만 IsAvailable은 체크함 → IsAvailable=true면 보너스 사용 가능
-                        bool onlyOnCooldown = unavailabilityReasons.All(r =>
-                            r == AbilityData.UnavailabilityReasonType.IsOnCooldown ||
-                            r == AbilityData.UnavailabilityReasonType.IsOnCooldownUntilEndOfCombat);
-
-                        if (onlyOnCooldown)
-                        {
-                            // IsAvailable=true이고 쿨다운만 문제라면 → 보너스 사용 가능
-                            Main.Log($"[CombatAPI] {data.Name}: On cooldown but has bonus usage - allowing");
-                        }
-                        else
-                        {
-                            // 쿨다운 이외의 이유가 있음 → 스킵
-                            Main.LogDebug($"[CombatAPI] Filtered out {data.Name}: {string.Join(", ", unavailabilityReasons)}");
-                            continue;
-                        }
+                        Main.LogDebug($"[CombatAPI] Filtered out {data.Name}: {string.Join(", ", reasons)}");
+                        continue;
                     }
 
                     // ★ v3.5.32: 중복 그룹 체크 - 계획 단계에서 필터링
@@ -2641,12 +2719,15 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
-        /// ★ v3.6.9: AOE 높이 차이 체크 - 게임 로직과 동일
+        /// ★ v3.6.9: AOE 높이 차이 체크 - 게임 로직 참조
         /// Circle 패턴: 1.6m 이상 차이 시 효과 없음
-        /// Directional 패턴 (Ray/Cone/Sector): 0.3m 이상 차이 시 효과 없음
+        /// ★ v3.7.15: Directional 패턴도 1.6m로 통일
+        /// 이유: 게임은 기울기(slope)를 계산하여 더 복잡한 검증을 함
+        ///       우리 AI가 0.3m로 너무 엄격하게 필터링하면 공격 기회 상실
+        ///       게임이 최종 검증을 하므로 사전 필터링은 관대하게
         /// </summary>
         public const float AoELevelDiffCircle = 1.6f;      // AoEPattern.SameLevelDiff
-        public const float AoELevelDiffDirectional = 0.3f; // AoEPattern.RayConeThickness
+        public const float AoELevelDiffDirectional = 1.6f; // ★ v3.7.15: 0.3f → 1.6f (게임이 기울기 계산으로 검증)
 
         /// <summary>
         /// ★ v3.6.9: AOE 높이 차이로 인해 적에게 효과가 닿을 수 있는지 확인

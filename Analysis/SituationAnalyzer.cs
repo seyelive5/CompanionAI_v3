@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.Enums;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Utility;
+using UnityEngine;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Data;
 using CompanionAI_v3.GameInterface;
@@ -52,6 +54,9 @@ namespace CompanionAI_v3.Analysis
 
                 // 턴 상태 복사
                 CopyTurnState(situation, turnState);
+
+                // ★ v3.7.00: 사역마 분석 (Overseer 아키타입 지원)
+                AnalyzeFamiliar(situation, unit);
 
                 Main.LogDebug($"[Analyzer] {situation}");
             }
@@ -721,6 +726,109 @@ namespace CompanionAI_v3.Analysis
                     // NeedsReposition은 AnalyzePosition()에서 이미 올바르게 설정됨
                     Main.LogDebug($"[Analyzer] Ranged character acted but no hittable targets and hasn't moved - allow reposition (NeedsReposition={situation.NeedsReposition}, MP={situation.CurrentMP:F1})");
                 }
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.7.00: 사역마 분석 (Overseer 아키타입 지원)
+        /// </summary>
+        private void AnalyzeFamiliar(Situation situation, BaseUnitEntity unit)
+        {
+            try
+            {
+                // 1. 이 유닛이 사역마인지 확인 (턴 스킵용)
+                situation.IsFamiliarUnit = FamiliarAPI.IsFamiliar(unit);
+                if (situation.IsFamiliarUnit)
+                {
+                    var master = FamiliarAPI.GetMaster(unit);
+                    Main.LogDebug($"[Analyzer] {unit.CharacterName}: Is Familiar (Master={master?.CharacterName ?? "None"})");
+                    return;  // 사역마는 추가 분석 불필요
+                }
+
+                // 2. 사역마 소유 여부 확인
+                situation.HasFamiliar = FamiliarAPI.HasFamiliar(unit);
+                if (!situation.HasFamiliar)
+                {
+                    return;  // 사역마 없음
+                }
+
+                // 3. 사역마 정보 수집
+                situation.Familiar = FamiliarAPI.GetFamiliar(unit);
+                situation.FamiliarType = FamiliarAPI.GetFamiliarType(unit);
+                situation.FamiliarPosition = FamiliarAPI.GetFamiliarPosition(unit);
+
+                if (situation.Familiar == null || !situation.FamiliarType.HasValue)
+                {
+                    situation.HasFamiliar = false;  // 유효하지 않은 사역마
+                    return;
+                }
+
+                // 4. 사역마 의식 여부 확인
+                if (!FamiliarAPI.IsFamiliarConscious(unit))
+                {
+                    Main.LogDebug($"[Analyzer] {unit.CharacterName}: Familiar {FamiliarAPI.GetFamiliarTypeName(situation.FamiliarType)} is unconscious");
+                    // 의식 없으면 Reactivate만 가능
+                    situation.FamiliarAbilities = FamiliarAbilities.CollectFamiliarAbilities(unit, situation.FamiliarType.Value)
+                        .Where(a => FamiliarAbilities.IsReactivateAbility(a))
+                        .ToList();
+                    return;
+                }
+
+                // 5. 최적 위치 계산
+                situation.OptimalFamiliarPosition = FamiliarPositioner.FindOptimalPosition(
+                    unit,
+                    situation.FamiliarType.Value,
+                    situation.Allies,
+                    situation.Enemies);
+
+                // 6. Relocate 필요 여부 판단
+                float currentDist = Vector3.Distance(
+                    situation.FamiliarPosition,
+                    situation.OptimalFamiliarPosition.Position);
+                situation.NeedsFamiliarRelocate = FamiliarPositioner.ShouldRelocate(
+                    situation.Familiar,
+                    situation.OptimalFamiliarPosition,
+                    currentDist);
+
+                // 7. 사역마 관련 능력 수집
+                situation.FamiliarAbilities = FamiliarAbilities.CollectFamiliarAbilities(
+                    unit, situation.FamiliarType.Value);
+
+                // ★ v3.7.05: Relocate 필요하지만 능력이 쿨다운이면 false로 설정
+                // RawFacts에서 수집하므로 쿨다운 체크 필요
+                if (situation.NeedsFamiliarRelocate)
+                {
+                    var relocateAbility = situation.FamiliarAbilities
+                        .FirstOrDefault(a => FamiliarAbilities.IsRelocateAbility(a, situation.FamiliarType));
+                    if (relocateAbility == null)
+                    {
+                        situation.NeedsFamiliarRelocate = false;
+                        Main.LogDebug($"[Analyzer] NeedsFamiliarRelocate=false: No relocate ability found");
+                    }
+                    else
+                    {
+                        // 쿨다운 체크
+                        var unavailableReasons = relocateAbility.GetUnavailabilityReasons();
+                        if (unavailableReasons != null && unavailableReasons.Any())
+                        {
+                            situation.NeedsFamiliarRelocate = false;
+                            string reasons = string.Join(", ", unavailableReasons);
+                            Main.LogDebug($"[Analyzer] NeedsFamiliarRelocate=false: Relocate unavailable ({reasons})");
+                        }
+                    }
+                }
+
+                // 8. 로깅
+                var typeName = FamiliarAPI.GetFamiliarTypeName(situation.FamiliarType);
+                Main.Log($"[Analyzer] {unit.CharacterName}: Has {typeName}, " +
+                    $"Optimal=({situation.OptimalFamiliarPosition.AlliesInRange} allies, {situation.OptimalFamiliarPosition.EnemiesInRange} enemies), " +
+                    $"NeedsRelocate={situation.NeedsFamiliarRelocate}, " +
+                    $"FamiliarAbilities={situation.FamiliarAbilities.Count}");
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[Analyzer] AnalyzeFamiliar error: {ex.Message}");
+                situation.HasFamiliar = false;
             }
         }
 

@@ -59,6 +59,10 @@
       <HintPath>$(ManagedPath)\Kingmaker.PubSubSystem.Core.Interfaces.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="Kingmaker.Enums">
+      <HintPath>$(ManagedPath)\Kingmaker.Enums.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="StateHasher">
       <HintPath>$(ManagedPath)\StateHasher.dll</HintPath>
       <Private>False</Private>

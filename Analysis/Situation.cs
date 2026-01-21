@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.Enums;
 using Kingmaker.UnitLogic.Abilities;
+using UnityEngine;
 using CompanionAI_v3.Settings;
 
 namespace CompanionAI_v3.Analysis
@@ -271,6 +273,34 @@ namespace CompanionAI_v3.Analysis
         public bool PrefersRanged =>
             RangePreference == RangePreference.PreferRanged ||
             (RangePreference == RangePreference.Adaptive && HasRangedWeapon);
+
+        #endregion
+
+        #region Familiar Support (v3.7.00)
+
+        /// <summary>★ v3.7.00: 사역마 소유 여부</summary>
+        public bool HasFamiliar { get; set; }
+
+        /// <summary>★ v3.7.00: 사역마 유닛</summary>
+        public BaseUnitEntity Familiar { get; set; }
+
+        /// <summary>★ v3.7.00: 사역마 타입</summary>
+        public PetType? FamiliarType { get; set; }
+
+        /// <summary>★ v3.7.00: 사역마 현재 위치</summary>
+        public Vector3 FamiliarPosition { get; set; }
+
+        /// <summary>★ v3.7.00: 사역마 최적 위치</summary>
+        public FamiliarPositioner.PositionScore OptimalFamiliarPosition { get; set; }
+
+        /// <summary>★ v3.7.00: 사역마 관련 능력 목록 (Relocate, Keystone 등)</summary>
+        public List<AbilityData> FamiliarAbilities { get; set; } = new List<AbilityData>();
+
+        /// <summary>★ v3.7.00: 사역마 Relocate 필요 여부</summary>
+        public bool NeedsFamiliarRelocate { get; set; }
+
+        /// <summary>★ v3.7.00: 이 유닛이 사역마인지 (턴 스킵용)</summary>
+        public bool IsFamiliarUnit { get; set; }
 
         #endregion
 

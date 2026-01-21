@@ -115,6 +115,7 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// ★ v3.5.28: 커스텀 트리 생성 로직
+        /// ★ v3.6.17: Loop 노드 추가 - 턴 종료까지 여러 액션 실행
         /// </summary>
         private static bool TryCreateCustomTree(BaseUnitEntity unit, out BehaviourTree result)
         {
@@ -125,7 +126,9 @@ namespace CompanionAI_v3.GameInterface
 
                 // ★ CompanionAI 전용 심플 트리 생성
                 // 핵심: 모든 결정이 CompanionAIDecisionNode를 통과
-                var rootNode = new Selector(
+
+                // ★ v3.6.17: 메인 액션 시퀀스 (루프 내부)
+                var mainSelector = new Selector(
                     new Sequence(
                         new TaskNodeWaitCommandsDone(),
                         new Condition(
@@ -157,6 +160,15 @@ namespace CompanionAI_v3.GameInterface
                         )
                     ),
                     new TaskNodeTryFinishTurn()
+                );
+
+                // ★ v3.6.17: Loop로 감싸기 - IsFinishedTurn이 true가 될 때까지 반복
+                // 이전 문제: Loop 없이 첫 액션 후 Success 반환 → 다음 액션 실행 안 됨
+                var rootNode = new Loop(
+                    b => { },                    // 초기화 (불필요)
+                    b => !b.IsFinishedTurn,      // 턴 종료까지 계속 반복
+                    mainSelector,
+                    Loop.ExitCondition.NoCondition
                 );
 
                 result = new BehaviourTree(unit, rootNode, new DecisionContext());
@@ -248,6 +260,15 @@ namespace CompanionAI_v3.GameInterface
 
             try
             {
+                // ★ v3.7.00: 사역마 유닛은 턴 스킵 (Master가 제어)
+                if (FamiliarAPI.IsFamiliar(unit))
+                {
+                    var master = FamiliarAPI.GetMaster(unit);
+                    Main.LogDebug($"[CompanionAIDecisionNode] {unit.CharacterName}: Familiar unit - skipping (controlled by {master?.CharacterName ?? "master"})");
+                    blackboard.IsFinishedTurn = true;
+                    return Status.Success;  // 즉시 턴 종료
+                }
+
                 // ★ IsActingEnabled 체크 - 턴 시작 후 0.5초 대기
                 if (!CustomBehaviourTreePatch.IsActingEnabled(unit))
                 {

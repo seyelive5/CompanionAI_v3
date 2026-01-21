@@ -1,5 +1,11 @@
-스킬 처리시 String 텍스트 기반 매칭 절대 금지
-추측과 추정이 아닌 정확한 계산
+### 금지 사항
+- 임시방편/땜빵 코드
+- 인위적인 숫자 제한 (MaxActions 등)
+- "나중에 하세요" 미루기
+- 스킬 처리시 String 텍스트 기반 매칭 절대 금지
+- 추측과 추정이 아닌 정확한 계산
+- 다끝나지 않았는데 다된것처럼 잘난척 금지
+- 거짓말 금지
 
 # CLAUDE.md
 
@@ -25,11 +31,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 릴리즈 배포
 
 **zip 파일에는 dll + Info.json만 포함** (settings.json, aiconfig.json 포함 금지)
+**zip 파일 위치**: `C:\Users\veria\Downloads\` (프로젝트 폴더 외부)
 
 ```powershell
 # 예시
-Compress-Archive -Path "...\CompanionAI_v3.dll", "Info.json" -DestinationPath "CompanionAI_v3_X.X.X.zip"
-gh release create vX.X.X "CompanionAI_v3_X.X.X.zip" --title "..." --notes "..."
+$version = "X.X.X"
+$dllPath = "C:\Users\veria\AppData\LocalLow\Owlcat Games\Warhammer 40000 Rogue Trader\UnityModManager\CompanionAI_v3\CompanionAI_v3.dll"
+$zipPath = "C:\Users\veria\Downloads\CompanionAI_v3_$version.zip"
+
+Compress-Archive -Path $dllPath, "Info.json" -DestinationPath $zipPath -Force
+gh release create "v$version" $zipPath --title "v$version" --notes "..."
 ```
 
 ---
@@ -138,7 +149,7 @@ ITurnStartHandler, ITurnEndHandler, ITurnBasedModeHandler
 
 ## 참조 리소스
 
-- **게임 디컴파일**: `C:\Users\veria\Downloads\EnhancedCompanionAI (2)\RogueTraderDecompiled-master`
+- **게임 디컴파일**: `C:\Users\veria\Downloads\roguetrader_decompile\project`
 - **게임 로그**: `C:\Users\veria\AppData\LocalLow\Owlcat Games\Warhammer 40000 Rogue Trader\GameLogFull.txt`
 
 ---

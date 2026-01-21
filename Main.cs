@@ -19,6 +19,7 @@ namespace CompanionAI_v3
         public static bool Enabled { get; private set; }
         public static UnityModManager.ModEntry ModEntry { get; private set; }
         public static ModSettings Settings => ModSettings.Instance;
+        public static string ModPath => ModEntry?.Path ?? "";
         private static Harmony _harmony;
 
         /// <summary>

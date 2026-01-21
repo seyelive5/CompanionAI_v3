@@ -542,6 +542,7 @@ namespace CompanionAI_v3.Planning.Planners
         /// 후퇴 (원거리 캐릭터가 적과 너무 가까울 때)
         /// ★ v3.0.61: 현재 위치가 이미 안전하면 이동 불필요
         /// ★ v3.2.25: role 전달 (Frontline 점수)
+        /// ★ v3.7.11: 무기 사거리 기반 최대 후퇴 거리 제한 (공격 가능 거리 유지)
         /// </summary>
         public static PlannedAction PlanRetreat(Situation situation)
         {
@@ -562,18 +563,62 @@ namespace CompanionAI_v3.Planning.Planners
             // ★ v3.2.25: Role 추출
             AIRole role = situation.CharacterSettings?.Role ?? AIRole.Auto;
 
+            // ★ v3.7.11: 무기 사거리 계산 (후퇴 후에도 공격 가능해야 함)
+            float weaponRangeTiles = 15f;  // 기본값 (타일 단위)
+            try
+            {
+                var primaryHand = unit.Body?.PrimaryHand;
+                if (primaryHand?.HasWeapon == true && !primaryHand.Weapon.Blueprint.IsMelee)
+                {
+                    int optRange = primaryHand.Weapon.AttackOptimalRange;
+                    if (optRange > 0 && optRange < 10000)
+                        weaponRangeTiles = optRange;
+                    else
+                    {
+                        int attackRange = primaryHand.Weapon.AttackRange;
+                        if (attackRange > 0 && attackRange < 10000)
+                            weaponRangeTiles = attackRange;
+                    }
+                }
+            }
+            catch { }
+
+            // ★ v3.7.15: 최대 후퇴 거리 = 무기 사거리 - 1 (안전 마진)
+            // 핵심: 무기 사거리보다 더 멀리 후퇴하면 공격 불가!
+            // MinSafeDistance(7)가 무기 사거리(3)보다 크면, 무기 사거리 내에서만 후퇴
+            float maxSafeDistance = weaponRangeTiles - 1f;  // 공격 가능 거리 유지
+            Main.Log($"[MovementPlanner] {unit.CharacterName}: Retreat range check - WeaponRange={weaponRangeTiles:F1}, MinSafe={situation.MinSafeDistance:F1}, MaxSafe={maxSafeDistance:F1}");
+
+            // ★ v3.7.04: 사역마 거리 제약 계산
+            // Servo-Skull/Raven은 버프 시전 거리 내에 있어야 함 (약 15m)
+            UnityEngine.Vector3? familiarPos = null;
+            float maxFamiliarDist = 0f;
+            if (situation.HasFamiliar && situation.Familiar != null &&
+                (situation.FamiliarType == Kingmaker.Enums.PetType.ServoskullSwarm ||
+                 situation.FamiliarType == Kingmaker.Enums.PetType.Raven))
+            {
+                familiarPos = situation.FamiliarPosition;
+                maxFamiliarDist = 15f;  // 버프 시전 범위 (미터)
+                Main.LogDebug($"[MovementPlanner] {unit.CharacterName}: Retreat with familiar constraint (max {maxFamiliarDist}m from familiar)");
+            }
+
             // ★ v3.0.60: MovementAPI 기반 실제 도달 가능한 타일 사용
             // ★ v3.2.00: influenceMap 전달
             // ★ v3.2.25: role 전달 (Frontline 점수)
             // ★ v3.4.00: predictiveMap 전달 (적 이동 예측)
+            // ★ v3.7.04: familiarPos 전달 (사역마 거리 제약)
+            // ★ v3.7.11: maxSafeDistance 전달 (무기 사거리 기반)
             var retreatScore = MovementAPI.FindRetreatPositionSync(
                 unit,
                 situation.Enemies,
                 situation.MinSafeDistance,
+                maxSafeDistance,
                 0f,
                 situation.InfluenceMap,
                 role,
-                situation.PredictiveThreatMap
+                situation.PredictiveThreatMap,
+                familiarPos,
+                maxFamiliarDist
             );
 
             if (retreatScore == null)
@@ -589,6 +634,7 @@ namespace CompanionAI_v3.Planning.Planners
         /// ★ v3.0.60: 행동 완료 후 안전 후퇴 (MovementAPI 기반)
         /// ★ v3.0.61: 현재 위치가 이미 안전하면 이동 불필요
         /// ★ v3.2.25: role 전달 (Frontline 점수)
+        /// ★ v3.7.11: 무기 사거리 기반 최대 후퇴 거리 제한 (공격 가능 거리 유지)
         /// </summary>
         public static PlannedAction PlanPostActionSafeRetreat(Situation situation)
         {
@@ -609,18 +655,58 @@ namespace CompanionAI_v3.Planning.Planners
             // ★ v3.2.25: Role 추출
             AIRole role = situation.CharacterSettings?.Role ?? AIRole.Auto;
 
+            // ★ v3.7.11: 무기 사거리 계산 (후퇴 후에도 공격 가능해야 함)
+            float weaponRangeTiles = 15f;
+            try
+            {
+                var primaryHand = unit.Body?.PrimaryHand;
+                if (primaryHand?.HasWeapon == true && !primaryHand.Weapon.Blueprint.IsMelee)
+                {
+                    int optRange = primaryHand.Weapon.AttackOptimalRange;
+                    if (optRange > 0 && optRange < 10000)
+                        weaponRangeTiles = optRange;
+                    else
+                    {
+                        int attackRange = primaryHand.Weapon.AttackRange;
+                        if (attackRange > 0 && attackRange < 10000)
+                            weaponRangeTiles = attackRange;
+                    }
+                }
+            }
+            catch { }
+
+            // ★ v3.7.15: 최대 후퇴 거리 = 무기 사거리 - 1 (안전 마진)
+            // 무기 사거리보다 더 멀리 후퇴하면 공격 불가!
+            float maxSafeDistance = weaponRangeTiles - 1f;
+
+            // ★ v3.7.04: 사역마 거리 제약 계산
+            UnityEngine.Vector3? familiarPos = null;
+            float maxFamiliarDist = 0f;
+            if (situation.HasFamiliar && situation.Familiar != null &&
+                (situation.FamiliarType == Kingmaker.Enums.PetType.ServoskullSwarm ||
+                 situation.FamiliarType == Kingmaker.Enums.PetType.Raven))
+            {
+                familiarPos = situation.FamiliarPosition;
+                maxFamiliarDist = 15f;
+            }
+
             // ★ v3.0.60: PathfindingService 기반 실제 도달 가능 위치
             // ★ v3.2.00: influenceMap 전달
             // ★ v3.2.25: role 전달 (Frontline 점수)
             // ★ v3.4.00: predictiveMap 전달 (적 이동 예측)
+            // ★ v3.7.04: familiarPos 전달 (사역마 거리 제약)
+            // ★ v3.7.11: maxSafeDistance 전달 (무기 사거리 기반)
             var retreatScore = MovementAPI.FindRetreatPositionSync(
                 unit,
                 situation.Enemies,
                 situation.MinSafeDistance,
+                maxSafeDistance,
                 0f,
                 situation.InfluenceMap,
                 role,
-                situation.PredictiveThreatMap
+                situation.PredictiveThreatMap,
+                familiarPos,
+                maxFamiliarDist
             );
 
             if (retreatScore == null)
