@@ -760,6 +760,14 @@ namespace CompanionAI_v3.Planning.Plans
             var familiarTarget = new TargetWrapper(situation.Familiar);
             var typeName = FamiliarAPI.GetFamiliarTypeName(situation.FamiliarType);
 
+            // ★ v3.7.22: 범위 내 실제 아군 목록 (버프 중복 체크용)
+            var validAllies = situation.Allies?.Where(a => a != null && a.IsConscious && !FamiliarAPI.IsFamiliar(a)).ToList()
+                ?? new List<BaseUnitEntity>();
+            var alliesInRange = FamiliarAPI.GetAlliesInRadius(
+                optimalPos.Position,
+                FamiliarPositioner.EFFECT_RADIUS_TILES,
+                validAllies);
+
             // ★ 버프 처리 (아군 2명+ 필요)
             if (keystoneBuffs.Count > 0 && optimalPos.AlliesInRange >= 2)
             {
@@ -774,8 +782,23 @@ namespace CompanionAI_v3.Planning.Plans
                     float cost = CombatAPI.GetAbilityAPCost(buff);
                     if (cost > remainingAP) continue;
 
-                    // 이미 활성화된 버프 스킵
+                    // 이미 활성화된 버프 스킵 (사역마 체크)
                     if (CombatAPI.HasActiveBuff(situation.Familiar, buff)) continue;
+
+                    // ★ v3.7.22: 범위 내 아군 중 버프가 없는 아군 수 체크
+                    // 버프가 이미 있는 아군에게 중복 확산은 AP 낭비
+                    int alliesNeedingBuff = 0;
+                    foreach (var ally in alliesInRange)
+                    {
+                        if (!CombatAPI.HasActiveBuff(ally, buff))
+                            alliesNeedingBuff++;
+                    }
+
+                    if (alliesNeedingBuff < 2)
+                    {
+                        Main.LogDebug($"[{RoleName}] Keystone Loop: {buff.Name} skipped - only {alliesNeedingBuff} allies need it");
+                        continue;
+                    }
 
                     string reason;
                     if (!CombatAPI.CanUseAbilityOn(buff, familiarTarget, out reason))
@@ -789,13 +812,16 @@ namespace CompanionAI_v3.Planning.Plans
                         usedAbilityGuids.Add(guid);
 
                     Main.Log($"[{RoleName}] ★ Familiar Keystone Buff: {buff.Name} on {typeName} " +
-                        $"({optimalPos.AlliesInRange} allies in range)");
+                        $"({alliesNeedingBuff}/{optimalPos.AlliesInRange} allies need buff)");
 
-                    actions.Add(PlannedAction.Buff(
+                    // ★ v3.7.20: IsFamiliarTarget 플래그 설정 - 실행 시 사역마 재해석
+                    var buffAction = PlannedAction.Buff(
                         buff,
                         situation.Familiar,
-                        $"Keystone spread: {buff.Name} ({optimalPos.AlliesInRange} allies)",
-                        cost));
+                        $"Keystone spread: {buff.Name} ({alliesNeedingBuff} allies need it)",
+                        cost);
+                    buffAction.IsFamiliarTarget = true;
+                    actions.Add(buffAction);
                 }
             }
 
@@ -829,11 +855,14 @@ namespace CompanionAI_v3.Planning.Plans
                     Main.Log($"[{RoleName}] ★ Familiar Keystone Debuff: {debuff.Name} on {typeName} " +
                         $"({optimalPos.EnemiesInRange} enemies in range) - Warp Relay spread");
 
-                    actions.Add(PlannedAction.Attack(  // 디버프는 Attack 타입으로 (적 대상)
+                    // ★ v3.7.20: IsFamiliarTarget 플래그 설정 - 실행 시 사역마 재해석
+                    var debuffAction = PlannedAction.Attack(  // 디버프는 Attack 타입으로 (적 대상)
                         debuff,
                         situation.Familiar,
                         $"Warp Relay debuff: {debuff.Name} ({optimalPos.EnemiesInRange} enemies)",
-                        cost));
+                        cost);
+                    debuffAction.IsFamiliarTarget = true;
+                    actions.Add(debuffAction);
                 }
             }
             else if (keystoneDebuffs.Count > 0)
@@ -965,11 +994,14 @@ namespace CompanionAI_v3.Planning.Plans
             Main.Log($"[{RoleName}] ★ Familiar Keystone: {buffAbility.Name} on {typeName} " +
                 $"for AoE spread ({optimalPos.AlliesInRange} allies)");
 
-            return PlannedAction.Buff(
+            // ★ v3.7.20: IsFamiliarTarget 플래그 설정 - 실행 시 사역마 재해석
+            var action = PlannedAction.Buff(
                 buffAbility,
                 situation.Familiar,
                 $"Cast on {typeName} for AoE spread ({optimalPos.AlliesInRange} allies)",
                 apCost);
+            action.IsFamiliarTarget = true;
+            return action;
         }
 
         /// <summary>

@@ -774,32 +774,55 @@ namespace CompanionAI_v3.Analysis
                     return;
                 }
 
-                // 5. 최적 위치 계산
+                // ★ v3.7.22: 순서 변경 - 먼저 능력 수집 후 Relocate 범위 확인
+                // 5. 사역마 관련 능력 수집 (먼저!)
+                situation.FamiliarAbilities = FamiliarAbilities.CollectFamiliarAbilities(
+                    unit, situation.FamiliarType.Value);
+
+                // 6. Relocate 능력 범위 확인 (최적 위치 계산에 사용)
+                float relocateRangeMeters = 0f;
+                var relocateAbility = situation.FamiliarAbilities
+                    .FirstOrDefault(a => FamiliarAbilities.IsRelocateAbility(a, situation.FamiliarType));
+                if (relocateAbility != null)
+                {
+                    // 타일 → 미터 변환 (1 타일 ≈ 1.35m)
+                    int rangeTiles = GameInterface.CombatAPI.GetAbilityRangeInTiles(relocateAbility);
+                    relocateRangeMeters = rangeTiles * 1.35f;
+                    Main.LogDebug($"[Analyzer] Relocate range: {rangeTiles} tiles ({relocateRangeMeters:F1}m)");
+                }
+
+                // 7. 최적 위치 계산 (Relocate 범위 제한 적용)
                 situation.OptimalFamiliarPosition = FamiliarPositioner.FindOptimalPosition(
                     unit,
                     situation.FamiliarType.Value,
                     situation.Allies,
-                    situation.Enemies);
+                    situation.Enemies,
+                    relocateRangeMeters);
 
-                // 6. Relocate 필요 여부 판단
+                // 8. ★ v3.7.22: 현재 위치의 커버리지 계산 (ShouldRelocate에 전달)
+                var validAllies = situation.Allies?.Where(a => a != null && a.IsConscious && !FamiliarAPI.IsFamiliar(a)).ToList()
+                    ?? new List<BaseUnitEntity>();
+                var validEnemies = situation.Enemies?.Where(e => e != null && e.IsConscious).ToList()
+                    ?? new List<BaseUnitEntity>();
+                int currentAlliesInRange = FamiliarAPI.CountAlliesInRadius(
+                    situation.FamiliarPosition, FamiliarPositioner.EFFECT_RADIUS_TILES, validAllies);
+                int currentEnemiesInRange = FamiliarAPI.CountEnemiesInRadius(
+                    situation.FamiliarPosition, FamiliarPositioner.EFFECT_RADIUS_TILES, validEnemies);
+
+                // 9. Relocate 필요 여부 판단 (커버리지 비교 기반)
                 float currentDist = Vector3.Distance(
                     situation.FamiliarPosition,
                     situation.OptimalFamiliarPosition.Position);
                 situation.NeedsFamiliarRelocate = FamiliarPositioner.ShouldRelocate(
                     situation.Familiar,
                     situation.OptimalFamiliarPosition,
-                    currentDist);
-
-                // 7. 사역마 관련 능력 수집
-                situation.FamiliarAbilities = FamiliarAbilities.CollectFamiliarAbilities(
-                    unit, situation.FamiliarType.Value);
+                    currentDist,
+                    currentAlliesInRange,
+                    currentEnemiesInRange);
 
                 // ★ v3.7.05: Relocate 필요하지만 능력이 쿨다운이면 false로 설정
-                // RawFacts에서 수집하므로 쿨다운 체크 필요
                 if (situation.NeedsFamiliarRelocate)
                 {
-                    var relocateAbility = situation.FamiliarAbilities
-                        .FirstOrDefault(a => FamiliarAbilities.IsRelocateAbility(a, situation.FamiliarType));
                     if (relocateAbility == null)
                     {
                         situation.NeedsFamiliarRelocate = false;
@@ -818,7 +841,7 @@ namespace CompanionAI_v3.Analysis
                     }
                 }
 
-                // 8. 로깅
+                // 10. 로깅
                 var typeName = FamiliarAPI.GetFamiliarTypeName(situation.FamiliarType);
                 Main.Log($"[Analyzer] {unit.CharacterName}: Has {typeName}, " +
                     $"Optimal=({situation.OptimalFamiliarPosition.AlliesInRange} allies, {situation.OptimalFamiliarPosition.EnemiesInRange} enemies), " +

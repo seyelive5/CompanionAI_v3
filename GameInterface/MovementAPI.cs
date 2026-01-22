@@ -989,7 +989,51 @@ namespace CompanionAI_v3.GameInterface
 
             if (candidates.Count == 0)
             {
-                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No safe retreat positions");
+                // ★ v3.7.23: 안전 거리 달성 불가 시 폴백 - 도달 가능한 최대 거리 위치
+                // 사역마 Relocate와 같은 로직 - 최대한 멀리 갈 수 있는 위치로 이동
+                Main.Log($"[MovementAPI] {unit.CharacterName}: No safe retreat positions at {minSafeDistance:F1} tiles, fallback to farthest reachable");
+
+                PositionScore farthestCandidate = null;
+                float farthestDist = 0f;
+
+                foreach (var kvp in tiles)
+                {
+                    var playerCell = kvp.Value;
+                    var node = playerCell.Node as CustomGridNodeBase;
+                    if (node == null || !playerCell.IsCanStand) continue;
+
+                    var pos = node.Vector3Position;
+
+                    // 적들로부터의 최소 거리
+                    float nearestEnemyDist = float.MaxValue;
+                    foreach (var enemy in enemies)
+                    {
+                        if (enemy == null || enemy.LifeState.IsDead) continue;
+                        float d = CombatAPI.MetersToTiles(Vector3.Distance(pos, enemy.Position));
+                        if (d < nearestEnemyDist) nearestEnemyDist = d;
+                    }
+
+                    // 현재 위치보다 멀고, 지금까지 찾은 것보다 멀면 갱신
+                    float currentDist = CombatAPI.MetersToTiles(Vector3.Distance(unit.Position, enemies[0].Position));
+                    if (nearestEnemyDist > currentDist && nearestEnemyDist > farthestDist)
+                    {
+                        farthestDist = nearestEnemyDist;
+                        farthestCandidate = new PositionScore
+                        {
+                            Node = node,
+                            CanStand = true,
+                            DistanceScore = nearestEnemyDist
+                        };
+                    }
+                }
+
+                if (farthestCandidate != null)
+                {
+                    Main.Log($"[MovementAPI] {unit.CharacterName}: Fallback retreat to ({farthestCandidate.Position.x:F1},{farthestCandidate.Position.z:F1}) dist={farthestDist:F1} tiles");
+                    return farthestCandidate;
+                }
+
+                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No retreat positions at all");
                 return null;
             }
 
@@ -997,6 +1041,61 @@ namespace CompanionAI_v3.GameInterface
             Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Retreat to ({best.Position.x:F1},{best.Position.z:F1}) score={best.TotalScore:F1}");
 
             return best;
+        }
+
+        /// <summary>
+        /// ★ v3.7.23: 적 방향으로 도달 가능한 최대 위치 찾기 (접근 폴백용)
+        /// 공격 가능한 위치가 없을 때 최대한 적에게 가까이 이동
+        /// </summary>
+        public static PositionScore FindBestApproachPosition(
+            BaseUnitEntity unit,
+            BaseUnitEntity target,
+            float predictedMP = 0f)
+        {
+            if (unit == null || target == null) return null;
+
+            var tiles = predictedMP > 0
+                ? FindAllReachableTilesSync(unit, predictedMP)
+                : FindAllReachableTilesSync(unit);
+            if (tiles == null || tiles.Count == 0)
+            {
+                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles for approach");
+                return null;
+            }
+
+            var targetPos = target.Position;
+            PositionScore closestCandidate = null;
+            float closestDist = float.MaxValue;
+
+            foreach (var kvp in tiles)
+            {
+                var playerCell = kvp.Value;
+                var node = playerCell.Node as CustomGridNodeBase;
+                if (node == null || !playerCell.IsCanStand) continue;
+
+                var pos = node.Vector3Position;
+                float distToTarget = Vector3.Distance(pos, targetPos);
+
+                // 현재 위치보다 가깝고, 지금까지 찾은 것보다 가까우면 갱신
+                float currentDist = Vector3.Distance(unit.Position, targetPos);
+                if (distToTarget < currentDist && distToTarget < closestDist)
+                {
+                    closestDist = distToTarget;
+                    closestCandidate = new PositionScore
+                    {
+                        Node = node,
+                        CanStand = true,
+                        DistanceScore = 100f - distToTarget  // 가까울수록 높은 점수
+                    };
+                }
+            }
+
+            if (closestCandidate != null)
+            {
+                Main.Log($"[MovementAPI] {unit.CharacterName}: Approach position at ({closestCandidate.Position.x:F1},{closestCandidate.Position.z:F1}) dist={closestDist:F1}m to {target.CharacterName}");
+            }
+
+            return closestCandidate;
         }
 
         #endregion

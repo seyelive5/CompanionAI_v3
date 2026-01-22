@@ -82,6 +82,24 @@ namespace CompanionAI_v3.Execution
                 return ExecutionResult.Failure("Ability is null");
             }
 
+            // ★ v3.7.20: 사역마 타겟 재해석 - stale 참조 방지
+            // 계획 시점에 저장된 사역마 엔티티 참조가 실행 시점에 유효하지 않을 수 있음
+            if (action.IsFamiliarTarget)
+            {
+                var caster = ability.Caster as BaseUnitEntity;
+                var freshFamiliar = FamiliarAPI.GetFamiliar(caster);
+                if (freshFamiliar != null)
+                {
+                    target = new TargetWrapper(freshFamiliar);
+                    Main.LogDebug($"[Executor] Familiar target re-resolved: {freshFamiliar.CharacterName}");
+                }
+                else
+                {
+                    Main.LogWarning($"[Executor] Familiar target stale and cannot be re-resolved");
+                    return ExecutionResult.Failure("Familiar not available");
+                }
+            }
+
             if (target == null)
             {
                 return ExecutionResult.Failure("Target is null");

@@ -24,8 +24,9 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>
         /// Relocate가 필요한 최소 거리 (타일)
+        /// ★ v3.7.22: 3f → 2f로 변경 (2타일 이동도 유의미한 커버리지 향상 가능)
         /// </summary>
-        public const float MIN_RELOCATE_DISTANCE_TILES = 3f;
+        public const float MIN_RELOCATE_DISTANCE_TILES = 2f;
 
         /// <summary>
         /// 위치 평가를 위한 샘플링 간격 (미터)
@@ -64,12 +65,14 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>
         /// 사역마 타입별 최적 위치 계산
+        /// ★ v3.7.22: maxRangeMeters 파라미터 추가 - Relocate 사거리 제한
         /// </summary>
         public static PositionScore FindOptimalPosition(
             BaseUnitEntity master,
             PetType familiarType,
             List<BaseUnitEntity> allies,
-            List<BaseUnitEntity> enemies)
+            List<BaseUnitEntity> enemies,
+            float maxRangeMeters = 0f)
         {
             if (master == null)
                 return CreateDefaultPosition(master?.Position ?? Vector3.zero);
@@ -79,15 +82,15 @@ namespace CompanionAI_v3.Analysis
                 return familiarType switch
                 {
                     // 버프 확산형: 아군 중심
-                    PetType.ServoskullSwarm => FindBuffCenterPosition(master, allies, enemies),
-                    PetType.Raven => FindBuffCenterPosition(master, allies, enemies),
+                    PetType.ServoskullSwarm => FindBuffCenterPosition(master, allies, enemies, maxRangeMeters),
+                    PetType.Raven => FindBuffCenterPosition(master, allies, enemies, maxRangeMeters),
 
                     // 적 제어형: 위협적 적 근처
-                    PetType.Mastiff => FindApprehendPosition(master, allies, enemies),
-                    PetType.Eagle => FindDisruptPosition(master, allies, enemies),
+                    PetType.Mastiff => FindApprehendPosition(master, allies, enemies, maxRangeMeters),
+                    PetType.Eagle => FindDisruptPosition(master, allies, enemies, maxRangeMeters),
 
                     // 기본값
-                    _ => FindBuffCenterPosition(master, allies, enemies)
+                    _ => FindBuffCenterPosition(master, allies, enemies, maxRangeMeters)
                 };
             }
             catch (Exception ex)
@@ -99,11 +102,14 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>
         /// Relocate가 필요한지 판단
+        /// ★ v3.7.22: 현재 위치 대비 커버리지 향상 기반으로 판단 (절대 점수 기준 제거)
         /// </summary>
         public static bool ShouldRelocate(
             BaseUnitEntity familiar,
             PositionScore optimalPosition,
-            float currentDistanceToOptimal)
+            float currentDistanceToOptimal,
+            int currentAlliesInRange = 0,
+            int currentEnemiesInRange = 0)
         {
             if (familiar == null || optimalPosition == null)
                 return false;
@@ -118,11 +124,20 @@ namespace CompanionAI_v3.Analysis
             if (totalAffected < 2)
                 return false;
 
-            // 3. 점수가 충분히 높아야 함
-            if (optimalPosition.Score < 50f)
-                return false;
+            // ★ v3.7.22: 커버리지 향상 기준으로 판단
+            // 현재 위치 대비 아군 또는 적 1명 이상 추가 커버 가능하면 Relocate 가치 있음
+            int alliesGained = optimalPosition.AlliesInRange - currentAlliesInRange;
+            int enemiesGained = optimalPosition.EnemiesInRange - currentEnemiesInRange;
+            int netGain = alliesGained + enemiesGained;
 
-            Main.LogDebug($"[FamiliarPositioner] ShouldRelocate: Yes (distance={distanceTiles:F1} tiles, affected={totalAffected})");
+            // 최소 1명 이상 추가 커버 가능해야 함
+            if (netGain < 1)
+            {
+                Main.LogDebug($"[FamiliarPositioner] ShouldRelocate: No (no coverage gain: allies {currentAlliesInRange}→{optimalPosition.AlliesInRange}, enemies {currentEnemiesInRange}→{optimalPosition.EnemiesInRange})");
+                return false;
+            }
+
+            Main.LogDebug($"[FamiliarPositioner] ShouldRelocate: Yes (distance={distanceTiles:F1} tiles, gain=+{netGain}, allies {currentAlliesInRange}→{optimalPosition.AlliesInRange}, enemies {currentEnemiesInRange}→{optimalPosition.EnemiesInRange})");
             return true;
         }
 
@@ -132,11 +147,13 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>
         /// 버프 확산형 (Servo-Skull, Psyber-Raven): 아군 중심 위치
+        /// ★ v3.7.22: maxRangeMeters 파라미터 추가
         /// </summary>
         private static PositionScore FindBuffCenterPosition(
             BaseUnitEntity master,
             List<BaseUnitEntity> allies,
-            List<BaseUnitEntity> enemies)
+            List<BaseUnitEntity> enemies,
+            float maxRangeMeters = 0f)
         {
             var validAllies = allies?.Where(a => a != null && a.IsConscious && !FamiliarAPI.IsFamiliar(a)).ToList()
                 ?? new List<BaseUnitEntity>();
@@ -153,7 +170,8 @@ namespace CompanionAI_v3.Analysis
                 master,
                 validAllies,
                 enemies ?? new List<BaseUnitEntity>(),
-                prioritizeAllies: true);
+                prioritizeAllies: true,
+                maxRangeMeters: maxRangeMeters);
 
             Main.LogDebug($"[FamiliarPositioner] BuffCenter: {bestPosition}");
             return bestPosition;
@@ -161,11 +179,13 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>
         /// Apprehend 타겟 (Cyber-Mastiff): 위협적 원거리 적 근처
+        /// ★ v3.7.22: maxRangeMeters 파라미터 추가
         /// </summary>
         private static PositionScore FindApprehendPosition(
             BaseUnitEntity master,
             List<BaseUnitEntity> allies,
-            List<BaseUnitEntity> enemies)
+            List<BaseUnitEntity> enemies,
+            float maxRangeMeters = 0f)
         {
             var validEnemies = enemies?.Where(e => e != null && e.IsConscious).ToList()
                 ?? new List<BaseUnitEntity>();
@@ -193,7 +213,8 @@ namespace CompanionAI_v3.Analysis
                 master,
                 allies ?? new List<BaseUnitEntity>(),
                 validEnemies,
-                prioritizeAllies: false);
+                prioritizeAllies: false,
+                maxRangeMeters: maxRangeMeters);
 
             bestPosition.Reason = $"Near threatening enemies ({threateningEnemies.Count})";
             Main.LogDebug($"[FamiliarPositioner] Apprehend: {bestPosition}");
@@ -202,11 +223,13 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>
         /// 적 교란형 (Cyber-Eagle): 적 밀집 지역
+        /// ★ v3.7.22: maxRangeMeters 파라미터 추가
         /// </summary>
         private static PositionScore FindDisruptPosition(
             BaseUnitEntity master,
             List<BaseUnitEntity> allies,
-            List<BaseUnitEntity> enemies)
+            List<BaseUnitEntity> enemies,
+            float maxRangeMeters = 0f)
         {
             var validEnemies = enemies?.Where(e => e != null && e.IsConscious).ToList()
                 ?? new List<BaseUnitEntity>();
@@ -223,7 +246,8 @@ namespace CompanionAI_v3.Analysis
                 master,
                 allies ?? new List<BaseUnitEntity>(),
                 validEnemies,
-                prioritizeAllies: false);
+                prioritizeAllies: false,
+                maxRangeMeters: maxRangeMeters);
 
             bestPosition.Reason = "Enemy cluster center";
             Main.LogDebug($"[FamiliarPositioner] Disrupt: {bestPosition}");
@@ -236,16 +260,22 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>
         /// 주어진 점 주변에서 최적 위치 탐색
+        /// ★ v3.7.22: maxRangeMeters 추가 - 마스터로부터 이 범위 내 위치만 고려
         /// </summary>
         private static PositionScore FindBestPositionAroundPoint(
             Vector3 center,
             BaseUnitEntity master,
             List<BaseUnitEntity> allies,
             List<BaseUnitEntity> enemies,
-            bool prioritizeAllies)
+            bool prioritizeAllies,
+            float maxRangeMeters = 0f)
         {
             PositionScore best = null;
             float bestScore = float.MinValue;
+            Vector3 masterPos = master?.Position ?? center;
+
+            // ★ v3.7.22: maxRange가 0이면 제한 없음
+            bool hasRangeLimit = maxRangeMeters > 0f;
 
             // 중심점에서 시작하여 나선형으로 탐색
             for (float radius = 0; radius <= MAX_SAMPLE_RADIUS; radius += POSITION_SAMPLE_INTERVAL)
@@ -253,11 +283,26 @@ namespace CompanionAI_v3.Analysis
                 if (radius == 0)
                 {
                     // 중심점 평가
-                    var score = EvaluatePosition(center, allies, enemies, prioritizeAllies);
-                    if (score.Score > bestScore)
+                    // ★ v3.7.22: 범위 체크
+                    if (hasRangeLimit && Vector3.Distance(masterPos, center) > maxRangeMeters)
                     {
-                        bestScore = score.Score;
-                        best = score;
+                        // 범위 밖이지만 일단 평가 (폴백용)
+                        var score = EvaluatePosition(center, allies, enemies, prioritizeAllies);
+                        score.Reason = "Out of range (fallback)";
+                        if (best == null || score.Score > bestScore)
+                        {
+                            bestScore = score.Score;
+                            best = score;
+                        }
+                    }
+                    else
+                    {
+                        var score = EvaluatePosition(center, allies, enemies, prioritizeAllies);
+                        if (score.Score > bestScore)
+                        {
+                            bestScore = score.Score;
+                            best = score;
+                        }
                     }
                 }
                 else
@@ -272,6 +317,10 @@ namespace CompanionAI_v3.Analysis
                             0,
                             Mathf.Sin(angle) * radius);
 
+                        // ★ v3.7.22: 범위 체크 - 범위 내 위치만 고려
+                        if (hasRangeLimit && Vector3.Distance(masterPos, pos) > maxRangeMeters)
+                            continue;
+
                         var score = EvaluatePosition(pos, allies, enemies, prioritizeAllies);
                         if (score.Score > bestScore)
                         {
@@ -280,6 +329,18 @@ namespace CompanionAI_v3.Analysis
                         }
                     }
                 }
+            }
+
+            // ★ v3.7.22: 범위 내에 좋은 위치가 없으면, 마스터로부터 최적 방향으로 최대 거리 지점 사용
+            if (best != null && hasRangeLimit && best.Reason == "Out of range (fallback)")
+            {
+                // 최적 중심점 방향으로 maxRange만큼 이동한 위치
+                Vector3 direction = (center - masterPos).normalized;
+                Vector3 clampedPos = masterPos + direction * maxRangeMeters;
+                var clampedScore = EvaluatePosition(clampedPos, allies, enemies, prioritizeAllies);
+                clampedScore.Reason = "Range-clamped position";
+                Main.LogDebug($"[FamiliarPositioner] Optimal position out of range, using clamped position at {maxRangeMeters:F1}m");
+                return clampedScore;
             }
 
             return best ?? CreateDefaultPosition(center);

@@ -58,18 +58,121 @@ namespace CompanionAI_v3.GameInterface
         /// </summary>
         private const float SecondsToWaitAtStart = 0.5f;
 
-        #region PartUnitBrain.UpdateBehaviourTree Patch
+        #region PartUnitBrain.Tick Patch - 매 Tick마다 트리 확인/교체
 
         /// <summary>
-        /// ★ v3.5.28: UpdateBehaviourTree() 직접 패치
+        /// ★ v3.7.17: Tick() Prefix 패치 - 핵심 수정
         ///
-        /// 이전 방식 (Create/CreateForUnit 패치)이 불완전했던 이유:
-        /// - 게임이 트리를 다른 경로로 설정할 수 있음
-        /// - Harmony __result 설정이 제대로 적용되지 않을 수 있음
+        /// 문제:
+        /// - UpdateBehaviourTree()는 SetBrain(), SetCustomBehaviour() 등에서만 호출됨
+        /// - 턴마다 호출되지 않음
+        /// - 게임이 어떤 시점에 트리를 다시 설정하면 우리 커스텀 트리가 덮어쓰여짐
+        /// - 로그에서 "Root (Type: Selector)" 확인 → 게임 네이티브 트리가 실행 중
         ///
-        /// 새 방식:
-        /// - Postfix에서 m_BehaviourTree 필드를 직접 확인
-        /// - CompanionAI 유닛이면 커스텀 트리로 교체
+        /// 해결:
+        /// - Tick() 호출 시마다 트리가 우리 것인지 확인
+        /// - 아니면 커스텀 트리로 교체
+        /// - 이렇게 하면 100% 확실하게 커스텀 트리 사용
+        /// </summary>
+        [HarmonyPatch(typeof(PartUnitBrain), "Tick")]
+        [HarmonyPrefix]
+        [HarmonyPriority(Priority.High)]
+        public static void Tick_Prefix(PartUnitBrain __instance)
+        {
+            try
+            {
+                // Owner 확인
+                var unit = __instance.Owner as BaseUnitEntity;
+                if (unit == null) return;
+
+                // CompanionAI 대상 유닛인지 확인
+                if (!TurnOrchestrator.Instance.ShouldControl(unit))
+                {
+                    return;
+                }
+
+                // 현재 트리 확인
+                if (_behaviourTreeField == null)
+                {
+                    Main.LogError("[CustomBehaviourTree] m_BehaviourTree field not found!");
+                    return;
+                }
+
+                var currentTree = _behaviourTreeField.GetValue(__instance) as BehaviourTree;
+
+                // 이미 커스텀 트리인지 확인 (루트가 Loop인지)
+                if (IsCustomTree(currentTree))
+                {
+                    return;  // 이미 커스텀 트리 → 교체 불필요
+                }
+
+                // 커스텀 트리가 아님 → 교체 필요
+                Main.LogWarning($"[CustomBehaviourTree] {unit.CharacterName}: Native tree detected, replacing with custom tree");
+
+                // 커스텀 트리 생성
+                if (!TryCreateCustomTree(unit, out var customTree))
+                {
+                    Main.LogError($"[CustomBehaviourTree] Failed to create custom tree for {unit.CharacterName}");
+                    return;
+                }
+
+                // 새 트리 설정
+                _behaviourTreeField.SetValue(__instance, customTree);
+
+                // 트리 초기화 (중요!)
+                customTree.Init();
+
+                Main.Log($"[CustomBehaviourTree] Replaced tree for {unit.CharacterName} (during Tick)");
+            }
+            catch (Exception ex)
+            {
+                Main.LogError($"[CustomBehaviourTree] Tick_Prefix error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.7.17: 커스텀 트리인지 확인
+        /// 우리 트리는 Loop가 루트, 게임 트리는 Selector가 루트
+        /// ★ v3.7.18: 필드 이름 수정 - m_Root → root (게임 코드 확인)
+        /// </summary>
+        private static readonly FieldInfo _rootNodeField = typeof(BehaviourTree)
+            .GetField("root", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        private static bool IsCustomTree(BehaviourTree tree)
+        {
+            if (tree == null) return false;
+
+            try
+            {
+                if (_rootNodeField == null)
+                {
+                    Main.LogError("[CustomBehaviourTree] root field not found in BehaviourTree!");
+                    return false;
+                }
+
+                var rootNode = _rootNodeField.GetValue(tree) as BehaviourTreeNode;
+                if (rootNode == null) return false;
+
+                // 우리 커스텀 트리는 Loop가 루트
+                // 게임 네이티브 트리는 Selector가 루트
+                return rootNode is Loop;
+            }
+            catch (Exception ex)
+            {
+                Main.LogError($"[CustomBehaviourTree] IsCustomTree error: {ex.Message}");
+                return false;
+            }
+        }
+
+        #endregion
+
+        #region PartUnitBrain.UpdateBehaviourTree Patch (백업)
+
+        /// <summary>
+        /// ★ v3.5.28: UpdateBehaviourTree() 직접 패치 (Tick_Prefix의 백업)
+        ///
+        /// Tick_Prefix가 주된 메커니즘이지만, 첫 번째 호출 전에도
+        /// 커스텀 트리가 설정되도록 UpdateBehaviourTree Postfix도 유지
         /// </summary>
         [HarmonyPatch(typeof(PartUnitBrain), "UpdateBehaviourTree")]
         [HarmonyPostfix]
@@ -127,14 +230,15 @@ namespace CompanionAI_v3.GameInterface
                 // ★ CompanionAI 전용 심플 트리 생성
                 // 핵심: 모든 결정이 CompanionAIDecisionNode를 통과
 
-                // ★ v3.6.17: 메인 액션 시퀀스 (루프 내부)
+                // ★ v3.7.16: 메인 액션 시퀀스 (루프 내부)
+                // ★ 수정: SafeAsyncTaskNodeInitializeDecisionContext로 교체 - 정렬 예외 방지
                 var mainSelector = new Selector(
                     new Sequence(
                         new TaskNodeWaitCommandsDone(),
                         new Condition(
                             b => b.Unit.Commands.Empty && b.Unit.State.CanActInTurnBased,
                             new Sequence(
-                                new AsyncTaskNodeInitializeDecisionContext(),
+                                new AsyncTaskNodeInitializeDecisionContext(),  // ★ v3.7.19: 래퍼 제거, 직접 사용 복원
                                 new AsyncTaskNodeCreateMoveVariants(),  // ★ v3.5.28: 이동 가능 타일 계산 (이동 시 필요)
                                 new CompanionAIDecisionNode(),  // ★ Ability 또는 FoundBetterPlace 설정
                                 new Selector(

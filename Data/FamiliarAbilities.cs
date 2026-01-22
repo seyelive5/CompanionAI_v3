@@ -1327,6 +1327,15 @@ namespace CompanionAI_v3.Data
                     if (!IsPetAbilityByName(bpName))
                         continue;
 
+                    // ★ v3.7.21: 능력 가용성 체크 추가 - CasterRestriction, 쿨다운 등 검증
+                    // 계획 단계에서 사용 불가능한 능력을 미리 필터링하여 Replan 루프 방지
+                    List<string> unavailableReasons;
+                    if (!GameInterface.CombatAPI.IsAbilityAvailable(ability, out unavailableReasons))
+                    {
+                        Main.LogDebug($"[FamiliarAbilities] Filtered out {ability.Name}: {string.Join(", ", unavailableReasons)}");
+                        continue;
+                    }
+
                     // 공통 능력
                     if (IsRelocateAbility(ability) || IsReactivateAbility(ability))
                     {

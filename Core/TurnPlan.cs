@@ -147,14 +147,34 @@ namespace CompanionAI_v3.Core
                 List<string> unavailableReasons;
                 if (!CombatAPI.IsAbilityAvailable(nextAction.Ability, out unavailableReasons))
                 {
-                    string reasons = string.Join(", ", unavailableReasons);
-                    Main.Log($"[TurnPlan] Replan needed: Ability {nextAction.Ability.Name} no longer available ({reasons})");
-                    return true;
+                    // ★ v3.7.20: 사역마 타겟 액션은 NullTarget 이유 무시
+                    // 실행 시점에 FamiliarAPI.GetFamiliar()로 타겟 재해석되므로
+                    // stale 참조로 인한 NullTarget은 리플랜 사유가 아님
+                    if (nextAction.IsFamiliarTarget)
+                    {
+                        var nonTargetReasons = unavailableReasons.Where(r => r != "NullTarget").ToList();
+                        if (nonTargetReasons.Count > 0)
+                        {
+                            string reasons = string.Join(", ", nonTargetReasons);
+                            Main.Log($"[TurnPlan] Replan needed: Ability {nextAction.Ability.Name} no longer available ({reasons})");
+                            return true;
+                        }
+                        // NullTarget만 있으면 무시하고 계속 진행
+                        Main.LogDebug($"[TurnPlan] Familiar target action - ignoring NullTarget, will re-resolve at execution");
+                    }
+                    else
+                    {
+                        string reasons = string.Join(", ", unavailableReasons);
+                        Main.Log($"[TurnPlan] Replan needed: Ability {nextAction.Ability.Name} no longer available ({reasons})");
+                        return true;
+                    }
                 }
 
                 // 1-2. 공격/디버프 타겟이 공격 불가능해졌는지
+                // ★ v3.7.20: 사역마 타겟 액션은 스킵 (실행 시 재해석)
                 if ((nextAction.Type == ActionType.Attack || nextAction.Type == ActionType.Debuff)
-                    && nextAction.Target != null)
+                    && nextAction.Target != null
+                    && !nextAction.IsFamiliarTarget)
                 {
                     string cantUseReason;
                     if (!CombatAPI.CanUseAbilityOn(nextAction.Ability, nextAction.Target, out cantUseReason))

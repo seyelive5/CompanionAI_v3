@@ -468,6 +468,17 @@ namespace CompanionAI_v3.Planning.Planners
 
                 if (bestPosition == null)
                 {
+                    // ★ v3.7.23: 공격 위치 없으면 적 방향으로 최대한 이동 (폴백)
+                    // 사역마 Relocate와 같은 로직 - 도달 가능한 최대 거리까지 이동
+                    var fallbackPosition = MovementAPI.FindBestApproachPosition(
+                        unit, target, effectiveMP);
+
+                    if (fallbackPosition != null)
+                    {
+                        Main.Log($"[{roleName}] PlanMoveToEnemy: No attack position, fallback to approach ({fallbackPosition.Position.x:F1},{fallbackPosition.Position.z:F1})");
+                        return PlannedAction.Move(fallbackPosition.Position, $"Approach {target.CharacterName}");
+                    }
+
                     Main.LogDebug($"[{roleName}] PlanMoveToEnemy: No safe ranged position found (effectiveMP={effectiveMP:F1})");
                     return null;
                 }

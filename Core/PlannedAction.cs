@@ -32,6 +32,13 @@ namespace CompanionAI_v3.Core
         /// <summary>우선순위 (낮을수록 먼저 실행)</summary>
         public int Priority { get; set; }
 
+        /// <summary>
+        /// ★ v3.7.20: 사역마 타겟 플래그
+        /// true일 경우 실행 시점에 FamiliarAPI.GetFamiliar()로 타겟 재해석
+        /// 계획 시점의 엔티티 참조가 stale해지는 문제 방지
+        /// </summary>
+        public bool IsFamiliarTarget { get; set; }
+
         /// <summary>실행 완료 여부</summary>
         public bool IsExecuted { get; set; }
 
