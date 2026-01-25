@@ -579,7 +579,7 @@ namespace CompanionAI_v3.Analysis
         }
 
         /// <summary>
-        /// 유닛에 해로운 디버프가 있는지 확인
+        /// ★ v3.7.65: 유닛에 해로운 디버프가 있는지 확인 (게임 API 기반 - 키워드 매칭 제거)
         /// </summary>
         private static bool HasHarmfulDebuff(BaseUnitEntity unit)
         {
@@ -588,21 +588,28 @@ namespace CompanionAI_v3.Analysis
                 var buffs = unit.Buffs?.Enumerable;
                 if (buffs == null) return false;
 
-                // ★ v3.1.21: IsHarmful 대신 SpellDescriptor 또는 적 캐스터 여부로 판단
                 return buffs.Any(b => {
                     var bp = b.Blueprint;
                     if (bp == null) return false;
 
-                    // 적으로부터 받은 버프 = 디버프일 가능성 높음
+                    // 1. 적으로부터 받은 버프 = 디버프일 가능성 높음
                     var caster = b.Context?.MaybeCaster;
                     if (caster != null && unit.CombatGroup?.IsEnemy(caster) == true)
                         return true;
 
-                    // Harmful 키워드 체크 (이름 기반 폴백)
-                    var name = bp.name?.ToLower() ?? "";
-                    return name.Contains("debuff") || name.Contains("stun") ||
-                           name.Contains("blind") || name.Contains("bleed") ||
-                           name.Contains("poison") || name.Contains("slow");
+                    // ★ v3.7.65: 게임 API - IsHardCrowdControl 체크 (HardCrowdControlBuff 컴포넌트 보유)
+                    if (bp.IsHardCrowdControl)
+                        return true;
+
+                    // ★ v3.7.65: DOT 효과는 해로운 효과
+                    if (bp.IsDOTVisual)
+                        return true;
+
+                    // ★ v3.7.65: DynamicDamage 플래그가 있으면 피해 효과
+                    if (bp.DynamicDamage)
+                        return true;
+
+                    return false;
                 });
             }
             catch { return false; }

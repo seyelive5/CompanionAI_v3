@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Kingmaker.Blueprints;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Abilities;
+using Kingmaker.UnitLogic.Abilities.Components;
 using Kingmaker.Utility;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
@@ -117,6 +119,9 @@ namespace CompanionAI_v3.Planning.Planners
                 .Where(a => !AbilityDatabase.IsPostFirstAction(a))
                 .Where(a => !AbilityDatabase.IsTurnEnding(a))
                 .Where(a => !AbilityDatabase.IsFinisher(a))
+                // ★ v3.7.27: MultiTarget 능력 이중 체크 (컴포넌트 + 명시적 제외)
+                .Where(a => a.Blueprint.GetComponent<AbilityMultiTarget>() == null)
+                .Where(a => !FamiliarAbilities.IsMultiTargetFamiliarAbility(a))
                 .Where(a => {
                     // ★ v3.5.76: DangerousAoE 설정 기반 허용
                     if (!AbilityDatabase.IsDangerousAoE(a)) return true;

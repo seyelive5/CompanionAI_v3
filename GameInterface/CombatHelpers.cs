@@ -44,24 +44,15 @@ namespace CompanionAI_v3.GameInterface
         #region Grenade Detection
 
         /// <summary>
-        /// 수류탄/폭발물인지 확인
+        /// ★ v3.7.65: 수류탄/폭발물인지 확인 (게임 API 기반 - 키워드 매칭 제거)
         /// </summary>
         public static bool IsGrenadeOrExplosive(AbilityData ability)
         {
             if (ability == null) return false;
 
-            string name = ability.Name?.ToLower() ?? "";
-            string bpName = ability.Blueprint?.name?.ToLower() ?? "";
-
-            // 한국어/영어 수류탄 키워드
-            if (name.Contains("수류탄") || name.Contains("폭탄") ||
-                name.Contains("grenade") || name.Contains("explosive") ||
-                name.Contains("krak") || name.Contains("frag"))
-                return true;
-
-            if (bpName.Contains("grenade") || bpName.Contains("explosive") ||
-                bpName.Contains("throwable") || bpName.Contains("thrown") ||
-                bpName.Contains("krak") || bpName.Contains("frag"))
+            // ★ v3.7.65: 게임 네이티브 API 사용 (키워드 매칭 제거)
+            var bp = ability.Blueprint;
+            if (bp != null && bp.IsGrenade)
                 return true;
 
             return false;

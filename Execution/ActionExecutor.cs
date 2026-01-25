@@ -123,11 +123,15 @@ namespace CompanionAI_v3.Execution
             }
 
             // 최종 검증 - 타겟에게 사용 가능한지
-            string reason;
-            if (!CombatAPI.CanUseAbilityOn(ability, target, out reason))
+            // ★ v3.7.25: MultiTarget 능력은 LOS 체크 스킵 (Point 타겟이므로)
+            if (action.AllTargets == null || action.AllTargets.Count == 0)
             {
-                Main.LogWarning($"[Executor] Ability blocked: {ability.Name} - {reason}");
-                return ExecutionResult.Failure(reason);
+                string reason;
+                if (!CombatAPI.CanUseAbilityOn(ability, target, out reason))
+                {
+                    Main.LogWarning($"[Executor] Ability blocked: {ability.Name} - {reason}");
+                    return ExecutionResult.Failure(reason);
+                }
             }
 
             // ★ v3.5.00: 공격 시 타겟 스냅샷 저장 + 예상 피해량 기록
@@ -163,7 +167,14 @@ namespace CompanionAI_v3.Execution
                 }
             }
 
-            // 실행 명령 반환
+            // ★ v3.7.25: MultiTarget 능력 처리
+            if (action.AllTargets != null && action.AllTargets.Count > 0)
+            {
+                Main.Log($"[Executor] Cast MultiTarget: {ability.Name} ({action.AllTargets.Count} targets)");
+                return ExecutionResult.CastAbilityMultiTarget(ability, action.AllTargets);
+            }
+
+            // 일반 능력 실행 명령 반환
             Main.Log($"[Executor] Cast: {ability.Name} -> {GetTargetName(target)}");
             return ExecutionResult.CastAbility(ability, target);
         }

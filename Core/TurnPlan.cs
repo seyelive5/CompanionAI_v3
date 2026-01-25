@@ -172,9 +172,11 @@ namespace CompanionAI_v3.Core
 
                 // 1-2. 공격/디버프 타겟이 공격 불가능해졌는지
                 // ★ v3.7.20: 사역마 타겟 액션은 스킵 (실행 시 재해석)
+                // ★ v3.7.25: MultiTarget 능력 스킵 (Point 타겟이므로 LOS 체크 불필요)
                 if ((nextAction.Type == ActionType.Attack || nextAction.Type == ActionType.Debuff)
                     && nextAction.Target != null
-                    && !nextAction.IsFamiliarTarget)
+                    && !nextAction.IsFamiliarTarget
+                    && (nextAction.AllTargets == null || nextAction.AllTargets.Count == 0))
                 {
                     string cantUseReason;
                     if (!CombatAPI.CanUseAbilityOn(nextAction.Ability, nextAction.Target, out cantUseReason))

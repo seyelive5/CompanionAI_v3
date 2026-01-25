@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Utility;
@@ -17,6 +18,12 @@ namespace CompanionAI_v3.Core
         public Vector3? Destination { get; private set; }
         public string Reason { get; private set; }
 
+        /// <summary>
+        /// ★ v3.7.25: MultiTarget 능력용 타겟 리스트
+        /// AerialRush 등 2개 이상의 타겟이 필요한 능력에 사용
+        /// </summary>
+        public List<TargetWrapper> AllTargets { get; private set; }
+
         private ExecutionResult() { }
 
         #region Factory Methods
@@ -32,6 +39,22 @@ namespace CompanionAI_v3.Core
                 Ability = ability,
                 Target = target,
                 Reason = $"Cast {ability?.Name} on {target?.Entity?.ToString() ?? "point"}"
+            };
+        }
+
+        /// <summary>
+        /// ★ v3.7.25: MultiTarget 능력 시전 명령
+        /// AerialRush 등 2개 이상의 타겟이 필요한 능력에 사용
+        /// </summary>
+        public static ExecutionResult CastAbilityMultiTarget(AbilityData ability, List<TargetWrapper> allTargets)
+        {
+            return new ExecutionResult
+            {
+                Type = ResultType.CastAbility,
+                Ability = ability,
+                Target = allTargets?.Count > 0 ? allTargets[0] : null,
+                AllTargets = allTargets,
+                Reason = $"Cast {ability?.Name} (MultiTarget: {allTargets?.Count ?? 0} targets)"
             };
         }
 

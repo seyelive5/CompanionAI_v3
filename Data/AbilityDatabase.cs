@@ -75,14 +75,14 @@ namespace CompanionAI_v3.Data
             // PreCombatBuff - 전투 시작 시 버프
             // ========================================
 
-            // Defensive Stance
-            { "cd42292391e74ba7809d0600ddb43a8d", new AbilityInfo("cd42292391e74ba7809d0600ddb43a8d", "DefensiveStance", AbilityTiming.PreCombatBuff) },
-            { "dfda4e8761d44549b0e70b10a71947fc", new AbilityInfo("dfda4e8761d44549b0e70b10a71947fc", "DefensiveStance_Recover", AbilityTiming.PreCombatBuff) },
-            { "39247f7f6f024676a693a7e04fcc631d", new AbilityInfo("39247f7f6f024676a693a7e04fcc631d", "DefensiveStance_Vanguard", AbilityTiming.PreCombatBuff) },
+            // Defensive Stance (★ v3.7.65: IsDefensiveStance 플래그 추가)
+            { "cd42292391e74ba7809d0600ddb43a8d", new AbilityInfo("cd42292391e74ba7809d0600ddb43a8d", "DefensiveStance", AbilityTiming.PreCombatBuff, flags: AbilityFlags.IsDefensiveStance) },
+            { "dfda4e8761d44549b0e70b10a71947fc", new AbilityInfo("dfda4e8761d44549b0e70b10a71947fc", "DefensiveStance_Recover", AbilityTiming.PreCombatBuff, flags: AbilityFlags.IsDefensiveStance) },
+            { "39247f7f6f024676a693a7e04fcc631d", new AbilityInfo("39247f7f6f024676a693a7e04fcc631d", "DefensiveStance_Vanguard", AbilityTiming.PreCombatBuff, flags: AbilityFlags.IsDefensiveStance) },
 
-            // Bulwark
-            { "0b693a158fed42a387d5f61ff6f0ae4c", new AbilityInfo("0b693a158fed42a387d5f61ff6f0ae4c", "Bulwark", AbilityTiming.PreCombatBuff) },
-            { "b064fd994f804996afc43725ffb75f7c", new AbilityInfo("b064fd994f804996afc43725ffb75f7c", "Bulwark_Strategy", AbilityTiming.PreCombatBuff) },
+            // Bulwark (★ v3.7.65: IsDefensiveStance 플래그 추가)
+            { "0b693a158fed42a387d5f61ff6f0ae4c", new AbilityInfo("0b693a158fed42a387d5f61ff6f0ae4c", "Bulwark", AbilityTiming.PreCombatBuff, flags: AbilityFlags.IsDefensiveStance) },
+            { "b064fd994f804996afc43725ffb75f7c", new AbilityInfo("b064fd994f804996afc43725ffb75f7c", "Bulwark_Strategy", AbilityTiming.PreCombatBuff, flags: AbilityFlags.IsDefensiveStance) },
 
             // Other Buffs
             { "3e34d7ddd1dc4cc580dc8a578cc09beb", new AbilityInfo("3e34d7ddd1dc4cc580dc8a578cc09beb", "AuraOfFaith", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
@@ -93,42 +93,43 @@ namespace CompanionAI_v3.Data
             // TurnEnding - 턴 종료 스킬
             // ========================================
 
-            { "f6a60b4556214528b0ce295c4f69306e", new AbilityInfo("f6a60b4556214528b0ce295c4f69306e", "StalwartDefense", AbilityTiming.TurnEnding) },
-            { "a77c8eee6d684e9587f6be5b10f93bb7", new AbilityInfo("a77c8eee6d684e9587f6be5b10f93bb7", "Overwatch", AbilityTiming.TurnEnding, flags: AbilityFlags.SelfTargetOnly) },
+            // ★ v3.7.65: IsDefensiveStance 플래그 추가
+            { "f6a60b4556214528b0ce295c4f69306e", new AbilityInfo("f6a60b4556214528b0ce295c4f69306e", "StalwartDefense", AbilityTiming.TurnEnding, flags: AbilityFlags.IsDefensiveStance) },
+            { "a77c8eee6d684e9587f6be5b10f93bb7", new AbilityInfo("a77c8eee6d684e9587f6be5b10f93bb7", "Overwatch", AbilityTiming.TurnEnding, flags: AbilityFlags.SelfTargetOnly | AbilityFlags.IsDefensiveStance) },
 
             // ========================================
-            // Reload - 재장전
+            // Reload - 재장전 (★ v3.7.65: IsReloadAbility 플래그 추가)
             // ========================================
 
-            { "98f4a31b68e446ad9c63411c7b349146", new AbilityInfo("98f4a31b68e446ad9c63411c7b349146", "Reload", AbilityTiming.Reload) },
-            { "b1704fc05eeb406ba23158061e765cac", new AbilityInfo("b1704fc05eeb406ba23158061e765cac", "Reload_NoAoO", AbilityTiming.Reload) },
-            { "121068f8b70641458b24b3edc31f9132", new AbilityInfo("121068f8b70641458b24b3edc31f9132", "Reload_Plasma", AbilityTiming.Reload) },
-            { "1e3a9caa44f04f7696ad5bd4ec4056a3", new AbilityInfo("1e3a9caa44f04f7696ad5bd4ec4056a3", "Reload_Kellermoph", AbilityTiming.Reload) },
-            { "1cedb5f0cf104f57a88f91168e4c0df8", new AbilityInfo("1cedb5f0cf104f57a88f91168e4c0df8", "Reload_PostCombat", AbilityTiming.Reload) },
-            { "afb34784b5f742b980cb0a3d46c9abe3", new AbilityInfo("afb34784b5f742b980cb0a3d46c9abe3", "WeaponReload", AbilityTiming.Reload) },
+            { "98f4a31b68e446ad9c63411c7b349146", new AbilityInfo("98f4a31b68e446ad9c63411c7b349146", "Reload", AbilityTiming.Reload, flags: AbilityFlags.IsReloadAbility) },
+            { "b1704fc05eeb406ba23158061e765cac", new AbilityInfo("b1704fc05eeb406ba23158061e765cac", "Reload_NoAoO", AbilityTiming.Reload, flags: AbilityFlags.IsReloadAbility) },
+            { "121068f8b70641458b24b3edc31f9132", new AbilityInfo("121068f8b70641458b24b3edc31f9132", "Reload_Plasma", AbilityTiming.Reload, flags: AbilityFlags.IsReloadAbility) },
+            { "1e3a9caa44f04f7696ad5bd4ec4056a3", new AbilityInfo("1e3a9caa44f04f7696ad5bd4ec4056a3", "Reload_Kellermoph", AbilityTiming.Reload, flags: AbilityFlags.IsReloadAbility) },
+            { "1cedb5f0cf104f57a88f91168e4c0df8", new AbilityInfo("1cedb5f0cf104f57a88f91168e4c0df8", "Reload_PostCombat", AbilityTiming.Reload, flags: AbilityFlags.IsReloadAbility) },
+            { "afb34784b5f742b980cb0a3d46c9abe3", new AbilityInfo("afb34784b5f742b980cb0a3d46c9abe3", "WeaponReload", AbilityTiming.Reload, flags: AbilityFlags.IsReloadAbility) },
 
             // ========================================
-            // Taunt - 도발
+            // Taunt - 도발 (★ v3.7.65: IsTauntAbility 플래그 추가)
             // ========================================
 
-            { "742ab23861c544b38f26e17175d17183", new AbilityInfo("742ab23861c544b38f26e17175d17183", "Taunt", AbilityTiming.Taunt) },
-            { "46e7a840c3d04703b154660efb45538b", new AbilityInfo("46e7a840c3d04703b154660efb45538b", "Taunt_Vanguard", AbilityTiming.Taunt) },
-            { "a8c7d8404d104d4dad2d460ec2b470ee", new AbilityInfo("a8c7d8404d104d4dad2d460ec2b470ee", "Taunt_Servoskull", AbilityTiming.Taunt) },
-            { "13e41af1d54c458da81050336ce8e0fc", new AbilityInfo("13e41af1d54c458da81050336ce8e0fc", "MockingCry", AbilityTiming.Taunt) },
-            { "383d89aaa52f4c3f8e19a02659ce19e7", new AbilityInfo("383d89aaa52f4c3f8e19a02659ce19e7", "ProvocatorHelm", AbilityTiming.Taunt) },
-            { "beef5bd0b6724e5c8373fb9fbcd34084", new AbilityInfo("beef5bd0b6724e5c8373fb9fbcd34084", "TauntTargetAbility", AbilityTiming.Taunt, flags: AbilityFlags.EnemyTarget) },
+            { "742ab23861c544b38f26e17175d17183", new AbilityInfo("742ab23861c544b38f26e17175d17183", "Taunt", AbilityTiming.Taunt, flags: AbilityFlags.IsTauntAbility) },
+            { "46e7a840c3d04703b154660efb45538b", new AbilityInfo("46e7a840c3d04703b154660efb45538b", "Taunt_Vanguard", AbilityTiming.Taunt, flags: AbilityFlags.IsTauntAbility) },
+            { "a8c7d8404d104d4dad2d460ec2b470ee", new AbilityInfo("a8c7d8404d104d4dad2d460ec2b470ee", "Taunt_Servoskull", AbilityTiming.Taunt, flags: AbilityFlags.IsTauntAbility) },
+            { "13e41af1d54c458da81050336ce8e0fc", new AbilityInfo("13e41af1d54c458da81050336ce8e0fc", "MockingCry", AbilityTiming.Taunt, flags: AbilityFlags.IsTauntAbility) },
+            { "383d89aaa52f4c3f8e19a02659ce19e7", new AbilityInfo("383d89aaa52f4c3f8e19a02659ce19e7", "ProvocatorHelm", AbilityTiming.Taunt, flags: AbilityFlags.IsTauntAbility) },
+            { "beef5bd0b6724e5c8373fb9fbcd34084", new AbilityInfo("beef5bd0b6724e5c8373fb9fbcd34084", "TauntTargetAbility", AbilityTiming.Taunt, flags: AbilityFlags.EnemyTarget | AbilityFlags.IsTauntAbility) },
 
             // ========================================
-            // Finisher - 마무리
+            // Finisher - 마무리 (★ v3.7.65: IsFinisherAbility 플래그 추가)
             // ========================================
 
-            { "6a4c3b65dff840e0aab5966ffe8aa7ba", new AbilityInfo("6a4c3b65dff840e0aab5966ffe8aa7ba", "DeathSentence", AbilityTiming.Finisher, targetHP: 30f) },
-            { "5b8545bc7a90491d865410a585071efe", new AbilityInfo("5b8545bc7a90491d865410a585071efe", "MissionComplete", AbilityTiming.Finisher, targetHP: 30f) },
-            { "cf6c3356a9b44dd7badea16a625687be", new AbilityInfo("cf6c3356a9b44dd7badea16a625687be", "MissionComplete_Sub", AbilityTiming.Finisher, targetHP: 30f) },
-            { "ed10346264414140936abd17d6c5b445", new AbilityInfo("ed10346264414140936abd17d6c5b445", "TwilightDismantle", AbilityTiming.Finisher, targetHP: 25f) },
-            { "614fe492067d4b50b03695782af00f00", new AbilityInfo("614fe492067d4b50b03695782af00f00", "PowerMaulFinish", AbilityTiming.Finisher, targetHP: 30f) },
-            { "70b2fcb4c67544da847ea8e0792191d5", new AbilityInfo("70b2fcb4c67544da847ea8e0792191d5", "InstantExecution_Desperate", AbilityTiming.Finisher, targetHP: 30f) },
-            { "ed15e7b6f9cc4d2f9d0f3c6e3c3a4b1c", new AbilityInfo("ed15e7b6f9cc4d2f9d0f3c6e3c3a4b1c", "BringItDown_Execute", AbilityTiming.Finisher, targetHP: 30f) },
+            { "6a4c3b65dff840e0aab5966ffe8aa7ba", new AbilityInfo("6a4c3b65dff840e0aab5966ffe8aa7ba", "DeathSentence", AbilityTiming.Finisher, targetHP: 30f, flags: AbilityFlags.IsFinisherAbility) },
+            { "5b8545bc7a90491d865410a585071efe", new AbilityInfo("5b8545bc7a90491d865410a585071efe", "MissionComplete", AbilityTiming.Finisher, targetHP: 30f, flags: AbilityFlags.IsFinisherAbility) },
+            { "cf6c3356a9b44dd7badea16a625687be", new AbilityInfo("cf6c3356a9b44dd7badea16a625687be", "MissionComplete_Sub", AbilityTiming.Finisher, targetHP: 30f, flags: AbilityFlags.IsFinisherAbility) },
+            { "ed10346264414140936abd17d6c5b445", new AbilityInfo("ed10346264414140936abd17d6c5b445", "TwilightDismantle", AbilityTiming.Finisher, targetHP: 25f, flags: AbilityFlags.IsFinisherAbility) },
+            { "614fe492067d4b50b03695782af00f00", new AbilityInfo("614fe492067d4b50b03695782af00f00", "PowerMaulFinish", AbilityTiming.Finisher, targetHP: 30f, flags: AbilityFlags.IsFinisherAbility) },
+            { "70b2fcb4c67544da847ea8e0792191d5", new AbilityInfo("70b2fcb4c67544da847ea8e0792191d5", "InstantExecution_Desperate", AbilityTiming.Finisher, targetHP: 30f, flags: AbilityFlags.IsFinisherAbility) },
+            { "ed15e7b6f9cc4d2f9d0f3c6e3c3a4b1c", new AbilityInfo("ed15e7b6f9cc4d2f9d0f3c6e3c3a4b1c", "BringItDown_Execute", AbilityTiming.Finisher, targetHP: 30f, flags: AbilityFlags.IsFinisherAbility) },
 
             // ========================================
             // HeroicAct - Momentum 175+
@@ -243,6 +244,11 @@ namespace CompanionAI_v3.Data
             { "d9f20b396eb64a4293c9e3bd3270e0dc", new AbilityInfo("d9f20b396eb64a4293c9e3bd3270e0dc", "UnstoppableOnslaught", AbilityTiming.GapCloser) },
             { "8fed5098066b48efa1e09a14f7b8f6c6", new AbilityInfo("8fed5098066b48efa1e09a14f7b8f6c6", "Ambush_Ambull", AbilityTiming.GapCloser) },
             { "c3e407372e02483e87b350235fc409f0", new AbilityInfo("c3e407372e02483e87b350235fc409f0", "AmbushTeleport_Ambull", AbilityTiming.GapCloser) },
+
+            // ★ v3.7.27: Cyber-Eagle Aerial Rush (MultiTarget 2-Point 능력)
+            // FamiliarOnly: AvailableAttacks에 추가되지 않음 - PlanFamiliarAerialRush()에서만 처리
+            { "95c502e72a6743d1ad0cbadf13051225", new AbilityInfo("95c502e72a6743d1ad0cbadf13051225", "EaglePet_AerialRush_Ability", AbilityTiming.FamiliarOnly) },
+            { "d830b9fd0e7240139d3f7381fa308ab7", new AbilityInfo("d830b9fd0e7240139d3f7381fa308ab7", "EaglePet_AerialRush_Ascended_Ability", AbilityTiming.FamiliarOnly) },
 
             // ========================================
             // DOTIntensify - DoT 강화 스킬
@@ -840,13 +846,9 @@ namespace CompanionAI_v3.Data
         }
 
         /// <summary>
-        /// 스킬 속성 기반 자동 타이밍 감지
-        /// ★ v3.0.20: 아군 버프 감지 로직 추가
-        /// ★ v3.0.21: 위치 타겟 버프 감지 추가
-        /// ★ v3.1.12: 게임 API 기반 자동 감지 강화
-        ///   - EffectOnAlly/EffectOnEnemy 활용
-        ///   - IsHeroicAct/IsMomentum 활용
-        ///   - AbilityEffectRunAction 컴포넌트 분석
+        /// ★ v3.7.30: 블루프린트 속성 기반 완전 자동 타이밍 감지
+        /// 게임이 제공하는 모든 관련 속성을 체계적으로 활용
+        /// 6단계 우선순위 기반 분류 시스템
         /// </summary>
         private static AbilityTiming AutoDetectTiming(AbilityData ability)
         {
@@ -856,162 +858,201 @@ namespace CompanionAI_v3.Data
                 if (bp == null) return AbilityTiming.Normal;
 
                 // ═══════════════════════════════════════════════════════════════
-                // 1단계: 게임 내장 속성 활용 (가장 정확)
+                // 속성 캐싱 (성능 최적화)
+                // ═══════════════════════════════════════════════════════════════
+                bool isHeroicAct = bp.IsHeroicAct;
+                bool isDesperateMeasure = bp.IsDesperateMeasure;
+                bool isCharge = bp.IsCharge;
+                bool isMoveUnit = bp.IsMoveUnit;
+                bool isStratagem = bp.IsStratagem;
+                bool isAoE = bp.IsAoE;
+                bool isAoEDamage = bp.IsAoEDamage;
+                bool isBurst = bp.IsBurst;
+                bool isGrenade = bp.IsGrenade;
+                bool isPsyker = bp.IsPsykerAbility;
+                bool isWeaponAbility = bp.IsWeaponAbility;
+                bool notOffensive = bp.NotOffensive;
+                bool canTargetSelf = bp.CanTargetSelf;
+                bool canTargetEnemies = bp.CanTargetEnemies;
+                bool canTargetFriends = bp.CanTargetFriends;
+                bool canTargetPoint = bp.CanTargetPoint;
+                bool canTargetDead = bp.CanCastToDeadTarget;
+
+                var effectOnAlly = bp.EffectOnAlly;
+                var effectOnEnemy = bp.EffectOnEnemy;
+                var aoETargets = bp.AoETargets;
+                var range = bp.Range;
+                int aoERadius = bp.AoERadius;
+
+                bool hasWeapon = ability.Weapon != null;
+                bool hasMultiTarget = bp.GetComponent<AbilityMultiTarget>() != null;
+                string bpName = bp.name?.ToLower() ?? "";
+
+                // ═══════════════════════════════════════════════════════════════
+                // Phase 1: 게임 명시적 속성 (100% 신뢰)
+                // 게임이 직접 분류해주는 속성들
                 // ═══════════════════════════════════════════════════════════════
 
-                // ★ v3.1.12: 영웅적 행동 (게임이 직접 판단)
-                if (bp.IsHeroicAct)
+                // 영웅적 행동 (Momentum 175+)
+                if (isHeroicAct)
                     return AbilityTiming.HeroicAct;
 
-                // ★ v3.1.12: 필사적 조치 (게임이 직접 판단)
-                if (bp.IsDesperateMeasure)
+                // 필사적 조치 (Momentum 25)
+                if (isDesperateMeasure)
                     return AbilityTiming.DesperateMeasure;
 
-                // ★ v3.1.12: 돌진 능력 (게임이 직접 판단)
-                if (bp.IsCharge)
-                    return AbilityTiming.GapCloser;
-
-                // ★ v3.1.12: 이동 능력 (게임이 직접 판단)
-                if (bp.IsMoveUnit)
-                    return AbilityTiming.GapCloser;
-
-                // ★ v3.1.12: 전략 능력 (게임이 직접 판단)
-                if (bp.IsStratagem)
+                // 전략 능력
+                if (isStratagem)
                     return AbilityTiming.Stratagem;
 
+                // 돌진/이동 능력
+                if (isCharge || isMoveUnit)
+                    return AbilityTiming.GapCloser;
+
                 // ═══════════════════════════════════════════════════════════════
-                // 2단계: AbilityEffectRunAction 컴포넌트 분석
+                // Phase 2: 컴포넌트 기반 (높은 신뢰도)
+                // 능력의 실제 동작을 분석
                 // ═══════════════════════════════════════════════════════════════
+
+                // MultiTarget 능력 → FamiliarOnly (별도 처리 필요)
+                if (hasMultiTarget)
+                    return AbilityTiming.FamiliarOnly;
 
                 var runAction = bp.GetComponent<AbilityEffectRunAction>();
                 if (runAction?.Actions?.Actions != null)
                 {
                     var actions = runAction.Actions.Actions;
 
-                    // ★ v3.1.12: 보너스 능력 사용 추가 → PostFirstAction (런 앤 건 등)
+                    // 보너스 능력 사용 추가 → PostFirstAction (Run and Gun 등)
                     if (HasActionOfType<ContextActionAddBonusAbilityUsage>(actions))
                         return AbilityTiming.PostFirstAction;
 
-                    // ★ v3.1.12: AP/MP 회복 → PostFirstAction (무모한 돌진 등)
+                    // AP 회복 → PostFirstAction
                     if (HasActionOfType<WarhammerContextActionRestoreActionPoints>(actions))
                         return AbilityTiming.PostFirstAction;
 
-                    // ★ v3.1.12: 힐링 액션 존재 → Healing
+                    // 힐링 액션 → Healing
                     if (HasActionOfType<ContextActionHealTarget>(actions))
+                        return AbilityTiming.Healing;
+
+                    // 부활 액션 → Healing (사망 타겟 가능 + 힐링)
+                    if (canTargetDead && effectOnAlly == AbilityEffectOnUnit.Helpful)
                         return AbilityTiming.Healing;
                 }
 
                 // ═══════════════════════════════════════════════════════════════
-                // 3단계: EffectOnAlly/EffectOnEnemy 활용
+                // Phase 3: AoE 분류 (게임 속성 활용)
+                // IsAoE, AoETargets, EffectOnAlly/Enemy 조합
                 // ═══════════════════════════════════════════════════════════════
 
-                var effectOnAlly = bp.EffectOnAlly;
-                var effectOnEnemy = bp.EffectOnEnemy;
-                bool canTargetSelf = bp.CanTargetSelf;
-                bool canTargetEnemies = bp.CanTargetEnemies;
-                bool canTargetFriends = bp.CanTargetFriends;
-                bool canTargetPoint = bp.CanTargetPoint;
-                bool hasWeapon = ability.Weapon != null;
-                bool notOffensive = bp.NotOffensive;
-                string range = bp.Range.ToString();
-                string bpName = bp.name?.ToLower() ?? "";
+                if (isAoE || isAoEDamage || aoERadius > 0)
+                {
+                    // 아군에게 해로운 AoE → DangerousAoE
+                    if (effectOnAlly == AbilityEffectOnUnit.Harmful)
+                        return AbilityTiming.DangerousAoE;
 
-                // ★ v3.1.12: 적에게 해롭고 아군에게 해로운 AoE → DangerousAoE
+                    // AoETargets=Any 이고 적/아군 모두 영향 → DangerousAoE
+                    if (aoETargets == TargetType.Any && canTargetEnemies)
+                    {
+                        // 아군도 영향받을 수 있는지 체크
+                        if (effectOnAlly != AbilityEffectOnUnit.None)
+                            return AbilityTiming.DangerousAoE;
+                    }
+
+                    // AoETargets=Ally 이고 아군에게 이로움 → PreCombatBuff
+                    if (aoETargets == TargetType.Ally && effectOnAlly == AbilityEffectOnUnit.Helpful)
+                        return AbilityTiming.PreCombatBuff;
+
+                    // AoETargets=Enemy → 일반 AoE 공격 (Normal)
+                    // 수류탄, 버스트 등은 Normal로 처리
+                }
+
+                // ═══════════════════════════════════════════════════════════════
+                // Phase 4: 효과 + 타겟팅 조합 (중간 신뢰도)
+                // EffectOnAlly/Enemy와 타겟팅 조합
+                // ═══════════════════════════════════════════════════════════════
+
+                // 적에게 해롭고 아군에게도 해로움 → DangerousAoE
                 if (effectOnEnemy == AbilityEffectOnUnit.Harmful &&
-                    effectOnAlly == AbilityEffectOnUnit.Harmful && !hasWeapon)
+                    effectOnAlly == AbilityEffectOnUnit.Harmful &&
+                    !hasWeapon)
                     return AbilityTiming.DangerousAoE;
 
-                // ★ v3.1.12: 비공격 + 적 타겟 + 적에게 해로움 → Debuff
+                // 비공격 + 적 타겟 + 적에게 해로움 → Debuff
                 if (notOffensive && canTargetEnemies && effectOnEnemy == AbilityEffectOnUnit.Harmful)
                     return AbilityTiming.Debuff;
 
-                // ★ v3.1.12: 아군에게 이로움 + 적 타겟 불가 → 버프/힐
+                // 아군에게 이로움 + 적 타겟 불가 → Buff 계열
                 if (effectOnAlly == AbilityEffectOnUnit.Helpful && !canTargetEnemies && !hasWeapon)
                 {
-                    // 힐링 키워드 체크
-                    if (bpName.Contains("heal") || bpName.Contains("medikit") || bpName.Contains("mend") ||
-                        bpName.Contains("restore") || bpName.Contains("revive"))
-                        return AbilityTiming.Healing;
-
-                    // 자기만 타겟 가능하면 PreAttackBuff
+                    // 자기만 타겟 → PreAttackBuff
                     if (canTargetSelf && !canTargetFriends)
                         return AbilityTiming.PreAttackBuff;
 
-                    // 아군 타겟 가능하면 PreCombatBuff
-                    return AbilityTiming.PreCombatBuff;
+                    // 아군 타겟 가능 → PreCombatBuff
+                    if (canTargetFriends)
+                        return AbilityTiming.PreCombatBuff;
+                }
+
+                // 사이커 능력 특수 처리
+                if (isPsyker)
+                {
+                    // 사이커 + 아군에게 해로움 → DangerousAoE (Perils 등)
+                    if (effectOnAlly == AbilityEffectOnUnit.Harmful)
+                        return AbilityTiming.DangerousAoE;
+
+                    // 사이커 + 디버프 성격 → Debuff
+                    if (notOffensive && effectOnEnemy == AbilityEffectOnUnit.Harmful)
+                        return AbilityTiming.Debuff;
                 }
 
                 // ═══════════════════════════════════════════════════════════════
-                // 4단계: 기존 휴리스틱 (폴백)
+                // Phase 5: 타겟팅 기반 (Range, Point)
                 // ═══════════════════════════════════════════════════════════════
 
-                // 구역 강화 스킬 (Stratagem)
-                if (bpName.Contains("stratagem"))
-                    return AbilityTiming.Stratagem;
-
-                // 위치 타겟 버프 (전방/보조/후방 구역 등)
+                // 위치 타겟 버프 (구역 배치 스킬)
                 if (canTargetPoint && !canTargetEnemies && !canTargetFriends && !hasWeapon)
                 {
-                    if (bpName.Contains("frontline") || bpName.Contains("backline") || bpName.Contains("rear") ||
-                        bpName.Contains("keystone"))
+                    // Range=Unlimited → 전장 어디든 배치 가능한 구역 스킬
+                    if (range == AbilityRange.Unlimited)
                         return AbilityTiming.PositionalBuff;
 
-                    if (range == "Unlimited")
+                    // Range=Custom + 범위 큼 → 구역 스킬
+                    if (range == AbilityRange.Custom && bp.CustomRange > 10)
+                        return AbilityTiming.PositionalBuff;
+
+                    // 아군에게 이로움 → PositionalBuff
+                    if (effectOnAlly == AbilityEffectOnUnit.Helpful)
                         return AbilityTiming.PositionalBuff;
                 }
 
-                // 위험한 AoE (적과 아군 모두 타겟 가능, 무기 공격 제외)
-                if (canTargetEnemies && canTargetFriends && !canTargetSelf && !hasWeapon)
-                    return AbilityTiming.DangerousAoE;
-
-                // 아군 버프 감지
-                if (canTargetFriends && !canTargetEnemies && !hasWeapon)
+                // Personal 범위 + 자기 타겟 → 자기 버프
+                // ★ v3.7.65: 키워드 매칭 제거 - 방어 태세는 데이터베이스 플래그로 확인
+                if (range == AbilityRange.Personal && canTargetSelf && !canTargetEnemies && !hasWeapon)
                 {
-                    if (bpName.Contains("heal") || bpName.Contains("medikit") || bpName.Contains("mend") ||
-                        bpName.Contains("restore") || bpName.Contains("revive"))
-                        return AbilityTiming.Healing;
-
-                    if (bpName.Contains("overwatch") || bpName.Contains("guard") || bpName.Contains("defend"))
-                        return AbilityTiming.TurnEnding;
-
-                    return AbilityTiming.PreCombatBuff;
-                }
-
-                // Personal 자기 버프
-                if (range == "Personal" && canTargetSelf && !canTargetEnemies && !hasWeapon)
-                {
-                    if (bpName.Contains("veil") || bpName.Contains("stance") ||
-                        bpName.Contains("defend") || bpName.Contains("guard"))
-                        return AbilityTiming.TurnEnding;
-
                     return AbilityTiming.PreAttackBuff;
                 }
 
-                // 자해 스킬 감지
-                if (bpName.Contains("blood") || bpName.Contains("oath") ||
-                    bpName.Contains("sacrifice") || bpName.Contains("wound"))
+                // 아군만 타겟 가능 (적 불가, 무기 아님)
+                // ★ v3.7.65: 키워드 매칭 제거 - 방어/감시는 데이터베이스 플래그로 확인
+                if (canTargetFriends && !canTargetEnemies && !hasWeapon)
                 {
-                    if (canTargetSelf || range == "Personal")
-                        return AbilityTiming.SelfDamage;
+                    return AbilityTiming.PreCombatBuff;
                 }
 
-                // 마무리 스킬 감지
-                if (bpName.Contains("dispatch") || bpName.Contains("execute") ||
-                    bpName.Contains("finish") || bpName.Contains("deathblow"))
-                    return AbilityTiming.Finisher;
+                // ═══════════════════════════════════════════════════════════════
+                // Phase 6: 폴백 - 분류되지 않은 능력
+                // ★ v3.7.65: 키워드 매칭 완전 제거
+                // Reload, Taunt, Finisher 등은 데이터베이스에 GUID로 등록되어 있어야 함
+                // 여기까지 도달한 능력은 데이터베이스에 미등록된 것
+                // ═══════════════════════════════════════════════════════════════
 
-                // 재장전 감지
-                if (bpName.Contains("reload"))
-                    return AbilityTiming.Reload;
-
-                // 힐링 감지
-                if (bpName.Contains("heal") || bpName.Contains("medikit") || bpName.Contains("mend"))
-                    return AbilityTiming.Healing;
-
+                // 기본값 - 미분류 능력
                 return AbilityTiming.Normal;
             }
-            catch
+            catch (Exception ex)
             {
+                Main.LogDebug($"[AbilityDatabase] AutoDetectTiming error: {ex.Message}");
                 return AbilityTiming.Normal;
             }
         }
@@ -1106,18 +1147,46 @@ namespace CompanionAI_v3.Data
         }
 
         /// <summary>
-        /// ★ v3.5.75: 방어 태세 능력인지 확인 (StalwartDefense, DefensiveStance 등)
-        /// BuffPlanner, TankPlan에서 중복 사용되던 로직 통합
+        /// ★ v3.7.65: 방어 태세 능력인지 확인 (StalwartDefense, DefensiveStance, Bulwark, Overwatch 등)
+        /// 키워드 매칭 제거 → GUID 데이터베이스 플래그 기반 확인
         /// </summary>
         public static bool IsDefensiveStance(AbilityData ability)
         {
             if (ability == null) return false;
 
-            // 1. TurnEnding + 방어 관련 키워드 조합으로 확인
-            string bpName = ability.Blueprint?.name?.ToLower() ?? "";
-            return bpName.Contains("defensive") || bpName.Contains("stance") ||
-                   bpName.Contains("bulwark") || bpName.Contains("guard") ||
-                   bpName.Contains("stalwart");
+            // 1. 데이터베이스 플래그 확인 (GUID 기반 - 정확함)
+            var info = GetInfo(ability);
+            if (info != null && (info.Flags & AbilityFlags.IsDefensiveStance) != 0)
+                return true;
+
+            // 2. TurnEnding 타이밍 + 방어 컴포넌트 조합으로 확인 (폴백)
+            if (GetTiming(ability) == AbilityTiming.TurnEnding)
+            {
+                // 방어 관련 버프를 부여하는 컴포넌트 체크
+                var bp = ability.Blueprint;
+                if (bp != null)
+                {
+                    try
+                    {
+                        // AC/Dodge 보너스를 주는 능력은 방어 태세
+                        var contextActions = bp.GetComponent<AbilityEffectRunAction>();
+                        if (contextActions?.Actions?.Actions != null)
+                        {
+                            foreach (var action in contextActions.Actions.Actions)
+                            {
+                                if (action is ContextActionApplyBuff applyBuff)
+                                {
+                                    // 버프가 방어 관련인지 컴포넌트로 체크
+                                    return true;  // TurnEnding + 버프 적용 = 방어 스탠스로 간주
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+
+            return false;
         }
 
         /// <summary>

@@ -284,6 +284,70 @@ namespace CompanionAI_v3.GameInterface
 
         #endregion
 
+        #region Overcharge (HeroicAct) Detection
+
+        /// <summary>
+        /// ★ v3.7.69: Raven Master가 Overcharge(HeroicAct) 상태인지 확인
+        /// Overcharge가 활성화되어야만 공격형 사이킥도 Warp Relay 가능
+        /// Overcharge 없이 PurificationDischarge 등 공격 사용 시 Raven에게 자해 데미지
+        /// </summary>
+        public static bool IsRavenOverchargeActive(BaseUnitEntity master)
+        {
+            if (master == null) return false;
+
+            try
+            {
+                // MomentumRoot에서 HeroicActBuff 가져오기
+                var momentumRoot = Kingmaker.Blueprints.Root.BlueprintRoot.Instance?.WarhammerRoot?.MomentumRoot;
+                if (momentumRoot == null)
+                {
+                    Main.LogDebug("[FamiliarAPI] IsRavenOverchargeActive: MomentumRoot is null");
+                    return false;
+                }
+
+                var heroicActBuff = momentumRoot.HeroicActBuff;
+                if (heroicActBuff == null)
+                {
+                    Main.LogDebug("[FamiliarAPI] IsRavenOverchargeActive: HeroicActBuff is null");
+                    return false;
+                }
+
+                // Master의 Facts에 HeroicActBuff가 있는지 확인
+                bool hasOvercharge = master.Facts?.Contains(heroicActBuff) ?? false;
+
+                if (hasOvercharge)
+                {
+                    Main.LogDebug($"[FamiliarAPI] {master.CharacterName}: Overcharge (HeroicAct) ACTIVE - attack abilities safe");
+                }
+
+                return hasOvercharge;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[FamiliarAPI] IsRavenOverchargeActive error: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.7.69: Raven 공격 능력을 안전하게 사용할 수 있는지 확인
+        /// - Overcharge 상태에서만 true
+        /// - Overcharge 없으면 PurificationDischarge 등 사용 시 Raven 자해
+        /// </summary>
+        public static bool CanRavenUseAttackAbilities(BaseUnitEntity master)
+        {
+            if (master == null) return false;
+
+            // Raven을 가진 Overseer인지 확인
+            var familiarType = GetFamiliarType(master);
+            if (familiarType != PetType.Raven) return false;
+
+            // Overcharge 상태 확인
+            return IsRavenOverchargeActive(master);
+        }
+
+        #endregion
+
         #region Diagnostics
 
         /// <summary>

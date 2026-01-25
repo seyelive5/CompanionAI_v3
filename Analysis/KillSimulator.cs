@@ -396,28 +396,8 @@ namespace CompanionAI_v3.Analysis
                 Main.LogDebug($"[KillSimulator] EstimateBuffMultiplier component analysis error: {ex.Message}");
             }
 
-            // 2. 이름 기반 휴리스틱 (폴백)
-            string buffName = buff.Name?.ToLower() ?? "";
-            string bpName = buff.Blueprint.name?.ToLower() ?? "";
-
-            // 알려진 버프들의 배율
-            if (buffName.Contains("rapid fire") || buffName.Contains("속사") ||
-                bpName.Contains("rapidfire"))
-                return 1.5f;  // 추가 공격으로 인한 대폭 증가
-
-            if (buffName.Contains("frenzy") || buffName.Contains("트랜스") ||
-                bpName.Contains("frenzy") || bpName.Contains("combattrance"))
-                return 1.3f;  // +30% 데미지
-
-            if (buffName.Contains("fury") || buffName.Contains("분노") ||
-                bpName.Contains("fury") || bpName.Contains("rage"))
-                return 1.25f; // +25% 데미지
-
-            if (buffName.Contains("aim") || buffName.Contains("조준") ||
-                bpName.Contains("aim") || bpName.Contains("precise"))
-                return 1.15f; // +15% 명중률 → 데미지 환산
-
-            // 기본값: 보수적으로 1.2 (20% 증가)
+            // ★ v3.7.65: 이름 기반 휴리스틱 제거 - 컴포넌트 기반 감지만 사용
+            // 컴포넌트에서 감지 못한 경우 보수적인 기본값 반환
             return 1.2f;
         }
 

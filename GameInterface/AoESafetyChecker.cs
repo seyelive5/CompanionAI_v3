@@ -175,6 +175,10 @@ namespace CompanionAI_v3.GameInterface
                     float distToCaster = CombatAPI.MetersToTiles(Vector3.Distance(caster.Position, center));
                     if (distToCaster > abilityRange) continue;
 
+                    // ★ v3.7.64: BattlefieldGrid Walkable 체크 (중간점이 장애물 안인지)
+                    if (Analysis.BattlefieldGrid.Instance.IsValid && !Analysis.BattlefieldGrid.Instance.IsWalkable(center))
+                        continue;
+
                     var score = EvaluateAoEPosition(ability, caster, center, allUnits);
                     if (score.IsSafe && score.EnemiesHit >= minEnemiesRequired)
                         candidates.Add(score);
@@ -346,6 +350,10 @@ namespace CompanionAI_v3.GameInterface
                     // ★ v3.5.98: 타일 단위로 변환
                     float distToCaster = CombatAPI.MetersToTiles(Vector3.Distance(caster.Position, center));
                     if (distToCaster > abilityRange) continue;
+
+                    // ★ v3.7.64: BattlefieldGrid Walkable 체크 (중간점이 장애물 안인지)
+                    if (Analysis.BattlefieldGrid.Instance.IsValid && !Analysis.BattlefieldGrid.Instance.IsWalkable(center))
+                        continue;
 
                     var evalScore = EvaluateAllyAoEPosition(ability, caster, center, allies, requiresWounded);
                     if (evalScore.IsSafe && evalScore.AlliesHit >= minAlliesRequired)

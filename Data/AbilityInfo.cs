@@ -75,6 +75,9 @@ namespace CompanionAI_v3.Data
 
         /// <summary>★ v3.0.28: 마킹 스킬 - 적을 표시만 하고 데미지 없음 (Hunt Down the Prey 등)</summary>
         Marker,
+
+        /// <summary>★ v3.7.27: 사역마 전용 능력 - FamiliarAbilities에서만 처리 (MultiTarget 등)</summary>
+        FamiliarOnly,
     }
 
     /// <summary>
@@ -99,6 +102,10 @@ namespace CompanionAI_v3.Data
         // ★ v3.0.98: MPRecovery 플래그 deprecated - CombatAPI.GetAbilityMPRecovery()가 Blueprint에서 자동 감지
         // MPRecovery = 1 << 12,
         RequiresBurstAttack = 1 << 12, // ★ v3.5.73: Burst 공격 전용 버프 (속사 등)
+        IsDefensiveStance = 1 << 13,   // ★ v3.7.65: 방어 태세 (StalwartDefense, DefensiveStance, Bulwark, Overwatch 등)
+        IsReloadAbility = 1 << 14,     // ★ v3.7.65: 재장전 능력
+        IsTauntAbility = 1 << 15,      // ★ v3.7.65: 도발 능력
+        IsFinisherAbility = 1 << 16,   // ★ v3.7.65: 마무리 능력 (처형 계열)
     }
 
     /// <summary>

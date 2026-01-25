@@ -3,8 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Enums;
+using Kingmaker.Pathfinding;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Utility;
+using Kingmaker.View.Covers;
+using Pathfinding;
 using UnityEngine;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
@@ -1131,15 +1134,18 @@ namespace CompanionAI_v3.Planning.Plans
             if (situation.FamiliarType != PetType.Eagle)
                 return null;
 
+            // ★ v3.7.31: 단일 타겟 능력만 처리 (MultiTarget 활공 버전은 PlanFamiliarAerialRush에서 처리)
             // Obstruct Vision 능력 찾기
             var obstruct = situation.FamiliarAbilities?
-                .FirstOrDefault(a => FamiliarAbilities.IsObstructVisionAbility(a));
+                .FirstOrDefault(a => FamiliarAbilities.IsObstructVisionAbility(a) &&
+                                     !FamiliarAbilities.IsMultiTargetFamiliarAbility(a));
 
             if (obstruct == null)
             {
-                // Blinding Strike 폴백
+                // Blinding Strike 폴백 (단일 타겟만)
                 obstruct = situation.FamiliarAbilities?
-                    .FirstOrDefault(a => FamiliarAbilities.IsBlindingStrikeAbility(a));
+                    .FirstOrDefault(a => FamiliarAbilities.IsBlindingStrikeAbility(a) &&
+                                        !FamiliarAbilities.IsMultiTargetFamiliarAbility(a));
             }
 
             if (obstruct == null)
@@ -1265,165 +1271,309 @@ namespace CompanionAI_v3.Planning.Plans
         }
 
         /// <summary>
-        /// ★ v3.7.13: 사역마 Aerial Rush 계획 (Cyber-Eagle)
+        /// ★ v3.7.45: 사역마 Aerial Rush 계획 (Cyber-Eagle)
         /// 이동 + 공격 능력 - 타겟까지 돌진하며 경로상 적에게 피해
-        /// AbilityCustomDirectMovement 기반: 경로상 모든 적 히트 가능
+        ///
+        /// ★ 핵심 메커니즘:
+        /// - Eagle은 턴 시작 시 필드에 없음 → 첫 클릭 시 하늘에서 내려옴
+        /// - Point1: Master가 능력 사거리(ability.RangeCells) 내에서 클릭
+        /// - Point2: Point1에서 Eagle 이동 범위(Familiar MP) 내 착륙 위치
+        ///
+        /// ★ Overseer 아키타입: 사역마 활용이 메인 → 이동해서라도 사용
         /// </summary>
         protected PlannedAction PlanFamiliarAerialRush(Situation situation, ref float remainingAP)
         {
+            // ★ v3.7.43: 디버그 로그 추가
+            Main.LogDebug($"[{RoleName}] Aerial Rush: Entry - FamiliarType={situation.FamiliarType}, " +
+                $"FamiliarAbilities={situation.FamiliarAbilities?.Count ?? 0}, AP={remainingAP:F1}");
+
             // Cyber-Eagle만 해당
             if (situation.FamiliarType != PetType.Eagle)
+            {
+                Main.LogDebug($"[{RoleName}] Aerial Rush: Skip - Not Eagle (type={situation.FamiliarType})");
                 return null;
+            }
 
-            // Aerial Rush 능력 찾기
-            var aerialRush = situation.FamiliarAbilities?
+            // ★ v3.7.31: 모든 Eagle MultiTarget 능력 처리 (우선순위 기반)
+            // 우선순위: AerialRush > AerialRushSupport > ObstructVision(Glide) > 기타 MultiTarget
+            AbilityData aerialRush = null;
+
+            // 1. AerialRush (데미지 우선)
+            aerialRush = situation.FamiliarAbilities?
                 .FirstOrDefault(a => FamiliarAbilities.IsAerialRushAbility(a));
 
+            // 2. AerialRush Support (실명 공격 — 활공)
             if (aerialRush == null)
+            {
+                aerialRush = situation.FamiliarAbilities?
+                    .FirstOrDefault(a => FamiliarAbilities.IsAerialRushSupportAbility(a));
+            }
+
+            // 3. ObstructVision Glide 버전 (시야 방해 — 활공)
+            if (aerialRush == null)
+            {
+                aerialRush = situation.FamiliarAbilities?
+                    .FirstOrDefault(a => FamiliarAbilities.IsObstructVisionAbility(a) &&
+                                         FamiliarAbilities.IsMultiTargetFamiliarAbility(a));
+            }
+
+            // 4. 기타 모든 Eagle MultiTarget 능력 (폴백)
+            if (aerialRush == null)
+            {
+                aerialRush = situation.FamiliarAbilities?
+                    .FirstOrDefault(a => FamiliarAbilities.IsMultiTargetFamiliarAbility(a));
+            }
+
+            if (aerialRush == null)
+            {
+                // ★ v3.7.43: 모든 능력 GUID 로그
+                Main.LogDebug($"[{RoleName}] Aerial Rush: No MultiTarget ability found. Available abilities:");
+                if (situation.FamiliarAbilities != null)
+                {
+                    foreach (var ab in situation.FamiliarAbilities)
+                    {
+                        bool isMulti = FamiliarAbilities.IsMultiTargetFamiliarAbility(ab);
+                        bool isAerial = FamiliarAbilities.IsAerialRushAbility(ab);
+                        Main.LogDebug($"  - {ab.Name} [{ab.Blueprint?.AssetGuid}] MultiTarget={isMulti}, AerialRush={isAerial}");
+                    }
+                }
                 return null;
+            }
 
             // AP 비용 확인
             float apCost = CombatAPI.GetAbilityAPCost(aerialRush);
+            Main.LogDebug($"[{RoleName}] Aerial Rush: Found ability={aerialRush.Name}, APCost={apCost:F1}, RemainingAP={remainingAP:F1}");
+
+            // ★ v3.7.46: 디버그 - TargetRestrictions 덤프
+            try
+            {
+                var restrictions = aerialRush.Blueprint?.TargetRestrictions;
+                if (restrictions != null && restrictions.Length > 0)
+                {
+                    Main.LogDebug($"[{RoleName}] Aerial Rush: TargetRestrictions ({restrictions.Length} total):");
+                    foreach (var restriction in restrictions)
+                    {
+                        Main.LogDebug($"  - {restriction.GetType().Name}");
+                    }
+                }
+                else
+                {
+                    Main.LogDebug($"[{RoleName}] Aerial Rush: No TargetRestrictions");
+                }
+
+                // MultiTarget 컴포넌트 정보
+                var components = aerialRush.Blueprint?.ComponentsArray;
+                if (components != null)
+                {
+                    foreach (var comp in components)
+                    {
+                        if (comp.GetType().Name.Contains("MultiTarget"))
+                        {
+                            Main.LogDebug($"[{RoleName}] Aerial Rush: Has {comp.GetType().Name} component");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[{RoleName}] Aerial Rush: Error dumping restrictions: {ex.Message}");
+            }
+
             if (remainingAP < apCost)
-                return null;
-
-            // ★ Aerial Rush 타겟 선정 전략:
-            // 1. HP 낮은 적 (마무리 타겟) - 돌진하면서 경로상 다른 적도 타격
-            // 2. 원거리 위협 적 - 사거리를 줄이기 위해 돌진
-            // 3. 적 밀집 지역의 끝에 있는 적 - 경로상 최대 피해
-            BaseUnitEntity targetEnemy = null;
-
-            // 1순위: HP 30% 미만인 적 (마무리 기회)
-            var lowHPEnemy = situation.Enemies
-                .Where(e => e != null && e.IsConscious)
-                .Where(e => CombatAPI.GetHPPercent(e) < 30f)
-                .OrderBy(e => CombatAPI.GetHPPercent(e))
-                .FirstOrDefault();
-
-            if (lowHPEnemy != null)
             {
-                var lowHPTarget = new TargetWrapper(lowHPEnemy);
-                string lowHPReason;
-                if (CombatAPI.CanUseAbilityOn(aerialRush, lowHPTarget, out lowHPReason))
-                {
-                    targetEnemy = lowHPEnemy;
-                    Main.LogDebug($"[{RoleName}] Aerial Rush: Targeting low HP enemy {lowHPEnemy.CharacterName}");
-                }
+                Main.LogDebug($"[{RoleName}] Aerial Rush: Insufficient AP ({remainingAP:F1} < {apCost:F1})");
+                return null;
             }
 
-            // 2순위: 원거리 적 (위협 감소)
-            if (targetEnemy == null)
+            var masterNode = situation.Unit.Position.GetNearestNodeXZ() as CustomGridNodeBase;
+            if (masterNode == null)
             {
-                var rangedEnemy = situation.Enemies
-                    .Where(e => e != null && e.IsConscious)
-                    .Where(e => CombatAPI.HasRangedWeapon(e))
-                    .OrderByDescending(e => e.Health?.MaxHitPoints ?? 0)
-                    .FirstOrDefault();
+                Main.LogDebug($"[{RoleName}] Aerial Rush: Master node is null");
+                return null;
+            }
 
-                if (rangedEnemy != null)
+            // ★ v3.7.46: Point1, Point2 범위 결정
+            //
+            // 게임 메커니즘 분석 결과:
+            // - Eagle 활공 능력은 AbilityRange.Unlimited (100000 타일) 반환
+            // - 하지만 WarhammerOverrideAbilityCasterPositionByPet 컴포넌트가 있으면
+            //   거리 계산 시 Pet(Eagle) 위치가 사용됨
+            // - 실제 제한은 LOS(시야선)로 걸림 (NeedLoS=true면 HasLos 체크)
+            // - Point1: Master가 클릭 → Eagle이 "나타날" 위치
+            // - Point2: Eagle이 Point1에서 이동할 착륙 위치
+            //
+            var familiar = FamiliarAPI.GetFamiliar(situation.Unit);
+            float familiarMP = familiar != null ? CombatAPI.GetCurrentMP(familiar) : 0f;
+
+            // ★ v3.7.46: 컴포넌트 분석 (디버깅용)
+            bool hasOverrideCasterByPet = false;
+            try
+            {
+                var components = aerialRush.Blueprint?.ComponentsArray;
+                if (components != null)
                 {
-                    var rangedTarget = new TargetWrapper(rangedEnemy);
-                    string rangedReason;
-                    if (CombatAPI.CanUseAbilityOn(aerialRush, rangedTarget, out rangedReason))
+                    foreach (var comp in components)
                     {
-                        targetEnemy = rangedEnemy;
-                        Main.LogDebug($"[{RoleName}] Aerial Rush: Targeting ranged enemy {rangedEnemy.CharacterName}");
+                        if (comp.GetType().Name.Contains("OverrideCasterPositionByPet") ||
+                            comp.GetType().Name.Contains("OverrideAbilityCasterPosition"))
+                        {
+                            hasOverrideCasterByPet = true;
+                            Main.LogDebug($"[{RoleName}] Aerial Rush: Found {comp.GetType().Name} - distance calc uses Pet position");
+                            break;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            // Point1 범위: RangeCells가 Unlimited(100000)면 LOS 기반 계산으로 대체
+            // (AI가 100000 타일 탐색하면 게임 멈춤)
+            int point1RangeTiles;
+
+            // 적 위치 기반으로 실용적인 탐색 범위 계산
+            float maxEnemyDist = 0f;
+            foreach (var enemy in situation.Enemies)
+            {
+                if (enemy == null || !enemy.IsConscious) continue;
+                float dist = Vector3.Distance(situation.Unit.Position, enemy.Position) / 1.35f;  // 미터 → 타일
+                if (dist > maxEnemyDist) maxEnemyDist = dist;
+            }
+
+            // Point1 범위 = 적까지 거리 + Eagle 이동력 + 여유분 (최대 60타일)
+            // 이렇게 하면 적을 타격할 수 있는 모든 Point1 후보를 포함함
+            point1RangeTiles = Math.Max(10, Math.Min((int)(maxEnemyDist + familiarMP + 5), 60));
+
+            // ★ v3.7.54: 게임이 실제 사용하는 Support 능력의 RangeCells 사용
+            // 원인: AI가 Eagle MP 기준으로 Point2 계산 → 게임은 Support_Ascended_Ability.RangeCells로 검증
+            // → 두 값이 다르면 TargetRestrictionNotPassed 발생
+            int point2RangeTiles = CombatAPI.GetMultiTargetPoint2RangeInTiles(aerialRush);
+
+            Main.LogDebug($"[{RoleName}] Aerial Rush: Point1={point1RangeTiles} tiles (maxEnemy={maxEnemyDist:F0}), " +
+                $"Point2={point2RangeTiles} tiles (from Support ability RangeCells), EagleMP={familiarMP:F0}, OverrideCaster={hasOverrideCasterByPet}");
+
+            // ★ v3.7.48: Eagle 위치 기반 경로 탐색
+            // 게임 검증 분석 결과: Point2 검증은 Eagle.Position에서 수행됨
+            // → Point1 = Eagle.Position으로 고정해야 TargetRestrictionNotPassed 방지
+            CustomGridNodeBase eagleNode = null;
+            if (familiar != null)
+            {
+                eagleNode = situation.FamiliarPosition.GetNearestNodeXZ() as CustomGridNodeBase;
+                Main.LogDebug($"[{RoleName}] Aerial Rush: Using Eagle position ({situation.FamiliarPosition.x:F1},{situation.FamiliarPosition.z:F1})");
+            }
+
+            CustomGridNodeBase bestPoint1Node, bestPoint2Node;
+            bool foundPath = PointTargetingHelper.FindBestAerialRushPath(
+                masterNode,
+                situation.Unit.SizeRect,
+                point1RangeTiles,
+                point2RangeTiles,
+                situation.Enemies,
+                out bestPoint1Node,
+                out bestPoint2Node,
+                eagleNode,  // ★ v3.7.48: Eagle 위치 전달
+                familiar);  // ★ v3.7.50: Charge 경로 검증용
+
+            // ★ v3.7.45: 현재 위치에서 안 되면 Master 이동 고려 (Overseer 핵심 기능!)
+            CustomGridNodeBase masterMoveNode = null;
+            if (!foundPath)
+            {
+                Main.LogDebug($"[{RoleName}] Aerial Rush: No path from current position, checking Master movement...");
+
+                float masterMP = CombatAPI.GetCurrentMP(situation.Unit);
+                int masterMPTiles = (int)masterMP;
+
+                if (masterMPTiles >= 2)  // 최소 2타일 이동 가능해야 의미 있음
+                {
+                    foundPath = PointTargetingHelper.FindBestMasterPositionForAerialRush(
+                        masterNode,
+                        situation.Unit.SizeRect,
+                        masterMPTiles,
+                        point1RangeTiles,
+                        point2RangeTiles,
+                        situation.Enemies,
+                        out masterMoveNode,
+                        out bestPoint1Node,
+                        out bestPoint2Node,
+                        eagleNode,  // ★ v3.7.48: Eagle 위치 전달
+                        familiar);  // ★ v3.7.50: Charge 경로 검증용
+
+                    if (foundPath && masterMoveNode != null)
+                    {
+                        Vector3 movePos = (Vector3)masterMoveNode.Vector3Position;
+                        Main.LogDebug($"[{RoleName}] Aerial Rush: Found path after Master moves to ({movePos.x:F1},{movePos.z:F1})");
                     }
                 }
             }
 
-            // 3순위: 경로상 가장 많은 적을 통과할 수 있는 타겟
-            // (단순화: 가장 먼 적을 타겟하면 경로가 길어져 더 많은 적 타격 가능)
-            if (targetEnemy == null)
+            if (!foundPath || bestPoint1Node == null || bestPoint2Node == null)
             {
-                var farthestEnemy = situation.Enemies
-                    .Where(e => e != null && e.IsConscious)
-                    .OrderByDescending(e => CombatCache.GetDistanceInTiles(situation.Unit, e))
-                    .FirstOrDefault();
+                Main.LogDebug($"[{RoleName}] Aerial Rush: No valid path found (even with movement)");
+                return null;
+            }
 
-                if (farthestEnemy != null)
+            // Point1, Point2 확정
+            UnityEngine.Vector3 point1 = (UnityEngine.Vector3)bestPoint1Node.Vector3Position;
+            UnityEngine.Vector3 point2 = (UnityEngine.Vector3)bestPoint2Node.Vector3Position;
+
+            // ★ v3.7.58: P1 → P2 경로에서 적 타격 (Eagle이 P1에서 소환, P2로 이동하며 공격)
+            int estimatedPathTargets = PointTargetingHelper.CountEnemiesInChargePath(point1, point2, situation.Enemies);
+
+            // 경로 상에 있는 첫 번째 적 이름 찾기 (로깅용)
+            string targetName = "path";
+            UnityEngine.Vector3 direction = (point2 - point1).normalized;
+            float pathLength = UnityEngine.Vector3.Distance(point1, point2);
+            foreach (var enemy in situation.Enemies)
+            {
+                if (enemy == null || !enemy.IsConscious) continue;
+                UnityEngine.Vector3 toEnemy = enemy.Position - point1;
+                float proj = UnityEngine.Vector3.Dot(toEnemy, direction);
+                if (proj >= 0 && proj <= pathLength)
                 {
-                    var farthestTarget = new TargetWrapper(farthestEnemy);
-                    string farthestReason;
-                    if (CombatAPI.CanUseAbilityOn(aerialRush, farthestTarget, out farthestReason))
+                    UnityEngine.Vector3 closestPoint = point1 + direction * proj;
+                    float perpDist = UnityEngine.Vector3.Distance(enemy.Position, closestPoint);
+                    if (perpDist <= 2.7f)
                     {
-                        targetEnemy = farthestEnemy;
-                        Main.LogDebug($"[{RoleName}] Aerial Rush: Targeting farthest enemy {farthestEnemy.CharacterName} for max path damage");
+                        targetName = enemy.CharacterName ?? "enemy";
+                        break;
                     }
                 }
             }
 
-            // 4순위: 아무 적이라도
-            if (targetEnemy == null)
+            // ★ v3.7.45: Master 이동이 필요한 경우
+            // 이동 행동만 먼저 반환 → 다음 사이클에서 능력 사용
+            // (게임은 이동 완료 후 다시 AI 업데이트를 호출함)
+            if (masterMoveNode != null)
             {
-                targetEnemy = situation.Enemies
-                    .Where(e => e != null && e.IsConscious)
-                    .FirstOrDefault();
-            }
+                Vector3 masterMovePos = (Vector3)masterMoveNode.Vector3Position;
+                Main.Log($"[{RoleName}] ★ Eagle Aerial Rush requires movement: " +
+                    $"Master moves to ({masterMovePos.x:F1},{masterMovePos.z:F1}) first, " +
+                    $"then will use Point1({point1.x:F1},{point1.z:F1}) -> Point2({point2.x:F1},{point2.z:F1}) " +
+                    $"through {targetName} ({estimatedPathTargets} enemies in path)");
 
-            if (targetEnemy == null)
-            {
-                Main.LogDebug($"[{RoleName}] Aerial Rush: No valid target found");
-                return null;
+                // 이동만 먼저 반환 - 다음 AI 사이클에서 Aerial Rush 재계획됨
+                return PlannedAction.Move(masterMovePos, $"Move for Aerial Rush ({estimatedPathTargets} enemies)");
             }
-
-            // 최종 타겟 사용 가능 여부 확인
-            var targetWrapper = new TargetWrapper(targetEnemy);
-            string reason;
-            if (!CombatAPI.CanUseAbilityOn(aerialRush, targetWrapper, out reason))
-            {
-                Main.LogDebug($"[{RoleName}] Aerial Rush blocked: {reason}");
-                return null;
-            }
-
-            // ★ 경로상 예상 적 수 계산 (디버그/로깅용)
-            int estimatedPathTargets = CountEnemiesInPath(situation.Unit.Position, targetEnemy.Position, situation.Enemies);
 
             remainingAP -= apCost;
 
-            Main.Log($"[{RoleName}] ★ Eagle Aerial Rush: {targetEnemy.CharacterName} (estimated {estimatedPathTargets} enemies in path)");
+            // MultiTarget 리스트 생성
+            var targets = new System.Collections.Generic.List<TargetWrapper>
+            {
+                new TargetWrapper(point1),
+                new TargetWrapper(point2)
+            };
 
-            return PlannedAction.Attack(
+            Main.Log($"[{RoleName}] ★ Eagle Aerial Rush: Point1({point1.x:F1},{point1.z:F1}) -> Point2({point2.x:F1},{point2.z:F1}) through {targetName} ({estimatedPathTargets} enemies in path)");
+
+            return PlannedAction.MultiTargetAttack(
                 aerialRush,
-                targetEnemy,
-                $"Aerial Rush to {targetEnemy.CharacterName} ({estimatedPathTargets} in path)",
+                targets,
+                $"Aerial Rush through {targetName} ({estimatedPathTargets} in path)",
                 apCost);
         }
 
-        /// <summary>
-        /// ★ v3.7.13: 두 지점 사이 경로상 적 수 추정
-        /// Aerial Rush 타겟 선정용 - 정확한 경로가 아닌 직선 근사
-        /// </summary>
-        private int CountEnemiesInPath(UnityEngine.Vector3 start, UnityEngine.Vector3 end, List<BaseUnitEntity> enemies)
-        {
-            if (enemies == null || enemies.Count == 0) return 0;
-
-            int count = 0;
-            UnityEngine.Vector3 direction = (end - start).normalized;
-            float pathLength = UnityEngine.Vector3.Distance(start, end);
-
-            foreach (var enemy in enemies)
-            {
-                if (enemy == null || !enemy.IsConscious) continue;
-
-                // 적이 경로에서 얼마나 떨어져 있는지 계산 (수직 거리)
-                UnityEngine.Vector3 toEnemy = enemy.Position - start;
-                float projectionLength = UnityEngine.Vector3.Dot(toEnemy, direction);
-
-                // 경로 범위 내에 있는지 확인
-                if (projectionLength < 0 || projectionLength > pathLength) continue;
-
-                // 경로로부터의 수직 거리
-                UnityEngine.Vector3 closestPointOnPath = start + direction * projectionLength;
-                float perpendicularDistance = UnityEngine.Vector3.Distance(enemy.Position, closestPointOnPath);
-
-                // 약 2타일(2.7m) 이내면 경로상에 있다고 간주
-                if (perpendicularDistance <= 2.7f)
-                    count++;
-            }
-
-            return count;
-        }
+        // ★ v3.7.36: CountEnemiesInPath, FindNearestUnoccupiedCell 제거
+        // → PointTargetingHelper로 통합
 
         /// <summary>
         /// ★ v3.7.14: 사역마 Blinding Dive 계획 (Cyber-Eagle)

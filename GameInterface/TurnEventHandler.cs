@@ -1,3 +1,5 @@
+using System.Linq;
+using Kingmaker;
 using Kingmaker.Controllers.TurnBased;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.EntitySystem.Interfaces;
@@ -101,6 +103,9 @@ namespace CompanionAI_v3.GameInterface
 
                 // ★ v3.1.19: 패턴 캐시 클리어
                 CombatAPI.ClearPatternCache();
+
+                // ★ v3.7.62: BattlefieldGrid 정리
+                BattlefieldGrid.Instance.Clear();
             }
             else
             {
@@ -108,6 +113,19 @@ namespace CompanionAI_v3.GameInterface
 
                 // ★ v3.2.10: TeamBlackboard 초기화
                 TeamBlackboard.Instance.InitializeCombat();
+
+                // ★ v3.7.62: BattlefieldGrid 초기화 - 전장 맵 구조 캐싱
+                try
+                {
+                    var allUnits = Game.Instance?.TurnController?.AllUnits?
+                        .OfType<BaseUnitEntity>()
+                        .ToList() ?? new System.Collections.Generic.List<BaseUnitEntity>();
+                    BattlefieldGrid.Instance.InitializeFromCombat(allUnits);
+                }
+                catch (System.Exception ex)
+                {
+                    Main.LogError($"[TurnEventHandler] BattlefieldGrid init failed: {ex.Message}");
+                }
             }
         }
 

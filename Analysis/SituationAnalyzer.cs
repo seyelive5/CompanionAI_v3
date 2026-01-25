@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Kingmaker.Blueprints;  // ★ v3.7.29: GetComponent<T>() 확장 메서드
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Enums;
 using Kingmaker.UnitLogic.Abilities;
+using Kingmaker.UnitLogic.Abilities.Components;  // ★ v3.7.29: AbilityMultiTarget
 using Kingmaker.Utility;
 using UnityEngine;
 using CompanionAI_v3.Core;
@@ -483,7 +485,10 @@ namespace CompanionAI_v3.Analysis
                 if (aoERadius > 0)
                     rangeInfo += $" (AOE r={aoERadius:F0} tiles)";
 
-                Main.LogDebug($"[Analyzer] Ability: {ability.Name} -> Timing={timing}, " +
+                // ★ v3.7.30: 블루프린트 캐시에 자동 추가 + GUID 로깅
+                Data.BlueprintCache.CacheAbility(ability);
+                string guid = bp?.AssetGuid?.ToString() ?? "null";
+                Main.LogDebug($"[Analyzer] Ability: {ability.Name} [{guid}] -> Timing={timing}, " +
                     $"CanTargetSelf={bp?.CanTargetSelf}, CanTargetFriends={bp?.CanTargetFriends}, " +
                     $"CanTargetEnemies={bp?.CanTargetEnemies}, CanTargetPoint={bp?.CanTargetPoint}, " +
                     $"Range={rangeInfo}, Weapon={ability.Weapon != null}");
@@ -539,6 +544,13 @@ namespace CompanionAI_v3.Analysis
 
                     // ★ v3.0.21: 위치 타겟 버프 (전방/보조/후방 구역)
                     case AbilityTiming.PositionalBuff:
+                        // ★ v3.7.30: AbilityMultiTarget 컴포넌트가 있으면 제외 (실명 공격 — 활공 등)
+                        // MultiTarget 능력은 FamiliarAbilities에서만 처리됨
+                        if (ability.Blueprint?.GetComponent<AbilityMultiTarget>() != null)
+                        {
+                            Main.LogDebug($"[Analyzer] Excluded MultiTarget from PositionalBuff: {ability.Name}");
+                            break;
+                        }
                         situation.AvailablePositionalBuffs.Add(ability);
                         break;
 
@@ -597,8 +609,29 @@ namespace CompanionAI_v3.Analysis
                     // Finisher, GapCloser -> AvailableAttacks
                     // (TurnPlanner에서 AbilityDatabase.IsXXX()로 필터링)
                     case AbilityTiming.Finisher:
-                    case AbilityTiming.GapCloser:
                         situation.AvailableAttacks.Add(ability);
+                        break;
+
+                    case AbilityTiming.GapCloser:
+                        // ★ v3.7.29: AbilityMultiTarget 컴포넌트가 있으면 제외 (GUID 매칭보다 확실)
+                        // MultiTarget 능력은 FamiliarAbilities에서만 처리됨
+                        if (ability.Blueprint?.GetComponent<AbilityMultiTarget>() != null)
+                        {
+                            Main.LogDebug($"[Analyzer] Excluded MultiTarget ability (component): {ability.Name}");
+                            break;
+                        }
+                        // ★ v3.7.27: 명시적 체크도 유지 (이름/GUID 기반)
+                        if (FamiliarAbilities.IsMultiTargetFamiliarAbility(ability))
+                        {
+                            Main.LogDebug($"[Analyzer] Excluded MultiTarget familiar ability: {ability.Name}");
+                            break;
+                        }
+                        situation.AvailableAttacks.Add(ability);
+                        break;
+
+                    // ★ v3.7.27: FamiliarOnly -> FamiliarAbilities에서만 처리 (AvailableAttacks에 추가 안 함)
+                    case AbilityTiming.FamiliarOnly:
+                        Main.LogDebug($"[Analyzer] FamiliarOnly ability skipped: {ability.Name}");
                         break;
 
                     // DangerousAoE -> AvailableAttacks (주의해서 사용)
@@ -616,6 +649,12 @@ namespace CompanionAI_v3.Analysis
                         // Normal 등 기타 공격 능력 분류
                         if (IsAttackAbility(ability, situation.RangePreference))
                         {
+                            // ★ v3.7.29: MultiTarget 능력은 제외 (단일 타겟 경로로 계획되면 예외 발생)
+                            if (ability.Blueprint?.GetComponent<AbilityMultiTarget>() != null)
+                            {
+                                Main.LogDebug($"[Analyzer] Excluded MultiTarget from default attacks: {ability.Name}");
+                                break;
+                            }
                             situation.AvailableAttacks.Add(ability);
                         }
                         break;

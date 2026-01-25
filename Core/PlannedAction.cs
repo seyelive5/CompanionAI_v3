@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Utility;
@@ -38,6 +39,12 @@ namespace CompanionAI_v3.Core
         /// 계획 시점의 엔티티 참조가 stale해지는 문제 방지
         /// </summary>
         public bool IsFamiliarTarget { get; set; }
+
+        /// <summary>
+        /// ★ v3.7.25: MultiTarget 능력용 타겟 리스트
+        /// AerialRush 등 2개 이상의 Point 타겟이 필요한 능력에 사용
+        /// </summary>
+        public List<TargetWrapper> AllTargets { get; set; }
 
         /// <summary>실행 완료 여부</summary>
         public bool IsExecuted { get; set; }
@@ -166,6 +173,42 @@ namespace CompanionAI_v3.Core
                 APCost = apCost,
                 Reason = reason,
                 Priority = 25  // 일반 Attack(50)보다 우선 (갭클로저 → 공격 연계)
+            };
+        }
+
+        /// <summary>
+        /// ★ v3.7.25: MultiTarget 공격 (AerialRush 등 2개 Point 필요)
+        /// </summary>
+        public static PlannedAction MultiTargetAttack(AbilityData ability, List<TargetWrapper> allTargets, string reason, float apCost)
+        {
+            return new PlannedAction
+            {
+                Type = ActionType.Attack,
+                Ability = ability,
+                Target = allTargets?.Count > 0 ? allTargets[0] : null,
+                AllTargets = allTargets,
+                APCost = apCost,
+                Reason = reason,
+                Priority = 25  // 갭클로저 수준 우선순위
+            };
+        }
+
+        /// <summary>
+        /// ★ v3.7.45: 이동 후 MultiTarget 공격
+        /// Master가 먼저 이동한 후 Familiar 능력 사용 (Overseer 핵심 패턴)
+        /// </summary>
+        public static PlannedAction MoveThenMultiTargetAttack(Vector3 moveDestination, AbilityData ability, List<TargetWrapper> allTargets, string reason, float apCost)
+        {
+            return new PlannedAction
+            {
+                Type = ActionType.Attack,
+                Ability = ability,
+                Target = allTargets?.Count > 0 ? allTargets[0] : null,
+                AllTargets = allTargets,
+                MoveDestination = moveDestination,  // 이동 목적지 설정
+                APCost = apCost,
+                Reason = reason,
+                Priority = 20  // Move보다 우선, 갭클로저보다 약간 우선
             };
         }
 

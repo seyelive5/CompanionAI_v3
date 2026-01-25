@@ -51,6 +51,10 @@ namespace CompanionAI_v3.Analysis
                     var direction = new Vector3(Mathf.Cos(rad), 0, Mathf.Sin(rad));
                     var candidatePos = currentPos + direction * dist;
 
+                    // ★ v3.7.64: BattlefieldGrid Walkable 체크
+                    if (BattlefieldGrid.Instance.IsValid && !BattlefieldGrid.Instance.IsWalkable(candidatePos))
+                        continue;
+
                     var score = EvaluatePosition(candidatePos, unit, enemies, allies, minSafeDistance);
                     if (score.TotalScore > 0)
                     {
@@ -70,6 +74,7 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>
         /// 특정 위치 평가
+        /// ★ v3.7.66: IsReachable 실제 구현 - BattlefieldGrid 검증
         /// </summary>
         public static PositionScore EvaluatePosition(
             Vector3 position,
@@ -78,11 +83,27 @@ namespace CompanionAI_v3.Analysis
             List<BaseUnitEntity> allies,
             float minSafeDistance)
         {
+            // ★ v3.7.66: 실제 도달 가능성 체크 (BattlefieldGrid 기반)
+            bool isReachable = true;
+            var grid = BattlefieldGrid.Instance;
+            if (grid != null && grid.IsValid)
+            {
+                var node = grid.GetNode(position);
+                isReachable = node != null && grid.CanUnitStandOn(unit, node);
+            }
+
             var score = new PositionScore
             {
                 Position = position,
-                IsReachable = true  // TODO: 실제 도달 가능성 체크
+                IsReachable = isReachable
             };
+
+            // 도달 불가능하면 최저 점수 반환
+            if (!isReachable)
+            {
+                score.TotalScore = float.MinValue;
+                return score;
+            }
 
             // 1. 적과의 최소 거리 (멀수록 좋음, 안전 거리 이상이어야 함)
             float nearestEnemyDist = float.MaxValue;
@@ -195,6 +216,10 @@ namespace CompanionAI_v3.Analysis
                 for (float dist = 3f; dist <= moveRange; dist += 3f)
                 {
                     var candidatePos = unit.Position + rotatedDir * dist;
+
+                    // ★ v3.7.64: BattlefieldGrid Walkable 체크
+                    if (BattlefieldGrid.Instance.IsValid && !BattlefieldGrid.Instance.IsWalkable(candidatePos))
+                        continue;
 
                     // 모든 적과 안전 거리 유지 확인
                     float nearestDist = float.MaxValue;

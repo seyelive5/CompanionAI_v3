@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Kingmaker.Blueprints;
 using Kingmaker.Enums;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.UnitLogic.Abilities.Blueprints;
+using Kingmaker.UnitLogic.Abilities.Components;
 using CompanionAI_v3.GameInterface;
 
 namespace CompanionAI_v3.Data
@@ -218,6 +220,7 @@ namespace CompanionAI_v3.Data
         private static readonly HashSet<string> ObstructVisionGuids = new()
         {
             "9cea4a0c57c448f7a90c44998745bf96",  // EaglePet_ObstructVision_Ability
+            "e985b758fa94464abfd506c773409571",  // ★ v3.7.31: 시야 방해 — 활공 (MultiTarget Glide 버전)
         };
 
         // ========================================
@@ -226,11 +229,29 @@ namespace CompanionAI_v3.Data
         private static readonly HashSet<string> AerialRushBlueprintNames = new(StringComparer.OrdinalIgnoreCase)
         {
             "EaglePet_AerialRush_Ability",
+            "EaglePet_AerialRush_Ascended_Ability",  // ★ v3.7.25: Ascended 버전 추가
         };
 
         private static readonly HashSet<string> AerialRushGuids = new()
         {
             "95c502e72a6743d1ad0cbadf13051225",  // EaglePet_AerialRush_Ability
+            "d830b9fd0e7240139d3f7381fa308ab7",  // ★ v3.7.25: EaglePet_AerialRush_Ascended_Ability
+        };
+
+        // ========================================
+        // ★ v3.7.30: Aerial Rush Support 능력 (Cyber-Eagle)
+        // 실명 공격 — 활공 (Blinding Glide)
+        // ========================================
+        private static readonly HashSet<string> AerialRushSupportBlueprintNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "EaglePet_AerialRush_Support_Ability",
+            "EaglePet_AerialRush_Support_Ascended_Ability",
+        };
+
+        // ★ v3.7.31: AerialRush Support GUIDs 추가
+        private static readonly HashSet<string> AerialRushSupportGuids = new()
+        {
+            "31e321c9332449c6a8531cb652b7290b",  // 실명 공격 — 활공 (Blinding Glide)
         };
 
         // ========================================
@@ -752,6 +773,57 @@ namespace CompanionAI_v3.Data
         }
 
         /// <summary>
+        /// ★ v3.7.30: Aerial Rush Support 능력인지 확인 (실명 공격 — 활공)
+        /// AerialRush와 동일하게 2개 Point 타겟 필요
+        /// </summary>
+        public static bool IsAerialRushSupportAbility(AbilityData ability)
+        {
+            if (ability == null) return false;
+
+            try
+            {
+                // ★ v3.7.31: GUID 체크 추가
+                string guid = AbilityDatabase.GetGuid(ability);
+                if (!string.IsNullOrEmpty(guid) && AerialRushSupportGuids.Contains(guid))
+                    return true;
+
+                // BlueprintName 체크
+                string blueprintName = ability.Blueprint?.name;
+                if (!string.IsNullOrEmpty(blueprintName) && AerialRushSupportBlueprintNames.Contains(blueprintName))
+                    return true;
+
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.7.27: MultiTarget 사역마 능력인지 확인
+        /// 이 능력들은 AvailableAttacks가 아닌 FamiliarAbilities에서만 처리됨
+        /// AttackPlanner/MovementPlanner에서 필터링할 때 사용
+        /// </summary>
+        public static bool IsMultiTargetFamiliarAbility(AbilityData ability)
+        {
+            if (ability == null) return false;
+
+            // AerialRush는 2개 Point 타겟 필요 (시작점, 끝점)
+            if (IsAerialRushAbility(ability)) return true;
+
+            // ★ v3.7.30: AerialRush Support도 2개 Point 타겟 필요
+            if (IsAerialRushSupportAbility(ability)) return true;
+
+            // ★ v3.7.51: ObstructVision Glide (MultiTarget 버전)
+            string guid = AbilityDatabase.GetGuid(ability);
+            if (guid == "e985b758fa94464abfd506c773409571")
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
         /// Screen 능력인지 확인 (Cyber-Eagle)
         /// </summary>
         public static bool IsScreenAbility(AbilityData ability)
@@ -1025,6 +1097,24 @@ namespace CompanionAI_v3.Data
             }
         }
 
+        /// <summary>
+        /// ★ v3.7.69: Raven 공격 능력인지 확인
+        /// - PurificationDischarge 등 Overcharge 필요 능력
+        /// - 이 능력들은 Overcharge 없이 사용하면 Raven에게 자해 데미지
+        /// </summary>
+        public static bool IsRavenAttackAbility(AbilityData ability)
+        {
+            if (ability == null) return false;
+
+            // PurificationDischarge는 Raven 공격 능력
+            if (IsPurificationDischarge(ability)) return true;
+
+            // 추후 다른 Raven 공격 능력이 추가되면 여기에 추가
+            // (현재 게임에서 PurificationDischarge가 유일한 Raven 공격 능력)
+
+            return false;
+        }
+
         #endregion
 
         #region Keystone Detection
@@ -1123,10 +1213,10 @@ namespace CompanionAI_v3.Data
         }
 
         /// <summary>
-        /// ★ v3.7.09: 피해를 주는 능력인지 확인 (Warp Relay 디버프 구분용)
+        /// ★ v3.7.65: 피해를 주는 능력인지 확인 (게임 API 기반 - 키워드 매칭 제거)
         /// - 무기 공격: true
-        /// - 피해 사이킥 (Pyromancy 공격, Telekinesis 공격): true
-        /// - 비피해 디버프 (Telepathy 디버프, Divination 디버프): false
+        /// - 직접 피해 컴포넌트 보유: true
+        /// - Harmful + 적만 타겟 + AoEDamage: true
         /// </summary>
         private static bool IsDamageDealingAbility(AbilityData ability)
         {
@@ -1140,59 +1230,35 @@ namespace CompanionAI_v3.Data
                 var blueprint = ability.Blueprint;
                 if (blueprint == null) return false;
 
-                string bpName = blueprint.name ?? "";
+                // ★ v3.7.65: 게임 네이티브 API 사용 (AoEDamage는 피해 능력)
+                if (blueprint.IsAoEDamage) return true;
 
-                // ★ Pyromancy는 대부분 직접 피해 능력
-                // 점화(Ignite), 화염 폭발(Flame Burst), 불기둥(Pillar of Fire) 등
-                if (bpName.Contains("Pyromancy") || bpName.Contains("Pyro") ||
-                    bpName.Contains("Fire") || bpName.Contains("Flame") ||
-                    bpName.Contains("Burn") || bpName.Contains("Ignite"))
+                // ★ v3.7.65: 컴포넌트 기반 감지 - 직접 피해 컴포넌트
+                var components = blueprint.ComponentsArray;
+                if (components != null)
                 {
-                    Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Damage-dealing (Pyromancy pattern)");
-                    return true;
+                    foreach (var component in components)
+                    {
+                        if (component == null) continue;
+                        string typeName = component.GetType().Name;
+
+                        // 직접 피해 컴포넌트 (ContextActionDealDamage, AbilityTargetsAround + damage 등)
+                        if (typeName.Contains("DealDamage") || typeName.Contains("DirectDamage"))
+                            return true;
+                    }
                 }
 
-                // ★ Telekinesis 공격 능력
-                // 염동력 일격(Telekinetic Strike), 염동력 밀치기(Telekinetic Push) 등
-                if (bpName.Contains("TelekineticStrike") || bpName.Contains("TelekineticPush") ||
-                    bpName.Contains("TelekineticRam") || bpName.Contains("TelekineticLash"))
-                {
-                    Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Damage-dealing (Telekinesis attack)");
-                    return true;
-                }
-
-                // ★ Biomancy 공격 능력 (피해를 주는 것들)
-                if (bpName.Contains("LifeDrain") || bpName.Contains("Smite") ||
-                    bpName.Contains("Wrath") || bpName.Contains("Bolt"))
-                {
-                    Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Damage-dealing (Biomancy/attack pattern)");
-                    return true;
-                }
-
-                // ★ Telepathy 능력은 대부분 디버프 (비피해)
-                // 감각 박탈(Sensory Deprivation), 정신 공격 등은 피해가 아닌 상태이상
-                if (bpName.Contains("Telepathy") || bpName.Contains("SensoryDeprivation") ||
-                    bpName.Contains("MindControl") || bpName.Contains("Dominate") ||
-                    bpName.Contains("Terrify") || bpName.Contains("Hallucination"))
-                {
-                    Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Non-damaging debuff (Telepathy pattern)");
-                    return false;
-                }
-
-                // ★ Divination 능력은 대부분 버프/디버프 (비피해)
-                if (bpName.Contains("Divination") || bpName.Contains("Prescience") ||
-                    bpName.Contains("Forewarning") || bpName.Contains("Scry"))
-                {
-                    Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Non-damaging (Divination pattern)");
-                    return false;
-                }
-
-                // 기본값: CanTargetEnemies && Harmful이면 피해 취급 (보수적)
+                // 게임 API: CanTargetEnemies && Harmful이면 피해 가능성이 높음
+                // 단, 버프/디버프 구분을 위해 CanTargetFriends가 아닌 것만
                 if (blueprint.CanTargetEnemies && !blueprint.CanTargetFriends &&
                     blueprint.EffectOnEnemy == AbilityEffectOnUnit.Harmful)
                 {
-                    Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Assumed damage-dealing (Harmful enemy-only)");
-                    return true;
+                    // 추가 조건: NotOffensive가 아니어야 함 (진짜 공격)
+                    if (!blueprint.NotOffensive)
+                    {
+                        Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Assumed damage-dealing (Harmful enemy-only offensive)");
+                        return true;
+                    }
                 }
 
                 return false;
@@ -1204,8 +1270,8 @@ namespace CompanionAI_v3.Data
         }
 
         /// <summary>
-        /// ★ v3.7.02 Fix: 사이킥 능력인지 확인 (더 정확한 판별)
-        /// Officer 버프는 AbilityType.Spell이지만 사이킥이 아님
+        /// ★ v3.7.65: 사이킥 능력인지 확인 (게임 API 기반 - 키워드 매칭 제거)
+        /// 게임 네이티브 IsPsykerAbility 사용
         /// </summary>
         private static bool IsPsychicAbility(AbilityData ability)
         {
@@ -1216,30 +1282,8 @@ namespace CompanionAI_v3.Data
                 var blueprint = ability.Blueprint;
                 if (blueprint == null) return false;
 
-                // BlueprintName으로 먼저 확인 (더 정확)
-                string bpName = blueprint.name ?? "";
-
-                // Officer/Nobility 능력은 사이킥이 아님 (명령 능력)
-                if (bpName.Contains("Officer_") || bpName.Contains("Nobility_") ||
-                    bpName.Contains("VoiceOfCommand") || bpName.Contains("BringItDown") ||
-                    bpName.Contains("StrategicAdaptation") || bpName.Contains("ServeMe"))
-                    return false;
-
-                // 명시적인 사이킥 능력 패턴
-                if (bpName.Contains("Psychic") || bpName.Contains("PsyPower") ||
-                    bpName.Contains("Psyker") || bpName.Contains("Biomancy") ||
-                    bpName.Contains("Divination") || bpName.Contains("Pyromancy") ||
-                    bpName.Contains("Telekinesis") || bpName.Contains("Telepathy"))
-                    return true;
-
-                // Raven 전용 능력은 사이킥 취급
-                if (bpName.Contains("RavenPet_Concentrate") || bpName.Contains("RavenPet_Hex"))
-                    return true;
-
-                // Type.Spell은 사이킥 가능성이 있지만 위에서 제외되지 않은 경우만
-                // (이 경우 보수적으로 false 반환 - Officer 버프 보호)
-                // 실제 사이킥은 위 패턴으로 이미 잡힘
-                return false;
+                // ★ v3.7.65: 게임 네이티브 API 사용 (키워드 매칭 제거)
+                return blueprint.IsPsykerAbility;
             }
             catch
             {
@@ -1353,11 +1397,27 @@ namespace CompanionAI_v3.Data
                             break;
 
                         case PetType.Raven:
-                            // ★ v3.7.12: IsCycleAbility 추가
-                            if (IsPurificationDischarge(ability) || IsWarpRelayKeystone(ability) ||
-                                IsConcentrateAbility(ability) || IsHexAbility(ability) ||
-                                IsCycleAbility(ability))
+                            // ★ v3.7.69: Raven 공격 능력은 Overcharge 상태에서만 수집
+                            // Overcharge 없이 공격하면 Raven 자신에게 데미지가 들어감!
+                            if (IsRavenAttackAbility(ability))
+                            {
+                                // Overcharge 상태 체크 - FamiliarAPI 사용
+                                if (GameInterface.FamiliarAPI.IsRavenOverchargeActive(master))
+                                {
+                                    Main.LogDebug($"[FamiliarAbilities] Raven attack {ability.Name} collected (Overcharge active)");
+                                    result.Add(ability);
+                                }
+                                else
+                                {
+                                    Main.LogDebug($"[FamiliarAbilities] Raven attack {ability.Name} SKIPPED - Overcharge NOT active (self-damage risk!)");
+                                }
+                            }
+                            // 비공격 능력 (Warp Relay, Hex, Cycle 등)은 항상 수집
+                            else if (IsWarpRelayKeystone(ability) || IsConcentrateAbility(ability) ||
+                                     IsHexAbility(ability) || IsCycleAbility(ability))
+                            {
                                 result.Add(ability);
+                            }
                             break;
 
                         case PetType.Mastiff:
@@ -1370,10 +1430,17 @@ namespace CompanionAI_v3.Data
 
                         case PetType.Eagle:
                             // ★ v3.7.14: EagleClaws 추가
+                            // ★ v3.7.30: AbilityMultiTarget 컴포넌트 동적 감지 (BlueprintName 하드코딩 불필요!)
+                            bool isMultiTarget = ability.Blueprint?.GetComponent<AbilityMultiTarget>() != null;
                             if (IsObstructVisionAbility(ability) || IsBlindingStrikeAbility(ability) ||
                                 IsAerialRushAbility(ability) || IsScreenAbility(ability) ||
-                                IsEagleClawsAbility(ability))
+                                IsEagleClawsAbility(ability) || IsAerialRushSupportAbility(ability) ||
+                                isMultiTarget)  // ★ v3.7.30: 모든 MultiTarget Eagle 능력 자동 수집
+                            {
+                                if (isMultiTarget)
+                                    Main.LogDebug($"[FamiliarAbilities] Auto-collected MultiTarget: {ability.Name}");
                                 result.Add(ability);
+                            }
                             break;
                     }
                 }

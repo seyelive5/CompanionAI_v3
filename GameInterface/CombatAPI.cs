@@ -172,6 +172,7 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// ★ v3.6.18: 가상 위치에서 공격 가능한 적 수 계산
+        /// ★ v3.7.66: BattlefieldGrid 검증 추가 - 위치 유효성 사전 확인
         /// </summary>
         public static int CountHittableEnemiesFromPosition(
             BaseUnitEntity unit,
@@ -181,6 +182,13 @@ namespace CompanionAI_v3.GameInterface
         {
             if (unit == null || fromNode == null || enemies == null || enemies.Count == 0)
                 return 0;
+
+            // ★ v3.7.66: 위치 유효성 사전 확인 - 설 수 없는 위치면 0
+            var grid = Analysis.BattlefieldGrid.Instance;
+            if (grid != null && grid.IsValid && !grid.CanUnitStandOn(unit, fromNode))
+            {
+                return 0;
+            }
 
             // 공격 능력이 없으면 가장 기본 공격 찾기
             if (primaryAttack == null)
@@ -3342,6 +3350,112 @@ namespace CompanionAI_v3.GameInterface
             catch
             {
                 return 15;  // 폴백: 15타일
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.7.46: MultiTarget 능력의 Point1 타겟팅 범위 반환
+        ///
+        /// MultiTarget 능력(예: Aerial Rush)은 각 Point마다 다른 능력 블루프린트를 사용함
+        /// Point1 = TryGetNextTargetAbilityAndCaster(targetIndex=0)의 능력 범위
+        /// </summary>
+        public static int GetMultiTargetPoint1RangeInTiles(AbilityData rootAbility)
+        {
+            if (rootAbility == null) return 30;  // 폴백
+
+            try
+            {
+                // IAbilityMultiTarget 컴포넌트 가져오기
+                var multiTarget = rootAbility.Blueprint?.GetComponent<Kingmaker.UnitLogic.Abilities.Components.Base.IAbilityMultiTarget>();
+                if (multiTarget == null)
+                {
+                    Main.LogDebug($"[CombatAPI] GetMultiTargetPoint1Range: No IAbilityMultiTarget component");
+                    return rootAbility.RangeCells;  // MultiTarget이 아니면 기본 범위 반환
+                }
+
+                // Point1 (targetIndex=0)에 사용되는 능력 가져오기
+                Kingmaker.UnitLogic.Abilities.Blueprints.BlueprintAbility point1Blueprint;
+                Kingmaker.EntitySystem.Entities.MechanicEntity point1Caster;
+
+                if (!multiTarget.TryGetNextTargetAbilityAndCaster(rootAbility, 0, out point1Blueprint, out point1Caster))
+                {
+                    Main.LogDebug($"[CombatAPI] GetMultiTargetPoint1Range: TryGetNextTarget failed for index 0");
+                    return 30;  // 폴백
+                }
+
+                if (point1Blueprint == null)
+                {
+                    Main.LogDebug($"[CombatAPI] GetMultiTargetPoint1Range: Point1 blueprint is null");
+                    return 30;  // 폴백
+                }
+
+                // Point1 능력의 AbilityData 생성하여 RangeCells 가져오기
+                var point1Ability = new AbilityData(point1Blueprint, point1Caster ?? rootAbility.Caster);
+                int point1Range = point1Ability.RangeCells;
+
+                Main.LogDebug($"[CombatAPI] GetMultiTargetPoint1Range: Point1 ability={point1Blueprint.name}, Range={point1Range} tiles");
+                return point1Range;
+            }
+            catch (Exception ex)
+            {
+                Main.LogWarning($"[CombatAPI] GetMultiTargetPoint1Range error: {ex.Message}");
+                return 30;  // 폴백
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.7.54: MultiTarget 능력의 Point2 타겟팅 범위 반환
+        ///
+        /// Aerial Rush Point2가 게임에서 거부되는 원인:
+        /// - AI는 Eagle MP를 Point2 범위로 사용
+        /// - 게임은 Support_Ascended_Ability.RangeCells로 검증
+        /// - 이 두 값이 다르면 TargetRestrictionNotPassed 발생
+        ///
+        /// 해결: 게임이 실제로 사용하는 Point2 능력의 RangeCells를 반환
+        /// </summary>
+        public static int GetMultiTargetPoint2RangeInTiles(AbilityData rootAbility)
+        {
+            if (rootAbility == null) return 15;  // 폴백
+
+            try
+            {
+                // IAbilityMultiTarget 컴포넌트 가져오기
+                var multiTarget = rootAbility.Blueprint?.GetComponent<Kingmaker.UnitLogic.Abilities.Components.Base.IAbilityMultiTarget>();
+                if (multiTarget == null)
+                {
+                    Main.LogDebug($"[CombatAPI] GetMultiTargetPoint2Range: No IAbilityMultiTarget component");
+                    return 15;  // MultiTarget이 아니면 폴백
+                }
+
+                // Point2 (targetIndex=1)에 사용되는 능력 가져오기
+                Kingmaker.UnitLogic.Abilities.Blueprints.BlueprintAbility point2Blueprint;
+                Kingmaker.EntitySystem.Entities.MechanicEntity point2Caster;
+
+                if (!multiTarget.TryGetNextTargetAbilityAndCaster(rootAbility, 1, out point2Blueprint, out point2Caster))
+                {
+                    Main.LogDebug($"[CombatAPI] GetMultiTargetPoint2Range: TryGetNextTarget failed for index 1");
+                    return 15;  // 폴백
+                }
+
+                if (point2Blueprint == null)
+                {
+                    Main.LogDebug($"[CombatAPI] GetMultiTargetPoint2Range: Point2 blueprint is null");
+                    return 15;  // 폴백
+                }
+
+                // Point2 능력의 AbilityData 생성하여 RangeCells 가져오기
+                // ★ caster는 Pet(Eagle) - AbilityMultiTarget.GetDelegateUnit() 참조
+                var point2Ability = new AbilityData(point2Blueprint, point2Caster ?? rootAbility.Caster);
+                int point2Range = point2Ability.RangeCells;
+
+                Main.LogDebug($"[CombatAPI] GetMultiTargetPoint2Range: Point2 ability={point2Blueprint.name}, " +
+                    $"Caster={(point2Caster as BaseUnitEntity)?.CharacterName ?? "unknown"}, Range={point2Range} tiles");
+                return point2Range;
+            }
+            catch (Exception ex)
+            {
+                Main.LogWarning($"[CombatAPI] GetMultiTargetPoint2Range error: {ex.Message}");
+                return 15;  // 폴백
             }
         }
 

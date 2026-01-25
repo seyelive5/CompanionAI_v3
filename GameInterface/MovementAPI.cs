@@ -562,6 +562,10 @@ namespace CompanionAI_v3.GameInterface
                 var node = playerCell.Node as CustomGridNodeBase;
                 if (node == null) continue;
 
+                // ★ v3.7.62: BattlefieldGrid 검증 - Walkable/점유 체크
+                if (!BattlefieldGrid.Instance.ValidateNode(unit, node))
+                    continue;
+
                 var aiCell = new WarhammerPathAiCell(
                     node.Vector3Position,
                     0,
@@ -724,6 +728,10 @@ namespace CompanionAI_v3.GameInterface
                 var node = playerCell.Node as CustomGridNodeBase;
                 if (node == null || !playerCell.IsCanStand) continue;
 
+                // ★ v3.7.62: BattlefieldGrid 검증 - Walkable/점유 체크
+                if (!BattlefieldGrid.Instance.ValidateNode(unit, node))
+                    continue;
+
                 var pos = node.Vector3Position;
 
                 // ★ v3.6.4: 적과의 거리 계산 - 타일 단위로 통일
@@ -878,6 +886,10 @@ namespace CompanionAI_v3.GameInterface
                 var playerCell = kvp.Value;
                 var node = playerCell.Node as CustomGridNodeBase;
                 if (node == null || !playerCell.IsCanStand) continue;
+
+                // ★ v3.7.62: BattlefieldGrid 검증 - Walkable/점유 체크
+                if (!BattlefieldGrid.Instance.ValidateNode(unit, node))
+                    continue;
 
                 var pos = node.Vector3Position;
 

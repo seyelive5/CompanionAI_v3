@@ -341,6 +341,15 @@ namespace CompanionAI_v3.Analysis
                 {
                     Vector3 cellPos = GetCellWorldPosition(x, z);
 
+                    // ★ v3.7.62: BattlefieldGrid Walkable 체크
+                    // 이동 불가 셀은 최대 위협으로 표시 (AI가 선택하지 않도록)
+                    if (BattlefieldGrid.Instance.IsValid && !BattlefieldGrid.Instance.IsWalkable(cellPos))
+                    {
+                        _threatGrid[x, z] = float.MaxValue;
+                        _controlGrid[x, z] = 0f;
+                        continue;
+                    }
+
                     // 적 위협 계산
                     float threat = 0f;
                     foreach (var enemy in _enemies)
@@ -523,6 +532,11 @@ namespace CompanionAI_v3.Analysis
                     if (_threatGrid[x, z] < SAFE_ZONE_THRESHOLD && _controlGrid[x, z] > 0)
                     {
                         Vector3 cellPos = GetCellWorldPosition(x, z);
+
+                        // ★ v3.7.64: BattlefieldGrid Walkable 체크
+                        if (BattlefieldGrid.Instance.IsValid && !BattlefieldGrid.Instance.IsWalkable(cellPos))
+                            continue;
+
                         // 아군 중심에서 너무 멀지 않은 위치만
                         if (Vector3.Distance(cellPos, AllyCentroid) < MAX_INFLUENCE_DISTANCE)
                         {

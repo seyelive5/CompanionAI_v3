@@ -1,16 +1,22 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using Kingmaker;
 using Kingmaker.AI;
 using Kingmaker.AI.BehaviourTrees;
 using Kingmaker.AI.BehaviourTrees.Nodes;
+using Kingmaker.Blueprints;  // ★ v3.7.29: GetComponent<T>() 확장 메서드
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Pathfinding;
 using Kingmaker.UnitLogic;
+using Kingmaker.UnitLogic.Abilities.Components;  // ★ v3.7.29: AbilityMultiTarget
+using Kingmaker.UnitLogic.Commands;
+using Kingmaker.Utility;
 using Pathfinding;
 using UnityEngine;
 using CompanionAI_v3.Core;
+using CompanionAI_v3.Data;  // ★ v3.7.52: FamiliarAbilities
 
 namespace CompanionAI_v3.GameInterface
 {
@@ -397,7 +403,41 @@ namespace CompanionAI_v3.GameInterface
                 switch (result.Type)
                 {
                     case ResultType.CastAbility:
-                        // 능력 시전 → context에 설정하고 Success
+                        // ★ v3.7.25: MultiTarget 능력 처리 (AerialRush 등)
+                        if (result.AllTargets != null && result.AllTargets.Count > 0)
+                        {
+                            // ★ v3.7.48: MultiTarget 능력 실행
+                            //
+                            // 게임 검증 흐름 (decompile 분석 결과):
+                            // 1. AbilityMultiTarget.Deliver()가 m_AbilityQueue의 능력을 Eagle 커맨드 큐에 추가
+                            // 2. UnitUseAbility.OnInit()에서 CanTarget(Point2, Eagle.Position) 호출
+                            // 3. AbilityCustomDirectMovement.CheckTargetRestriction()이 Eagle.Position에서 Point2까지 경로 계산
+                            //
+                            // ★ 핵심: Point2 검증은 Eagle의 "현재 위치"에서 수행됨!
+                            // → PointTargetingHelper.FindBestAerialRushPath()에서 Point1 = Eagle.Position 보장 필요
+                            // → BasePlan.PlanFamiliarAerialRush()에서 이미 Eagle 위치 기반 경로 탐색 수행
+                            //
+                            // MultiTarget 능력은 직접 명령 실행 (TaskNodeCastAbility 우회)
+                            // ★ v3.7.26: 스킬은 Master가 시전 - LOS 검증은 PlanFamiliarAerialRush에서 수행
+                            var cmd = new UnitUseAbilityParams(result.Ability, result.Target);
+                            cmd.AllTargets = result.AllTargets;
+                            unit.Commands.Run(cmd);
+                            Main.Log($"[CompanionAIDecisionNode] {unit.CharacterName}: Cast MultiTarget {result.Ability?.Name} ({result.AllTargets.Count} targets)");
+                            return Status.Running;  // 명령 완료 대기 (다음 tick에서 IsCommandQueueEmpty 체크)
+                        }
+
+                        // ★ v3.7.29: 방어적 체크 - MultiTarget 능력이 AllTargets 없이 시전되면 거부
+                        // 이 상황은 SituationAnalyzer 필터가 실패했음을 의미 (예: 알 수 없는 GUID)
+                        // ★ v3.7.52: AbilityMultiTarget 컴포넌트 대신 IsMultiTargetFamiliarAbility() 사용
+                        // AbilityMultiTarget이 있어도 단일 Point로 시전 가능한 능력이 있음 (예: Servo-Skull Redirect)
+                        if (FamiliarAbilities.IsMultiTargetFamiliarAbility(result.Ability))
+                        {
+                            Main.LogError($"[CompanionAIDecisionNode] BLOCKED: MultiTarget ability {result.Ability.Name} without AllTargets! This ability requires 2 Point targets.");
+                            // 이 능력을 스킵하고 다음 행동으로 (리플랜 트리거)
+                            return Status.Running;
+                        }
+
+                        // 일반 능력 시전 → context에 설정하고 Success
                         context.Ability = result.Ability;
                         context.AbilityTarget = result.Target;
                         // ★ v3.5.33: Stale 이동 데이터 클리어 - Charge 후 이동 버그 방지

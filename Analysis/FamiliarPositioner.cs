@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Enums;
+using Kingmaker.Pathfinding;
 using UnityEngine;
 using CompanionAI_v3.GameInterface;
 
@@ -261,6 +262,7 @@ namespace CompanionAI_v3.Analysis
         /// <summary>
         /// 주어진 점 주변에서 최적 위치 탐색
         /// ★ v3.7.22: maxRangeMeters 추가 - 마스터로부터 이 범위 내 위치만 고려
+        /// ★ v3.7.70: Y좌표를 그리드 노드에서 가져와 정확한 지형 높이 사용
         /// </summary>
         private static PositionScore FindBestPositionAroundPoint(
             Vector3 center,
@@ -282,12 +284,21 @@ namespace CompanionAI_v3.Analysis
             {
                 if (radius == 0)
                 {
-                    // 중심점 평가
+                    // ★ v3.7.70: 중심점을 그리드에 스냅하고 유효성 검증
+                    Vector3 snappedCenter = SnapToGridWithValidation(center, out bool isCenterValid);
+
+                    // ★ v3.7.70: 유효하지 않은 위치면 스킵 (Walkable 아니거나 점유됨)
+                    if (!isCenterValid)
+                    {
+                        Main.LogDebug($"[FamiliarPositioner] Center position invalid, searching alternatives");
+                        continue;
+                    }
+
                     // ★ v3.7.22: 범위 체크
-                    if (hasRangeLimit && Vector3.Distance(masterPos, center) > maxRangeMeters)
+                    if (hasRangeLimit && Vector3.Distance(masterPos, snappedCenter) > maxRangeMeters)
                     {
                         // 범위 밖이지만 일단 평가 (폴백용)
-                        var score = EvaluatePosition(center, allies, enemies, prioritizeAllies);
+                        var score = EvaluatePosition(snappedCenter, allies, enemies, prioritizeAllies);
                         score.Reason = "Out of range (fallback)";
                         if (best == null || score.Score > bestScore)
                         {
@@ -297,7 +308,7 @@ namespace CompanionAI_v3.Analysis
                     }
                     else
                     {
-                        var score = EvaluatePosition(center, allies, enemies, prioritizeAllies);
+                        var score = EvaluatePosition(snappedCenter, allies, enemies, prioritizeAllies);
                         if (score.Score > bestScore)
                         {
                             bestScore = score.Score;
@@ -312,10 +323,17 @@ namespace CompanionAI_v3.Analysis
                     for (int i = 0; i < samples; i++)
                     {
                         float angle = (float)i / samples * Mathf.PI * 2;
-                        Vector3 pos = center + new Vector3(
+                        Vector3 rawPos = center + new Vector3(
                             Mathf.Cos(angle) * radius,
                             0,
                             Mathf.Sin(angle) * radius);
+
+                        // ★ v3.7.70: 그리드에 스냅하고 유효성 검증
+                        Vector3 pos = SnapToGridWithValidation(rawPos, out bool isValid);
+
+                        // ★ v3.7.70: 유효하지 않은 위치면 스킵
+                        if (!isValid)
+                            continue;
 
                         // ★ v3.7.22: 범위 체크 - 범위 내 위치만 고려
                         if (hasRangeLimit && Vector3.Distance(masterPos, pos) > maxRangeMeters)
@@ -336,14 +354,75 @@ namespace CompanionAI_v3.Analysis
             {
                 // 최적 중심점 방향으로 maxRange만큼 이동한 위치
                 Vector3 direction = (center - masterPos).normalized;
-                Vector3 clampedPos = masterPos + direction * maxRangeMeters;
-                var clampedScore = EvaluatePosition(clampedPos, allies, enemies, prioritizeAllies);
-                clampedScore.Reason = "Range-clamped position";
-                Main.LogDebug($"[FamiliarPositioner] Optimal position out of range, using clamped position at {maxRangeMeters:F1}m");
-                return clampedScore;
+                Vector3 clampedRaw = masterPos + direction * maxRangeMeters;
+                Vector3 clampedPos = SnapToGridWithValidation(clampedRaw, out bool isClampedValid);  // ★ v3.7.70: 검증
+
+                if (isClampedValid)
+                {
+                    var clampedScore = EvaluatePosition(clampedPos, allies, enemies, prioritizeAllies);
+                    clampedScore.Reason = "Range-clamped position";
+                    Main.LogDebug($"[FamiliarPositioner] Optimal position out of range, using clamped position at {maxRangeMeters:F1}m");
+                    return clampedScore;
+                }
+                else
+                {
+                    Main.LogDebug($"[FamiliarPositioner] Clamped position also invalid, no valid Relocate target");
+                }
             }
 
             return best ?? CreateDefaultPosition(center);
+        }
+
+        /// <summary>
+        /// ★ v3.7.70: 월드 좌표를 그리드 노드에 스냅하고 유효성 검사
+        /// Relocate 타겟 위치가 유효한 지형 높이를 갖도록 함
+        /// </summary>
+        /// <param name="worldPos">월드 좌표</param>
+        /// <param name="isValid">해당 위치가 유효한지 (Walkable, 미점유)</param>
+        private static Vector3 SnapToGridWithValidation(Vector3 worldPos, out bool isValid)
+        {
+            isValid = false;
+            try
+            {
+                // 가장 가까운 그리드 노드 찾기
+                var node = worldPos.GetNearestNodeXZ() as CustomGridNodeBase;
+                if (node != null)
+                {
+                    // 1. Walkable 체크
+                    if (!node.Walkable)
+                    {
+                        Main.LogDebug($"[FamiliarPositioner] Position not walkable: {worldPos}");
+                        return worldPos;
+                    }
+
+                    // 2. 유닛 점유 체크
+                    if (node.TryGetUnit(out var occupant) && occupant != null && occupant.IsConscious)
+                    {
+                        Main.LogDebug($"[FamiliarPositioner] Position occupied by {occupant.CharacterName}");
+                        return worldPos;
+                    }
+
+                    // 모든 검증 통과
+                    isValid = true;
+                    return node.Vector3Position;
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[FamiliarPositioner] SnapToGridWithValidation error: {ex.Message}");
+            }
+
+            // 폴백: 원본 좌표 반환
+            return worldPos;
+        }
+
+        /// <summary>
+        /// 간단한 스냅 (검증 없이)
+        /// </summary>
+        private static Vector3 SnapToGrid(Vector3 worldPos)
+        {
+            bool ignored;
+            return SnapToGridWithValidation(worldPos, out ignored);
         }
 
         /// <summary>

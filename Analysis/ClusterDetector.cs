@@ -241,6 +241,10 @@ namespace CompanionAI_v3.Analysis
                         if (CombatAPI.MetersToTiles(Vector3.Distance(caster.Position, testPos)) > abilityRange)
                             continue;
 
+                        // ★ v3.7.64: BattlefieldGrid Walkable 체크
+                        if (BattlefieldGrid.Instance.IsValid && !BattlefieldGrid.Instance.IsWalkable(testPos))
+                            continue;
+
                         // 적중 수 계산
                         // ★ v3.6.10: ability 전달하여 패턴별 높이 체크
                         int hits = CountEnemiesInRadius(testPos, cluster.Enemies, aoERadius, ability);

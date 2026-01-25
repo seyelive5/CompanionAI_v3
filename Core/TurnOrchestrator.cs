@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using Kingmaker;
 using Kingmaker.EntitySystem.Entities;
 using CompanionAI_v3.Analysis;
 using CompanionAI_v3.Planning;
@@ -510,6 +512,23 @@ namespace CompanionAI_v3.Core
 
             // ★ v3.5.29: 전투 캐시 초기화 (거리/타겟팅)
             CombatCache.ClearAll();
+
+            // ★ v3.7.68: BattlefieldGrid 동적 확장 체크 (유닛이 경계 근처면 확장)
+            try
+            {
+                var allUnits = Game.Instance?.TurnController?.AllUnits?
+                    .OfType<BaseUnitEntity>()
+                    .Where(u => u != null && u.IsInCombat)
+                    .ToList();
+                if (allUnits != null && allUnits.Count > 0)
+                {
+                    Analysis.BattlefieldGrid.Instance.ExpandIfNeeded(allUnits);
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[Orchestrator] BattlefieldGrid expand check failed: {ex.Message}");
+            }
 
             Main.Log($"[Orchestrator] Turn started for {unit.CharacterName} (via event)");
         }

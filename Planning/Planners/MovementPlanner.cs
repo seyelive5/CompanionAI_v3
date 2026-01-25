@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Kingmaker.Blueprints;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Pathfinding;
 using Kingmaker.UnitLogic.Abilities;
+using Kingmaker.UnitLogic.Abilities.Components;
 using Kingmaker.Utility;
 using Pathfinding;
 using UnityEngine;
@@ -117,6 +119,9 @@ namespace CompanionAI_v3.Planning.Planners
 
             var gapClosers = situation.AvailableAttacks
                 .Where(a => AbilityDatabase.IsGapCloser(a))
+                // ★ v3.7.27: MultiTarget 능력 이중 체크 (컴포넌트 + 명시적 제외)
+                .Where(a => a.Blueprint.GetComponent<AbilityMultiTarget>() == null)
+                .Where(a => !FamiliarAbilities.IsMultiTargetFamiliarAbility(a))
                 .ToList();
 
             if (gapClosers.Count == 0)
@@ -308,6 +313,10 @@ namespace CompanionAI_v3.Planning.Planners
 
                     // 다른 유닛이 점유 중인지 확인
                     if (node.TryGetUnit(out var occupant) && occupant != null && occupant.IsConscious && occupant != unit)
+                        continue;
+
+                    // ★ v3.7.63: BattlefieldGrid 검증 추가
+                    if (!BattlefieldGrid.Instance.ValidateNode(unit, node))
                         continue;
 
                     Vector3 nodePos = node.Vector3Position;
