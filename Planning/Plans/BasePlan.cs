@@ -803,11 +803,28 @@ namespace CompanionAI_v3.Planning.Plans
                         continue;
                     }
 
+                    // ★ v3.7.71: Point AOE 능력은 위치 타겟, 그 외는 유닛 타겟
+                    bool isPointTarget = CombatAPI.IsPointTargetAbility(buff);
+                    Vector3 familiarPos = situation.Familiar.Position;
+
                     string reason;
-                    if (!CombatAPI.CanUseAbilityOn(buff, familiarTarget, out reason))
+                    if (isPointTarget)
                     {
-                        Main.LogDebug($"[{RoleName}] Keystone Loop: {buff.Name} blocked - {reason}");
-                        continue;
+                        // Point AOE는 위치로 시전 가능한지 확인
+                        if (!CombatAPI.CanUseAbilityOnPoint(buff, familiarPos, out reason))
+                        {
+                            Main.LogDebug($"[{RoleName}] Keystone Loop: {buff.Name} blocked (point target) - {reason}");
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        // 유닛 타겟은 사역마에게 시전 가능한지 확인
+                        if (!CombatAPI.CanUseAbilityOn(buff, familiarTarget, out reason))
+                        {
+                            Main.LogDebug($"[{RoleName}] Keystone Loop: {buff.Name} blocked - {reason}");
+                            continue;
+                        }
                     }
 
                     remainingAP -= cost;
@@ -815,15 +832,32 @@ namespace CompanionAI_v3.Planning.Plans
                         usedAbilityGuids.Add(guid);
 
                     Main.Log($"[{RoleName}] ★ Familiar Keystone Buff: {buff.Name} on {typeName} " +
-                        $"({alliesNeedingBuff}/{optimalPos.AlliesInRange} allies need buff)");
+                        $"({alliesNeedingBuff}/{optimalPos.AlliesInRange} allies need buff)" +
+                        (isPointTarget ? " [Point AOE]" : ""));
 
-                    // ★ v3.7.20: IsFamiliarTarget 플래그 설정 - 실행 시 사역마 재해석
-                    var buffAction = PlannedAction.Buff(
-                        buff,
-                        situation.Familiar,
-                        $"Keystone spread: {buff.Name} ({alliesNeedingBuff} allies need it)",
-                        cost);
-                    buffAction.IsFamiliarTarget = true;
+                    // ★ v3.7.71: Point AOE는 위치 타겟, 유닛 타겟은 사역마 직접 타겟
+                    PlannedAction buffAction;
+                    if (isPointTarget)
+                    {
+                        // Point AOE 능력 - 사역마 위치로 시전 (펫 타겟팅 제한 우회)
+                        buffAction = PlannedAction.PositionalBuff(
+                            buff,
+                            familiarPos,
+                            $"Keystone spread: {buff.Name} ({alliesNeedingBuff} allies need it)",
+                            cost);
+                        // IsFamiliarTarget = false (PositionalBuff는 기본값 false)
+                        Main.LogDebug($"[{RoleName}] Keystone Point AOE: {buff.Name} at ({familiarPos.x:F1}, {familiarPos.z:F1})");
+                    }
+                    else
+                    {
+                        // 유닛 타겟 능력 - 사역마 직접 타겟
+                        buffAction = PlannedAction.Buff(
+                            buff,
+                            situation.Familiar,
+                            $"Keystone spread: {buff.Name} ({alliesNeedingBuff} allies need it)",
+                            cost);
+                        buffAction.IsFamiliarTarget = true;  // 실행 시 사역마 재해석
+                    }
                     actions.Add(buffAction);
                 }
             }
@@ -982,28 +1016,56 @@ namespace CompanionAI_v3.Planning.Plans
             if (remainingAP < apCost)
                 return null;
 
-            // 사역마에게 시전 가능한지 확인
-            var familiarTarget = new TargetWrapper(situation.Familiar);
+            // ★ v3.7.71: Point AOE 능력은 위치 타겟, 그 외는 유닛 타겟
+            bool isPointTarget = CombatAPI.IsPointTargetAbility(buffAbility);
+            Vector3 familiarPos = situation.Familiar.Position;
+
+            // 타겟팅 검증
             string reason;
-            if (!CombatAPI.CanUseAbilityOn(buffAbility, familiarTarget, out reason))
+            if (isPointTarget)
             {
-                Main.LogDebug($"[{RoleName}] Familiar Keystone blocked: {buffAbility.Name} -> {reason}");
-                return null;
+                if (!CombatAPI.CanUseAbilityOnPoint(buffAbility, familiarPos, out reason))
+                {
+                    Main.LogDebug($"[{RoleName}] Familiar Keystone blocked (point): {buffAbility.Name} -> {reason}");
+                    return null;
+                }
+            }
+            else
+            {
+                var familiarTarget = new TargetWrapper(situation.Familiar);
+                if (!CombatAPI.CanUseAbilityOn(buffAbility, familiarTarget, out reason))
+                {
+                    Main.LogDebug($"[{RoleName}] Familiar Keystone blocked: {buffAbility.Name} -> {reason}");
+                    return null;
+                }
             }
 
             remainingAP -= apCost;
 
             var typeName = FamiliarAPI.GetFamiliarTypeName(situation.FamiliarType);
             Main.Log($"[{RoleName}] ★ Familiar Keystone: {buffAbility.Name} on {typeName} " +
-                $"for AoE spread ({optimalPos.AlliesInRange} allies)");
+                $"for AoE spread ({optimalPos.AlliesInRange} allies)" +
+                (isPointTarget ? " [Point AOE]" : ""));
 
-            // ★ v3.7.20: IsFamiliarTarget 플래그 설정 - 실행 시 사역마 재해석
-            var action = PlannedAction.Buff(
-                buffAbility,
-                situation.Familiar,
-                $"Cast on {typeName} for AoE spread ({optimalPos.AlliesInRange} allies)",
-                apCost);
-            action.IsFamiliarTarget = true;
+            // ★ v3.7.71: Point AOE는 위치 타겟, 유닛 타겟은 사역마 직접 타겟
+            PlannedAction action;
+            if (isPointTarget)
+            {
+                action = PlannedAction.PositionalBuff(
+                    buffAbility,
+                    familiarPos,
+                    $"Cast on {typeName} for AoE spread ({optimalPos.AlliesInRange} allies)",
+                    apCost);
+            }
+            else
+            {
+                action = PlannedAction.Buff(
+                    buffAbility,
+                    situation.Familiar,
+                    $"Cast on {typeName} for AoE spread ({optimalPos.AlliesInRange} allies)",
+                    apCost);
+                action.IsFamiliarTarget = true;
+            }
             return action;
         }
 
