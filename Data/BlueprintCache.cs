@@ -123,11 +123,24 @@ namespace CompanionAI_v3.Data
                 }
 
                 // 블루프린트 속성 직접 읽기
+                // ★ v3.7.72: ability.Name 접근 시 Localization 예외 방지
+                string displayName;
+                try
+                {
+                    displayName = ability.Name;
+                    if (string.IsNullOrEmpty(displayName))
+                        displayName = bp.Name ?? bp.name ?? "Unknown";
+                }
+                catch
+                {
+                    displayName = bp.name ?? "Unknown";
+                }
+
                 var info = new AbilityBlueprintInfo
                 {
                     GUID = guid,
                     BlueprintName = bp.name ?? "Unknown",
-                    DisplayName = ability.Name ?? bp.Name ?? bp.name ?? "Unknown",
+                    DisplayName = displayName,
 
                     // 블루프린트 직접 속성 (팩트)
                     IsAoE = bp.IsAoE,
