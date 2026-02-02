@@ -18,6 +18,7 @@ namespace CompanionAI_v3.UI
         private static Vector2 _scrollPosition = Vector2.zero;
         private static bool _showAdvancedSettings = false;  // ★ v3.5.13: 고급 설정 접기/펴기
         private static bool _showPerformanceSettings = false;  // ★ v3.5.20: 성능 설정 접기/펴기
+        private static bool _showAoESettings = false;  // ★ v3.8.12: AOE 설정 접기/펴기
 
         private static GUIStyle _headerStyle;
         private static GUIStyle _boldLabelStyle;
@@ -121,6 +122,9 @@ namespace CompanionAI_v3.UI
             GUILayout.Space(15);
             DrawPerformanceSettings();
 
+            GUILayout.Space(15);
+            DrawAoESettings();  // ★ v3.8.12: AOE 설정
+
             GUILayout.EndVertical();
         }
 
@@ -206,6 +210,127 @@ namespace CompanionAI_v3.UI
             GUILayout.Label($"<size=16>{min}</size>", GUILayout.Width(40));
             value = (int)GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(500), GUILayout.Height(25));
             GUILayout.Label($"<size=16>{max}</size>", GUILayout.Width(50));
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(15);
+            GUILayout.EndVertical();
+
+            return value;
+        }
+
+        /// <summary>
+        /// ★ v3.8.12: AOE 설정 섹션 (전역)
+        /// </summary>
+        private static void DrawAoESettings()
+        {
+            // 접기/펴기 버튼
+            GUILayout.BeginHorizontal();
+            string toggleText = _showAoESettings
+                ? $"<size=20><b><color=#FF6347>▼ {L("AoESettings")}</color></b></size>"
+                : $"<size=20><b><color=#AAAAAA>▶ {L("AoESettings")}</color></b></size>";
+
+            if (GUILayout.Button(toggleText, _boldLabelStyle, GUILayout.Height(40), GUILayout.Width(400)))
+                _showAoESettings = !_showAoESettings;
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
+
+            if (!_showAoESettings) return;
+
+            var aoeConfig = AIConfig.GetAoEConfig();
+            if (aoeConfig == null) return;
+
+            GUILayout.BeginVertical("box", GUILayout.MinWidth(700));
+
+            // 경고 메시지
+            GUILayout.Label($"<size=18><color=#FF6347>{L("AoEWarning")}</color></size>", _descriptionStyle);
+            GUILayout.Space(15);
+
+            // 리셋 버튼
+            if (GUILayout.Button($"<size=18><color=#FFFF00>{L("ResetAoEToDefault")}</color></size>", GUILayout.Width(350), GUILayout.Height(45)))
+            {
+                aoeConfig.MaxPlayerAlliesHit = 1;
+                aoeConfig.AllowDangerousAoEAutoSelect = false;
+                aoeConfig.DangerousAoEMinEnemies = 3;
+                aoeConfig.ClusterAllyPenalty = 40f;
+                AIConfig.Save();
+            }
+            GUILayout.Space(20);
+
+            // MaxPlayerAlliesHit 슬라이더
+            int newMaxAllies = DrawSliderSettingIntLarge(
+                L("MaxPlayerAlliesHit"),
+                L("MaxPlayerAlliesHitDesc"),
+                aoeConfig.MaxPlayerAlliesHit,
+                0, 3);
+            if (newMaxAllies != aoeConfig.MaxPlayerAlliesHit)
+            {
+                aoeConfig.MaxPlayerAlliesHit = newMaxAllies;
+                AIConfig.Save();
+            }
+
+            // AllowDangerousAoEAutoSelect 체크박스
+            GUILayout.BeginHorizontal();
+            string dangerCheckIcon = aoeConfig.AllowDangerousAoEAutoSelect
+                ? "<size=22><b><color=green>☑</color></b></size>"
+                : "<size=22><b>☐</b></size>";
+            if (GUILayout.Button(dangerCheckIcon, GUI.skin.box, GUILayout.Width(50), GUILayout.Height(50)))
+            {
+                aoeConfig.AllowDangerousAoEAutoSelect = !aoeConfig.AllowDangerousAoEAutoSelect;
+                AIConfig.Save();
+            }
+            GUILayout.Space(10);
+            GUILayout.BeginVertical();
+            GUILayout.Label($"<size=18><b>{L("AllowDangerousAoE")}</b></size>", _boldLabelStyle);
+            GUILayout.Label($"<size=16><color=#888888>{L("AllowDangerousAoEDesc")}</color></size>", _descriptionStyle);
+            GUILayout.EndVertical();
+            GUILayout.EndHorizontal();
+            GUILayout.Space(15);
+
+            // DangerousAoEMinEnemies 슬라이더 (AllowDangerousAoE가 true일 때만)
+            if (aoeConfig.AllowDangerousAoEAutoSelect)
+            {
+                int newMinEnemies = DrawSliderSettingIntLarge(
+                    L("DangerousAoEMinEnemies"),
+                    L("DangerousAoEMinEnemiesDesc"),
+                    aoeConfig.DangerousAoEMinEnemies,
+                    1, 5);
+                if (newMinEnemies != aoeConfig.DangerousAoEMinEnemies)
+                {
+                    aoeConfig.DangerousAoEMinEnemies = newMinEnemies;
+                    AIConfig.Save();
+                }
+            }
+
+            // ClusterAllyPenalty 슬라이더
+            float newPenalty = DrawSliderSettingFloatLarge(
+                L("ClusterAllyPenalty"),
+                L("ClusterAllyPenaltyDesc"),
+                aoeConfig.ClusterAllyPenalty,
+                0f, 100f);
+            if (Math.Abs(newPenalty - aoeConfig.ClusterAllyPenalty) > 0.5f)
+            {
+                aoeConfig.ClusterAllyPenalty = newPenalty;
+                AIConfig.Save();
+            }
+
+            GUILayout.EndVertical();
+        }
+
+        /// <summary>
+        /// ★ v3.8.12: 큰 폰트 float 슬라이더 (AOE 설정용)
+        /// </summary>
+        private static float DrawSliderSettingFloatLarge(string label, string description, float value, float min, float max)
+        {
+            GUILayout.BeginVertical();
+
+            GUILayout.Label($"<size=18><b>{label}</b>: <color=#00FF00>{value:F0}</color></size>", _boldLabelStyle);
+            GUILayout.Label($"<size=16><color=#888888>{description}</color></size>", _descriptionStyle);
+            GUILayout.Space(5);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"<size=16>{min:F0}</size>", GUILayout.Width(40));
+            value = GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(500), GUILayout.Height(25));
+            GUILayout.Label($"<size=16>{max:F0}</size>", GUILayout.Width(50));
             GUILayout.EndHorizontal();
 
             GUILayout.Space(15);

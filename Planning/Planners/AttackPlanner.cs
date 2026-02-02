@@ -99,6 +99,7 @@ namespace CompanionAI_v3.Planning.Planners
         /// <summary>
         /// 최적 공격 선택 (Utility 스코어링 기반)
         /// ★ v3.5.11: 상세 로깅 추가 (공격 실패 원인 진단용)
+        /// ★ v3.7.89: AOO (기회공격) 회피 로직 추가
         /// </summary>
         public static AbilityData SelectBestAttack(Situation situation, BaseUnitEntity target, HashSet<string> excludeAbilityGuids = null)
         {
@@ -110,6 +111,13 @@ namespace CompanionAI_v3.Planning.Planners
 
             var targetWrapper = new TargetWrapper(target);
             var rangePreference = situation.RangePreference;
+
+            // ★ v3.7.89: AOO 상태 체크 (위협 범위 내인지)
+            bool isInThreatArea = CombatAPI.IsInThreateningArea(situation.Unit);
+            if (isInThreatArea)
+            {
+                Main.LogDebug($"[AttackPlanner] Unit is in threatening area - applying AOO filters");
+            }
 
             // ★ v3.5.76: DangerousAoE 조건부 허용
             var aoeConfig = AIConfig.GetAoEConfig();
@@ -125,9 +133,24 @@ namespace CompanionAI_v3.Planning.Planners
                 .Where(a => {
                     // ★ v3.5.76: DangerousAoE 설정 기반 허용
                     if (!AbilityDatabase.IsDangerousAoE(a)) return true;
+
+                    // ★ v3.8.10: 0 AP 공격은 DangerousAoE 필터 우회 (bonus attack 등)
+                    // 0 AP 공격은 "무료"이므로 안 쓰면 손해 - 항상 허용
+                    float cost = CombatAPI.GetEffectiveAPCost(a);
+                    if (cost <= 0f)
+                    {
+                        Main.LogDebug($"[AttackPlanner] 0 AP DangerousAoE allowed: {a.Name}");
+                        return true;
+                    }
+
                     if (!aoeConfig.AllowDangerousAoEAutoSelect) return false;
                     // 충분한 적이 있을 때만 허용
                     return situation.Enemies.Count(e => e != null && e.IsConscious) >= aoeConfig.DangerousAoEMinEnemies;
+                })
+                // ★ v3.7.89: 위협 범위 내 사용 불가 능력 필터링
+                .Where(a => {
+                    if (!isInThreatArea) return true;  // 위협 범위 밖이면 모두 허용
+                    return !CombatAPI.CannotUseInThreateningArea(a);  // CannotUse 타입 제외
                 })
                 .Where(a => !IsAbilityExcluded(a, excludeAbilityGuids))
                 .ToList();
@@ -319,18 +342,23 @@ namespace CompanionAI_v3.Planning.Planners
         /// <summary>
         /// ★ v3.6.16: AOE 능력이 타겟에 대해 안전한지 확인
         /// - 비 AOE 능력: 항상 안전
-        /// - AOE 능력: 타겟 주변에 아군이 없으면 안전
+        /// - AOE 능력: 타겟 주변 아군 수가 MaxPlayerAlliesHit 이하면 안전
+        /// ★ v3.8.12: AIConfig.MaxPlayerAlliesHit 설정 반영
         /// </summary>
         private static bool IsAoESafeForTarget(AbilityData ability, BaseUnitEntity target, Situation situation)
         {
             if (ability == null || target == null) return false;
+
+            // ★ v3.8.12: 설정에서 최대 허용 아군 수 가져오기
+            var aoeConfig = AIConfig.GetAoEConfig();
+            int maxAlliesAllowed = aoeConfig?.MaxPlayerAlliesHit ?? 1;
 
             // DangerousAoE 체크
             if (AbilityDatabase.IsDangerousAoE(ability))
             {
                 float radius = CombatAPI.GetAoERadius(ability);
                 if (radius <= 0f) radius = 3f;
-                return CountAlliesNearTarget(target, situation, radius) == 0;
+                return CountAlliesNearTarget(target, situation, radius) <= maxAlliesAllowed;
             }
 
             // Point AOE 체크
@@ -339,7 +367,7 @@ namespace CompanionAI_v3.Planning.Planners
                 float radius = CombatAPI.GetAoERadius(ability);
                 if (radius > 0f)
                 {
-                    return CountAlliesNearTarget(target, situation, radius) == 0;
+                    return CountAlliesNearTarget(target, situation, radius) <= maxAlliesAllowed;
                 }
             }
 
@@ -626,9 +654,11 @@ namespace CompanionAI_v3.Planning.Planners
 
                 // ★ v3.1.18: 패턴 타입에 따른 분기
                 // ★ v3.1.29: MinEnemiesForAoE 설정값 적용
+                // ★ v3.8.09: GetActualIsDirectional() 사용으로 정확한 판정
                 int minEnemiesForAoE = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+                bool isActuallyDirectional = CombatAPI.GetActualIsDirectional(ability);
 
-                if (CombatAPI.IsDirectionalPattern(patternType))
+                if (isActuallyDirectional)
                 {
                     // 방향성 패턴 (Cone/Ray/Sector) - 타겟 기반
                     bestResult = AoESafetyChecker.FindBestDirectionalAoETarget(

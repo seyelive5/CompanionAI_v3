@@ -368,6 +368,11 @@ namespace CompanionAI_v3.Settings
         public static AIConfig Instance { get; private set; }
 
         /// <summary>
+        /// ★ v3.8.12: 모드 경로 (Save용)
+        /// </summary>
+        private static string _modPath = null;
+
+        /// <summary>
         /// 기본값으로 초기화된 새 인스턴스 생성
         /// </summary>
         public static AIConfig CreateDefault()
@@ -410,6 +415,7 @@ namespace CompanionAI_v3.Settings
         /// </summary>
         public static void Load(string modPath)
         {
+            _modPath = modPath;  // ★ v3.8.12: 경로 저장
             string configPath = Path.Combine(modPath, "aiconfig.json");
 
             try
@@ -463,6 +469,34 @@ namespace CompanionAI_v3.Settings
             catch (Exception ex)
             {
                 Main.LogError($"[AIConfig] Failed to save default: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.8.12: 현재 설정을 aiconfig.json으로 저장 (UI에서 호출)
+        /// </summary>
+        public static void Save()
+        {
+            if (string.IsNullOrEmpty(_modPath))
+            {
+                Main.LogError("[AIConfig] Cannot save - modPath not set");
+                return;
+            }
+
+            string configPath = Path.Combine(_modPath, "aiconfig.json");
+
+            try
+            {
+                if (Instance == null)
+                    Instance = CreateDefault();
+
+                string json = JsonConvert.SerializeObject(Instance, Formatting.Indented);
+                File.WriteAllText(configPath, json);
+                Main.LogDebug("[AIConfig] Settings saved to aiconfig.json");
+            }
+            catch (Exception ex)
+            {
+                Main.LogError($"[AIConfig] Failed to save: {ex.Message}");
             }
         }
 

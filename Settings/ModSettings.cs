@@ -51,6 +51,7 @@ namespace CompanionAI_v3.Settings
             ["Role_Tank"] = new() { { Language.English, "Tank" }, { Language.Korean, "탱커" } },
             ["Role_DPS"] = new() { { Language.English, "DPS" }, { Language.Korean, "딜러" } },
             ["Role_Support"] = new() { { Language.English, "Support" }, { Language.Korean, "지원" } },
+            ["Role_Overseer"] = new() { { Language.English, "Overseer" }, { Language.Korean, "오버시어" } },  // ★ v3.7.91
 
             // Role descriptions
             ["RoleDesc_Auto"] = new() {
@@ -68,6 +69,11 @@ namespace CompanionAI_v3.Settings
             ["RoleDesc_Support"] = new() {
                 { Language.English, "Team supporter. Prioritizes buffs/debuffs, heals allies, avoids front line." },
                 { Language.Korean, "팀 서포터. 버프/디버프 우선, 아군 치유, 최전방 회피." }
+            },
+            // ★ v3.7.91: Overseer role description
+            ["RoleDesc_Overseer"] = new() {
+                { Language.English, "Familiar master. Uses pets as primary damage source, activates Momentum before Warp Relay, retreats within familiar ability range." },
+                { Language.Korean, "사역마 마스터. 펫을 주력 딜링으로 활용, Warp Relay 전 Momentum 활성화, 사역마 스킬 사거리 내 후퇴." }
             },
 
             // Range Preference
@@ -206,6 +212,52 @@ namespace CompanionAI_v3.Settings
                 { Language.English, "Reset Performance to Default" },
                 { Language.Korean, "성능 설정 기본값으로" }
             },
+
+            // ★ v3.8.12: AOE Settings
+            ["AoESettings"] = new() {
+                { Language.English, "AOE Settings" },
+                { Language.Korean, "AOE 설정" }
+            },
+            ["AoEWarning"] = new() {
+                { Language.English, "⚠️ Controls how AI handles AOE abilities that may hit allies." },
+                { Language.Korean, "⚠️ 아군에게 피해를 줄 수 있는 AOE 능력의 AI 처리 방식을 조절합니다." }
+            },
+            ["MaxPlayerAlliesHit"] = new() {
+                { Language.English, "Max Allies in AOE" },
+                { Language.Korean, "AOE 최대 허용 아군 수" }
+            },
+            ["MaxPlayerAlliesHitDesc"] = new() {
+                { Language.English, "Maximum number of allies allowed in AOE area.\n0 = Never hit allies, 1 = Allow 1 ally, etc." },
+                { Language.Korean, "AOE 범위 내 허용되는 최대 아군 수.\n0 = 아군 절대 안 맞춤, 1 = 아군 1명 허용, 등" }
+            },
+            ["AllowDangerousAoE"] = new() {
+                { Language.English, "Allow Dangerous AOE" },
+                { Language.Korean, "위험한 AOE 허용" }
+            },
+            ["AllowDangerousAoEDesc"] = new() {
+                { Language.English, "Allow AI to auto-select high-damage AOE abilities (grenades, etc.)" },
+                { Language.Korean, "AI가 고위력 AOE 능력(수류탄 등)을 자동 선택하도록 허용" }
+            },
+            ["DangerousAoEMinEnemies"] = new() {
+                { Language.English, "Min Enemies for Dangerous AOE" },
+                { Language.Korean, "위험한 AOE 최소 적 수" }
+            },
+            ["DangerousAoEMinEnemiesDesc"] = new() {
+                { Language.English, "Minimum enemies required to use dangerous AOE abilities" },
+                { Language.Korean, "위험한 AOE 능력 사용에 필요한 최소 적 수" }
+            },
+            ["ClusterAllyPenalty"] = new() {
+                { Language.English, "Ally in AOE Penalty" },
+                { Language.Korean, "AOE 아군 페널티" }
+            },
+            ["ClusterAllyPenaltyDesc"] = new() {
+                { Language.English, "Score penalty per ally in AOE area (higher = more ally protection)" },
+                { Language.Korean, "AOE 범위 내 아군 1명당 점수 페널티 (높을수록 아군 보호)" }
+            },
+            ["ResetAoEToDefault"] = new() {
+                { Language.English, "Reset AOE to Default" },
+                { Language.Korean, "AOE 설정 기본값으로" }
+            },
         };
 
         public static string Get(string key)
@@ -234,7 +286,8 @@ namespace CompanionAI_v3.Settings
         Auto,       // ★ v3.0.92: Automatically detect optimal role based on abilities
         Tank,       // Prioritize defense, draw enemy attention
         DPS,        // Prioritize damage output
-        Support     // Prioritize buffs and debuffs
+        Support,    // Prioritize buffs and debuffs
+        Overseer    // ★ v3.7.91: Familiar-centric combat (pet as primary damage source)
     }
 
     /// <summary>

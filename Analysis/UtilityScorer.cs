@@ -337,6 +337,26 @@ namespace CompanionAI_v3.Analysis
                 else score -= 10f;
             }
 
+            // ★ v3.7.89: AOO (기회공격) 회피 점수
+            // 위협 범위 내에서 AOO를 유발하는 능력은 감점
+            if (CombatAPI.IsInThreateningArea(situation.Unit))
+            {
+                var aooStatus = CombatAPI.CheckAOOStatus(attack, situation.Unit);
+                if (aooStatus.WillTriggerAOO)
+                {
+                    // AOO 유발 시 감점 (위협하는 적 수에 비례)
+                    float aooPenalty = 15f + (aooStatus.ThreateningEnemyCount * 10f);
+                    score -= aooPenalty;
+                    Main.LogDebug($"[UtilityScorer] {attack.Name}: AOO penalty={aooPenalty:F0} " +
+                        $"({aooStatus.ThreateningEnemyCount} threatening enemies)");
+                }
+                else if (aooStatus.IsSafe)
+                {
+                    // AOO 회피 가능 = 약간의 보너스
+                    score += 5f;
+                }
+            }
+
             // ★ 특수 타이밍 고려
             // ★ v3.5.00: ThresholdConfig 적용
             var attackThresholds = AIConfig.GetThresholds();
@@ -378,6 +398,8 @@ namespace CompanionAI_v3.Analysis
 
             // ★ v3.6.16: 모든 Point AOE 능력에 아군 체크 적용
             // DangerousAoE뿐만 아니라 Point 타겟 AOE (플라스마 과충전 등)도 포함
+            // ★ v3.8.11: Directional 패턴은 실제 방향 기준 아군 체크
+            // ★ v3.8.12: AIConfig.MaxPlayerAlliesHit 설정 반영
             float aoeRadius = CombatAPI.GetAoERadius(attack);
             bool isPointAoE = CombatAPI.IsPointTargetAbility(attack) && aoeRadius > 0f;
             bool isDangerousAoE = AbilityDatabase.IsDangerousAoE(attack);
@@ -385,11 +407,72 @@ namespace CompanionAI_v3.Analysis
             if (isPointAoE || isDangerousAoE)
             {
                 float checkRadius = aoeRadius > 0f ? aoeRadius : 3f;
-                int nearbyAllies = CountAlliesNear(target, situation, checkRadius);
-                if (nearbyAllies > 0)
+                int alliesInDanger = 0;
+
+                // ★ v3.8.12: 설정에서 최대 허용 아군 수 가져오기
+                var aoeConfig = AIConfig.GetAoEConfig();
+                int maxAlliesAllowed = aoeConfig?.MaxPlayerAlliesHit ?? 1;
+
+                // ★ v3.8.11: Directional 패턴은 방향 기반 체크
+                var patternInfo = CombatAPI.GetPatternInfo(attack);
+                bool isActuallyDirectional = patternInfo?.IsDirectional ?? false;
+                var patternType = patternInfo?.Type;
+
+                if (isActuallyDirectional && patternType.HasValue)
                 {
-                    score -= 1000f;  // 아군 피해 절대 방지
-                    Main.LogDebug($"[Scorer] AOE ally check {attack.Name}: {nearbyAllies} allies in {checkRadius:F0} tiles - BLOCKED");
+                    // Directional: caster → target 방향의 cone/ray 내 아군만 체크
+                    Vector3 direction = (target.Position - situation.Unit.Position).normalized;
+                    float angle = patternInfo.Angle;
+
+                    foreach (var ally in situation.Allies)
+                    {
+                        if (ally == null || ally.LifeState.IsDead) continue;
+                        if (ally == situation.Unit) continue;  // 자기 자신 제외
+
+                        // 실제 패턴 내에 있는지 체크
+                        if (CombatAPI.IsUnitInDirectionalAoERange(
+                            situation.Unit.Position, direction, ally, checkRadius, angle, patternType.Value))
+                        {
+                            alliesInDanger++;
+                        }
+                    }
+
+                    // ★ v3.8.12: 설정된 최대치 초과 시에만 차단
+                    if (alliesInDanger > maxAlliesAllowed)
+                    {
+                        score -= 1000f;
+                        Main.LogDebug($"[Scorer] Directional AOE ally check {attack.Name}: {alliesInDanger} allies > max {maxAlliesAllowed} - BLOCKED");
+                    }
+                    else if (alliesInDanger > 0)
+                    {
+                        // 허용 범위 내 아군 - 페널티만 적용
+                        float penalty = (aoeConfig?.ClusterAllyPenalty ?? 40f) * alliesInDanger;
+                        score -= penalty;
+                        Main.LogDebug($"[Scorer] Directional AOE {attack.Name}: {alliesInDanger} allies (≤{maxAlliesAllowed}) - penalty {penalty:F0}");
+                    }
+                    else
+                    {
+                        Main.LogDebug($"[Scorer] Directional AOE {attack.Name}: No allies in {patternType} pattern direction - OK");
+                    }
+                }
+                else
+                {
+                    // Non-directional (Circle): 기존 반경 체크
+                    alliesInDanger = CountAlliesNear(target, situation, checkRadius);
+
+                    // ★ v3.8.12: 설정된 최대치 초과 시에만 차단
+                    if (alliesInDanger > maxAlliesAllowed)
+                    {
+                        score -= 1000f;
+                        Main.LogDebug($"[Scorer] AOE ally check {attack.Name}: {alliesInDanger} allies > max {maxAlliesAllowed} - BLOCKED");
+                    }
+                    else if (alliesInDanger > 0)
+                    {
+                        // 허용 범위 내 아군 - 페널티만 적용
+                        float penalty = (aoeConfig?.ClusterAllyPenalty ?? 40f) * alliesInDanger;
+                        score -= penalty;
+                        Main.LogDebug($"[Scorer] AOE {attack.Name}: {alliesInDanger} allies (≤{maxAlliesAllowed}) - penalty {penalty:F0}");
+                    }
                 }
             }
 
