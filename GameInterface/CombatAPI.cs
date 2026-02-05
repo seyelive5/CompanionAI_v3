@@ -7,6 +7,7 @@ using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Items;
 using Kingmaker.Pathfinding;
 using Kingmaker.UnitLogic.Abilities;
+using Pathfinding;
 using Kingmaker.UnitLogic.Abilities.Blueprints;
 using Kingmaker.UnitLogic.Abilities.Components;
 using Kingmaker.UnitLogic.Abilities.Components.Base;
@@ -14,6 +15,7 @@ using Kingmaker.UnitLogic.Abilities.Components.CasterCheckers;
 using Kingmaker.UnitLogic.Abilities.Components.Patterns;
 using Kingmaker.UnitLogic.Mechanics.Actions;
 using Kingmaker.UnitLogic.Parts;
+using Kingmaker.UnitLogic.Levelup.Obsolete.Blueprints.Spells;
 using Kingmaker.Utility;
 using Kingmaker.View.Covers;
 using Kingmaker.RuleSystem;
@@ -21,6 +23,8 @@ using Kingmaker.RuleSystem.Rules;
 using UnityEngine;
 using CompanionAI_v3.Data;
 using CompanionAI_v3.Settings;
+using Kingmaker.UnitLogic;  // ★ v3.7.89: AOO API
+using Kingmaker.UnitLogic.Buffs.Components;  // ★ v3.8.36: WarhammerAbilityRestriction
 
 namespace CompanionAI_v3.GameInterface
 {
@@ -46,6 +50,17 @@ namespace CompanionAI_v3.GameInterface
 
             try
             {
+                // ★ v3.8.36: IsRestricted 체크 복원 (버프 제한 존중)
+                // 잠재력 초월(SoulMarkHope4) 같은 버프는 의도적으로 능력을 제한함
+                // 이 제한을 무시하면 AI가 사용 불가능한 능력을 선택하게 됨
+                if (ability.IsRestricted)
+                {
+                    reason = GetRestrictionReason(ability);
+                    // 디버그 로깅 - 어떤 능력이 왜 제한되는지 파악
+                    Main.LogDebug($"[CombatAPI] CanUseAbilityOn: {ability.Name} IsRestricted=true - {reason}");
+                    return false;
+                }
+
                 // 기본 타겟 검증
                 AbilityData.UnavailabilityReasonType? unavailableReason;
                 bool canTarget = ability.CanTarget(target, out unavailableReason);
@@ -89,6 +104,135 @@ namespace CompanionAI_v3.GameInterface
                 reason = $"Exception: {ex.Message}";
                 return false;
             }
+        }
+
+        /// <summary>
+        /// ★ v3.8.25: AbilityCasterHasFacts 컴포넌트 검증
+        /// ★ v3.8.33: 게임 API의 IsRestricted/IsAvailable 직접 사용
+        /// 게임이 모든 제한 조건을 체크하도록 위임 (복잡한 로직 복제 대신)
+        /// </summary>
+        public static bool MeetsCasterFactRequirements(AbilityData ability, out string reason)
+        {
+            reason = null;
+            if (ability == null) return true;
+
+            try
+            {
+                // ★ v3.8.33: 게임 API 직접 사용 - 모든 제한 조건 체크
+                // IsRestricted 체크 항목:
+                // - CombatStateRestriction (InCombatOnly/NotInCombatOnly)
+                // - InterruptionAbilityRestrictions
+                // - IAbilityCasterRestriction 컴포넌트들 (HasFacts, HasNoFacts, InCombat 등)
+                // - WeaponReloadLogic
+                // - UsingInThreateningArea
+                // - ConcussionEffect
+                if (ability.IsRestricted)
+                {
+                    // 자세한 이유 파악 시도
+                    reason = GetRestrictionReason(ability);
+                    Main.LogDebug($"[CombatAPI] IsRestricted=true for {ability.Name}: {reason}");
+                    return false;
+                }
+
+                // IsAvailable 추가 체크 (AP, 쿨다운, 탄약 등)
+                if (!ability.IsAvailable)
+                {
+                    reason = GetUnavailabilityReason(ability);
+                    Main.LogDebug($"[CombatAPI] IsAvailable=false for {ability.Name}: {reason}");
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] MeetsCasterFactRequirements error for {ability?.Name}: {ex.Message}");
+                return true; // 에러 시 일단 허용
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.8.36: 능력 제한 이유 상세 파악 (버프 기반 제한 추가)
+        /// </summary>
+        private static string GetRestrictionReason(AbilityData ability)
+        {
+            var reasons = new List<string>();
+
+            try
+            {
+                var bp = ability.Blueprint;
+                var caster = ability.Caster;
+
+                // CombatStateRestriction 체크
+                if (bp.CombatStateRestriction == BlueprintAbility.CombatStateRestrictionType.InCombatOnly && !caster.IsInCombat)
+                    reasons.Add("InCombatOnly but not in combat");
+                if (bp.CombatStateRestriction == BlueprintAbility.CombatStateRestrictionType.NotInCombatOnly && caster.IsInCombat)
+                    reasons.Add("NotInCombatOnly but in combat");
+
+                // CasterRestrictions 체크
+                foreach (var restriction in bp.CasterRestrictions)
+                {
+                    if (!restriction.IsCasterRestrictionPassed(caster))
+                    {
+                        var text = restriction.GetAbilityCasterRestrictionUIText(caster);
+                        reasons.Add($"{restriction.GetType().Name}: {text}");
+                    }
+                }
+
+                // UsingInThreateningArea 체크
+                var unitCaster = caster as BaseUnitEntity;
+                if (unitCaster?.CombatState != null && unitCaster.CombatState.IsEngaged)
+                {
+                    if (ability.UsingInThreateningArea == BlueprintAbility.UsingInThreateningAreaType.CannotUse)
+                        reasons.Add("CannotUse in threatening area (engaged)");
+                }
+
+                // ★ v3.8.36: 버프 기반 WarhammerAbilityRestriction 체크
+                // 잠재력 초월(SoulMarkHope4) 같은 버프가 능력 사용을 제한할 수 있음
+                if (unitCaster != null)
+                {
+                    var buffs = unitCaster.Buffs;
+                    if (buffs != null)
+                    {
+                        foreach (var buff in buffs.RawFacts)
+                        {
+                            var restriction = buff.Blueprint?.GetComponent<Kingmaker.UnitLogic.Buffs.Components.WarhammerAbilityRestriction>();
+                            if (restriction != null && restriction.AbilityIsRestricted(ability))
+                            {
+                                reasons.Add($"BuffRestriction: {buff.Name} (WarhammerAbilityRestriction)");
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return reasons.Count > 0 ? string.Join(", ", reasons) : "Unknown restriction";
+        }
+
+        /// <summary>
+        /// ★ v3.8.33: 능력 사용 불가 이유 상세 파악
+        /// </summary>
+        private static string GetUnavailabilityReason(AbilityData ability)
+        {
+            var reasons = new List<string>();
+
+            try
+            {
+                if (ability.GetAvailableForCastCount() == 0)
+                    reasons.Add("No casts available");
+                if (!ability.HasEnoughActionPoint)
+                    reasons.Add("Not enough AP");
+                if (!ability.HasEnoughAmmo)
+                    reasons.Add("Not enough ammo");
+                if (ability.IsRestricted)
+                    reasons.Add("IsRestricted");
+                if (ability.IsOnCooldown && !ability.IsBonusUsage)
+                    reasons.Add("On cooldown");
+            }
+            catch { }
+
+            return reasons.Count > 0 ? string.Join(", ", reasons) : "Unknown unavailability";
         }
 
         /// <summary>
@@ -378,6 +522,21 @@ namespace CompanionAI_v3.GameInterface
                         return true;
                     }
 
+                    // ★ v3.8.37: WarhammerFreeUltimateBuff가 있으면 IsUltimateAbilityUsedThisRound 무시
+                    // 잠재력 초월(SoulMarkHope4) 버프는 궁극기 라운드 제한을 우회해야 함
+                    bool onlyUltimateRoundLimit = unavailabilityReasons.All(r =>
+                        r == AbilityData.UnavailabilityReasonType.IsUltimateAbilityUsedThisRound);
+
+                    if (onlyUltimateRoundLimit)
+                    {
+                        var caster = ability.Caster;
+                        if (caster != null && caster.Facts.HasComponent<WarhammerFreeUltimateBuff>(null))
+                        {
+                            Main.LogDebug($"[CombatAPI] IsAbilityAvailable: {ability.Name} has WarhammerFreeUltimateBuff - bypassing round limit");
+                            return true;
+                        }
+                    }
+
                     reasons = unavailabilityReasons.Select(r => r.ToString()).ToList();
                     return false;
                 }
@@ -504,6 +663,149 @@ namespace CompanionAI_v3.GameInterface
             if (from == null || to == null) return float.MaxValue;
             try { return Vector3.Distance(from.Position, to.Position); }
             catch { return float.MaxValue; }
+        }
+
+        #endregion
+
+        #region ★ v3.7.89: Attack of Opportunity (AOO) API
+
+        /// <summary>
+        /// 유닛이 현재 적의 위협 범위 내에 있는지 확인
+        /// (적이 기회공격을 할 수 있는 상태인지)
+        /// </summary>
+        public static bool IsInThreateningArea(BaseUnitEntity unit)
+        {
+            if (unit == null) return false;
+            try
+            {
+                var engagedBy = unit.GetEngagedByUnits(true);
+                return engagedBy != null && engagedBy.Any();
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] IsInThreateningArea error: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 유닛을 위협하는 적 목록 반환
+        /// </summary>
+        public static List<BaseUnitEntity> GetThreateningEnemies(BaseUnitEntity unit)
+        {
+            if (unit == null) return new List<BaseUnitEntity>();
+            try
+            {
+                var engagedBy = unit.GetEngagedByUnits(true);
+                return engagedBy?.ToList() ?? new List<BaseUnitEntity>();
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] GetThreateningEnemies error: {ex.Message}");
+                return new List<BaseUnitEntity>();
+            }
+        }
+
+        /// <summary>
+        /// 능력 사용 시 기회공격이 발생하는지 확인
+        /// </summary>
+        /// <returns>
+        /// true: AOO 발생
+        /// false: AOO 없음 (안전하게 사용 가능)
+        /// </returns>
+        public static bool WillCauseAOO(AbilityData ability, BaseUnitEntity caster)
+        {
+            if (ability == null || caster == null) return false;
+            try
+            {
+                // 1. 능력의 AOO 유형 확인
+                var aooType = ability.UsingInThreateningArea;
+
+                // AOO를 유발하지 않는 능력이면 false
+                if (aooType != BlueprintAbility.UsingInThreateningAreaType.WillCauseAOO)
+                    return false;
+
+                // 2. 유닛이 위협 범위 내에 있는지 확인
+                if (!IsInThreateningArea(caster))
+                    return false;
+
+                // 3. 사이커 예외: 사이커 능력은 AOO 면제 특성이 있을 수 있음
+                // (게임 내 MechanicsFeatureType.PsychicPowersDoNotProvokeAoO)
+                // 이 부분은 게임이 자체적으로 처리하므로 여기선 단순화
+
+                return true;  // AOO 발생 예상
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] WillCauseAOO error: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 능력이 위협 범위 내에서 사용 불가능한지 확인
+        /// </summary>
+        public static bool CannotUseInThreateningArea(AbilityData ability)
+        {
+            if (ability == null) return false;
+            try
+            {
+                return ability.UsingInThreateningArea == BlueprintAbility.UsingInThreateningAreaType.CannotUse;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// AOO 정보를 포함한 능력 평가 결과
+        /// </summary>
+        public struct AOOCheckResult
+        {
+            public bool IsInThreatArea;      // 유닛이 위협 범위 내
+            public bool WillTriggerAOO;       // 능력 사용 시 AOO 발생
+            public bool CannotUseHere;        // 위협 범위 내 사용 불가
+            public int ThreateningEnemyCount; // 위협하는 적 수
+            public List<BaseUnitEntity> ThreateningEnemies;
+
+            public bool IsSafe => !WillTriggerAOO && !CannotUseHere;
+        }
+
+        /// <summary>
+        /// 능력 사용 시 AOO 상태 종합 체크
+        /// </summary>
+        public static AOOCheckResult CheckAOOStatus(AbilityData ability, BaseUnitEntity caster)
+        {
+            var result = new AOOCheckResult
+            {
+                ThreateningEnemies = new List<BaseUnitEntity>()
+            };
+
+            if (ability == null || caster == null)
+                return result;
+
+            try
+            {
+                result.ThreateningEnemies = GetThreateningEnemies(caster);
+                result.ThreateningEnemyCount = result.ThreateningEnemies.Count;
+                result.IsInThreatArea = result.ThreateningEnemyCount > 0;
+
+                var aooType = ability.UsingInThreateningArea;
+
+                result.CannotUseHere = result.IsInThreatArea &&
+                    aooType == BlueprintAbility.UsingInThreateningAreaType.CannotUse;
+
+                result.WillTriggerAOO = result.IsInThreatArea &&
+                    aooType == BlueprintAbility.UsingInThreateningAreaType.WillCauseAOO;
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] CheckAOOStatus error: {ex.Message}");
+                return result;
+            }
         }
 
         #endregion
@@ -1168,6 +1470,238 @@ namespace CompanionAI_v3.GameInterface
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// ★ v3.7.94: 버프 남은 라운드 조회 (게임 API 활용)
+        /// </summary>
+        /// <param name="unit">대상 유닛</param>
+        /// <param name="ability">버프 능력</param>
+        /// <returns>남은 라운드 (버프 없으면 0, 영구 버프면 -1)</returns>
+        public static int GetBuffRemainingRounds(BaseUnitEntity unit, AbilityData ability)
+        {
+            if (unit == null || ability?.Blueprint == null) return 0;
+
+            try
+            {
+                var runAction = ability.Blueprint.GetComponent<AbilityEffectRunAction>();
+                if (runAction?.Actions?.Actions != null)
+                {
+                    foreach (var action in runAction.Actions.Actions)
+                    {
+                        if (action is ContextActionApplyBuff applyBuff)
+                        {
+                            var buffBlueprint = applyBuff.Buff;
+                            if (buffBlueprint == null) continue;
+
+                            var existingBuff = unit.Buffs.GetBuff(buffBlueprint);
+                            if (existingBuff != null)
+                            {
+                                // 영구 버프 (DurationInRounds == 0)
+                                if (existingBuff.IsPermanent)
+                                    return -1;
+
+                                // 남은 라운드 반환
+                                return existingBuff.ExpirationInRounds;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] GetBuffRemainingRounds error: {ex.Message}");
+            }
+
+            return 0;  // 버프 없음
+        }
+
+        /// <summary>
+        /// ★ v3.7.94: 버프 갱신 필요 여부 확인
+        /// 버프가 없거나 곧 만료되면 true
+        /// </summary>
+        /// <param name="unit">대상 유닛</param>
+        /// <param name="ability">버프 능력</param>
+        /// <param name="refreshThreshold">갱신 임계값 (기본 2라운드 이하면 갱신)</param>
+        public static bool NeedsBuffRefresh(BaseUnitEntity unit, AbilityData ability, int refreshThreshold = 2)
+        {
+            int remaining = GetBuffRemainingRounds(unit, ability);
+
+            // 영구 버프면 갱신 불필요
+            if (remaining == -1)
+                return false;
+
+            // 버프 없거나 임계값 이하면 갱신 필요
+            return remaining <= refreshThreshold;
+        }
+
+        /// <summary>
+        /// ★ v3.7.94: 유닛의 모든 활성 버프 이름 목록 (디버그용)
+        /// </summary>
+        public static List<string> GetAllActiveBuffNames(BaseUnitEntity unit)
+        {
+            var result = new List<string>();
+            if (unit?.Buffs == null) return result;
+
+            try
+            {
+                foreach (var buff in unit.Buffs)
+                {
+                    string name = buff.Blueprint?.Name ?? buff.Name ?? "Unknown";
+                    int remaining = buff.IsPermanent ? -1 : buff.ExpirationInRounds;
+                    string durationStr = remaining == -1 ? "∞" : $"{remaining}R";
+                    result.Add($"{name} ({durationStr})");
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] GetAllActiveBuffNames error: {ex.Message}");
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// ★ v3.7.94: 유닛이 특정 버프 카테고리를 가지고 있는지 확인
+        /// </summary>
+        public static bool HasBuffOfType(BaseUnitEntity unit, string buffNameContains)
+        {
+            if (unit?.Buffs == null || string.IsNullOrEmpty(buffNameContains)) return false;
+
+            try
+            {
+                foreach (var buff in unit.Buffs)
+                {
+                    string name = buff.Blueprint?.Name ?? buff.Name ?? "";
+                    if (name.IndexOf(buffNameContains, StringComparison.OrdinalIgnoreCase) >= 0)
+                        return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] HasBuffOfType error: {ex.Message}");
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// ★ v3.8.39: 유닛이 잠재력 초월(WarhammerFreeUltimateBuff)을 가지고 있는지 확인
+        /// 이 버프가 있으면 궁극기 사용이 가능한 추가 턴
+        /// </summary>
+        public static bool HasFreeUltimateBuff(BaseUnitEntity unit)
+        {
+            if (unit == null) return false;
+
+            try
+            {
+                return unit.Facts.HasComponent<WarhammerFreeUltimateBuff>(null);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.8.39: 능력이 궁극기(HeroicAct 또는 DesperateMeasure)인지 확인
+        /// </summary>
+        public static bool IsUltimateAbility(AbilityData ability)
+        {
+            if (ability?.Blueprint == null) return false;
+            return ability.Blueprint.IsHeroicAct || ability.Blueprint.IsDesperateMeasure;
+        }
+
+        /// <summary>
+        /// ★ v3.8.40: 궁극기 유형 분류
+        /// </summary>
+        public enum UltimateType
+        {
+            Unknown,
+            Defensive,      // 방어적: 자기 버프, 피해 감소
+            OffensiveSingle,// 공격적 단일: 고데미지 단일 타겟
+            OffensiveAoE,   // 공격적 범위: AOE 데미지
+            Support,        // 지원: 아군 버프/힐
+            Mobility        // 이동: 돌진/텔레포트
+        }
+
+        /// <summary>
+        /// ★ v3.8.40: 궁극기 유형 판별
+        /// </summary>
+        public static UltimateType ClassifyUltimate(AbilityData ability)
+        {
+            if (ability?.Blueprint == null) return UltimateType.Unknown;
+
+            var bp = ability.Blueprint;
+
+            // 1. 이동/돌진 궁극기
+            if (bp.IsCharge || bp.IsMoveUnit)
+                return UltimateType.Mobility;
+
+            // 2. 방어적 궁극기 (자기 버프, NotOffensive)
+            if (bp.NotOffensive && bp.CanTargetSelf)
+                return UltimateType.Defensive;
+
+            // 3. 지원 궁극기 (아군 타겟, 비공격적)
+            if (bp.NotOffensive && bp.CanTargetFriends && !bp.CanTargetEnemies)
+                return UltimateType.Support;
+
+            // 4. 공격적 AOE
+            if (bp.IsAoE || bp.IsAoEDamage || bp.CanTargetPoint)
+                return UltimateType.OffensiveAoE;
+
+            // 5. 공격적 단일 (기본 공격 궁극기)
+            if (bp.CanTargetEnemies)
+                return UltimateType.OffensiveSingle;
+
+            // 6. 그 외 자기 버프 = 방어적
+            if (bp.CanTargetSelf && !bp.CanTargetEnemies)
+                return UltimateType.Defensive;
+
+            return UltimateType.Unknown;
+        }
+
+        /// <summary>
+        /// ★ v3.8.40: 궁극기 상세 정보 구조체
+        /// </summary>
+        public struct UltimateInfo
+        {
+            public UltimateType Type;
+            public bool IsHeroicAct;
+            public bool IsDesperateMeasure;
+            public bool IsAoE;
+            public float AoERadius;
+            public bool CanTargetSelf;
+            public bool CanTargetFriends;
+            public bool CanTargetEnemies;
+            public bool CanTargetPoint;
+            public string EffectOnAlly;
+            public string EffectOnEnemy;
+        }
+
+        /// <summary>
+        /// ★ v3.8.40: 궁극기 상세 정보 조회
+        /// </summary>
+        public static UltimateInfo GetUltimateInfo(AbilityData ability)
+        {
+            var info = new UltimateInfo { Type = UltimateType.Unknown };
+            if (ability?.Blueprint == null) return info;
+
+            var bp = ability.Blueprint;
+
+            info.Type = ClassifyUltimate(ability);
+            info.IsHeroicAct = bp.IsHeroicAct;
+            info.IsDesperateMeasure = bp.IsDesperateMeasure;
+            info.IsAoE = bp.IsAoE || bp.IsAoEDamage;
+            info.AoERadius = GetAoERadius(ability);
+            info.CanTargetSelf = bp.CanTargetSelf;
+            info.CanTargetFriends = bp.CanTargetFriends;
+            info.CanTargetEnemies = bp.CanTargetEnemies;
+            info.CanTargetPoint = bp.CanTargetPoint;
+            info.EffectOnAlly = bp.EffectOnAlly.ToString();
+            info.EffectOnEnemy = bp.EffectOnEnemy.ToString();
+
+            return info;
         }
 
         #endregion
@@ -1978,6 +2512,10 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// ★ v3.0.58: 능력의 정확한 사거리 반환 (게임 API 사용)
+        /// ★ v3.8.06: 모든 AOE 능력 사거리 정확히 계산
+        /// - Pattern AOE (Cone, Circle, Ray 등): PatternSettings.Pattern.Radius
+        /// - Circle AOE (AbilityTargetsAround): AoERadius
+        /// - LidlessStare 등 Range="Unlimited"이지만 실제로는 Pattern.Radius가 범위
         /// </summary>
         public static float GetAbilityRange(AbilityData ability)
         {
@@ -1987,6 +2525,27 @@ namespace CompanionAI_v3.GameInterface
             {
                 var bp = ability.Blueprint;
                 if (bp == null) return 0f;
+
+                // ★ v3.8.06: 모든 Pattern/AOE 능력 처리 (게임 API 통합 사용)
+                // PatternSettings는 WarhammerAbilityAttackDelivery + AbilityTargetsInPattern 모두 포함
+                var patternSettings = bp.PatternSettings;
+                if (patternSettings != null)
+                {
+                    int patternRadius = patternSettings.Pattern?.Radius ?? 0;
+                    if (patternRadius > 0)
+                    {
+                        Main.LogDebug($"[CombatAPI] GetAbilityRange: {bp.name} is Pattern AOE, Radius={patternRadius}");
+                        return patternRadius;
+                    }
+                }
+
+                // ★ v3.8.06: Circle AOE 처리 (IAbilityAoERadiusProvider)
+                int aoERadius = bp.AoERadius;
+                if (aoERadius > 0)
+                {
+                    Main.LogDebug($"[CombatAPI] GetAbilityRange: {bp.name} is Circle AOE, Radius={aoERadius}");
+                    return aoERadius;
+                }
 
                 // 1. Blueprint.GetRange() 사용 (게임 공식 API)
                 int baseRange = bp.GetRange();
@@ -2017,6 +2576,7 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// 능력이 무제한 사거리인지 확인
+        /// ★ v3.8.06: 모든 AOE 능력 처리 (Pattern/Circle AOE는 실제로 제한 범위)
         /// </summary>
         public static bool IsUnlimitedRange(AbilityData ability)
         {
@@ -2024,9 +2584,93 @@ namespace CompanionAI_v3.GameInterface
 
             try
             {
-                return ability.Blueprint?.Range == AbilityRange.Unlimited;
+                var bp = ability.Blueprint;
+                if (bp == null) return false;
+
+                // ★ v3.8.06: Pattern AOE는 무제한이 아님 (실제 범위는 Pattern.Radius)
+                if (bp.PatternSettings != null)
+                {
+                    int patternRadius = bp.PatternSettings.Pattern?.Radius ?? 0;
+                    if (patternRadius > 0) return false;
+                }
+
+                // ★ v3.8.06: Circle AOE도 무제한이 아님
+                if (bp.AoERadius > 0) return false;
+
+                return bp.Range == AbilityRange.Unlimited;
             }
             catch { return false; }
+        }
+
+        /// <summary>
+        /// ★ v3.7.81: 특정 위치에서 타겟에게 능력 사용 가능한지 확인
+        /// 이동 후 공격 검증에 사용 (사거리 + LOS 기반)
+        /// </summary>
+        public static bool CanReachTargetFromPosition(AbilityData ability, Vector3 fromPosition, BaseUnitEntity target)
+        {
+            if (ability == null || target == null) return false;
+
+            try
+            {
+                // Unlimited 사거리는 LOS만 체크
+                bool isUnlimited = IsUnlimitedRange(ability);
+                float distanceInTiles = 0f;
+
+                if (!isUnlimited)
+                {
+                    float abilityRange = GetAbilityRange(ability);
+                    if (abilityRange <= 0) return false;  // Personal 능력
+
+                    // 가상 위치에서 타겟까지 거리 계산
+                    float distanceToTarget = Vector3.Distance(fromPosition, target.Position);
+
+                    // 거리를 타일로 변환 (게임 그리드 기준)
+                    distanceInTiles = distanceToTarget / GridCellSize;
+
+                    // 사거리 여유 (1타일)
+                    bool inRange = distanceInTiles <= abilityRange + 1f;
+
+                    if (!inRange)
+                    {
+                        Main.LogDebug($"[CombatAPI] CanReachFromPos: {ability.Name} -> {target.CharacterName}, " +
+                            $"Dist={distanceInTiles:F1}tiles, Range={abilityRange:F1}tiles, OUT OF RANGE");
+                        return false;
+                    }
+                }
+
+                // LOS 체크 (게임 API 사용)
+                var fromNode = fromPosition.GetNearestNodeXZ();
+                var targetNode = target.Position.GetNearestNodeXZ();
+
+                if (fromNode == null || targetNode == null)
+                {
+                    Main.LogDebug($"[CombatAPI] CanReachFromPos: Node lookup failed, allowing");
+                    return true;  // 노드 찾기 실패 시 허용
+                }
+
+                // LosCalculations.HasLos 사용
+                bool hasLos = Kingmaker.View.Covers.LosCalculations.HasLos(
+                    fromNode, new IntRect(0, 0, 1, 1),  // 1x1 유닛 가정
+                    targetNode, target.SizeRect);
+
+                if (!hasLos)
+                {
+                    Main.LogDebug($"[CombatAPI] CanReachFromPos: {ability.Name} -> {target.CharacterName}, " +
+                        $"Dist={distanceInTiles:F1}tiles, NO LOS");
+                }
+                else
+                {
+                    Main.LogDebug($"[CombatAPI] CanReachFromPos: {ability.Name} -> {target.CharacterName}, " +
+                        $"Dist={distanceInTiles:F1}tiles, OK");
+                }
+
+                return hasLos;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] CanReachTargetFromPosition error: {ex.Message}");
+                return true;  // 에러 시 허용 (안전하게)
+            }
         }
 
         #endregion
@@ -2324,6 +2968,8 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// ★ v3.1.18: 패턴이 방향성 패턴인지 확인 (Cone/Ray/Sector)
+        /// ★ v3.8.09: 이 함수는 PatternType만 체크 - CanBeDirectional과 동일
+        /// 실제 IsDirectional 판정은 GetActualIsDirectional() 사용!
         /// </summary>
         public static bool IsDirectionalPattern(Kingmaker.Blueprints.PatternType? patternType)
         {
@@ -2338,6 +2984,108 @@ namespace CompanionAI_v3.GameInterface
                 default:
                     return false;
             }
+        }
+
+        /// <summary>
+        /// ★ v3.8.09: 게임의 실제 IsDirectional 로직 구현
+        /// - Non-Custom 패턴: AbilityAoEPatternSettings.m_Directional 필드
+        /// - Custom 패턴: AoEPattern.IsDirectional → BlueprintAttackPattern.IsDirectional
+        /// </summary>
+        public static bool GetActualIsDirectional(AbilityData ability)
+        {
+            if (ability == null) return false;
+
+            try
+            {
+                var patternSettings = ability.GetPatternSettings();
+                if (patternSettings == null) return false;
+
+                var pattern = patternSettings.Pattern;
+                if (pattern == null) return false;
+
+                // Custom 패턴: AoEPattern.IsDirectional 프로퍼티 직접 사용
+                if (pattern.IsCustom)
+                {
+                    try
+                    {
+                        return pattern.IsDirectional;  // BlueprintAttackPattern.IsDirectional
+                    }
+                    catch { return false; }
+                }
+
+                // Non-Custom 패턴: m_Directional 필드 (Reflection)
+                if (!pattern.CanBeDirectional) return false;  // Ray/Cone/Sector만 가능
+
+                // AbilityAoEPatternSettings에서 m_Directional 필드 가져오기
+                var settingsType = patternSettings.GetType();
+                var directionalField = settingsType.GetField("m_Directional",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+                if (directionalField != null)
+                {
+                    bool result = (bool)directionalField.GetValue(patternSettings);
+                    Main.LogDebug($"[CombatAPI] {ability.Name}: m_Directional field = {result}");
+                    return result;
+                }
+
+                // 필드를 찾지 못하면 타입 기반 폴백 (CanBeDirectional이면 true 가정)
+                Main.LogDebug($"[CombatAPI] {ability.Name}: m_Directional field not found, using CanBeDirectional fallback");
+                return pattern.CanBeDirectional;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] GetActualIsDirectional error for {ability?.Name}: {ex.Message}");
+                return IsDirectionalPattern(GetPatternType(ability));  // 폴백
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.8.09: AbilityCustomRam 컴포넌트 사용 여부 (Slash 공격 등)
+        /// AbilityCustomRam은 Pattern이 null이지만 동적으로 Ray 패턴 생성
+        /// </summary>
+        public static bool IsRamAbility(AbilityData ability)
+        {
+            if (ability == null) return false;
+
+            try
+            {
+                var bp = ability.Blueprint;
+                if (bp == null) return false;
+
+                // AbilityCustomRam 컴포넌트 체크
+                return bp.GetComponent<Kingmaker.UnitLogic.Abilities.Components.AbilityCustomRam>() != null;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// ★ v3.8.09: Ram 능력의 관통 여부 (m_RamThrough)
+        /// true면 경로의 모든 적 타격, false면 첫 적에서 멈춤
+        /// </summary>
+        public static bool IsRamThroughAbility(AbilityData ability)
+        {
+            if (ability == null) return false;
+
+            try
+            {
+                var bp = ability.Blueprint;
+                if (bp == null) return false;
+
+                var ramComponent = bp.GetComponent<Kingmaker.UnitLogic.Abilities.Components.AbilityCustomRam>();
+                if (ramComponent == null) return false;
+
+                // m_RamThrough 필드 (Reflection)
+                var ramThroughField = ramComponent.GetType().GetField("m_RamThrough",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+                if (ramThroughField != null)
+                {
+                    return (bool)ramThroughField.GetValue(ramComponent);
+                }
+
+                return false;
+            }
+            catch { return false; }
         }
 
         #endregion
@@ -2442,6 +3190,7 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// ★ v3.1.19: AOE 패턴 정보 통합 클래스
+        /// ★ v3.8.09: IsRamAbility, IsRamThrough 추가
         /// </summary>
         public class PatternInfo
         {
@@ -2450,13 +3199,17 @@ namespace CompanionAI_v3.GameInterface
             public float Angle { get; set; }
             public Kingmaker.UnitLogic.Abilities.Components.TargetType TargetType { get; set; }
             public bool IsDirectional { get; set; }
-            public bool IsValid => Radius > 0;
+            public bool CanBeDirectional { get; set; }  // ★ v3.8.09: Type만으로 판단
+            public bool IsRamAbility { get; set; }      // ★ v3.8.09: AbilityCustomRam 사용
+            public bool IsRamThrough { get; set; }      // ★ v3.8.09: 관통 여부
+            public bool IsValid => Radius > 0 || IsRamAbility;
         }
 
         private static Dictionary<string, PatternInfo> PatternCache = new Dictionary<string, PatternInfo>();
 
         /// <summary>
         /// ★ v3.1.19: 패턴 정보 조회 (캐싱)
+        /// ★ v3.8.09: GetActualIsDirectional() 사용으로 정확한 IsDirectional 판정
         /// </summary>
         public static PatternInfo GetPatternInfo(AbilityData ability)
         {
@@ -2469,14 +3222,32 @@ namespace CompanionAI_v3.GameInterface
                     return cached;
 
                 var patternType = GetPatternType(ability);
+                bool canBeDirectional = IsDirectionalPattern(patternType);  // Type 기반 (Ray/Cone/Sector)
+                bool actualIsDirectional = GetActualIsDirectional(ability); // 게임 실제 로직
+
+                // ★ v3.8.09: Ram 능력 체크
+                bool isRam = IsRamAbility(ability);
+                bool isRamThrough = isRam && IsRamThroughAbility(ability);
+
                 var info = new PatternInfo
                 {
                     Type = patternType,
                     Radius = GetAoERadius(ability),
                     Angle = GetPatternAngle(ability),
                     TargetType = GetAoETargetType(ability),
-                    IsDirectional = IsDirectionalPattern(patternType)
+                    CanBeDirectional = canBeDirectional,
+                    IsDirectional = actualIsDirectional,
+                    IsRamAbility = isRam,
+                    IsRamThrough = isRamThrough
                 };
+
+                // ★ v3.8.09: 디버그 로그 (새 능력일 때만)
+                if (actualIsDirectional != canBeDirectional || isRam)
+                {
+                    Main.LogDebug($"[CombatAPI] PatternInfo for {ability.Name}: Type={patternType}, " +
+                        $"CanBeDirectional={canBeDirectional}, IsDirectional={actualIsDirectional}, " +
+                        $"IsRam={isRam}, RamThrough={isRamThrough}, Radius={info.Radius}");
+                }
 
                 PatternCache[guid] = info;
                 return info;
@@ -2754,12 +3525,12 @@ namespace CompanionAI_v3.GameInterface
                 var patternType = GetPatternType(ability);
 
                 // ★ v3.6.9 fix: 패턴 타입이 없으면 AOE 여부 확인 후 Circle로 처리
-                // 일부 AOE 능력은 GetPatternSettings()가 null을 반환하지만 실제로는 AOE
+                // ★ v3.8.09: GetActualIsDirectional() 사용으로 정확한 판정
                 bool isDirectional = false;
                 if (patternType.HasValue)
                 {
-                    isDirectional = IsDirectionalPattern(patternType);
-                    Main.LogDebug($"[CombatAPI] AOE height: {ability.Name} PatternType={patternType.Value}, Directional={isDirectional}");
+                    isDirectional = GetActualIsDirectional(ability);  // ★ v3.8.09: 게임 실제 로직
+                    Main.LogDebug($"[CombatAPI] AOE height: {ability.Name} PatternType={patternType.Value}, IsDirectional={isDirectional}");
                 }
                 else
                 {
@@ -2826,15 +3597,11 @@ namespace CompanionAI_v3.GameInterface
             // 2. 높이 차이 체크
             float heightDiff = Mathf.Abs(center.y - unit.Position.y);
 
-            // 패턴 타입에 따른 높이 임계값
+            // ★ v3.8.09: 패턴 타입에 따른 높이 임계값 - GetActualIsDirectional 사용
             bool isDirectional = false;
             if (ability != null)
             {
-                var patternType = GetPatternType(ability);
-                if (patternType.HasValue)
-                {
-                    isDirectional = IsDirectionalPattern(patternType);
-                }
+                isDirectional = GetActualIsDirectional(ability);  // ★ v3.8.09: 게임 실제 로직
             }
 
             float heightThreshold = isDirectional ? AoELevelDiffDirectional : AoELevelDiffCircle;
@@ -2843,6 +3610,7 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// ★ v3.6.10: 방향성 AOE(Cone/Ray/Sector) 범위 내에 유닛이 있는지 확인
+        /// ★ v3.8.09: Custom/Circle 패턴 지원 추가
         /// </summary>
         public static bool IsUnitInDirectionalAoERange(
             Vector3 casterPosition,
@@ -2878,6 +3646,16 @@ namespace CompanionAI_v3.GameInterface
                 case Kingmaker.Blueprints.PatternType.Cone:
                 case Kingmaker.Blueprints.PatternType.Sector:
                     return unitAngle <= angle / 2f;
+
+                case Kingmaker.Blueprints.PatternType.Custom:
+                    // ★ v3.8.09: Custom 패턴 - 각도가 설정되어 있으면 사용
+                    // 360도면 전방향 (거리만 체크)
+                    if (angle >= 360f) return true;
+                    return unitAngle <= angle / 2f;
+
+                case Kingmaker.Blueprints.PatternType.Circle:
+                    // ★ v3.8.09: Circle은 거리만 체크 (방향 무관)
+                    return true;
 
                 default:
                     return false;
@@ -3011,6 +3789,137 @@ namespace CompanionAI_v3.GameInterface
         {
             AbilityTypeCache.Clear();
             Main.LogDebug("[CombatAPI] AbilityType cache cleared");
+        }
+
+        #endregion
+
+        #region Ability Classification Data (v3.7.73)
+
+        // ★ v3.7.73: AbilityClassificationData 캐시 (GUID별)
+        private static Dictionary<string, AbilityClassificationData> ClassificationCache = new Dictionary<string, AbilityClassificationData>();
+
+        /// <summary>
+        /// ★ v3.7.73: 능력의 모든 분류 속성을 추출 (게임 API 기반)
+        /// 캐싱되어 동일 GUID는 한 번만 계산
+        /// </summary>
+        public static AbilityClassificationData GetClassificationData(AbilityData ability)
+        {
+            if (ability == null) return new AbilityClassificationData();
+
+            try
+            {
+                // 캐시 확인
+                var guid = ability.Blueprint?.AssetGuid?.ToString();
+                if (!string.IsNullOrEmpty(guid) && ClassificationCache.TryGetValue(guid, out var cached))
+                    return cached;
+
+                var bp = ability.Blueprint;
+                if (bp == null) return new AbilityClassificationData();
+
+                var data = new AbilityClassificationData
+                {
+                    // ═══════════════════════════════════════════════════════════════
+                    // 기본 타입 (Blueprint에서 추출)
+                    // ═══════════════════════════════════════════════════════════════
+                    Tag = bp.AbilityTag,
+                    ParamsSource = bp.AbilityParamsSource,
+                    SpellDescriptor = bp.SpellDescriptor,
+
+                    // ═══════════════════════════════════════════════════════════════
+                    // 공격 특성 (AbilityData 런타임 + Blueprint 혼합)
+                    // ═══════════════════════════════════════════════════════════════
+                    AttackType = bp.AttackType,
+                    IsMelee = ability.IsMelee,
+                    IsRanged = !ability.IsMelee,
+                    IsScatter = ability.IsScatter,
+                    IsBurst = ability.IsBurstAttack,
+                    IsSingleShot = ability.IsSingleShot,
+                    IsAoE = ability.IsAOE,
+                    IsCharge = ability.IsCharge,
+                    IsMoveUnit = bp.IsMoveUnit,
+                    BurstCount = ability.BurstAttacksCount,
+                    AoERadius = bp.AoERadius,
+
+                    // ═══════════════════════════════════════════════════════════════
+                    // 타겟팅 (Blueprint에서 추출)
+                    // ═══════════════════════════════════════════════════════════════
+                    Range = bp.Range,
+                    RangeCells = (int)GetAbilityRange(ability),
+                    MinRangeCells = bp.MinRange,
+                    CustomRange = bp.CustomRange,
+                    CanTargetEnemies = bp.CanTargetEnemies,
+                    CanTargetFriends = bp.CanTargetFriends,
+                    CanTargetSelf = bp.CanTargetSelf,
+                    CanTargetPoint = bp.CanTargetPoint,
+                    CanTargetDead = bp.CanCastToDeadTarget,
+                    AoETargets = bp.AoETargets,
+                    NeedLoS = true, // 대부분의 능력은 LOS 필요
+
+                    // ═══════════════════════════════════════════════════════════════
+                    // 효과 (Blueprint에서 추출)
+                    // ═══════════════════════════════════════════════════════════════
+                    EffectOnAlly = bp.EffectOnAlly,
+                    EffectOnEnemy = bp.EffectOnEnemy,
+                    NotOffensive = bp.NotOffensive,
+                    IsWeaponAbility = bp.IsWeaponAbility,
+                    IsPsykerAbility = bp.IsPsykerAbility,
+
+                    // ═══════════════════════════════════════════════════════════════
+                    // 특수 (Blueprint에서 추출)
+                    // ═══════════════════════════════════════════════════════════════
+                    IsHeroicAct = bp.IsHeroicAct,
+                    IsDesperateMeasure = bp.IsDesperateMeasure,
+                    IsMomentum = bp.IsMomentum,
+
+                    // ═══════════════════════════════════════════════════════════════
+                    // 비용 (Blueprint + Runtime 혼합)
+                    // ═══════════════════════════════════════════════════════════════
+                    APCost = bp.ActionPointCost,
+                    IsFreeAction = ability.IsFreeAction,
+
+                    // ═══════════════════════════════════════════════════════════════
+                    // ★ v3.7.89: AOO 관련 (Blueprint에서 추출)
+                    // ═══════════════════════════════════════════════════════════════
+                    UsingInThreateningArea = (int)bp.UsingInThreateningArea,
+                };
+
+                // 패턴 타입 추출
+                var patternInfo = GetPatternInfo(ability);
+                if (patternInfo != null && patternInfo.IsValid)
+                {
+                    data.PatternType = patternInfo.Type.ToString();
+                }
+
+                // 캐시 저장
+                if (!string.IsNullOrEmpty(guid))
+                    ClassificationCache[guid] = data;
+
+                return data;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] GetClassificationData error: {ex.Message}");
+                return new AbilityClassificationData();
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.7.73: 분류 데이터 캐시 클리어 (전투 종료 시 호출)
+        /// </summary>
+        public static void ClearClassificationCache()
+        {
+            ClassificationCache.Clear();
+            Main.LogDebug("[CombatAPI] Classification cache cleared");
+        }
+
+        /// <summary>
+        /// ★ v3.7.73: 모든 능력 관련 캐시 클리어
+        /// </summary>
+        public static void ClearAllAbilityCaches()
+        {
+            ClearAbilityTypeCache();
+            ClearClassificationCache();
+            Main.LogDebug("[CombatAPI] All ability caches cleared");
         }
 
         #endregion

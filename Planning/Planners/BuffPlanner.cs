@@ -76,6 +76,15 @@ namespace CompanionAI_v3.Planning.Planners
 
                 if (CombatAPI.HasActiveBuff(situation.Unit, ability)) continue;
 
+                // ★ v3.8.25: AbilityCasterHasFacts 검증 (스택 버프 필요 여부)
+                // GetUnavailabilityReasons()가 감지하지 못하는 캐스터 제한 검증
+                string factReason;
+                if (!CombatAPI.MeetsCasterFactRequirements(ability, out factReason))
+                {
+                    Main.LogDebug($"[{roleName}] DefensiveStance skipped - {factReason}");
+                    continue;
+                }
+
                 string reason;
                 if (CombatAPI.CanUseAbilityOn(ability, target, out reason))
                 {
@@ -143,6 +152,7 @@ namespace CompanionAI_v3.Planning.Planners
 
         /// <summary>
         /// 도발 계획 (Tank 전용)
+        /// ★ v3.8.19: AllyTarget 도발 (FightMe 등) 처리 추가
         /// </summary>
         public static PlannedAction PlanTaunt(Situation situation, ref float remainingAP, string roleName)
         {
@@ -164,6 +174,21 @@ namespace CompanionAI_v3.Planning.Planners
                 {
                     target = new TargetWrapper(situation.Unit);
                 }
+                // ★ v3.8.19: 아군 타겟 도발 (FightMe 등) - 위협받는 아군 보호
+                else if (taunt.Blueprint?.CanTargetFriends == true && taunt.Blueprint?.CanTargetEnemies == false)
+                {
+                    // 적에게 타겟팅되고 있거나 적에게 둘러싸인 아군 찾기
+                    var allyToProtect = FindAllyNeedingProtection(situation);
+                    if (allyToProtect != null)
+                    {
+                        target = new TargetWrapper(allyToProtect);
+                        Main.Log($"[{roleName}] AllyTaunt: {taunt.Name} -> protecting {allyToProtect.CharacterName}");
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                }
                 else if (situation.NearestEnemy != null)
                 {
                     target = new TargetWrapper(situation.NearestEnemy);
@@ -183,6 +208,48 @@ namespace CompanionAI_v3.Planning.Planners
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// ★ v3.8.19: 보호가 필요한 아군 찾기 (FightMe 등 아군 타겟 도발용)
+        /// 우선순위: 적에게 둘러싸인 아군 > HP 낮은 아군 > 가장 가까운 아군
+        /// </summary>
+        private static BaseUnitEntity FindAllyNeedingProtection(Situation situation)
+        {
+            if (situation.Allies == null || situation.Allies.Count == 0)
+                return null;
+
+            BaseUnitEntity bestAlly = null;
+            float bestScore = float.MinValue;
+
+            foreach (var ally in situation.Allies)
+            {
+                if (ally == situation.Unit) continue;  // 자기 자신 제외
+                if (!ally.IsConscious) continue;
+
+                float score = 0f;
+
+                // 주변 적 수 계산 (반경 3m 내)
+                int nearbyEnemies = situation.Enemies?.Count(e =>
+                    e.IsConscious && Vector3.Distance(ally.Position, e.Position) <= 4.5f) ?? 0;
+
+                score += nearbyEnemies * 50f;  // 적 1명당 50점
+
+                // HP 비율 낮을수록 높은 점수
+                float hpPercent = CombatAPI.GetHPPercent(ally);
+                score += (1f - hpPercent) * 100f;  // HP 0%면 100점 추가
+
+                // 탱크가 아닌 캐릭터 우선 (딜러/서포터 보호)
+                // 간단히 HP가 낮은 캐릭터를 우선시
+
+                if (score > bestScore && nearbyEnemies > 0)  // 적이 근처에 있어야 함
+                {
+                    bestScore = score;
+                    bestAlly = ally;
+                }
+            }
+
+            return bestAlly;
         }
 
         /// <summary>
@@ -896,6 +963,10 @@ namespace CompanionAI_v3.Planning.Planners
 
         public static bool CanAffordBuffWithReservation(float buffCost, float remainingAP, float reservedAP, bool isEssential)
         {
+            // ★ v3.8.38: 0 코스트 능력은 항상 허용 (WarhammerFreeUltimateBuff 궁극기 등)
+            if (buffCost <= 0f)
+                return true;
+
             if (isEssential)
                 return buffCost <= remainingAP;
 

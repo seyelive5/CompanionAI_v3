@@ -79,6 +79,28 @@ namespace CompanionAI_v3.Analysis
 
             float score = 50f;  // 기본 점수
 
+            // ★ v3.8.40: 잠재력 초월(FreeUltimateBuff) 활성 시 궁극기 상세 점수 시스템
+            bool hasFreeUltimateBuff = CombatAPI.HasFreeUltimateBuff(situation.Unit);
+            bool isUltimate = CombatAPI.IsUltimateAbility(buff);
+
+            if (hasFreeUltimateBuff)
+            {
+                if (isUltimate)
+                {
+                    // 궁극기 기본 보너스 (추가 턴은 궁극기 사용을 위한 것)
+                    score += 500f;
+
+                    // ★ v3.8.40: 상세 분류 기반 점수
+                    score += ScoreUltimateByType(buff, situation);
+                }
+                else
+                {
+                    // 궁극기가 아님 = 큰 감점 (WarhammerAbilityRestriction으로 제한될 것)
+                    score -= 1000f;
+                    Main.LogDebug($"[UtilityScorer] {buff.Name}: Non-ultimate during FreeUltimate turn - skipped");
+                }
+            }
+
             // ★ v3.1.30: AP 효율 Response Curve 적용
             float cost = CombatAPI.GetAbilityAPCost(buff);
             score += CurvePresets.BuffAPCost.Evaluate(cost);
@@ -230,6 +252,189 @@ namespace CompanionAI_v3.Analysis
             if (buff == null) return false;
             var timing = AbilityDatabase.GetTiming(buff);
             return timing == AbilityTiming.PreCombatBuff || timing == AbilityTiming.Emergency;
+        }
+
+        /// <summary>
+        /// ★ v3.8.40: 궁극기 유형별 상세 점수 계산
+        /// 전투당 한 번만 사용 가능하므로 상황에 맞는 최적의 궁극기 선택 필요
+        /// </summary>
+        private static float ScoreUltimateByType(AbilityData ultimate, Situation situation)
+        {
+            float score = 0f;
+            var info = CombatAPI.GetUltimateInfo(ultimate);
+
+            // 상황 변수 수집
+            int livingEnemies = situation.Enemies?.Count(e => e != null && e.IsConscious) ?? 0;
+            int livingAllies = situation.Allies?.Count(a => a != null && a.IsConscious) ?? 0;
+            float hpPercent = situation.HPPercent;
+            bool isInDanger = situation.IsInDanger;
+            float nearestEnemyDist = situation.NearestEnemyDistance;
+            int hittableEnemies = situation.HittableEnemies?.Count ?? 0;
+
+            // 근접 적 수 (3m 이내)
+            int nearbyEnemies = situation.Enemies?.Count(e =>
+                e != null && e.IsConscious &&
+                CombatAPI.GetDistance(situation.Unit, e) <= 4.5f) ?? 0;
+
+            // HP 낮은 아군 수
+            int lowHPAllies = situation.Allies?.Count(a =>
+                a != null && a.IsConscious && a != situation.Unit &&
+                CombatAPI.GetHPPercent(a) < 50f) ?? 0;
+
+            // AOE 범위 내 적 수 계산 (AOE 궁극기용)
+            int enemiesInAoERange = 0;
+            if (info.IsAoE && info.AoERadius > 0)
+            {
+                var clusters = ClusterDetector.FindClusters(
+                    situation.Enemies.Where(e => e != null && e.IsConscious).ToList(),
+                    info.AoERadius);
+                enemiesInAoERange = clusters.Any() ? clusters.Max(c => c.Count) : 0;
+            }
+
+            Main.LogDebug($"[UtilityScorer] Ultimate {ultimate.Name}: Type={info.Type}, " +
+                $"HP={hpPercent:F0}%, Danger={isInDanger}, Enemies={livingEnemies}, " +
+                $"Nearby={nearbyEnemies}, LowHPAllies={lowHPAllies}, AoETargets={enemiesInAoERange}");
+
+            switch (info.Type)
+            {
+                case CombatAPI.UltimateType.Defensive:
+                    // ========================================
+                    // 방어적 궁극기: HP 낮거나 위험할 때 우선
+                    // ========================================
+
+                    // HP 기반 점수 (HP 낮을수록 높음)
+                    if (hpPercent < 30f)
+                        score += 150f;  // 위급
+                    else if (hpPercent < 50f)
+                        score += 100f;  // 위험
+                    else if (hpPercent < 70f)
+                        score += 50f;   // 주의
+                    else
+                        score -= 50f;   // HP 충분하면 감점
+
+                    // 위험 상황 보너스
+                    if (isInDanger)
+                        score += 80f;
+
+                    // 근접 적 수 기반 (둘러싸임)
+                    score += nearbyEnemies * 30f;
+
+                    // DesperateMeasure는 위기 상황에서 더 높은 점수
+                    if (info.IsDesperateMeasure && hpPercent < 40f)
+                        score += 100f;
+
+                    Main.LogDebug($"[UtilityScorer] {ultimate.Name}: DEFENSIVE score={score:F0}");
+                    break;
+
+                case CombatAPI.UltimateType.OffensiveSingle:
+                    // ========================================
+                    // 단일 타겟 공격: 고가치 타겟 존재 시 우선
+                    // ========================================
+
+                    // 공격 가능 적 있으면 기본 점수
+                    if (hittableEnemies > 0)
+                        score += 80f;
+                    else
+                        score -= 100f;  // 공격 불가면 큰 감점
+
+                    // 적 수 적을 때 (보스전 등) 더 효율적
+                    if (livingEnemies <= 2)
+                        score += 50f;   // 소수 정예전
+
+                    // HP가 너무 낮으면 공격보다 생존 우선
+                    if (hpPercent < 30f)
+                        score -= 80f;
+
+                    Main.LogDebug($"[UtilityScorer] {ultimate.Name}: SINGLE OFFENSIVE score={score:F0}");
+                    break;
+
+                case CombatAPI.UltimateType.OffensiveAoE:
+                    // ========================================
+                    // AOE 공격: 다수 적 밀집 시 우선
+                    // ========================================
+
+                    // AOE 범위 내 적 수 기반 (핵심 요소)
+                    if (enemiesInAoERange >= 4)
+                        score += 200f;  // 대규모 집단
+                    else if (enemiesInAoERange >= 3)
+                        score += 150f;  // 좋은 기회
+                    else if (enemiesInAoERange >= 2)
+                        score += 80f;   // 괜찮음
+                    else
+                        score -= 50f;   // 단일 타겟에 AOE는 낭비
+
+                    // 전체 적 수 보너스
+                    score += livingEnemies * 15f;
+
+                    // HP가 너무 낮으면 감점
+                    if (hpPercent < 30f)
+                        score -= 60f;
+
+                    Main.LogDebug($"[UtilityScorer] {ultimate.Name}: AOE OFFENSIVE score={score:F0} (AoETargets={enemiesInAoERange})");
+                    break;
+
+                case CombatAPI.UltimateType.Support:
+                    // ========================================
+                    // 지원 궁극기: 아군이 위험하거나 다수일 때 우선
+                    // ========================================
+
+                    // HP 낮은 아군 수 기반
+                    score += lowHPAllies * 60f;
+
+                    // 아군 수 기반
+                    score += livingAllies * 20f;
+
+                    // 아군이 없으면 의미 없음
+                    if (livingAllies == 0)
+                        score -= 200f;
+
+                    // 자신의 HP가 위급하면 지원보다 생존
+                    if (hpPercent < 25f)
+                        score -= 100f;
+
+                    Main.LogDebug($"[UtilityScorer] {ultimate.Name}: SUPPORT score={score:F0} (lowHPAllies={lowHPAllies})");
+                    break;
+
+                case CombatAPI.UltimateType.Mobility:
+                    // ========================================
+                    // 이동 궁극기: 적이 멀거나 위치 조정 필요 시 우선
+                    // ========================================
+
+                    // 적이 멀면 이동 필요
+                    if (nearestEnemyDist > 10f)
+                        score += 100f;
+                    else if (nearestEnemyDist > 5f)
+                        score += 50f;
+                    else
+                        score -= 30f;  // 이미 가까우면 불필요
+
+                    // 공격 불가 상태면 이동 필요
+                    if (hittableEnemies == 0 && livingEnemies > 0)
+                        score += 80f;
+
+                    // 위험 상황에서 탈출용으로도 가치
+                    if (isInDanger && nearbyEnemies >= 2)
+                        score += 60f;
+
+                    Main.LogDebug($"[UtilityScorer] {ultimate.Name}: MOBILITY score={score:F0} (dist={nearestEnemyDist:F1})");
+                    break;
+
+                default:
+                    // 알 수 없는 유형 = 기본 점수
+                    score += 30f;
+                    Main.LogDebug($"[UtilityScorer] {ultimate.Name}: UNKNOWN type, default score");
+                    break;
+            }
+
+            // HeroicAct vs DesperateMeasure 추가 조정
+            // HeroicAct: 공격적 상황에서 보너스
+            // DesperateMeasure: 방어적 상황에서 보너스
+            if (info.IsHeroicAct && livingEnemies >= 3)
+                score += 30f;
+            if (info.IsDesperateMeasure && (hpPercent < 50f || isInDanger))
+                score += 40f;
+
+            return score;
         }
 
         /// <summary>
