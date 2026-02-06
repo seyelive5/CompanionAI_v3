@@ -235,6 +235,115 @@ namespace CompanionAI_v3.GameInterface
             return true;
         }
 
+        /// <summary>
+        /// ★ v3.8.45: 유닛 타겟 능력의 아군 안전 체크
+        /// AOE point-target 능력 + CanTargetFriends 능력(점사 사격 등) 모두 처리
+        /// - AOE 반경 있음: 반경 내 아군 체크
+        /// - CanTargetFriends=true (AOE 반경 0): 타겟 근접 + 사선(line-of-fire) 체크
+        /// </summary>
+        public static bool IsAoESafeForUnitTarget(
+            AbilityData ability,
+            BaseUnitEntity caster,
+            BaseUnitEntity target,
+            List<BaseUnitEntity> allies)
+        {
+            // AOE 반경 결정: GetAoERadius → GetPatternInfo 폴백
+            float aoERadius = CombatAPI.GetAoERadius(ability);
+            if (aoERadius <= 0)
+            {
+                var patternInfo = CombatAPI.GetPatternInfo(ability);
+                if (patternInfo != null && patternInfo.IsValid)
+                    aoERadius = patternInfo.Radius;
+            }
+
+            // ★ v3.8.45: CanTargetFriends 체크 - AOE 반경이 0이어도 아군 피격 가능
+            // 점사 사격(Burst Fire) 같은 능력은 AOE 패턴 없이도 주변 아군 피격 발생
+            bool canTargetFriends = ability?.Blueprint?.CanTargetFriends == true;
+
+            // AOE 효과도 없고 아군 타겟 불가능하면 안전
+            if (aoERadius <= 0 && !canTargetFriends) return true;
+            if (allies == null) return true;
+
+            var aoeConfig = AIConfig.GetAoEConfig();
+            int playerPartyAlliesInRange = 0;
+
+            foreach (var ally in allies)
+            {
+                if (ally == null || !ally.IsConscious) continue;
+                if (ally == target) continue;  // 타겟 자체는 제외
+                if (ally == caster) continue;   // 캐스터 자신은 제외
+
+                bool isInDanger = false;
+
+                if (aoERadius > 0)
+                {
+                    // AOE 반경 기반 체크 (기존 로직)
+                    if (CombatAPI.IsUnitInAoERange(ability, target.Position, ally, aoERadius))
+                        isInDanger = true;
+                }
+                else if (canTargetFriends)
+                {
+                    // ★ v3.8.45: CanTargetFriends 능력 - 타겟 근접 + 사선 체크
+                    // 점사 사격 등은 타겟 주변으로 탄이 퍼지고, 사선 상 아군도 피격 가능
+
+                    float allyToTargetDist = CombatCache.GetDistanceInTiles(ally, target);
+
+                    // Check 1: 타겟 주변 아군 (burst spread - 3타일 이내)
+                    if (allyToTargetDist < 3f)
+                    {
+                        isInDanger = true;
+                    }
+                    else
+                    {
+                        // Check 2: 사선(line-of-fire) 체크 - 캐스터와 타겟 사이 아군
+                        Vector3 casterToTarget = target.Position - caster.Position;
+                        Vector3 casterToAlly = ally.Position - caster.Position;
+                        float casterToTargetMag = casterToTarget.magnitude;
+
+                        if (casterToTargetMag > 0.1f)
+                        {
+                            Vector3 dirNorm = casterToTarget / casterToTargetMag;
+
+                            // 아군이 캐스터~타겟 구간에 있는지 (뒤에 있으면 무시)
+                            float projection = Vector3.Dot(casterToAlly, dirNorm);
+                            if (projection > 0 && projection < casterToTargetMag)
+                            {
+                                // 사선으로부터의 수직 거리 (타일 단위)
+                                float perpDistMeters = Vector3.Cross(dirNorm, casterToAlly).magnitude;
+                                float perpDistTiles = CombatAPI.MetersToTiles(perpDistMeters);
+
+                                // 2타일 이내면 위험 (burst/scatter spread)
+                                if (perpDistTiles < 2f)
+                                {
+                                    isInDanger = true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (!isInDanger) continue;
+
+                try
+                {
+                    if (!caster.IsPlayerEnemy && ally.IsInPlayerParty)
+                    {
+                        playerPartyAlliesInRange++;
+
+                        if (playerPartyAlliesInRange > aoeConfig.MaxPlayerAlliesHit)
+                        {
+                            string checkType = aoERadius > 0 ? $"radius={aoERadius:F1}" : "CanTargetFriends";
+                            CompanionAI_v3.Main.LogDebug($"[AOE] Unit-target safety: {ability.Name} -> {target.CharacterName} blocked ({checkType}, allies={playerPartyAlliesInRange} > max={aoeConfig.MaxPlayerAlliesHit})");
+                            return false;
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            return true;
+        }
+
         #region Ally-Targeting AOE (v3.1.17)
 
         /// <summary>

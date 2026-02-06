@@ -809,11 +809,16 @@ namespace CompanionAI_v3.GameInterface
                     s.DistanceScore > 0f);
             }
 
+            // ★ v3.8.45: 3차 폴백에 MinSafeDistance 체크 추가
+            // 기존: HittableEnemyCount > 0만 체크 → 적 1.4타일 위치도 선택됨
+            // 수정: DistanceScore >= 0 = MinSafeDistance 이상 위치만 허용
+            // (DistanceScore < 0 = nearestEnemyDist < minSafeDistance → 위험 지역)
             if (best == null)
             {
                 best = scores.FirstOrDefault(s =>
                     s.CanStand &&
-                    s.HittableEnemyCount > 0);
+                    s.HittableEnemyCount > 0 &&
+                    s.DistanceScore >= 0f);
             }
 
             // ★ v3.6.18: 공격 가능 위치 없으면 기존 LOS 기반 폴백 (접근 이동용)
@@ -826,11 +831,13 @@ namespace CompanionAI_v3.GameInterface
                     s.DistanceScore >= 20f);
             }
 
+            // ★ v3.8.45: LOS 폴백도 MinSafeDistance 준수
             if (best == null)
             {
                 best = scores.FirstOrDefault(s =>
                     s.CanStand &&
-                    s.HasLosToEnemy);
+                    s.HasLosToEnemy &&
+                    s.DistanceScore >= 0f);
             }
 
             if (best != null)

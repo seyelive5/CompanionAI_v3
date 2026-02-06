@@ -719,8 +719,10 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // 추가 이동
+            // ★ v3.8.45: 원거리 캐릭터는 공격 후 적에게 접근하지 않음
+            // 원거리가 공격 후 전진하면 다음 턴에 위험 위치에 노출됨
             if (!skipMove && !situation.HasHittableEnemies && situation.HasLivingEnemies &&
-                situation.CanMove && situation.AllowPostAttackMove)
+                situation.CanMove && situation.AllowPostAttackMove && !situation.PrefersRanged)
             {
                 var moveAction = PlanMoveToEnemy(situation);
                 if (moveAction != null) actions.Add(moveAction);

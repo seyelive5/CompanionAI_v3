@@ -659,42 +659,102 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.1.29: 원거리가 위험하면 이동 필요
             bool isRangedInDanger = situation.PrefersRanged && situation.IsInDanger;
             // ★ v3.5.80: deferRetreat 포함 - 공격+런앤건 후 후퇴 필요
-            bool needsMovement = situation.NeedsReposition || (!didPlanAttack && situation.HasLivingEnemies) || isRangedInDanger || deferRetreat;
+            // ★ v3.8.45: 원거리 + AvailableAttacks=0 (모두 쿨다운) → 적에게 접근 무의미
+            // 공격할 수단이 전혀 없는데 적에게 다가가는 것은 위험만 증가
+            bool noAttackNoApproach = situation.PrefersRanged && situation.AvailableAttacks.Count == 0;
+            // NeedsReposition도 noAttackNoApproach 적용 - 공격 수단 없으면 이동도 무의미
+            bool needsMovement = ((situation.NeedsReposition || (!didPlanAttack && situation.HasLivingEnemies)) && !noAttackNoApproach) || isRangedInDanger || deferRetreat;
             // ★ v3.0.99: situation.CanMove는 계획 시작 시점 MP 기준, remainingMP는 예측된 MP 포함
             bool canMove = situation.CanMove || remainingMP > 0;
+
+            if (noAttackNoApproach)
+                Main.Log($"[DPS] Phase 8: Ranged with no available attacks - skipping forward movement");
 
             Main.LogDebug($"[DPS] Phase 8 check: hasMoveInPlan={hasMoveInPlan}, NeedsReposition={situation.NeedsReposition}, " +
                 $"didPlanAttack={didPlanAttack}, needsMovement={needsMovement}, CanMove={canMove}, MP={remainingMP:F1}, IsInDanger={situation.IsInDanger}");
 
             if (!hasMoveInPlan && needsMovement && canMove && remainingMP > 0)
             {
-                Main.Log($"[DPS] Phase 8: Trying move (attack planned={didPlanAttack}, predictedMP={remainingMP:F1}, isRangedInDanger={isRangedInDanger})");
-                // ★ v3.0.89: 공격 실패 시 forceMove=true로 이동 강제
-                // ★ v3.1.29: 원거리가 위험하면 공격 가능해도 후퇴 이동 강제
-                // ★ v3.8.44: HasHittableEnemies → attackContext.ShouldForceMove (실패 이유 기반)
-                bool forceMove = (!didPlanAttack && attackContext.ShouldForceMove) || isRangedInDanger;
-                Main.LogDebug($"[DPS] Phase 8: {attackContext}, forceMove={forceMove}");
-                // ★ v3.1.00: MP 회복 예측 후 situation.CanMove=False여도 이동 가능
-                // PlanMoveToEnemy 내부의 CanMove 체크를 우회
-                bool bypassCanMoveCheck = !situation.CanMove && remainingMP > 0;
-                // ★ v3.1.01: remainingMP를 MovementAPI에 전달하여 실제로 이동 가능한 타일 계산
-                // ★ v3.8.44: attackContext 전달 - 능력 사거리 기반 이동 위치 계산
-                var moveOrGapCloser = PlanMoveOrGapCloser(situation, ref remainingAP, forceMove, bypassCanMoveCheck, remainingMP, attackContext);
-                if (moveOrGapCloser != null)
-                {
-                    actions.Add(moveOrGapCloser);
-                    hasMoveInPlan = true;
+                Main.Log($"[DPS] Phase 8: Trying move (attack planned={didPlanAttack}, predictedMP={remainingMP:F1}, isRangedInDanger={isRangedInDanger}, deferRetreat={deferRetreat})");
 
-                    // ★ v3.1.24: 이동 목적지 추출하여 Post-move 공격에 전달
-                    if (reservedAP > 0 && situation.NearestEnemy != null)
+                // ★ v3.8.45: deferRetreat=true면 후퇴 우선 (공격→런앤건→후퇴 시퀀스)
+                // 기존: deferRetreat가 PlanMoveOrGapCloser로 빠져서 접근 이동됨
+                // 수정: 후퇴를 먼저 시도, 실패하면 일반 이동
+                if (deferRetreat)
+                {
+                    var retreatAction = PlanRetreat(situation);
+                    if (retreatAction != null)
                     {
-                        UnityEngine.Vector3? moveDestination = moveOrGapCloser.Target?.Point;
-                        var postMoveAttack = PlanPostMoveAttack(situation, situation.NearestEnemy, ref remainingAP, moveDestination);
-                        if (postMoveAttack != null)
+                        actions.Add(retreatAction);
+                        hasMoveInPlan = true;
+                        Main.Log($"[DPS] Phase 8: Deferred retreat executed");
+                    }
+                }
+
+                if (!hasMoveInPlan)
+                {
+                    // ★ v3.0.89: 공격 실패 시 forceMove=true로 이동 강제
+                    // ★ v3.1.29: 원거리가 위험하면 공격 가능해도 후퇴 이동 강제
+                    // ★ v3.8.44: HasHittableEnemies → attackContext.ShouldForceMove (실패 이유 기반)
+                    bool forceMove = (!didPlanAttack && attackContext.ShouldForceMove) || isRangedInDanger;
+                    Main.LogDebug($"[DPS] Phase 8: {attackContext}, forceMove={forceMove}");
+                    // ★ v3.1.00: MP 회복 예측 후 situation.CanMove=False여도 이동 가능
+                    // PlanMoveToEnemy 내부의 CanMove 체크를 우회
+                    bool bypassCanMoveCheck = !situation.CanMove && remainingMP > 0;
+                    // ★ v3.1.01: remainingMP를 MovementAPI에 전달하여 실제로 이동 가능한 타일 계산
+                    // ★ v3.8.44: attackContext 전달 - 능력 사거리 기반 이동 위치 계산
+                    var moveOrGapCloser = PlanMoveOrGapCloser(situation, ref remainingAP, forceMove, bypassCanMoveCheck, remainingMP, attackContext);
+                    if (moveOrGapCloser != null)
+                    {
+                        actions.Add(moveOrGapCloser);
+                        hasMoveInPlan = true;
+
+                        // ★ v3.1.24: 이동 목적지 추출하여 Post-move 공격에 전달
+                        if (reservedAP > 0 && situation.NearestEnemy != null)
                         {
-                            actions.Add(postMoveAttack);
-                            Main.Log($"[DPS] Added post-move attack (from destination={moveDestination.HasValue})");
+                            UnityEngine.Vector3? moveDestination = moveOrGapCloser.Target?.Point;
+                            var postMoveAttack = PlanPostMoveAttack(situation, situation.NearestEnemy, ref remainingAP, moveDestination);
+                            if (postMoveAttack != null)
+                            {
+                                actions.Add(postMoveAttack);
+                                Main.Log($"[DPS] Added post-move attack (from destination={moveDestination.HasValue})");
+                            }
                         }
+                    }
+                }
+            }
+
+            // ★ v3.8.45: Phase 8.5 - 행동 완료 후 원거리 안전 후퇴
+            // SupportPlan과 동일 패턴 - 모든 행동 후에도 적이 가까우면 후퇴
+            if (!hasMoveInPlan && remainingMP > 0 && situation.CanMove && situation.PrefersRanged)
+            {
+                bool needsSafeRetreat = false;
+                string retreatReason = "";
+
+                if (situation.NearestEnemy != null && situation.NearestEnemyDistance < situation.MinSafeDistance * 1.2f)
+                {
+                    needsSafeRetreat = true;
+                    retreatReason = $"enemy too close ({situation.NearestEnemyDistance:F1}m)";
+                }
+
+                if (situation.InfluenceMap != null && situation.InfluenceMap.IsValid)
+                {
+                    float frontlineDist = situation.InfluenceMap.GetFrontlineDistance(situation.Unit.Position);
+                    if (frontlineDist > -5f)
+                    {
+                        needsSafeRetreat = true;
+                        retreatReason = $"too close to frontline ({frontlineDist:F1}m)";
+                    }
+                }
+
+                if (needsSafeRetreat)
+                {
+                    var safeRetreatAction = PlanPostActionSafeRetreat(situation);
+                    if (safeRetreatAction != null)
+                    {
+                        actions.Add(safeRetreatAction);
+                        hasMoveInPlan = true;
+                        Main.Log($"[DPS] Phase 8.5: Post-action safe retreat: {retreatReason}");
                     }
                 }
             }

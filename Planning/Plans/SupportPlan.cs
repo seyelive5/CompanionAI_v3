@@ -622,7 +622,10 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.7.06: 사역마 Master는 아군 방향으로 이동 (버프 시전을 위해)
             bool hasMoveInPlan = actions.Any(a => a.Type == ActionType.Move ||
                 (a.Type == ActionType.Attack && a.Ability != null && AbilityDatabase.IsGapCloser(a.Ability)));
-            bool needsMovement = situation.NeedsReposition || (!didPlanAttack && situation.HasLivingEnemies);
+            // ★ v3.8.45: 원거리 + AvailableAttacks=0 → 적에게 접근 무의미
+            bool noAttackNoApproach = situation.PrefersRanged && situation.AvailableAttacks.Count == 0;
+            // NeedsReposition도 noAttackNoApproach 적용
+            bool needsMovement = (situation.NeedsReposition || (!didPlanAttack && situation.HasLivingEnemies)) && !noAttackNoApproach;
             bool canMove = situation.CanMove || remainingMP > 0;
 
             // ★ v3.7.06: 사역마 Master가 사역마/아군과 너무 멀면 접근

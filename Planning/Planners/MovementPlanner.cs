@@ -499,8 +499,38 @@ namespace CompanionAI_v3.Planning.Planners
 
                 if (bestPosition == null)
                 {
-                    // ★ v3.7.23: 공격 위치 없으면 적 방향으로 최대한 이동 (폴백)
-                    // 사역마 Relocate와 같은 로직 - 도달 가능한 최대 거리까지 이동
+                    // ★ v3.8.45: 원거리 캐릭터 접근 폴백 안전 체크
+                    // FindRangedAttackPositionSync가 null = 안전한 공격 위치 없음
+                    // Case 1: 적이 사거리 내 → 안전 위치 없으니 이동하지 않음 (접근은 악화)
+                    // Case 2: 적이 사거리 밖 → 접근하되 MinSafeDistance 이내로는 접근 금지
+                    if (situation.PrefersRanged)
+                    {
+                        float nearestEnemyTiles = CombatCache.GetDistanceInTiles(unit, target);
+                        if (nearestEnemyTiles <= weaponRange)
+                        {
+                            Main.LogDebug($"[{roleName}] PlanMoveToEnemy: Enemy in range ({nearestEnemyTiles:F1} <= {weaponRange:F1}) but no safe position - staying put");
+                            return null;
+                        }
+
+                        // 사거리 밖 → 접근하되 안전 거리 유지
+                        var safeApproach = MovementAPI.FindBestApproachPosition(unit, target, effectiveMP);
+                        if (safeApproach != null)
+                        {
+                            float approachDistToEnemy = CombatAPI.MetersToTiles(
+                                Vector3.Distance(safeApproach.Position, target.Position));
+                            if (approachDistToEnemy < situation.MinSafeDistance)
+                            {
+                                Main.LogDebug($"[{roleName}] PlanMoveToEnemy: Approach cancelled - would enter danger zone ({approachDistToEnemy:F1} < MinSafe={situation.MinSafeDistance:F1})");
+                                return null;
+                            }
+                            Main.Log($"[{roleName}] PlanMoveToEnemy: Safe approach ({approachDistToEnemy:F1} tiles from enemy)");
+                            return PlannedAction.Move(safeApproach.Position, $"Safe approach {target.CharacterName}");
+                        }
+                        Main.LogDebug($"[{roleName}] PlanMoveToEnemy: No safe ranged position found (effectiveMP={effectiveMP:F1})");
+                        return null;
+                    }
+
+                    // 근접 캐릭터: 기존 로직 유지 (안전 거리 불필요)
                     var fallbackPosition = MovementAPI.FindBestApproachPosition(
                         unit, target, effectiveMP);
 

@@ -480,7 +480,10 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.8.13: 거리 선호 반영 - 근접 선호시 적 접근, 원거리 선호시 거리 유지
             // ══════════════════════════════════════════════════════════════
             bool canMove = situation.CanMove || remainingMP > 0;
-            bool needsMovement = situation.NeedsReposition || (!didPlanAttack && situation.HasLivingEnemies);
+            // ★ v3.8.45: 원거리 + AvailableAttacks=0 → 적에게 접근 무의미
+            bool noAttackNoApproach = situation.PrefersRanged && situation.AvailableAttacks.Count == 0;
+            // NeedsReposition도 noAttackNoApproach 적용
+            bool needsMovement = (situation.NeedsReposition || (!didPlanAttack && situation.HasLivingEnemies)) && !noAttackNoApproach;
 
             // ★ v3.8.14: 근접 선호시 적에게 접근 필요 여부 체크
             // 핵심 변경: HasHittableEnemies가 아닌 HasMeleeHittableEnemies를 사용
@@ -515,6 +518,45 @@ namespace CompanionAI_v3.Planning.Plans
                 if (moveAction != null)
                 {
                     actions.Add(moveAction);
+                }
+            }
+
+            // ══════════════════════════════════════════════════════════════
+            // Phase 8.5: 원거리 안전 후퇴 ★v3.8.45★
+            // Phase 7 후퇴가 실행되지 않은 경우의 안전망
+            // ══════════════════════════════════════════════════════════════
+            bool hasMoveAfterPhase8 = actions.Any(a => a.Type == ActionType.Move ||
+                (a.Type == ActionType.Attack && a.Ability != null && AbilityDatabase.IsGapCloser(a.Ability)));
+
+            if (!hasMoveAfterPhase8 && remainingMP > 0 && situation.CanMove && situation.PrefersRanged)
+            {
+                bool needsSafeRetreat = false;
+                string retreatReason = "";
+
+                if (situation.NearestEnemy != null && situation.NearestEnemyDistance < situation.MinSafeDistance * 1.2f)
+                {
+                    needsSafeRetreat = true;
+                    retreatReason = $"enemy too close ({situation.NearestEnemyDistance:F1}m)";
+                }
+
+                if (situation.InfluenceMap != null && situation.InfluenceMap.IsValid)
+                {
+                    float frontlineDist = situation.InfluenceMap.GetFrontlineDistance(situation.Unit.Position);
+                    if (frontlineDist > -5f)
+                    {
+                        needsSafeRetreat = true;
+                        retreatReason = $"too close to frontline ({frontlineDist:F1}m)";
+                    }
+                }
+
+                if (needsSafeRetreat)
+                {
+                    var safeRetreatAction = PlanPostActionSafeRetreat(situation);
+                    if (safeRetreatAction != null)
+                    {
+                        actions.Add(safeRetreatAction);
+                        Main.Log($"[Overseer] Phase 8.5: Post-action safe retreat: {retreatReason}");
+                    }
                 }
             }
 

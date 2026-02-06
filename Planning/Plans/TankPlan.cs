@@ -531,8 +531,10 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.5.17: Tank 이동 조건 확장
             // - 기존: NeedsReposition || 공격 실패 시
             // - 추가: 적과 근접 거리 밖이면 공격 후에도 이동
-            bool needsMovement = situation.NeedsReposition ||
-                                 (!didPlanAttack && situation.HasLivingEnemies) ||
+            // ★ v3.8.45: 원거리 + AvailableAttacks=0 → 적에게 접근 무의미
+            bool noAttackNoApproach = situation.PrefersRanged && situation.AvailableAttacks.Count == 0;
+            // NeedsReposition도 noAttackNoApproach 적용
+            bool needsMovement = ((situation.NeedsReposition || (!didPlanAttack && situation.HasLivingEnemies)) && !noAttackNoApproach) ||
                                  shouldAdvanceToFrontline ||
                                  shouldEngageMelee;
 
@@ -568,6 +570,41 @@ namespace CompanionAI_v3.Planning.Plans
                             actions.Add(postMoveAttack);
                             Main.Log($"[Tank] Added post-move attack (from destination={moveDestination.HasValue})");
                         }
+                    }
+                }
+            }
+
+            // ★ v3.8.45: Phase 8.5 - 원거리 Tank 안전 후퇴
+            // 원거리 설정 Tank가 공격 후 적 근처에 남아있으면 후퇴
+            if (!hasMoveInPlan && remainingMP > 0 && situation.CanMove && situation.PrefersRanged)
+            {
+                bool needsSafeRetreat = false;
+                string retreatReason = "";
+
+                if (situation.NearestEnemy != null && situation.NearestEnemyDistance < situation.MinSafeDistance * 1.2f)
+                {
+                    needsSafeRetreat = true;
+                    retreatReason = $"enemy too close ({situation.NearestEnemyDistance:F1}m)";
+                }
+
+                if (situation.InfluenceMap != null && situation.InfluenceMap.IsValid)
+                {
+                    float frontlineDist = situation.InfluenceMap.GetFrontlineDistance(situation.Unit.Position);
+                    if (frontlineDist > -5f)
+                    {
+                        needsSafeRetreat = true;
+                        retreatReason = $"too close to frontline ({frontlineDist:F1}m)";
+                    }
+                }
+
+                if (needsSafeRetreat)
+                {
+                    var safeRetreatAction = PlanPostActionSafeRetreat(situation);
+                    if (safeRetreatAction != null)
+                    {
+                        actions.Add(safeRetreatAction);
+                        hasMoveInPlan = true;
+                        Main.Log($"[Tank] Phase 8.5: Post-action safe retreat: {retreatReason}");
                     }
                 }
             }

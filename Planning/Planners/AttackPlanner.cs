@@ -247,6 +247,18 @@ namespace CompanionAI_v3.Planning.Planners
                 string reason;
                 if (CombatAPI.CanUseAbilityOn(scored.Attack, targetWrapper, out reason))
                 {
+                    // ★ v3.8.45: 아군 피격 안전 체크 (AOE point-target + CanTargetFriends 능력)
+                    // Point-target AOE: 타겟 주변 반경 내 아군 체크
+                    // CanTargetFriends (점사 사격 등): 타겟 근접 + 사선 체크
+                    if (CombatAPI.IsPointTargetAbility(scored.Attack) || scored.Attack.Blueprint?.CanTargetFriends == true)
+                    {
+                        if (!AoESafetyChecker.IsAoESafeForUnitTarget(scored.Attack, situation.Unit, target, situation.Allies))
+                        {
+                            Main.LogDebug($"[AttackPlanner] Ally safety blocked: {scored.Attack.Name} -> {target.CharacterName}");
+                            continue;
+                        }
+                    }
+
                     return scored.Attack;
                 }
                 else
@@ -315,6 +327,17 @@ namespace CompanionAI_v3.Planning.Planners
 
                     return null;  // ★ v3.6.10: 명시적 null 반환
                 }
+
+                // ★ v3.8.45: PrimaryAttack 폴백도 아군 안전 체크 (AOE + CanTargetFriends)
+                if (CombatAPI.IsPointTargetAbility(situation.PrimaryAttack) || situation.PrimaryAttack.Blueprint?.CanTargetFriends == true)
+                {
+                    if (!AoESafetyChecker.IsAoESafeForUnitTarget(situation.PrimaryAttack, situation.Unit, target, situation.Allies))
+                    {
+                        Main.LogDebug($"[AttackPlanner] PrimaryAttack ally safety blocked: {situation.PrimaryAttack.Name} -> {target.CharacterName}");
+                        return null;
+                    }
+                }
+
                 return situation.PrimaryAttack;
             }
 
@@ -382,6 +405,18 @@ namespace CompanionAI_v3.Planning.Planners
                 if (attack == null)
                 {
                     attack = CombatAPI.FindAnyAttackAbility(situation.Unit, situation.RangePreference);
+
+                    // ★ v3.8.45: FindAnyAttackAbility 폴백도 아군 안전 체크
+                    // CanTargetFriends 능력(점사 사격 등)이 반환될 수 있음
+                    if (attack != null && effectiveTarget != null &&
+                        (CombatAPI.IsPointTargetAbility(attack) || attack.Blueprint?.CanTargetFriends == true))
+                    {
+                        if (!AoESafetyChecker.IsAoESafeForUnitTarget(attack, situation.Unit, effectiveTarget, situation.Allies))
+                        {
+                            Main.LogDebug($"[{roleName}] PostMoveAttack FindAny ally safety blocked: {attack.Name} -> {effectiveTarget.CharacterName}");
+                            attack = null;
+                        }
+                    }
                 }
             }
 
