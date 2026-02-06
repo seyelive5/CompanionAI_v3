@@ -255,184 +255,183 @@ namespace CompanionAI_v3.Analysis
         }
 
         /// <summary>
-        /// ★ v3.8.40: 궁극기 유형별 상세 점수 계산
-        /// 전투당 한 번만 사용 가능하므로 상황에 맞는 최적의 궁극기 선택 필요
+        /// ★ v3.8.41: 궁극기 상세 점수 계산 (실제 능력 데이터 기반)
+        ///
+        /// 전투당 한 번만 사용 가능 → 상황에 맞는 최적의 궁극기 선택 필요
+        /// 잠재력 초월 추가 턴에서는 궁극기가 유일한 행동이므로 반드시 사용해야 함
+        ///
+        /// 타겟 유형별 분류:
+        /// - SelfBuff(Personal): 항상 사용 가능, 영구 강화 효과 (대부분의 궁극기)
+        ///   Steady Superiority, Carnival, Overcharge, Firearm Mastery, Unyielding Guard, Daring Breach
+        /// - ImmediateAttack(적 타겟): 즉시 공격, 적 필요
+        ///   Dispatch, Death Waltz, Wild Hunt, Dismantling Attack
+        /// - AllyBuff(아군 타겟): 아군 추가 턴 부여
+        ///   Finest Hour!
+        /// - AreaEffect(지점 타겟): 구역 기반 팀 효과
+        ///   Take and Hold, Orchestrated Firestorm
         /// </summary>
         private static float ScoreUltimateByType(AbilityData ultimate, Situation situation)
         {
             float score = 0f;
             var info = CombatAPI.GetUltimateInfo(ultimate);
 
+            // ========================================
             // 상황 변수 수집
+            // ========================================
             int livingEnemies = situation.Enemies?.Count(e => e != null && e.IsConscious) ?? 0;
             int livingAllies = situation.Allies?.Count(a => a != null && a.IsConscious) ?? 0;
             float hpPercent = situation.HPPercent;
             bool isInDanger = situation.IsInDanger;
-            float nearestEnemyDist = situation.NearestEnemyDistance;
             int hittableEnemies = situation.HittableEnemies?.Count ?? 0;
-
-            // 근접 적 수 (3m 이내)
-            int nearbyEnemies = situation.Enemies?.Count(e =>
-                e != null && e.IsConscious &&
-                CombatAPI.GetDistance(situation.Unit, e) <= 4.5f) ?? 0;
 
             // HP 낮은 아군 수
             int lowHPAllies = situation.Allies?.Count(a =>
                 a != null && a.IsConscious && a != situation.Unit &&
                 CombatAPI.GetHPPercent(a) < 50f) ?? 0;
 
-            // AOE 범위 내 적 수 계산 (AOE 궁극기용)
-            int enemiesInAoERange = 0;
-            if (info.IsAoE && info.AoERadius > 0)
+            Main.LogDebug($"[UtilityScorer] Ultimate {ultimate.Name}: TargetType={info.TargetType}, " +
+                $"HeroicAct={info.IsHeroicAct}, HP={hpPercent:F0}%, Danger={isInDanger}, " +
+                $"Enemies={livingEnemies}, Hittable={hittableEnemies}, LowHPAllies={lowHPAllies}");
+
+            switch (info.TargetType)
             {
-                var clusters = ClusterDetector.FindClusters(
-                    situation.Enemies.Where(e => e != null && e.IsConscious).ToList(),
-                    info.AoERadius);
-                enemiesInAoERange = clusters.Any() ? clusters.Max(c => c.Count) : 0;
-            }
-
-            Main.LogDebug($"[UtilityScorer] Ultimate {ultimate.Name}: Type={info.Type}, " +
-                $"HP={hpPercent:F0}%, Danger={isInDanger}, Enemies={livingEnemies}, " +
-                $"Nearby={nearbyEnemies}, LowHPAllies={lowHPAllies}, AoETargets={enemiesInAoERange}");
-
-            switch (info.Type)
-            {
-                case CombatAPI.UltimateType.Defensive:
+                case CombatAPI.UltimateTargetType.SelfBuff:
                     // ========================================
-                    // 방어적 궁극기: HP 낮거나 위험할 때 우선
+                    // Personal 타겟 궁극기 (대부분의 궁극기)
                     // ========================================
+                    // 항상 사용 가능 (타겟 불필요) → 높은 기본 점수
+                    // 효과가 전투 끝까지 지속 → 적이 많을수록 가치 상승
+                    //
+                    // 실제 예시:
+                    // - Steady Superiority: +1 공격/턴 영구 → 적 많을수록 좋음
+                    // - Firearm Mastery: 연사력만큼 즉시 추가공격 → 적 있으면 즉시 효과
+                    // - Daring Breach: AP/MP 전량 복구 → 잔여 전투량과 비례
+                    // - Unyielding Guard: 3셀 아군 보호 반격 → 아군이 위협받을 때
+                    // - Carnival of Misery: DoT +100% → DoT 기반 빌드에 강력
+                    // - Overcharge: 사역마 풀힐 + AP 할인 → 사역마 있을 때
 
-                    // HP 기반 점수 (HP 낮을수록 높음)
-                    if (hpPercent < 30f)
-                        score += 150f;  // 위급
-                    else if (hpPercent < 50f)
-                        score += 100f;  // 위험
-                    else if (hpPercent < 70f)
-                        score += 50f;   // 주의
-                    else
-                        score -= 50f;   // HP 충분하면 감점
+                    score += 100f;  // 기본: 항상 사용 가능
 
-                    // 위험 상황 보너스
-                    if (isInDanger)
-                        score += 80f;
-
-                    // 근접 적 수 기반 (둘러싸임)
-                    score += nearbyEnemies * 30f;
-
-                    // DesperateMeasure는 위기 상황에서 더 높은 점수
-                    if (info.IsDesperateMeasure && hpPercent < 40f)
-                        score += 100f;
-
-                    Main.LogDebug($"[UtilityScorer] {ultimate.Name}: DEFENSIVE score={score:F0}");
-                    break;
-
-                case CombatAPI.UltimateType.OffensiveSingle:
-                    // ========================================
-                    // 단일 타겟 공격: 고가치 타겟 존재 시 우선
-                    // ========================================
-
-                    // 공격 가능 적 있으면 기본 점수
-                    if (hittableEnemies > 0)
-                        score += 80f;
-                    else
-                        score -= 100f;  // 공격 불가면 큰 감점
-
-                    // 적 수 적을 때 (보스전 등) 더 효율적
-                    if (livingEnemies <= 2)
-                        score += 50f;   // 소수 정예전
-
-                    // HP가 너무 낮으면 공격보다 생존 우선
-                    if (hpPercent < 30f)
-                        score -= 80f;
-
-                    Main.LogDebug($"[UtilityScorer] {ultimate.Name}: SINGLE OFFENSIVE score={score:F0}");
-                    break;
-
-                case CombatAPI.UltimateType.OffensiveAoE:
-                    // ========================================
-                    // AOE 공격: 다수 적 밀집 시 우선
-                    // ========================================
-
-                    // AOE 범위 내 적 수 기반 (핵심 요소)
-                    if (enemiesInAoERange >= 4)
-                        score += 200f;  // 대규모 집단
-                    else if (enemiesInAoERange >= 3)
-                        score += 150f;  // 좋은 기회
-                    else if (enemiesInAoERange >= 2)
-                        score += 80f;   // 괜찮음
-                    else
-                        score -= 50f;   // 단일 타겟에 AOE는 낭비
-
-                    // 전체 적 수 보너스
+                    // 남은 적 수 = 영구 강화의 가치 (적이 많을수록 더 많은 턴 활용)
                     score += livingEnemies * 15f;
 
-                    // HP가 너무 낮으면 감점
-                    if (hpPercent < 30f)
-                        score -= 60f;
+                    // 위험 상황이면 방어적 효과도 가치 있음
+                    if (isInDanger)
+                        score += 30f;
 
-                    Main.LogDebug($"[UtilityScorer] {ultimate.Name}: AOE OFFENSIVE score={score:F0} (AoETargets={enemiesInAoERange})");
+                    Main.LogDebug($"[UtilityScorer] {ultimate.Name}: SELF_BUFF score={score:F0}");
                     break;
 
-                case CombatAPI.UltimateType.Support:
+                case CombatAPI.UltimateTargetType.ImmediateAttack:
                     // ========================================
-                    // 지원 궁극기: 아군이 위험하거나 다수일 때 우선
+                    // 적 타겟 즉시 공격 궁극기
                     // ========================================
+                    // 공격 가능 적이 있어야 효과 발휘
+                    //
+                    // 실제 예시:
+                    // - Dispatch: 필중 단일 타겟 고데미지 (실종 HP 25% 추가)
+                    // - Death Waltz: 다중 근접 공격 (2+AGI/3회)
+                    // - Wild Hunt: 먹잇감 전체 동시공격 필중+필크리
+                    // - Dismantling Attack: 전체 적 exploit + 필중 공격 + 디버프
 
-                    // HP 낮은 아군 수 기반
-                    score += lowHPAllies * 60f;
+                    if (hittableEnemies > 0)
+                    {
+                        score += 120f;  // 공격 가능 = 즉시 효과
 
-                    // 아군 수 기반
-                    score += livingAllies * 20f;
-
-                    // 아군이 없으면 의미 없음
-                    if (livingAllies == 0)
-                        score -= 200f;
-
-                    // 자신의 HP가 위급하면 지원보다 생존
-                    if (hpPercent < 25f)
-                        score -= 100f;
-
-                    Main.LogDebug($"[UtilityScorer] {ultimate.Name}: SUPPORT score={score:F0} (lowHPAllies={lowHPAllies})");
-                    break;
-
-                case CombatAPI.UltimateType.Mobility:
-                    // ========================================
-                    // 이동 궁극기: 적이 멀거나 위치 조정 필요 시 우선
-                    // ========================================
-
-                    // 적이 멀면 이동 필요
-                    if (nearestEnemyDist > 10f)
-                        score += 100f;
-                    else if (nearestEnemyDist > 5f)
-                        score += 50f;
+                        // 적 수에 따른 보너스 (Multi-hit 궁극기는 적 많을수록 유리)
+                        score += Math.Min(livingEnemies * 20f, 100f);
+                    }
                     else
-                        score -= 30f;  // 이미 가까우면 불필요
+                    {
+                        // 공격 불가 = 사용 자체가 불가능하거나 무의미
+                        score -= 200f;
+                        Main.LogDebug($"[UtilityScorer] {ultimate.Name}: No hittable enemies - heavily penalized");
+                    }
 
-                    // 공격 불가 상태면 이동 필요
-                    if (hittableEnemies == 0 && livingEnemies > 0)
-                        score += 80f;
+                    Main.LogDebug($"[UtilityScorer] {ultimate.Name}: IMMEDIATE_ATTACK score={score:F0}");
+                    break;
 
-                    // 위험 상황에서 탈출용으로도 가치
-                    if (isInDanger && nearbyEnemies >= 2)
-                        score += 60f;
+                case CombatAPI.UltimateTargetType.AllyBuff:
+                    // ========================================
+                    // 아군 타겟 궁극기 (Finest Hour! 등)
+                    // ========================================
+                    // 아군 1명에게 추가 턴(풀AP+풀MP) 부여
+                    // 강력한 딜러에게 사용하면 극대효과
 
-                    Main.LogDebug($"[UtilityScorer] {ultimate.Name}: MOBILITY score={score:F0} (dist={nearestEnemyDist:F1})");
+                    if (livingAllies > 0)
+                    {
+                        score += 80f;  // 아군 존재 = 사용 가능
+
+                        // 아군이 많을수록 좋은 타겟 선택지
+                        score += livingAllies * 10f;
+
+                        // HP 낮은 아군이 있으면 추가 턴으로 자힐 가능
+                        score += lowHPAllies * 20f;
+
+                        // 적이 많으면 추가 턴의 가치 상승
+                        score += Math.Min(livingEnemies * 15f, 75f);
+                    }
+                    else
+                    {
+                        // 아군 없음 = 사용 불가
+                        score -= 200f;
+                    }
+
+                    Main.LogDebug($"[UtilityScorer] {ultimate.Name}: ALLY_BUFF score={score:F0} (allies={livingAllies})");
+                    break;
+
+                case CombatAPI.UltimateTargetType.AreaEffect:
+                    // ========================================
+                    // 지점 타겟 구역 효과 궁극기
+                    // ========================================
+                    // Take and Hold: 구역 내 아군 추가 턴 (킬 시 AP 증가)
+                    // Orchestrated Firestorm: 구역 내 적에게 아군 전원 공격
+                    //
+                    // 아군 + 적 배치에 따라 효과 크게 변동
+
+                    // 기본 점수
+                    score += 80f;
+
+                    if (info.NotOffensive)
+                    {
+                        // 아군 지원형 구역 (Take and Hold)
+                        // 구역 내 아군이 많을수록 효과적
+                        score += livingAllies * 20f;
+
+                        // 적이 많으면 킬 보너스로 AP 증가 기대
+                        score += livingEnemies * 10f;
+                    }
+                    else
+                    {
+                        // 공격형 구역 (Orchestrated Firestorm)
+                        // 적이 많을수록 + 아군(공격 참여자)이 많을수록 효과적
+                        score += livingEnemies * 20f;
+                        score += livingAllies * 15f;
+
+                        // 공격 가능한 적이 없으면 무의미
+                        if (livingEnemies == 0)
+                            score -= 150f;
+                    }
+
+                    Main.LogDebug($"[UtilityScorer] {ultimate.Name}: AREA_EFFECT score={score:F0} " +
+                        $"(offensive={!info.NotOffensive}, allies={livingAllies}, enemies={livingEnemies})");
                     break;
 
                 default:
-                    // 알 수 없는 유형 = 기본 점수
-                    score += 30f;
+                    // 분류 불가 = 기본 점수 (사용은 시도)
+                    score += 50f;
                     Main.LogDebug($"[UtilityScorer] {ultimate.Name}: UNKNOWN type, default score");
                     break;
             }
 
-            // HeroicAct vs DesperateMeasure 추가 조정
-            // HeroicAct: 공격적 상황에서 보너스
-            // DesperateMeasure: 방어적 상황에서 보너스
-            if (info.IsHeroicAct && livingEnemies >= 3)
-                score += 30f;
-            if (info.IsDesperateMeasure && (hpPercent < 50f || isInDanger))
-                score += 40f;
+            // ========================================
+            // HeroicAct vs DesperateMeasures: 항상 HeroicAct 우선
+            // ========================================
+            // 동일한 효과에 DesperateMeasures는 추가 페널티(출혈, 스탯감소 등)가 있음
+            // → HeroicAct가 엄격히 상위호환
+            if (info.IsHeroicAct)
+                score += 100f;  // HeroicAct 선호
+            // DesperateMeasures는 보너스 없음 (HeroicAct 불가 시 자동 선택)
 
             return score;
         }

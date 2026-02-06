@@ -1613,60 +1613,60 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
-        /// ★ v3.8.40: 궁극기 유형 분류
+        /// ★ v3.8.41: 궁극기 타겟 유형 분류 (실제 능력 데이터 기반)
+        ///
+        /// 실제 궁극기 분석 결과:
+        /// - SelfBuff(Personal): Steady Superiority, Carnival of Misery, Overcharge,
+        ///   Firearm Mastery, Unyielding Guard, Daring Breach
+        /// - ImmediateAttack(적 타겟): Dispatch, Death Waltz, Wild Hunt, Dismantling Attack
+        /// - AllyBuff(아군 타겟): Finest Hour!
+        /// - AreaEffect(지점 타겟): Take and Hold, Orchestrated Firestorm
         /// </summary>
-        public enum UltimateType
+        public enum UltimateTargetType
         {
             Unknown,
-            Defensive,      // 방어적: 자기 버프, 피해 감소
-            OffensiveSingle,// 공격적 단일: 고데미지 단일 타겟
-            OffensiveAoE,   // 공격적 범위: AOE 데미지
-            Support,        // 지원: 아군 버프/힐
-            Mobility        // 이동: 돌진/텔레포트
+            SelfBuff,         // Personal 타겟: 자기 강화/자원회복/방어오라 (대부분의 궁극기)
+            ImmediateAttack,  // 적 타겟: 즉시 공격 (Dispatch, Death Waltz, Wild Hunt 등)
+            AllyBuff,         // 아군 타겟: 아군 지원 (Finest Hour!)
+            AreaEffect         // 지점 타겟: 구역 효과 (Take and Hold, Orchestrated Firestorm)
         }
 
         /// <summary>
-        /// ★ v3.8.40: 궁극기 유형 판별
+        /// ★ v3.8.41: 궁극기 타겟 유형 판별 (블루프린트 플래그 기반)
         /// </summary>
-        public static UltimateType ClassifyUltimate(AbilityData ability)
+        public static UltimateTargetType ClassifyUltimateTarget(AbilityData ability)
         {
-            if (ability?.Blueprint == null) return UltimateType.Unknown;
+            if (ability?.Blueprint == null) return UltimateTargetType.Unknown;
 
             var bp = ability.Blueprint;
 
-            // 1. 이동/돌진 궁극기
-            if (bp.IsCharge || bp.IsMoveUnit)
-                return UltimateType.Mobility;
-
-            // 2. 방어적 궁극기 (자기 버프, NotOffensive)
-            if (bp.NotOffensive && bp.CanTargetSelf)
-                return UltimateType.Defensive;
-
-            // 3. 지원 궁극기 (아군 타겟, 비공격적)
-            if (bp.NotOffensive && bp.CanTargetFriends && !bp.CanTargetEnemies)
-                return UltimateType.Support;
-
-            // 4. 공격적 AOE
-            if (bp.IsAoE || bp.IsAoEDamage || bp.CanTargetPoint)
-                return UltimateType.OffensiveAoE;
-
-            // 5. 공격적 단일 (기본 공격 궁극기)
+            // 1. 적 타겟 = 즉시 공격 (Dispatch, Death Waltz, Wild Hunt, Dismantling Attack)
             if (bp.CanTargetEnemies)
-                return UltimateType.OffensiveSingle;
+                return UltimateTargetType.ImmediateAttack;
 
-            // 6. 그 외 자기 버프 = 방어적
-            if (bp.CanTargetSelf && !bp.CanTargetEnemies)
-                return UltimateType.Defensive;
+            // 2. 지점 타겟 = 구역 효과 (Take and Hold, Orchestrated Firestorm)
+            if (bp.CanTargetPoint && !bp.CanTargetSelf)
+                return UltimateTargetType.AreaEffect;
 
-            return UltimateType.Unknown;
+            // 3. 아군 타겟 (자기 제외) = 아군 버프 (Finest Hour!)
+            if (bp.CanTargetFriends && !bp.CanTargetSelf)
+                return UltimateTargetType.AllyBuff;
+
+            // 4. Self 타겟 = 자기 강화 (대부분의 Personal 궁극기)
+            //    Steady Superiority, Carnival, Overcharge, Firearm Mastery,
+            //    Unyielding Guard, Daring Breach 등
+            if (bp.CanTargetSelf)
+                return UltimateTargetType.SelfBuff;
+
+            return UltimateTargetType.Unknown;
         }
 
         /// <summary>
-        /// ★ v3.8.40: 궁극기 상세 정보 구조체
+        /// ★ v3.8.41: 궁극기 상세 정보 구조체
         /// </summary>
         public struct UltimateInfo
         {
-            public UltimateType Type;
+            public UltimateTargetType TargetType;
             public bool IsHeroicAct;
             public bool IsDesperateMeasure;
             public bool IsAoE;
@@ -1675,21 +1675,22 @@ namespace CompanionAI_v3.GameInterface
             public bool CanTargetFriends;
             public bool CanTargetEnemies;
             public bool CanTargetPoint;
+            public bool NotOffensive;
             public string EffectOnAlly;
             public string EffectOnEnemy;
         }
 
         /// <summary>
-        /// ★ v3.8.40: 궁극기 상세 정보 조회
+        /// ★ v3.8.41: 궁극기 상세 정보 조회
         /// </summary>
         public static UltimateInfo GetUltimateInfo(AbilityData ability)
         {
-            var info = new UltimateInfo { Type = UltimateType.Unknown };
+            var info = new UltimateInfo { TargetType = UltimateTargetType.Unknown };
             if (ability?.Blueprint == null) return info;
 
             var bp = ability.Blueprint;
 
-            info.Type = ClassifyUltimate(ability);
+            info.TargetType = ClassifyUltimateTarget(ability);
             info.IsHeroicAct = bp.IsHeroicAct;
             info.IsDesperateMeasure = bp.IsDesperateMeasure;
             info.IsAoE = bp.IsAoE || bp.IsAoEDamage;
@@ -1698,6 +1699,7 @@ namespace CompanionAI_v3.GameInterface
             info.CanTargetFriends = bp.CanTargetFriends;
             info.CanTargetEnemies = bp.CanTargetEnemies;
             info.CanTargetPoint = bp.CanTargetPoint;
+            info.NotOffensive = bp.NotOffensive;
             info.EffectOnAlly = bp.EffectOnAlly.ToString();
             info.EffectOnEnemy = bp.EffectOnEnemy.ToString();
 
