@@ -451,6 +451,19 @@ namespace CompanionAI_v3.GameInterface
                         {
                             if (SetupMovement(unit, result.Destination.Value, context))
                             {
+                                // ★ v3.8.42: 이동 중 카메라 추적
+                                // 게임은 UnitMoveToProper에 대한 카메라 핸들러가 없어서
+                                // 직접 Follower.Follow()를 호출하여 이동 중 카메라가 유닛을 따라감
+                                // (다음 능력 시전 시 자동으로 Release됨)
+                                try
+                                {
+                                    if (Kingmaker.Settings.SettingsRoot.Game.TurnBased.CameraScrollToCurrentUnit.GetValue())
+                                    {
+                                        Game.Instance.CameraController?.Follower?.Follow(unit);
+                                    }
+                                }
+                                catch (Exception) { /* 카메라 실패가 AI를 중단시키지 않도록 */ }
+
                                 Main.Log($"[CompanionAIDecisionNode] {unit.CharacterName}: Move to {result.Destination.Value}");
                                 return Status.Success;  // → Selector가 Movement 노드 실행
                             }

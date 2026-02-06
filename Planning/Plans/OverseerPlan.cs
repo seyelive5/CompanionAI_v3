@@ -59,6 +59,10 @@ namespace CompanionAI_v3.Planning.Plans
                     actions.Add(ultimateAction);
                     return new TurnPlan(actions, TurnPriority.Critical, "Overseer ultimate (Transcend Potential)");
                 }
+                // ★ v3.8.42: 궁극기 실패 시 즉시 EndTurn (WarhammerAbilityRestriction으로 다른 능력 사용 불가)
+                Main.Log("[Overseer] Ultimate failed during Transcend Potential - ending turn");
+                actions.Add(PlannedAction.EndTurn("Overseer no ultimate available"));
+                return new TurnPlan(actions, TurnPriority.EndTurn, "Overseer ultimate failed (Transcend Potential)");
             }
 
             // ══════════════════════════════════════════════════════════════
