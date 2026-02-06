@@ -312,6 +312,9 @@ namespace CompanionAI_v3.Core
     /// </summary>
     public enum TurnPriority
     {
+        /// <summary>★ v3.8.42: 궁극기 전용 턴 (잠재력 초월 등, 최고 우선순위)</summary>
+        Critical = -10,
+
         /// <summary>긴급 (HP 위험, 즉시 힐/후퇴)</summary>
         Emergency = 0,
 

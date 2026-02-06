@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Kingmaker;
 using Kingmaker.AI;
 using Kingmaker.AI.AreaScanning;
 using Kingmaker.EntitySystem.Entities;
@@ -19,6 +20,29 @@ namespace CompanionAI_v3.GameInterface
     /// </summary>
     public static class MovementAPI
     {
+        #region ★ v3.8.15: AI Pathfinding Cache (스터터링 방지)
+
+        /// <summary>
+        /// AI 패스파인딩 캐시 - 한 턴에 한 번만 계산
+        /// 문제: FindAllReachableTilesWithThreatsSync가 한 턴에 4번까지 호출됨
+        /// 해결: 첫 호출에서 캐싱하고 이후 호출에서 재사용
+        /// </summary>
+        private static string _cachedUnitId;
+        private static float _cachedAP;
+        private static Dictionary<GraphNode, WarhammerPathAiCell> _cachedAiTiles;
+        private static int _cachedTurnNumber = -1;
+
+        /// <summary>AI 패스파인딩 캐시 무효화</summary>
+        public static void InvalidateAiPathCache()
+        {
+            _cachedUnitId = null;
+            _cachedAP = 0;
+            _cachedAiTiles = null;
+            Main.LogDebug("[MovementAPI] AI pathfinding cache invalidated");
+        }
+
+        #endregion
+
         #region Position Scoring
 
         public class PositionScore
@@ -118,6 +142,142 @@ namespace CompanionAI_v3.GameInterface
             }
         }
 
+        /// <summary>
+        /// ★ v3.8.13: AI용 패스파인딩 - 경로 위협 데이터 포함 (ProvokedAttacks, EnteredAoE, StepsInsideDamagingAoE)
+        /// ★ v3.8.15: 캐싱 추가 - 한 턴에 한 번만 계산하여 스터터링 방지
+        ///
+        /// 게임의 AI와 동일한 메서드 사용 (AiAreaScanner.FindAllReachableNodesAsync 참조)
+        ///
+        /// 핵심 차이점:
+        /// - FindAllReachableTilesSync: WarhammerPathPlayerCell 반환 (위협 데이터 없음)
+        /// - FindAllReachableTilesWithThreatsSync: WarhammerPathAiCell 반환 (위협 데이터 포함)
+        /// </summary>
+        public static Dictionary<GraphNode, WarhammerPathAiCell> FindAllReachableTilesWithThreatsSync(
+            BaseUnitEntity unit,
+            float? maxAP = null)
+        {
+            if (unit == null) return new Dictionary<GraphNode, WarhammerPathAiCell>();
+
+            try
+            {
+                float ap = maxAP ?? unit.CombatState?.ActionPointsBlue ?? 0f;
+                if (ap <= 0) return new Dictionary<GraphNode, WarhammerPathAiCell>();
+
+                string unitId = unit.UniqueId;
+                int currentTurn = Game.Instance?.TurnController?.CombatRound ?? -1;
+
+                // ★ v3.8.15: 캐시 체크 - 같은 유닛, 같은 턴, 같은 AP면 캐시된 결과 반환
+                if (_cachedAiTiles != null &&
+                    _cachedUnitId == unitId &&
+                    _cachedTurnNumber == currentTurn &&
+                    Math.Abs(_cachedAP - ap) < 0.1f)
+                {
+                    Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Using cached AI pathfinding ({_cachedAiTiles.Count} tiles)");
+                    return _cachedAiTiles;
+                }
+
+                var agent = unit.View?.MovementAgent;
+                if (agent == null) return new Dictionary<GraphNode, WarhammerPathAiCell>();
+
+                // ★ 게임 AI와 동일: 먼저 위협 데이터 수집
+                var threatsDict = AiBrainHelper.GatherThreatsData(unit);
+
+                // ★ AI용 패스파인딩 호출 (비동기 → 동기 변환)
+                // 참고: 이 호출은 AI 턴 처리 중이므로 블로킹해도 안전
+                var task = PathfindingService.Instance.FindAllReachableTiles_Delayed_Task(
+                    agent,
+                    unit.Position,
+                    (int)ap,
+                    threatsDict
+                );
+
+                // ★ v3.8.15: 타임아웃 200ms로 축소 (기존 1000ms → 끊김 원인)
+                if (!task.Wait(200))
+                {
+                    Main.LogDebug($"[MovementAPI] {unit.CharacterName}: AI pathfinding timeout, falling back to player version");
+                    var fallback = ConvertToAiCells(FindAllReachableTilesSync(unit, maxAP));
+                    // 폴백 결과도 캐싱
+                    _cachedUnitId = unitId;
+                    _cachedAP = ap;
+                    _cachedAiTiles = fallback;
+                    _cachedTurnNumber = currentTurn;
+                    return fallback;
+                }
+
+                var tiles = task.Result;
+                if (tiles == null || tiles.Count == 0)
+                {
+                    Main.LogDebug($"[MovementAPI] {unit.CharacterName}: AI pathfinding returned null/empty, falling back");
+                    var fallback = ConvertToAiCells(FindAllReachableTilesSync(unit, maxAP));
+                    _cachedUnitId = unitId;
+                    _cachedAP = ap;
+                    _cachedAiTiles = fallback;
+                    _cachedTurnNumber = currentTurn;
+                    return fallback;
+                }
+
+                // ★ v3.8.15: 결과 캐싱
+                _cachedUnitId = unitId;
+                _cachedAP = ap;
+                _cachedAiTiles = tiles;
+                _cachedTurnNumber = currentTurn;
+
+                // ★ 디버그: 경로 위협 데이터 샘플 출력 (첫 호출에서만)
+                int threatsFound = 0;
+                foreach (var kvp in tiles)
+                {
+                    var cell = kvp.Value;
+                    if (cell.ProvokedAttacks > 0 || cell.EnteredAoE > 0 || cell.StepsInsideDamagingAoE > 0)
+                    {
+                        threatsFound++;
+                        if (threatsFound <= 3)  // 최대 3개만 로깅
+                        {
+                            Main.LogDebug($"[MovementAPI] ThreatData: Node({cell.Position.x:F1},{cell.Position.z:F1}) AoO={cell.ProvokedAttacks}, AoE={cell.EnteredAoE}, DmgAoE={cell.StepsInsideDamagingAoE}");
+                        }
+                    }
+                }
+
+                Main.Log($"[MovementAPI] {unit.CharacterName}: AI pathfinding found {tiles.Count} tiles, {threatsFound} with threats");
+                return tiles;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[MovementAPI] FindAllReachableTilesWithThreatsSync error: {ex.Message}");
+                return ConvertToAiCells(FindAllReachableTilesSync(unit, maxAP));
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.8.13: WarhammerPathPlayerCell → WarhammerPathAiCell 변환 (폴백용)
+        /// 위협 데이터는 0으로 설정 (플레이어 셀에는 없음)
+        /// </summary>
+        private static Dictionary<GraphNode, WarhammerPathAiCell> ConvertToAiCells(
+            Dictionary<GraphNode, WarhammerPathPlayerCell> playerCells)
+        {
+            var result = new Dictionary<GraphNode, WarhammerPathAiCell>();
+            if (playerCells == null) return result;
+
+            foreach (var kvp in playerCells)
+            {
+                var pc = kvp.Value;
+                var node = pc.Node as CustomGridNodeBase;
+                if (node == null) continue;
+
+                result[kvp.Key] = new WarhammerPathAiCell(
+                    pc.Position,
+                    pc.DiagonalsCount,
+                    pc.Length,
+                    pc.Node,
+                    pc.ParentNode,
+                    pc.IsCanStand,
+                    0,  // EnteredAoE - 플레이어 셀에는 없음
+                    0,  // StepsInsideDamagingAoE
+                    0   // ProvokedAttacks
+                );
+            }
+            return result;
+        }
+
         #endregion
 
         #region Threat Detection
@@ -194,67 +354,76 @@ namespace CompanionAI_v3.GameInterface
             WarhammerPathPlayerCell pathCell,
             BattlefieldInfluenceMap influenceMap)
         {
+            // ★ v3.8.13: AI 셀로 변환하여 통합 메서드 호출
+            var aiCell = new WarhammerPathAiCell(
+                pathCell.Position,
+                pathCell.DiagonalsCount,
+                pathCell.Length,
+                pathCell.Node,
+                pathCell.ParentNode,
+                pathCell.IsCanStand,
+                0, 0, 0  // 플레이어 셀에는 위협 데이터 없음
+            );
+            return EvaluatePathRiskAi(unit, startPos, endNode, aiCell, influenceMap);
+        }
+
+        /// <summary>
+        /// ★ v3.8.13: AI 셀용 경로 위험도 평가 (실제 경로 위협 데이터 활용)
+        /// AI 패스파인더가 계산한 ProvokedAttacks, EnteredAoE, StepsInsideDamagingAoE를 직접 사용
+        ///
+        /// 핵심: 게임의 AI 패스파인더는 경로 전체의 위협을 누적 계산하여 셀에 저장
+        /// - ProvokedAttacks: 해당 경로로 이동 시 유발되는 총 AoO 수
+        /// - EnteredAoE: 경로에서 진입하는 AoE 구역 수
+        /// - StepsInsideDamagingAoE: 피해 AoE 내에서 이동하는 총 칸 수
+        /// </summary>
+        public static float EvaluatePathRiskAi(
+            BaseUnitEntity unit,
+            Vector3 startPos,
+            CustomGridNodeBase endNode,
+            WarhammerPathAiCell pathCell,
+            BattlefieldInfluenceMap influenceMap)
+        {
             if (unit == null || endNode == null || pathCell.Node == null)
                 return 0f;
 
             float totalRisk = 0f;
-            int nodeCount = 0;
 
             try
             {
-                // 경로를 역추적하여 모든 노드의 위협 점수 합산
-                // ParentNode 체인을 따라 시작점까지 역추적
-                var currentNode = endNode;
-                var visited = new HashSet<CustomGridNodeBase>();
+                // ★ v3.8.13: AI 셀의 경로 위협 데이터 직접 활용 (게임 패스파인더가 이미 계산함)
+                // 이 값들은 경로 전체의 누적 위협이므로 별도 계산 불필요
+                float pathProvokedAttacks = pathCell.ProvokedAttacks;
+                float pathEnteredAoE = pathCell.EnteredAoE;
+                float pathDamagingAoESteps = pathCell.StepsInsideDamagingAoE;
 
-                while (currentNode != null && !visited.Contains(currentNode))
+                // 경로 위협 점수 계산 (게임의 TileScorer와 유사한 가중치)
+                // - AoO: 20점 (매우 위험 - 즉시 피해 + 행동 방해)
+                // - AoE 진입: 15점 (위험 - 지속 피해 가능성)
+                // - 피해 AoE 내 이동: 10점 (중간 - 매 칸 피해)
+                totalRisk += pathProvokedAttacks * 20f;
+                totalRisk += pathEnteredAoE * 15f;
+                totalRisk += pathDamagingAoESteps * 10f;
+
+                // ★ 디버그: 실제 경로 위협 데이터 로깅
+                if (totalRisk > 0)
                 {
-                    visited.Add(currentNode);
-                    var nodePos = currentNode.Vector3Position;
+                    Main.LogDebug($"[MovementAPI] PathRiskAi: AoO={pathProvokedAttacks}, AoE={pathEnteredAoE}, DmgAoE={pathDamagingAoESteps} -> Risk={totalRisk:F1}");
+                }
 
-                    // 1. 게임 API 기반 위협 (AoO, AoE, Overwatch)
-                    float nodeThreat = CalculateThreatScore(unit, currentNode);
-                    totalRisk += nodeThreat * 0.5f;  // 경로 상 위협은 목적지보다 가중치 낮음
-
-                    // 2. 영향력 맵 기반 위협 (적 밀집도)
-                    if (influenceMap != null && influenceMap.IsValid)
-                    {
-                        float influenceThreat = influenceMap.GetThreatAt(nodePos);
-                        totalRisk += influenceThreat * 3f;  // 적 밀집 구역 통과 페널티
-                    }
-
-                    nodeCount++;
-
-                    // ★ v3.6.4: 시작점에 도달하면 종료 (1타일 = GridCellSize 미터)
-                    if (Vector3.Distance(nodePos, startPos) < CombatAPI.GridCellSize)
-                        break;
-
-                    // 다음 노드로 이동 (부모 노드)
-                    currentNode = pathCell.ParentNode as CustomGridNodeBase;
-
-                    // 순환 방지: 100개 노드 이상이면 중단
-                    if (nodeCount > 100)
-                    {
-                        Main.LogDebug($"[MovementAPI] EvaluatePathRisk: Path too long, breaking");
-                        break;
-                    }
+                // 추가: 영향력 맵 기반 위협 (적 밀집도) - 목적지에서만 평가
+                if (influenceMap != null && influenceMap.IsValid)
+                {
+                    float influenceThreat = influenceMap.GetThreatAt(endNode.Vector3Position);
+                    totalRisk += influenceThreat * 3f;
                 }
             }
             catch (Exception ex)
             {
-                Main.LogDebug($"[MovementAPI] EvaluatePathRisk error: {ex.Message}");
+                Main.LogDebug($"[MovementAPI] EvaluatePathRiskAi error: {ex.Message}");
                 return 0f;
             }
 
-            // 평균 위험도 반환 (경로가 길어도 불이익 없도록)
-            float averageRisk = nodeCount > 0 ? totalRisk / nodeCount : 0f;
-
-            if (averageRisk > 0)
-            {
-                Main.LogDebug($"[MovementAPI] PathRisk: {averageRisk:F1} (nodes={nodeCount})");
-            }
-
-            return averageRisk;
+            return totalRisk;
         }
 
         /// <summary>
@@ -545,38 +714,29 @@ namespace CompanionAI_v3.GameInterface
             AIRole role = AIRole.Auto,
             Analysis.PredictiveThreatMap predictiveMap = null)
         {
-            // ★ v3.1.01: predictedMP가 있으면 사용, 없으면 기본 동작
+            // ★ v3.8.13: AI용 패스파인딩 사용 - 경로 위협 데이터(ProvokedAttacks, EnteredAoE) 포함
             var tiles = predictedMP > 0
-                ? FindAllReachableTilesSync(unit, predictedMP)
-                : FindAllReachableTilesSync(unit);
+                ? FindAllReachableTilesWithThreatsSync(unit, predictedMP)
+                : FindAllReachableTilesWithThreatsSync(unit);
             if (tiles == null || tiles.Count == 0)
             {
                 Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles (predictedMP={predictedMP:F1})");
                 return null;
             }
 
+            // ★ v3.8.13: 이제 AI 셀에 실제 경로 위협 데이터가 포함됨
+            // BattlefieldGrid 검증만 추가로 수행
             var aiCells = new Dictionary<GraphNode, WarhammerPathAiCell>();
             foreach (var kvp in tiles)
             {
-                var playerCell = kvp.Value;
-                var node = playerCell.Node as CustomGridNodeBase;
-                if (node == null) continue;
+                var aiCell = kvp.Value;
+                var node = aiCell.Node as CustomGridNodeBase;
+                if (node == null || !aiCell.IsCanStand) continue;
 
                 // ★ v3.7.62: BattlefieldGrid 검증 - Walkable/점유 체크
                 if (!BattlefieldGrid.Instance.ValidateNode(unit, node))
                     continue;
 
-                var aiCell = new WarhammerPathAiCell(
-                    node.Vector3Position,
-                    0,
-                    playerCell.Length,
-                    node,
-                    null,
-                    playerCell.IsCanStand,
-                    0,
-                    0,
-                    0
-                );
                 aiCells[kvp.Key] = aiCell;
             }
 
@@ -603,20 +763,20 @@ namespace CompanionAI_v3.GameInterface
                 {
                     ApplyInfluenceScores(score, influenceMap, role, predictiveMap);
 
-                    // ★ v3.5.41: 경로 위험도 평가 (Larian MovementScore 개념)
-                    // 원본 WarhammerPathPlayerCell 조회
+                    // ★ v3.8.13: AI 셀에서 직접 경로 위험도 평가 (실제 위협 데이터 활용)
+                    // AI 패스파인더가 이미 경로 상의 AoO, AoE 진입 횟수를 계산해둠
                     var originalTile = tiles.Values.FirstOrDefault(t =>
                         t.Node == score.Node);
 
-                    if (originalTile.Node != null && originalTile.ParentNode != null)
+                    if (originalTile.Node != null)
                     {
-                        // 경로 정보가 있으면 정확한 경로 위험도 계산
-                        score.PathRiskScore = EvaluatePathRisk(
+                        // AI 셀의 경로 위협 데이터 직접 활용
+                        score.PathRiskScore = EvaluatePathRiskAi(
                             unit, unit.Position, score.Node, originalTile, influenceMap);
                     }
                     else
                     {
-                        // 경로 정보 없으면 단순 샘플링 방식 사용
+                        // 폴백: 단순 샘플링 방식
                         score.PathRiskScore = EvaluatePathRiskSimple(
                             unit, unit.Position, score.Position, influenceMap);
                     }
@@ -704,10 +864,10 @@ namespace CompanionAI_v3.GameInterface
         {
             if (unit == null || target == null) return null;
 
-            // ★ v3.1.01: predictedMP 지원
+            // ★ v3.8.13: AI용 패스파인딩 사용 - 경로 위협 데이터 포함
             var tiles = predictedMP > 0
-                ? FindAllReachableTilesSync(unit, predictedMP)
-                : FindAllReachableTilesSync(unit);
+                ? FindAllReachableTilesWithThreatsSync(unit, predictedMP)
+                : FindAllReachableTilesWithThreatsSync(unit);
             if (tiles == null || tiles.Count == 0)
             {
                 Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles for melee approach (predictedMP={predictedMP:F1})");
@@ -724,9 +884,9 @@ namespace CompanionAI_v3.GameInterface
 
             foreach (var kvp in tiles)
             {
-                var playerCell = kvp.Value;
-                var node = playerCell.Node as CustomGridNodeBase;
-                if (node == null || !playerCell.IsCanStand) continue;
+                var aiCell = kvp.Value;
+                var node = aiCell.Node as CustomGridNodeBase;
+                if (node == null || !aiCell.IsCanStand) continue;
 
                 // ★ v3.7.62: BattlefieldGrid 검증 - Walkable/점유 체크
                 if (!BattlefieldGrid.Instance.ValidateNode(unit, node))
@@ -759,31 +919,34 @@ namespace CompanionAI_v3.GameInterface
                 if (flankDot > 0.5f)  // 뒤쪽에서 공격
                     score += 15f;
 
-                // 3. AoE/AoO 위협 점수 계산 (CalculateThreatScore가 AoO도 포함)
-                float threatScore = CalculateThreatScore(unit, node);
+                // 3. ★ v3.8.13: AI 셀의 경로 위협 데이터 활용 (목적지 위협 + 경로 위협)
+                // CalculateThreatScore(목적지)에 추가로 경로 위협도 반영
+                float destThreatScore = CalculateThreatScore(unit, node);
+                float pathThreatScore = aiCell.ProvokedAttacks * 20f + aiCell.EnteredAoE * 15f + aiCell.StepsInsideDamagingAoE * 10f;
+                float threatScore = destThreatScore + pathThreatScore;
                 score -= threatScore;
 
                 var posScore = new PositionScore
                 {
                     Node = node,
                     CanStand = true,
-                    APCost = playerCell.Length,
+                    APCost = aiCell.Length,
                     DistanceScore = score,
                     ThreatScore = threatScore
                 };
 
                 // ★ v3.2.25: 영향력 맵 + Role별 Frontline 점수 적용
                 // ★ v3.4.00: 예측 위협 맵 점수 추가
-                // ★ v3.5.41: 경로 위험도 점수 추가
+                // ★ v3.8.13: AI 셀로 경로 위험도 평가
                 if (influenceMap != null && influenceMap.IsValid)
                 {
                     ApplyInfluenceScores(posScore, influenceMap, role, predictiveMap);
 
-                    // ★ v3.5.41: 경로 위험도 평가
-                    if (playerCell.ParentNode != null)
+                    // ★ v3.8.13: AI 셀의 경로 위협 데이터 직접 활용
+                    if (aiCell.Node != null)
                     {
-                        posScore.PathRiskScore = EvaluatePathRisk(
-                            unit, unitPos, node, playerCell, influenceMap);
+                        posScore.PathRiskScore = EvaluatePathRiskAi(
+                            unit, unitPos, node, aiCell, influenceMap);
                     }
                     else
                     {
@@ -854,10 +1017,10 @@ namespace CompanionAI_v3.GameInterface
             if (unit == null || enemies == null || enemies.Count == 0)
                 return null;
 
-            // ★ v3.1.01: predictedMP 지원
+            // ★ v3.8.13: AI용 패스파인딩 사용 - 경로 위협 데이터 포함
             var tiles = predictedMP > 0
-                ? FindAllReachableTilesSync(unit, predictedMP)
-                : FindAllReachableTilesSync(unit);
+                ? FindAllReachableTilesWithThreatsSync(unit, predictedMP)
+                : FindAllReachableTilesWithThreatsSync(unit);
             if (tiles == null || tiles.Count == 0)
             {
                 Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles for retreat (predictedMP={predictedMP:F1})");
@@ -883,9 +1046,9 @@ namespace CompanionAI_v3.GameInterface
 
             foreach (var kvp in tiles)
             {
-                var playerCell = kvp.Value;
-                var node = playerCell.Node as CustomGridNodeBase;
-                if (node == null || !playerCell.IsCanStand) continue;
+                var aiCell = kvp.Value;
+                var node = aiCell.Node as CustomGridNodeBase;
+                if (node == null || !aiCell.IsCanStand) continue;
 
                 // ★ v3.7.62: BattlefieldGrid 검증 - Walkable/점유 체크
                 if (!BattlefieldGrid.Instance.ValidateNode(unit, node))
@@ -944,31 +1107,34 @@ namespace CompanionAI_v3.GameInterface
                 float moveDist = Vector3.Distance(unit.Position, pos);
                 float moveDistPenalty = moveDist * 0.5f;
 
+                // ★ v3.8.13: AI 셀의 경로 위협 데이터 활용 (목적지 위협 + 경로 위협)
+                float destThreatScore = CalculateThreatScore(unit, node);
+                float pathThreatScore = aiCell.ProvokedAttacks * 20f + aiCell.EnteredAoE * 15f + aiCell.StepsInsideDamagingAoE * 10f;
+
                 var score = new PositionScore
                 {
                     Node = node,
                     CanStand = true,
-                    APCost = playerCell.Length,
+                    APCost = aiCell.Length,
                     // ★ v3.7.04: 사역마 거리 패널티 적용
                     // ★ v3.7.11: 무기 사거리 초과 패널티 적용
-                    DistanceScore = distScore + directionBonus - moveDistPenalty - familiarDistPenalty - weaponRangePenalty
+                    DistanceScore = distScore + directionBonus - moveDistPenalty - familiarDistPenalty - weaponRangePenalty,
+                    // ★ v3.8.13: 경로 위협도 반영
+                    ThreatScore = destThreatScore + pathThreatScore
                 };
-
-                // ★ v3.0.62: AoE/위협 점수 계산
-                score.ThreatScore = CalculateThreatScore(unit, node);
 
                 // ★ v3.2.25: 영향력 맵 + Role별 Frontline 점수 적용
                 // ★ v3.4.00: 예측 위협 맵 점수 추가
-                // ★ v3.5.41: 경로 위험도 점수 추가
+                // ★ v3.8.13: AI 셀로 경로 위험도 평가
                 if (influenceMap != null && influenceMap.IsValid)
                 {
                     ApplyInfluenceScores(score, influenceMap, role, predictiveMap);
 
-                    // ★ v3.5.41: 경로 위험도 평가 (후퇴 시 특히 중요)
-                    if (playerCell.ParentNode != null)
+                    // ★ v3.8.13: AI 셀의 경로 위협 데이터 직접 활용
+                    if (aiCell.Node != null)
                     {
-                        score.PathRiskScore = EvaluatePathRisk(
-                            unit, unit.Position, node, playerCell, influenceMap);
+                        score.PathRiskScore = EvaluatePathRiskAi(
+                            unit, unit.Position, node, aiCell, influenceMap);
                     }
                     else
                     {
@@ -1010,9 +1176,9 @@ namespace CompanionAI_v3.GameInterface
 
                 foreach (var kvp in tiles)
                 {
-                    var playerCell = kvp.Value;
-                    var node = playerCell.Node as CustomGridNodeBase;
-                    if (node == null || !playerCell.IsCanStand) continue;
+                    var aiCell = kvp.Value;
+                    var node = aiCell.Node as CustomGridNodeBase;
+                    if (node == null || !aiCell.IsCanStand) continue;
 
                     var pos = node.Vector3Position;
 
@@ -1066,9 +1232,10 @@ namespace CompanionAI_v3.GameInterface
         {
             if (unit == null || target == null) return null;
 
+            // ★ v3.8.13: AI용 패스파인딩 사용 - 경로 위협 데이터 포함
             var tiles = predictedMP > 0
-                ? FindAllReachableTilesSync(unit, predictedMP)
-                : FindAllReachableTilesSync(unit);
+                ? FindAllReachableTilesWithThreatsSync(unit, predictedMP)
+                : FindAllReachableTilesWithThreatsSync(unit);
             if (tiles == null || tiles.Count == 0)
             {
                 Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles for approach");
@@ -1078,33 +1245,41 @@ namespace CompanionAI_v3.GameInterface
             var targetPos = target.Position;
             PositionScore closestCandidate = null;
             float closestDist = float.MaxValue;
+            float lowestPathRisk = float.MaxValue;
 
             foreach (var kvp in tiles)
             {
-                var playerCell = kvp.Value;
-                var node = playerCell.Node as CustomGridNodeBase;
-                if (node == null || !playerCell.IsCanStand) continue;
+                var aiCell = kvp.Value;
+                var node = aiCell.Node as CustomGridNodeBase;
+                if (node == null || !aiCell.IsCanStand) continue;
 
                 var pos = node.Vector3Position;
                 float distToTarget = Vector3.Distance(pos, targetPos);
 
+                // ★ v3.8.13: 경로 위협도 계산 (접근 시에도 안전한 경로 선호)
+                float pathRisk = aiCell.ProvokedAttacks * 20f + aiCell.EnteredAoE * 15f + aiCell.StepsInsideDamagingAoE * 10f;
+
                 // 현재 위치보다 가깝고, 지금까지 찾은 것보다 가까우면 갱신
+                // 같은 거리면 더 안전한 경로 선택
                 float currentDist = Vector3.Distance(unit.Position, targetPos);
-                if (distToTarget < currentDist && distToTarget < closestDist)
+                if (distToTarget < currentDist &&
+                    (distToTarget < closestDist || (distToTarget == closestDist && pathRisk < lowestPathRisk)))
                 {
                     closestDist = distToTarget;
+                    lowestPathRisk = pathRisk;
                     closestCandidate = new PositionScore
                     {
                         Node = node,
                         CanStand = true,
-                        DistanceScore = 100f - distToTarget  // 가까울수록 높은 점수
+                        DistanceScore = 100f - distToTarget,  // 가까울수록 높은 점수
+                        PathRiskScore = pathRisk  // ★ v3.8.13: 경로 위험도 기록
                     };
                 }
             }
 
             if (closestCandidate != null)
             {
-                Main.Log($"[MovementAPI] {unit.CharacterName}: Approach position at ({closestCandidate.Position.x:F1},{closestCandidate.Position.z:F1}) dist={closestDist:F1}m to {target.CharacterName}");
+                Main.Log($"[MovementAPI] {unit.CharacterName}: Approach position at ({closestCandidate.Position.x:F1},{closestCandidate.Position.z:F1}) dist={closestDist:F1}m, pathRisk={lowestPathRisk:F1} to {target.CharacterName}");
             }
 
             return closestCandidate;

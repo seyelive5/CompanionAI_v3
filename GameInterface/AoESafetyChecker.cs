@@ -393,6 +393,11 @@ namespace CompanionAI_v3.GameInterface
             float abilityRange = CombatAPI.GetAbilityRangeInTiles(ability);
             float angle = CombatAPI.GetPatternAngle(ability);
 
+            // ★ v3.8.33: 방향성 패턴(Ray/Cone/Sector)은 caster에서 시작하여 radius만큼만 뻗어나감
+            // abilityRange(무기 사거리)가 아닌 radius(패턴 반경)가 실제 유효 사거리!
+            // 예: 무기 사거리 15, 패턴 반경 6 → Ray는 caster에서 6타일만 이동
+            float effectiveRange = radius;  // 방향성 패턴은 항상 patternRadius 사용
+
             var candidates = new System.Collections.Generic.List<AoEScore>();
 
             // 각 적을 주 타겟으로 평가 (방향 결정)
@@ -401,8 +406,9 @@ namespace CompanionAI_v3.GameInterface
                 if (primaryTarget == null || !primaryTarget.IsConscious) continue;
 
                 // ★ v3.5.98: 타일 단위로 변환
+                // ★ v3.8.33: abilityRange 대신 effectiveRange(패턴 반경) 사용
                 float distToCaster = CombatAPI.MetersToTiles(Vector3.Distance(caster.Position, primaryTarget.Position));
-                if (distToCaster > abilityRange) continue;
+                if (distToCaster > effectiveRange) continue;
 
                 // 이 적을 향한 방향으로 패턴 시전 시 영향받는 유닛 계산
                 Vector3 direction = (primaryTarget.Position - caster.Position).normalized;
@@ -519,6 +525,7 @@ namespace CompanionAI_v3.GameInterface
         /// <summary>
         /// ★ v3.1.18: 유닛이 방향성 패턴 내에 있는지 확인
         /// ★ v3.6.10: 높이 체크 추가 (Directional은 0.3m 제한)
+        /// ★ v3.8.09: Custom 패턴 지원 추가
         /// </summary>
         public static bool IsInDirectionalPattern(
             Vector3 toUnit,
@@ -552,6 +559,17 @@ namespace CompanionAI_v3.GameInterface
                 case Kingmaker.Blueprints.PatternType.Sector:
                     // Cone/Sector: 지정된 각도의 절반 이내
                     return unitAngle <= angle / 2f;
+
+                case Kingmaker.Blueprints.PatternType.Custom:
+                    // ★ v3.8.09: Custom 패턴 - 각도가 설정되어 있으면 사용, 아니면 전방향 (360)
+                    // Custom 패턴은 BlueprintAttackPattern의 Angle 프로퍼티 사용
+                    // 360도면 거리 체크만으로 충분 (이미 통과)
+                    if (angle >= 360f) return true;
+                    return unitAngle <= angle / 2f;
+
+                case Kingmaker.Blueprints.PatternType.Circle:
+                    // Circle은 방향성이 없으므로 거리 체크만 (이미 통과)
+                    return true;
 
                 default:
                     return false;

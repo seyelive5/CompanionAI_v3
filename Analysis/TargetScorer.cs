@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Abilities;
+using Kingmaker.View.Covers;  // ★ v3.8.31: LosCalculations.CoverType
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Data;
 using CompanionAI_v3.GameInterface;
@@ -160,6 +161,51 @@ namespace CompanionAI_v3.Analysis
                 if (HasHarmfulDebuff(target))
                 {
                     score += 20f * weights.DebuffState;
+                }
+
+                // ★ v3.8.31: 명중률 기반 스코어링 (게임 RuleCalculateHitChances 사용)
+                // - 낮은 명중률 타겟 페널티 (회피 or 사거리 초과)
+                // - 최적 거리 타겟 보너스
+                // - 엄폐 상태 반영
+                if (situation.PrimaryAttack != null)
+                {
+                    var hitInfo = CombatAPI.GetHitChance(situation.PrimaryAttack, situation.Unit, target);
+                    if (hitInfo != null)
+                    {
+                        // 명중률 기반 점수 조정
+                        if (hitInfo.IsVeryLowHitChance)  // < 30%
+                        {
+                            score -= 25f;  // 심각한 페널티
+                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: -25 very low hit ({hitInfo.HitChance}%)");
+                        }
+                        else if (hitInfo.IsLowHitChance)  // < 50%
+                        {
+                            score -= 15f;  // 중간 페널티
+                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: -15 low hit ({hitInfo.HitChance}%)");
+                        }
+                        else if (hitInfo.HitChance >= 80)  // 높은 명중률
+                        {
+                            score += 10f;  // 보너스
+                        }
+
+                        // 최적 거리 보너스 (DistanceFactor >= 1.0)
+                        if (hitInfo.IsInOptimalRange)
+                        {
+                            score += 8f;
+                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: +8 optimal range");
+                        }
+
+                        // 엄폐 페널티 (Full Cover = 높은 페널티)
+                        if (hitInfo.CoverType == LosCalculations.CoverType.Full)
+                        {
+                            score -= 12f;
+                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: -12 full cover");
+                        }
+                        else if (hitInfo.CoverType == LosCalculations.CoverType.Half)
+                        {
+                            score -= 6f;
+                        }
+                    }
                 }
 
                 // 7. 특수 역할 (Healer/Caster)

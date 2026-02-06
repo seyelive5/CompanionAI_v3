@@ -3,6 +3,7 @@ using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Utility;
 using UnityEngine;
+using CompanionAI_v3.GameInterface;
 
 namespace CompanionAI_v3.Core
 {
@@ -69,6 +70,26 @@ namespace CompanionAI_v3.Core
 
         public static PlannedAction Attack(AbilityData ability, BaseUnitEntity target, string reason, float apCost)
         {
+            // ★ v3.7.80: Point 타겟 능력은 계획 단계에서부터 위치 기반으로 생성
+            // 사이킥 비명 등 Point AOE 능력이 Unit 타겟으로 잘못 생성되는 것 방지
+            // ★ v3.8.08: Directional 패턴 (Ray/Cone/Sector)은 Unit 타겟 유지!
+            // - Ray/Cone은 방향이 필요하므로 Unit 타겟으로 방향 결정
+            // - Point 타겟 시 ContextConditionIsAlly 등이 "Target unit is missing" 에러 발생
+            // ★ v3.8.09: GetActualIsDirectional() 사용으로 게임 실제 로직 적용
+            var patternType = CombatAPI.GetPatternType(ability);
+            bool isActuallyDirectional = CombatAPI.GetActualIsDirectional(ability);
+
+            if (CombatAPI.IsPointTargetAbility(ability) && !isActuallyDirectional)
+            {
+                Main.LogDebug($"[PlannedAction] Attack auto-converted to PositionalAttack: {ability.Name} (Point-target ability, non-directional)");
+                return PositionalAttack(ability, target.Position, reason, apCost);
+            }
+
+            if (isActuallyDirectional)
+            {
+                Main.LogDebug($"[PlannedAction] Directional pattern kept as unit target: {ability.Name} (PatternType={patternType}, IsDirectional=true)");
+            }
+
             return new PlannedAction
             {
                 Type = ActionType.Attack,
@@ -120,6 +141,13 @@ namespace CompanionAI_v3.Core
 
         public static PlannedAction Debuff(AbilityData ability, BaseUnitEntity target, string reason, float apCost)
         {
+            // ★ v3.7.80: Point 타겟 능력은 계획 단계에서부터 위치 기반으로 생성
+            if (CombatAPI.IsPointTargetAbility(ability))
+            {
+                Main.LogDebug($"[PlannedAction] Debuff auto-converted to PositionalDebuff: {ability.Name} (Point-target ability)");
+                return PositionalDebuff(ability, target.Position, reason, apCost);
+            }
+
             return new PlannedAction
             {
                 Type = ActionType.Debuff,
@@ -128,6 +156,22 @@ namespace CompanionAI_v3.Core
                 APCost = apCost,
                 Reason = reason,
                 Priority = 30
+            };
+        }
+
+        /// <summary>
+        /// ★ v3.7.80: 위치 타겟 디버프 (Point AOE 디버프 능력)
+        /// </summary>
+        public static PlannedAction PositionalDebuff(AbilityData ability, Vector3 position, string reason, float apCost)
+        {
+            return new PlannedAction
+            {
+                Type = ActionType.Debuff,
+                Ability = ability,
+                Target = new TargetWrapper(position),
+                APCost = apCost,
+                Reason = reason,
+                Priority = 28  // 일반 Debuff(30)보다 약간 우선
             };
         }
 
@@ -190,6 +234,26 @@ namespace CompanionAI_v3.Core
                 APCost = apCost,
                 Reason = reason,
                 Priority = 25  // 갭클로저 수준 우선순위
+            };
+        }
+
+        /// <summary>
+        /// ★ v3.8.25: MultiTarget 서포트 (Familiar Relocate 등)
+        /// PropertyCalculatorComponent.ForMainTarget 컨텍스트가 필요한 능력에 사용
+        /// - AllTargets 경로 사용으로 UnitUseAbilityParams 직접 실행 (BehaviourTree 컨텍스트 우회)
+        /// - MyPet 평가기가 올바른 Caster 컨텍스트 획득
+        /// </summary>
+        public static PlannedAction MultiTargetSupport(AbilityData ability, List<TargetWrapper> allTargets, string reason, float apCost)
+        {
+            return new PlannedAction
+            {
+                Type = ActionType.Support,
+                Ability = ability,
+                Target = allTargets?.Count > 0 ? allTargets[0] : null,
+                AllTargets = allTargets,
+                APCost = apCost,
+                Reason = reason,
+                Priority = 12  // PositionalBuff와 동일한 우선순위
             };
         }
 

@@ -91,6 +91,9 @@ namespace CompanionAI_v3.Analysis
         /// <summary>현재 위치에서 공격 가능한 적</summary>
         public List<BaseUnitEntity> HittableEnemies { get; set; } = new List<BaseUnitEntity>();
 
+        /// <summary>★ v3.8.14: 근접 공격으로 공격 가능한 적 (폴백 제외)</summary>
+        public List<BaseUnitEntity> MeleeHittableEnemies { get; set; } = new List<BaseUnitEntity>();
+
         /// <summary>최적 타겟</summary>
         public BaseUnitEntity BestTarget { get; set; }
 
@@ -253,6 +256,9 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>공격 가능한 적이 있는가?</summary>
         public bool HasHittableEnemies => HittableEnemies?.Count > 0;
+
+        /// <summary>★ v3.8.14: 근접 공격으로 공격 가능한 적이 있는가? (폴백 제외)</summary>
+        public bool HasMeleeHittableEnemies => MeleeHittableEnemies?.Count > 0;
 
         /// <summary>살아있는 적이 있는가?</summary>
         public bool HasLivingEnemies => Enemies?.Count > 0;

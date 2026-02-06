@@ -29,7 +29,9 @@ namespace CompanionAI_v3.Planning.Plans
         protected const float HP_COST_THRESHOLD = 40f;
         protected const float DEFAULT_MELEE_ATTACK_COST = 2f;
         protected const float DEFAULT_RANGED_ATTACK_COST = 2f;
-        protected const int MAX_ATTACKS_PER_PLAN = 3;
+        // ★ v3.8.16: 3 → 10으로 증가 (실질적 제한 해제)
+        // AP 부족/PlanAttack null 반환으로 자연스럽게 종료되므로 인위적 제한 불필요
+        protected const int MAX_ATTACKS_PER_PLAN = 10;
         protected const int MAX_POSITIONAL_BUFFS = 3;
 
         #endregion
@@ -349,6 +351,10 @@ namespace CompanionAI_v3.Planning.Plans
         protected PlannedAction PlanHeroicAct(Situation situation, ref float remainingAP)
             => BuffPlanner.PlanHeroicAct(situation, ref remainingAP, RoleName);
 
+        // ★ v3.8.41: 통합 궁극기 계획 (모든 타겟 유형 처리)
+        protected PlannedAction PlanUltimate(Situation situation, ref float remainingAP)
+            => BuffPlanner.PlanUltimate(situation, ref remainingAP, RoleName);
+
         protected PlannedAction PlanDebuff(Situation situation, BaseUnitEntity target, ref float remainingAP)
             => BuffPlanner.PlanDebuff(situation, target, ref remainingAP, RoleName);
 
@@ -376,6 +382,144 @@ namespace CompanionAI_v3.Planning.Plans
 
         protected bool CanAffordBuffWithReservation(float buffCost, float remainingAP, float reservedAP, bool isEssential)
             => BuffPlanner.CanAffordBuffWithReservation(buffCost, remainingAP, reservedAP, isEssential);
+
+        /// <summary>
+        /// ★ v3.7.93: 아군 버프 계획 (BasePlan으로 이동)
+        /// Support/Overseer 모두 사용 가능
+        /// ★ v3.8.16: 턴 부여 능력 중복 방지 파라미터 추가 (쳐부숴라 등)
+        /// </summary>
+        /// <param name="situation">현재 상황</param>
+        /// <param name="remainingAP">남은 AP</param>
+        /// <param name="usedKeystoneGuids">키스톤 루프에서 이미 사용된 버프 GUID (중복 방지)</param>
+        /// <param name="plannedTurnGrantTargetIds">★ v3.8.16: 이미 턴 부여가 계획된 대상 ID (중복 방지)</param>
+        /// <returns>아군 버프 행동 또는 null</returns>
+        protected PlannedAction PlanAllyBuff(Situation situation, ref float remainingAP, HashSet<string> usedKeystoneGuids = null, HashSet<string> plannedTurnGrantTargetIds = null)
+        {
+            // ★ v3.2.15: 팀 전술에 따라 버프 대상 우선순위 조정
+            var tactic = TeamBlackboard.Instance.CurrentTactic;
+            var prioritizedTargets = new List<BaseUnitEntity>();
+
+            if (tactic == TacticalSignal.Retreat)
+            {
+                // 후퇴: 가장 위험한 아군 우선 (생존 버프)
+                var mostWounded = TeamBlackboard.Instance.GetMostWoundedAlly();
+                if (mostWounded != null)
+                {
+                    prioritizedTargets.Add(mostWounded);
+                    Main.LogDebug($"[{RoleName}] AllyBuff: Retreat tactic - buff wounded ally {mostWounded.CharacterName}");
+                }
+            }
+            else if (tactic == TacticalSignal.Attack)
+            {
+                // 공격: DPS 우선 버프 (HP 50% 이상인 DPS)
+                foreach (var ally in situation.Allies.Where(a => a != null && !a.LifeState.IsDead))
+                {
+                    var settings = ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
+                    if (settings?.Role == AIRole.DPS && CombatAPI.GetHPPercent(ally) > 50f)
+                    {
+                        prioritizedTargets.Add(ally);
+                    }
+                }
+                if (prioritizedTargets.Count > 0)
+                {
+                    Main.LogDebug($"[{RoleName}] AllyBuff: Attack tactic - buff DPS first");
+                }
+            }
+
+            // 기본 우선순위 (Defend 또는 위에서 대상 없을 때): Tank > DPS > 본인 > 기타
+            // 1. Tank 역할 먼저
+            foreach (var ally in situation.Allies.Where(a => a != null && !a.LifeState.IsDead))
+            {
+                var settings = ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
+                if (settings?.Role == AIRole.Tank && !prioritizedTargets.Contains(ally))
+                    prioritizedTargets.Add(ally);
+            }
+
+            // 2. DPS 역할
+            foreach (var ally in situation.Allies.Where(a => a != null && !a.LifeState.IsDead))
+            {
+                var settings = ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
+                if (settings?.Role == AIRole.DPS && !prioritizedTargets.Contains(ally))
+                    prioritizedTargets.Add(ally);
+            }
+
+            // 3. 본인
+            if (!prioritizedTargets.Contains(situation.Unit))
+                prioritizedTargets.Add(situation.Unit);
+
+            // 4. 나머지 아군
+            foreach (var ally in situation.Allies.Where(a => a != null && !a.LifeState.IsDead))
+            {
+                if (!prioritizedTargets.Contains(ally))
+                    prioritizedTargets.Add(ally);
+            }
+
+            foreach (var buff in situation.AvailableBuffs)
+            {
+                if (buff.Blueprint?.CanTargetFriends != true) continue;
+
+                // ★ v3.7.07 Fix: 실제 사역마에게 성공한 버프만 스킵
+                string buffGuid = buff.Blueprint?.AssetGuid?.ToString();
+                if (!string.IsNullOrEmpty(buffGuid) && usedKeystoneGuids != null && usedKeystoneGuids.Contains(buffGuid))
+                {
+                    Main.LogDebug($"[{RoleName}] Skip {buff.Name} - successfully used on familiar in Keystone phase");
+                    continue;
+                }
+
+                float cost = CombatAPI.GetAbilityAPCost(buff);
+                if (cost > remainingAP) continue;
+
+                // ★ v3.7.87: 턴 전달 능력인지 확인 (쳐부숴라 등)
+                bool isTurnGrant = AbilityDatabase.IsTurnGrantAbility(buff);
+
+                foreach (var target in prioritizedTargets)
+                {
+                    // ★ v3.7.95: 스마트 버프 체크 - 버프 지속시간 확인해서 갱신 필요 여부 판단
+                    // NeedsBuffRefresh: 버프 없거나 2라운드 이하 남으면 true (갱신 필요)
+                    if (!CombatAPI.NeedsBuffRefresh(target, buff))
+                    {
+                        int remaining = CombatAPI.GetBuffRemainingRounds(target, buff);
+                        string durStr = remaining == -1 ? "영구" : $"{remaining}R";
+                        Main.LogDebug($"[{RoleName}] Skip {buff.Name} -> {target.CharacterName}: buff active ({durStr} remaining)");
+                        continue;
+                    }
+
+                    // ★ v3.7.87: 턴 전달 능력은 이미 행동한 유닛에게 쓰면 낭비
+                    if (isTurnGrant && TeamBlackboard.Instance.HasActedThisRound(target))
+                    {
+                        Main.LogDebug($"[{RoleName}] Skip {buff.Name} -> {target.CharacterName}: already acted this round");
+                        continue;
+                    }
+
+                    // ★ v3.8.16: 턴 전달 능력이 이미 이 턴에 계획된 대상에게 중복 사용 방지
+                    // 같은 계획 단계에서 같은 대상에게 여러 번 쳐부숴라 계획 방지
+                    string targetId = target.UniqueId ?? target.CharacterName ?? "unknown";
+                    if (isTurnGrant && plannedTurnGrantTargetIds != null && plannedTurnGrantTargetIds.Contains(targetId))
+                    {
+                        Main.LogDebug($"[{RoleName}] Skip {buff.Name} -> {target.CharacterName}: turn grant already planned for this target");
+                        continue;
+                    }
+
+                    var targetWrapper = new TargetWrapper(target);
+                    string reason;
+                    if (CombatAPI.CanUseAbilityOn(buff, targetWrapper, out reason))
+                    {
+                        // ★ v3.8.16: 턴 전달 능력 성공 시 대상 ID 기록
+                        if (isTurnGrant && plannedTurnGrantTargetIds != null)
+                        {
+                            plannedTurnGrantTargetIds.Add(targetId);
+                            Main.Log($"[{RoleName}] Turn grant planned: {buff.Name} -> {target.CharacterName} (tracked for duplicate prevention)");
+                        }
+
+                        remainingAP -= cost;
+                        Main.Log($"[{RoleName}] Buff ally: {buff.Name} -> {target.CharacterName}");
+                        return PlannedAction.Buff(buff, target, $"Buff {target.CharacterName}", cost);
+                    }
+                }
+            }
+
+            return null;
+        }
 
         #endregion
 
@@ -686,7 +830,12 @@ namespace CompanionAI_v3.Planning.Plans
         /// ★ v3.7.09: Raven의 경우 디버프도 포함 (적에게 확산)
         /// AP가 남아있는 동안 적용 가능한 모든 버프/디버프를 사역마에게 시전
         /// </summary>
-        protected List<PlannedAction> PlanAllFamiliarKeystoneBuffs(Situation situation, ref float remainingAP)
+        /// <summary>
+        /// ★ v3.8.01: heroicActPlanned 파라미터 추가
+        /// 계획 단계에서 HeroicAct를 계획했으면 Momentum이 있는 것으로 간주
+        /// (버프는 실행 시에만 적용되므로, 계획 단계에서는 "계획됨" 상태로 판단)
+        /// </summary>
+        protected List<PlannedAction> PlanAllFamiliarKeystoneBuffs(Situation situation, ref float remainingAP, bool heroicActPlanned = false)
         {
             var actions = new List<PlannedAction>();
 
@@ -862,7 +1011,21 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // ★ v3.7.09: 디버프 처리 (적 2명+ 필요) - Raven Warp Relay
+            // ★ v3.7.96: Raven Warp Relay 재정의
+            // 1. 비피해 디버프: Momentum 없이도 Warp Relay로 적에게 전달 가능
+            // 2. 피해 사이킹 공격: Momentum(과충전) 있을 때만 Warp Relay로 적에게 전달 가능
+            // ★ v3.8.01: heroicActPlanned가 true면 Momentum이 있는 것으로 간주
+            // (계획 단계에서는 버프가 아직 적용 안 됨, 실행 시 적용되므로 "계획됨"으로 판단)
+            bool buffActive = FamiliarAPI.IsRavenOverchargeActive(situation.Unit);
+            bool hasMomentum = situation.FamiliarType == PetType.Raven &&
+                               (heroicActPlanned || buffActive);
+
+            if (situation.FamiliarType == PetType.Raven)
+            {
+                Main.LogDebug($"[{RoleName}] Keystone: Momentum check - heroicActPlanned={heroicActPlanned}, buffActive={buffActive}, hasMomentum={hasMomentum}");
+            }
+
+            // ★ 비피해 디버프 처리 (Momentum 불필요) - 적 2명+ 필요
             if (keystoneDebuffs.Count > 0 && optimalPos.EnemiesInRange >= 2)
             {
                 foreach (var debuff in keystoneDebuffs)
@@ -877,7 +1040,6 @@ namespace CompanionAI_v3.Planning.Plans
                     if (cost > remainingAP) continue;
 
                     // 디버프를 Raven에게 시전 가능한지 확인
-                    // (게임이 Warp Relay 메커니즘으로 허용하는 경우에만 성공)
                     string reason;
                     if (!CombatAPI.CanUseAbilityOn(debuff, familiarTarget, out reason))
                     {
@@ -892,8 +1054,7 @@ namespace CompanionAI_v3.Planning.Plans
                     Main.Log($"[{RoleName}] ★ Familiar Keystone Debuff: {debuff.Name} on {typeName} " +
                         $"({optimalPos.EnemiesInRange} enemies in range) - Warp Relay spread");
 
-                    // ★ v3.7.20: IsFamiliarTarget 플래그 설정 - 실행 시 사역마 재해석
-                    var debuffAction = PlannedAction.Attack(  // 디버프는 Attack 타입으로 (적 대상)
+                    var debuffAction = PlannedAction.Attack(
                         debuff,
                         situation.Familiar,
                         $"Warp Relay debuff: {debuff.Name} ({optimalPos.EnemiesInRange} enemies)",
@@ -905,6 +1066,63 @@ namespace CompanionAI_v3.Planning.Plans
             else if (keystoneDebuffs.Count > 0)
             {
                 Main.LogDebug($"[{RoleName}] Keystone Debuff: Not enough enemies in range ({optimalPos.EnemiesInRange})");
+            }
+
+            // ★ v3.7.96: 피해 사이킥 공격 처리 (Momentum 필요!) - 적 2명+ 필요
+            // Overcharge(과충전) 상태에서만 사이킥 데미지를 Raven에게 사용해 적에게 전달 가능
+            if (hasMomentum && optimalPos.EnemiesInRange >= 2 && situation.AvailableAttacks != null)
+            {
+                foreach (var attack in situation.AvailableAttacks)
+                {
+                    if (remainingAP < 1f) break;
+
+                    // 이미 사용된 능력 스킵
+                    string guid = attack.Blueprint?.AssetGuid?.ToString();
+                    if (!string.IsNullOrEmpty(guid) && usedAbilityGuids.Contains(guid))
+                        continue;
+
+                    // 사이킹 능력이어야 함
+                    if (!FamiliarAbilities.IsPsychicAbility(attack))
+                        continue;
+
+                    // 피해를 주는 공격이어야 함 (비피해 디버프는 위에서 처리됨)
+                    if (!FamiliarAbilities.IsDamagingPsychicAttack(attack))
+                        continue;
+
+                    // Point Target 능력 제외 (유닛 타겟만)
+                    if (attack.Blueprint?.CanTargetPoint == true && !attack.Blueprint.CanTargetEnemies)
+                        continue;
+
+                    float cost = CombatAPI.GetAbilityAPCost(attack);
+                    if (cost > remainingAP) continue;
+
+                    // Raven에게 시전 가능한지 확인
+                    string reason;
+                    if (!CombatAPI.CanUseAbilityOn(attack, familiarTarget, out reason))
+                    {
+                        Main.LogDebug($"[{RoleName}] Warp Relay Attack: {attack.Name} can't target Raven - {reason}");
+                        continue;
+                    }
+
+                    remainingAP -= cost;
+                    if (!string.IsNullOrEmpty(guid))
+                        usedAbilityGuids.Add(guid);
+
+                    Main.Log($"[{RoleName}] ★ Warp Relay Psychic Attack: {attack.Name} on {typeName} " +
+                        $"({optimalPos.EnemiesInRange} enemies) - Momentum active, damage spreads!");
+
+                    var attackAction = PlannedAction.Attack(
+                        attack,
+                        situation.Familiar,
+                        $"Warp Relay attack: {attack.Name} ({optimalPos.EnemiesInRange} enemies)",
+                        cost);
+                    attackAction.IsFamiliarTarget = true;
+                    actions.Add(attackAction);
+                }
+            }
+            else if (hasMomentum && optimalPos.EnemiesInRange < 2)
+            {
+                Main.LogDebug($"[{RoleName}] Warp Relay Attack: Momentum active but not enough enemies ({optimalPos.EnemiesInRange})");
             }
 
             if (actions.Count > 0)
@@ -972,6 +1190,10 @@ namespace CompanionAI_v3.Planning.Plans
             Main.Log($"[{RoleName}] ★ Familiar Relocate: {typeName} to optimal position " +
                 $"({optimalPos.AlliesInRange} allies, {optimalPos.EnemiesInRange} enemies in range)");
 
+            // ★ v3.8.30: PositionalBuff 경로 사용 (MultiTarget 경로 문제 해결)
+            // - PropertyCalculatorComponent.SaveToContext="ForMainTarget"는 게임의 TaskNodeCastAbility를 통해야 제대로 동작
+            // - MultiTarget 경로(UnitUseAbilityParams 직접 실행)는 컨텍스트 설정이 불완전하여 "unit is null" 오류 발생
+            // - Point 타겟 능력은 BehaviourTree 컨텍스트 설정 후 TaskNodeCastAbility로 실행해야 함
             return PlannedAction.PositionalBuff(
                 relocate,
                 optimalPos.Position,
@@ -1577,8 +1799,11 @@ namespace CompanionAI_v3.Planning.Plans
             UnityEngine.Vector3 point1 = (UnityEngine.Vector3)bestPoint1Node.Vector3Position;
             UnityEngine.Vector3 point2 = (UnityEngine.Vector3)bestPoint2Node.Vector3Position;
 
-            // ★ v3.7.58: P1 → P2 경로에서 적 타격 (Eagle이 P1에서 소환, P2로 이동하며 공격)
-            int estimatedPathTargets = PointTargetingHelper.CountEnemiesInChargePath(point1, point2, situation.Enemies);
+            // ★ v3.8.07: P1 → P2 경로에서 적 타격 (실제 패스파인딩 사용)
+            var familiarAgent = familiar?.MaybeMovementAgent;
+            int estimatedPathTargets = familiarAgent != null
+                ? PointTargetingHelper.CountEnemiesInChargePath(point1, point2, situation.Enemies, familiarAgent)
+                : PointTargetingHelper.CountEnemiesInChargePath(point1, point2, situation.Enemies);
 
             // 경로 상에 있는 첫 번째 적 이름 찾기 (로깅용)
             string targetName = "path";

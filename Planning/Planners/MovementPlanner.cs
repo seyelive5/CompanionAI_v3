@@ -201,7 +201,43 @@ namespace CompanionAI_v3.Planning.Planners
                     }
                     else
                     {
-                        // 일반 타겟 능력
+                        // ★ v3.7.88: Unit 타겟 갭클로저 - 실제 경로 검증 (게임 패스파인딩 활용)
+                        // 기존 문제: CanUseAbilityOn()이 사거리 초과를 허용하는 경우가 있음
+                        // 해결: FindPathChargeTB_Blocking으로 실제 도달 가능 여부 사전 검증
+
+                        // 1. Charge 경로 검증
+                        bool hasValidPath = false;
+                        try
+                        {
+                            var agent = situation.Unit.View?.AgentASP;
+                            if (agent != null)
+                            {
+                                var chargePath = PathfindingService.Instance.FindPathChargeTB_Blocking(
+                                    agent,
+                                    situation.Unit.Position,
+                                    candidateTarget.Position,
+                                    false,  // ignoreBlockers
+                                    candidateTarget  // targetEntity
+                                );
+                                hasValidPath = chargePath?.path != null && chargePath.path.Count >= 2;
+
+                                if (!hasValidPath)
+                                {
+                                    Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} -> {candidateTarget.CharacterName} - NO CHARGE PATH");
+                                    continue;
+                                }
+                            }
+                            else
+                            {
+                                Main.LogDebug($"[{roleName}] PlanGapCloser: Agent is null, skipping path validation");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Main.LogDebug($"[{roleName}] PlanGapCloser: Path validation error: {ex.Message}");
+                        }
+
+                        // 2. 기존 검증
                         var targetWrapper = new TargetWrapper(candidateTarget);
                         string reason;
                         if (CombatAPI.CanUseAbilityOn(gapCloser, targetWrapper, out reason))
@@ -213,7 +249,7 @@ namespace CompanionAI_v3.Planning.Planners
                                 remainingMP -= mpCost;
                                 if (remainingMP < 0) remainingMP = 0;
                             }
-                            Main.Log($"[{roleName}] Gap closer: {gapCloser.Name} -> {candidateTarget.CharacterName} (AP:{cost:F1}, MP:{mpCost:F1})");
+                            Main.Log($"[{roleName}] Gap closer: {gapCloser.Name} -> {candidateTarget.CharacterName} (AP:{cost:F1}, MP:{mpCost:F1}, pathOK={hasValidPath})");
                             return PlannedAction.Attack(gapCloser, candidateTarget, $"Gap closer on {candidateTarget.CharacterName}", cost);
                         }
                         else
@@ -563,6 +599,7 @@ namespace CompanionAI_v3.Planning.Planners
         /// ★ v3.0.61: 현재 위치가 이미 안전하면 이동 불필요
         /// ★ v3.2.25: role 전달 (Frontline 점수)
         /// ★ v3.7.11: 무기 사거리 기반 최대 후퇴 거리 제한 (공격 가능 거리 유지)
+        /// ★ v3.8.23: SoldierDash 등 후퇴용 대시 능력 지원
         /// </summary>
         public static PlannedAction PlanRetreat(Situation situation)
         {
@@ -578,6 +615,15 @@ namespace CompanionAI_v3.Planning.Planners
             {
                 Main.LogDebug($"[MovementPlanner] {unit.CharacterName}: Already safe, no retreat needed");
                 return null;
+            }
+
+            // ★ v3.8.23: 후퇴용 대시 능력 먼저 확인 (SoldierDash 등)
+            // 대시는 걷기보다 더 멀리, 더 안전하게 후퇴 가능
+            var dashRetreatAction = PlanRetreatWithDash(situation);
+            if (dashRetreatAction != null)
+            {
+                Main.Log($"[MovementPlanner] {unit.CharacterName}: Retreating with dash ability");
+                return dashRetreatAction;
             }
 
             // ★ v3.2.25: Role 추출
@@ -610,7 +656,8 @@ namespace CompanionAI_v3.Planning.Planners
             Main.Log($"[MovementPlanner] {unit.CharacterName}: Retreat range check - WeaponRange={weaponRangeTiles:F1}, MinSafe={situation.MinSafeDistance:F1}, MaxSafe={maxSafeDistance:F1}");
 
             // ★ v3.7.04: 사역마 거리 제약 계산
-            // Servo-Skull/Raven은 버프 시전 거리 내에 있어야 함 (약 15m)
+            // ★ v3.7.90: 고정 15m → 동적 사역마 스킬 사거리 기반으로 변경
+            // Servo-Skull/Raven은 버프 시전 거리 내에 있어야 함
             UnityEngine.Vector3? familiarPos = null;
             float maxFamiliarDist = 0f;
             if (situation.HasFamiliar && situation.Familiar != null &&
@@ -618,8 +665,9 @@ namespace CompanionAI_v3.Planning.Planners
                  situation.FamiliarType == Kingmaker.Enums.PetType.Raven))
             {
                 familiarPos = situation.FamiliarPosition;
-                maxFamiliarDist = 15f;  // 버프 시전 범위 (미터)
-                Main.LogDebug($"[MovementPlanner] {unit.CharacterName}: Retreat with familiar constraint (max {maxFamiliarDist}m from familiar)");
+                // ★ v3.7.90: 마스터의 사역마 대상 능력 최대 사거리 동적 계산
+                maxFamiliarDist = FamiliarAPI.GetMaxFamiliarAbilityRange(unit);
+                Main.LogDebug($"[MovementPlanner] {unit.CharacterName}: Retreat with familiar constraint (max {maxFamiliarDist:F1}m from familiar)");
             }
 
             // ★ v3.0.60: MovementAPI 기반 실제 도달 가능한 타일 사용
@@ -648,6 +696,201 @@ namespace CompanionAI_v3.Planning.Planners
             }
 
             return PlannedAction.Move(retreatScore.Position, $"Retreat from {nearestEnemy.CharacterName}");
+        }
+
+        /// <summary>
+        /// ★ v3.8.23: 대시 능력을 사용한 후퇴 계획
+        /// SoldierDash 등 IsRetreatCapable 플래그가 있는 능력 사용
+        /// - 걷기보다 더 멀리 후퇴 가능
+        /// - IgnoreEnemies, DisableAttacksOfOpportunity로 안전
+        /// </summary>
+        private static PlannedAction PlanRetreatWithDash(Situation situation)
+        {
+            var unit = situation.Unit;
+
+            // 후퇴 가능한 대시 능력 찾기
+            var retreatDashes = situation.AvailableAttacks?
+                .Where(a => AbilityDatabase.IsRetreatCapable(a))
+                .Where(a => AbilityDatabase.IsGapCloser(a))  // GapCloser여야 이동 가능
+                .ToList();
+
+            if (retreatDashes == null || retreatDashes.Count == 0)
+            {
+                Main.LogDebug($"[MovementPlanner] {unit.CharacterName}: No retreat-capable dash abilities");
+                return null;
+            }
+
+            Main.LogDebug($"[MovementPlanner] {unit.CharacterName}: Found {retreatDashes.Count} retreat dash(es): {string.Join(", ", retreatDashes.Select(d => d.Name))}");
+
+            foreach (var dashAbility in retreatDashes)
+            {
+                float apCost = CombatAPI.GetAbilityAPCost(dashAbility);
+                if (apCost > situation.CurrentAP)
+                {
+                    Main.LogDebug($"[MovementPlanner] {unit.CharacterName}: {dashAbility.Name} skipped - AP cost {apCost:F1} > current {situation.CurrentAP:F1}");
+                    continue;
+                }
+
+                var info = AbilityDatabase.GetInfo(dashAbility);
+                bool isPointTarget = info != null && (info.Flags & AbilityFlags.PointTarget) != 0;
+
+                if (!isPointTarget)
+                {
+                    Main.LogDebug($"[MovementPlanner] {unit.CharacterName}: {dashAbility.Name} skipped - not PointTarget");
+                    continue;
+                }
+
+                // 대시 능력의 범위 내에서 안전한 후퇴 위치 찾기
+                var landingPosition = FindRetreatDashLandingPosition(situation, dashAbility);
+                if (landingPosition == null)
+                {
+                    Main.LogDebug($"[MovementPlanner] {unit.CharacterName}: {dashAbility.Name} - no safe landing position");
+                    continue;
+                }
+
+                // 후퇴 위치가 현재 위치보다 안전한지 확인
+                float currentDistToEnemy = situation.NearestEnemyDistance;
+                float newDistToEnemy = Vector3.Distance(landingPosition.Value, situation.NearestEnemy.Position);
+
+                if (newDistToEnemy <= currentDistToEnemy)
+                {
+                    Main.LogDebug($"[MovementPlanner] {unit.CharacterName}: {dashAbility.Name} landing not safer (current={currentDistToEnemy:F1}, new={newDistToEnemy:F1})");
+                    continue;
+                }
+
+                // 대시 사용 가능 여부 최종 확인
+                var pointTarget = new TargetWrapper(landingPosition.Value);
+                string reason;
+                if (!CombatAPI.CanUseAbilityOn(dashAbility, pointTarget, out reason))
+                {
+                    Main.LogDebug($"[MovementPlanner] {unit.CharacterName}: {dashAbility.Name} cannot use: {reason}");
+                    continue;
+                }
+
+                Main.Log($"[MovementPlanner] {unit.CharacterName}: Retreat dash {dashAbility.Name} to ({landingPosition.Value.x:F1},{landingPosition.Value.z:F1}), " +
+                    $"distance {currentDistToEnemy:F1}m → {newDistToEnemy:F1}m (AP:{apCost:F1})");
+
+                return PlannedAction.PositionalAttack(dashAbility, landingPosition.Value, $"Dash retreat from {situation.NearestEnemy.CharacterName}", apCost);
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// ★ v3.8.23: 후퇴 대시의 착지 위치 찾기
+        /// 적으로부터 멀어지면서 대시 범위 내의 안전한 위치 탐색
+        /// </summary>
+        private static Vector3? FindRetreatDashLandingPosition(Situation situation, AbilityData dashAbility)
+        {
+            var unit = situation.Unit;
+            var nearestEnemy = situation.NearestEnemy;
+            if (nearestEnemy == null) return null;
+
+            // 대시 능력의 범위 (타일 단위)
+            float dashRange = CombatAPI.GetAbilityRangeInTiles(dashAbility);
+            Main.LogDebug($"[MovementPlanner] FindRetreatDashLanding: {dashAbility.Name} range={dashRange:F1} tiles");
+
+            // 무기 사거리 확인 (후퇴 후에도 공격 가능해야 함)
+            float weaponRangeTiles = 15f;
+            try
+            {
+                var primaryHand = unit.Body?.PrimaryHand;
+                if (primaryHand?.HasWeapon == true && !primaryHand.Weapon.Blueprint.IsMelee)
+                {
+                    int optRange = primaryHand.Weapon.AttackOptimalRange;
+                    if (optRange > 0 && optRange < 10000)
+                        weaponRangeTiles = optRange;
+                    else
+                    {
+                        int attackRange = primaryHand.Weapon.AttackRange;
+                        if (attackRange > 0 && attackRange < 10000)
+                            weaponRangeTiles = attackRange;
+                    }
+                }
+            }
+            catch { }
+
+            // 적으로부터 반대 방향 계산
+            Vector3 retreatDirection = (unit.Position - nearestEnemy.Position).normalized;
+
+            // 그리드 기반 탐색 - 대시 범위 내에서 가장 안전한 위치 찾기
+            try
+            {
+                var unitNode = unit.CurrentUnwalkableNode;
+                if (unitNode == null)
+                {
+                    Main.LogDebug($"[MovementPlanner] FindRetreatDashLanding: unit has no valid node");
+                    return null;
+                }
+
+                // 대시 범위 내의 노드들을 나선형으로 탐색
+                int searchRadius = Mathf.CeilToInt(dashRange);
+                var nodesInRange = GridAreaHelper.GetNodesSpiralAround(
+                    unitNode,
+                    unit.SizeRect,
+                    searchRadius
+                );
+
+                Vector3? bestPosition = null;
+                float bestScore = float.MinValue;
+
+                foreach (var node in nodesInRange)
+                {
+                    if (node == null || !node.Walkable)
+                        continue;
+
+                    // 다른 유닛이 점유 중인지 확인
+                    if (node.TryGetUnit(out var occupant) && occupant != null && occupant.IsConscious && occupant != unit)
+                        continue;
+
+                    // BattlefieldGrid 검증
+                    if (!BattlefieldGrid.Instance.ValidateNode(unit, node))
+                        continue;
+
+                    Vector3 nodePos = node.Vector3Position;
+
+                    // 대시 범위 내인지 확인
+                    float distFromUnit = CombatAPI.MetersToTiles(Vector3.Distance(unit.Position, nodePos));
+                    if (distFromUnit > dashRange || distFromUnit < 0.5f)
+                        continue;
+
+                    // 적으로부터의 거리
+                    float distFromEnemy = Vector3.Distance(nodePos, nearestEnemy.Position);
+                    float distFromEnemyTiles = CombatAPI.MetersToTiles(distFromEnemy);
+
+                    // 무기 사거리보다 멀면 공격 불가 → 스킵
+                    if (distFromEnemyTiles > weaponRangeTiles)
+                        continue;
+
+                    // 점수 계산: 적으로부터 멀수록 + 후퇴 방향일수록 좋음
+                    Vector3 toNode = (nodePos - unit.Position).normalized;
+                    float directionScore = Vector3.Dot(toNode, retreatDirection);  // -1 ~ 1
+
+                    // 최종 점수 = 적으로부터 거리 + 방향 보너스
+                    float score = distFromEnemy + (directionScore * 3f);
+
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        bestPosition = nodePos;
+                    }
+                }
+
+                if (bestPosition.HasValue)
+                {
+                    float bestDistFromEnemy = Vector3.Distance(bestPosition.Value, nearestEnemy.Position);
+                    Main.LogDebug($"[MovementPlanner] FindRetreatDashLanding: best position at ({bestPosition.Value.x:F1},{bestPosition.Value.z:F1}), " +
+                        $"dist from enemy={bestDistFromEnemy:F1}m, score={bestScore:F1}");
+                }
+
+                return bestPosition;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[MovementPlanner] FindRetreatDashLanding grid search failed: {ex.Message}");
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -700,6 +943,7 @@ namespace CompanionAI_v3.Planning.Planners
             float maxSafeDistance = weaponRangeTiles - 1f;
 
             // ★ v3.7.04: 사역마 거리 제약 계산
+            // ★ v3.7.90: 고정 15m → 동적 사역마 스킬 사거리 기반
             UnityEngine.Vector3? familiarPos = null;
             float maxFamiliarDist = 0f;
             if (situation.HasFamiliar && situation.Familiar != null &&
@@ -707,7 +951,7 @@ namespace CompanionAI_v3.Planning.Planners
                  situation.FamiliarType == Kingmaker.Enums.PetType.Raven))
             {
                 familiarPos = situation.FamiliarPosition;
-                maxFamiliarDist = 15f;
+                maxFamiliarDist = FamiliarAPI.GetMaxFamiliarAbilityRange(unit);
             }
 
             // ★ v3.0.60: PathfindingService 기반 실제 도달 가능 위치

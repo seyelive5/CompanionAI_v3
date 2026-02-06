@@ -4,6 +4,7 @@ using Kingmaker;
 using Kingmaker.Controllers;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Pathfinding;
+using Kingmaker.View;
 using Kingmaker.View.Covers;
 using Pathfinding;
 using UnityEngine;
@@ -345,6 +346,117 @@ namespace CompanionAI_v3.GameInterface
             }
 
             return hitEnemies;
+        }
+
+        /// <summary>
+        /// ★ v3.8.07: 게임 패스파인딩을 사용한 실제 Charge 경로의 적 목록
+        /// Bresenham 직선이 아닌 게임의 실제 타일 기반 패스파인딩 사용
+        /// </summary>
+        public static List<BaseUnitEntity> GetEnemiesInChargePath(
+            Vector3 p1Pos, Vector3 p2Pos,
+            List<BaseUnitEntity> allEnemies,
+            UnitMovementAgentBase agent,  // ★ 실제 패스파인딩용 Agent
+            int casterSize = 1)
+        {
+            var hitEnemies = new List<BaseUnitEntity>();
+
+            if (allEnemies == null || allEnemies.Count == 0)
+                return hitEnemies;
+
+            if (agent == null)
+            {
+                // Agent가 없으면 기존 Bresenham 방식 폴백
+                Main.LogDebug("[PointTargetingHelper] GetEnemiesInChargePath: No agent, fallback to Bresenham");
+                return GetEnemiesInChargePath(p1Pos, p2Pos, allEnemies, casterSize);
+            }
+
+            try
+            {
+                // ★ 게임의 실제 Charge 패스파인딩 사용
+                var chargePath = PathfindingService.Instance
+                    .FindPathChargeTB_Blocking(agent, p1Pos, p2Pos, true, null);
+
+                if (chargePath?.path == null || chargePath.path.Count == 0)
+                {
+                    Main.LogDebug("[PointTargetingHelper] GetEnemiesInChargePath: Charge path failed, fallback to Bresenham");
+                    return GetEnemiesInChargePath(p1Pos, p2Pos, allEnemies, casterSize);
+                }
+
+                // ★ 실제 경로 노드에서 좌표 추출
+                var pathNodeCoords = new HashSet<(int x, int z)>();
+                foreach (var graphNode in chargePath.path)
+                {
+                    var gridNode = graphNode as CustomGridNodeBase;
+                    if (gridNode != null)
+                    {
+                        pathNodeCoords.Add((gridNode.XCoordinateInGrid, gridNode.ZCoordinateInGrid));
+
+                        // casterSize > 1인 경우 추가 노드도 포함
+                        if (casterSize > 1)
+                        {
+                            for (int ox = 0; ox < casterSize; ox++)
+                            {
+                                for (int oz = 0; oz < casterSize; oz++)
+                                {
+                                    if (ox == 0 && oz == 0) continue;
+                                    pathNodeCoords.Add((gridNode.XCoordinateInGrid + ox, gridNode.ZCoordinateInGrid + oz));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                var p1Node = p1Pos.GetNearestNodeXZ() as CustomGridNodeBase;
+                var p2Node = p2Pos.GetNearestNodeXZ() as CustomGridNodeBase;
+                Main.LogDebug($"[PointTargetingHelper] ActualChargePath from " +
+                    $"({p1Node?.XCoordinateInGrid},{p1Node?.ZCoordinateInGrid}) to " +
+                    $"({p2Node?.XCoordinateInGrid},{p2Node?.ZCoordinateInGrid}): " +
+                    $"{chargePath.path.Count} nodes (actual pathfinding)");
+
+                // ★ 각 적 유닛 체크
+                foreach (var enemy in allEnemies)
+                {
+                    if (enemy == null || !enemy.IsConscious)
+                        continue;
+
+                    var enemyNodes = GetEnemyOccupiedNodeCoords(enemy);
+
+                    bool isHit = false;
+                    foreach (var enemyCoord in enemyNodes)
+                    {
+                        if (pathNodeCoords.Contains(enemyCoord))
+                        {
+                            isHit = true;
+                            break;
+                        }
+                    }
+
+                    if (isHit)
+                    {
+                        hitEnemies.Add(enemy);
+                        Main.LogDebug($"[PointTargetingHelper]   ✓ HIT (actual path): {enemy.CharacterName}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[PointTargetingHelper] GetEnemiesInChargePath ERROR: {ex.Message}, fallback to Bresenham");
+                return GetEnemiesInChargePath(p1Pos, p2Pos, allEnemies, casterSize);
+            }
+
+            return hitEnemies;
+        }
+
+        /// <summary>
+        /// ★ v3.8.07: 게임 패스파인딩으로 경로상 적 수 카운트 (Agent 버전)
+        /// </summary>
+        public static int CountEnemiesInChargePath(
+            Vector3 p1Pos, Vector3 p2Pos,
+            List<BaseUnitEntity> allEnemies,
+            UnitMovementAgentBase agent,
+            int casterSize = 1)
+        {
+            return GetEnemiesInChargePath(p1Pos, p2Pos, allEnemies, agent, casterSize).Count;
         }
 
         /// <summary>
@@ -895,8 +1007,20 @@ namespace CompanionAI_v3.GameInterface
                             continue;
                         }
 
+                        // ★ v3.8.07: 실제 경로 기반 적 수 재계산
+                        var actualHitEnemies = GetEnemiesInChargePath(p1, p2, enemies, eagleAgent);
+                        int actualEnemyCount = actualHitEnemies.Count;
+
+                        if (actualEnemyCount <= 0)
+                        {
+                            Main.LogDebug($"[PointTargetingHelper] P1→P2 ActualPath has NO ENEMIES: " +
+                                $"P1({p1.x:F1},{p1.z:F1}) -> P2({p2.x:F1},{p2.z:F1}) (Bresenham={candidate.enemies})");
+                            continue;
+                        }
+
                         Main.LogDebug($"[PointTargetingHelper] Path VALID: " +
-                            $"Eagle({eaglePos.x:F1},{eaglePos.z:F1}) -> P1({p1.x:F1},{p1.z:F1}) -> P2({p2.x:F1},{p2.z:F1})");
+                            $"Eagle({eaglePos.x:F1},{eaglePos.z:F1}) -> P1({p1.x:F1},{p1.z:F1}) -> P2({p2.x:F1},{p2.z:F1}), " +
+                            $"ActualEnemies={actualEnemyCount} (Bresenham={candidate.enemies})");
                     }
                     catch (Exception ex)
                     {
@@ -908,8 +1032,10 @@ namespace CompanionAI_v3.GameInterface
                 bestPoint1 = candidate.p1;
                 bestPoint2 = candidate.p2;
 
-                // ★ v3.7.58: P1 → P2 경로의 타격 대상
-                var hitEnemies = GetEnemiesInChargePath(p1, p2, enemies);
+                // ★ v3.8.07: P1 → P2 경로의 타격 대상 (실제 패스파인딩 사용)
+                var hitEnemies = eagleAgent != null
+                    ? GetEnemiesInChargePath(p1, p2, enemies, eagleAgent)
+                    : GetEnemiesInChargePath(p1, p2, enemies);
                 var hitNames = string.Join(", ", hitEnemies.ConvertAll(e => e.CharacterName));
 
                 Main.LogDebug($"[PointTargetingHelper] FindBestPath: SUCCESS - " +
@@ -1011,8 +1137,11 @@ namespace CompanionAI_v3.GameInterface
                     {
                         Vector3 p1Pos = (Vector3)tempP1.Vector3Position;
                         Vector3 p2Pos = (Vector3)tempP2.Vector3Position;
-                        // ★ v3.7.58: P1 → P2 경로에서 적 타격
-                        int enemyCount = CountEnemiesInChargePath(p1Pos, p2Pos, enemies);
+                        // ★ v3.8.07: P1 → P2 경로에서 적 타격 (실제 패스파인딩 사용)
+                        var eagleAgent = eagle?.MaybeMovementAgent;
+                        int enemyCount = eagleAgent != null
+                            ? CountEnemiesInChargePath(p1Pos, p2Pos, enemies, eagleAgent)
+                            : CountEnemiesInChargePath(p1Pos, p2Pos, enemies);
                         float pathLength = Vector3.Distance(p1Pos, p2Pos);
 
                         // 최적 선택: 1) 적 수 > 2) 경로 길이 > 3) Master 이동 거리 짧은 것

@@ -23,6 +23,244 @@ namespace CompanionAI_v3.Planning.Planners
     public static class BuffPlanner
     {
         /// <summary>
+        /// ★ v3.8.41: 통합 궁극기 계획 (모든 역할 공통)
+        ///
+        /// 모든 타겟 유형(Self, 적, 아군, 지점)의 궁극기를 올바르게 처리
+        /// HeroicAct + DesperateMeasure 모두 탐색
+        ///
+        /// 호출 시점: 각 플랜의 최초 페이즈 (FreeUltimateBuff 감지 시)
+        /// </summary>
+        public static PlannedAction PlanUltimate(Situation situation, ref float remainingAP, string roleName)
+        {
+            var unit = situation.Unit;
+
+            // 모든 궁극기 수집 (HeroicAct + DesperateMeasure)
+            var ultimates = situation.AvailableBuffs
+                .Where(a => CombatAPI.IsUltimateAbility(a))
+                .ToList();
+
+            // AvailableAttacks에도 궁극기가 있을 수 있음 (적 타겟 궁극기)
+            if (situation.AvailableAttacks != null)
+            {
+                var attackUltimates = situation.AvailableAttacks
+                    .Where(a => CombatAPI.IsUltimateAbility(a))
+                    .ToList();
+                ultimates.AddRange(attackUltimates);
+            }
+
+            // 중복 제거 (GUID 기반)
+            ultimates = ultimates
+                .GroupBy(a => a.Blueprint?.AssetGuid?.ToString() ?? a.Name)
+                .Select(g => g.First())
+                .ToList();
+
+            if (ultimates.Count == 0)
+            {
+                Main.LogDebug($"[{roleName}] PlanUltimate: No ultimate abilities available");
+                return null;
+            }
+
+            Main.Log($"[{roleName}] PlanUltimate: Found {ultimates.Count} ultimates: {string.Join(", ", ultimates.Select(a => a.Name))}");
+
+            // 점수 기반 정렬 (ScoreBuff 사용 → FreeUltimateBuff 보너스 포함)
+            var scored = ultimates
+                .Select(a => new { Ability = a, Score = UtilityScorer.ScoreBuff(a, situation) })
+                .Where(x => x.Score > 0)
+                .OrderByDescending(x => x.Score)
+                .ToList();
+
+            if (scored.Count == 0)
+            {
+                Main.LogDebug($"[{roleName}] PlanUltimate: All ultimates scored <= 0");
+                return null;
+            }
+
+            foreach (var candidate in scored)
+            {
+                var ability = candidate.Ability;
+                float cost = CombatAPI.GetAbilityAPCost(ability);
+
+                // 0 코스트가 아닌 경우 AP 체크
+                if (cost > 0 && cost > remainingAP)
+                {
+                    Main.LogDebug($"[{roleName}] PlanUltimate: {ability.Name} skipped (cost={cost:F1} > AP={remainingAP:F1})");
+                    continue;
+                }
+
+                // 타겟 유형에 따라 적절한 타겟 결정
+                var targetType = CombatAPI.ClassifyUltimateTarget(ability);
+                TargetWrapper target = null;
+                string targetDesc = "";
+
+                switch (targetType)
+                {
+                    case CombatAPI.UltimateTargetType.SelfBuff:
+                        // Personal 궁극기 → 자기 자신
+                        target = new TargetWrapper(unit);
+                        targetDesc = "self";
+                        break;
+
+                    case CombatAPI.UltimateTargetType.ImmediateAttack:
+                        // 적 타겟 궁극기 → 최적 적 선택
+                        var bestEnemy = situation.BestTarget ?? situation.NearestEnemy;
+                        if (bestEnemy != null)
+                        {
+                            target = new TargetWrapper(bestEnemy);
+                            targetDesc = bestEnemy.CharacterName;
+                        }
+                        break;
+
+                    case CombatAPI.UltimateTargetType.AllyBuff:
+                        // 아군 타겟 궁극기 → 최적 아군 선택 (가장 강한 딜러 우선)
+                        var bestAlly = SelectBestAllyForUltimate(situation);
+                        if (bestAlly != null)
+                        {
+                            target = new TargetWrapper(bestAlly);
+                            targetDesc = bestAlly.CharacterName;
+                        }
+                        break;
+
+                    case CombatAPI.UltimateTargetType.AreaEffect:
+                        // 지점 타겟 궁극기 → 최적 위치 계산
+                        var bestPos = FindBestUltimatePosition(ability, situation);
+                        if (bestPos.HasValue)
+                        {
+                            target = new TargetWrapper(bestPos.Value);
+                            targetDesc = $"({bestPos.Value.x:F1},{bestPos.Value.z:F1})";
+                        }
+                        break;
+
+                    default:
+                        // 알 수 없는 타겟 → self 시도
+                        target = new TargetWrapper(unit);
+                        targetDesc = "self(fallback)";
+                        break;
+                }
+
+                if (target == null)
+                {
+                    Main.LogDebug($"[{roleName}] PlanUltimate: {ability.Name} skipped - no valid target for {targetType}");
+                    continue;
+                }
+
+                string reason;
+                if (CombatAPI.CanUseAbilityOn(ability, target, out reason))
+                {
+                    remainingAP -= cost;
+                    Main.Log($"[{roleName}] ★ ULTIMATE: {ability.Name} -> {targetDesc} " +
+                        $"(type={targetType}, score={candidate.Score:F0}, heroic={ability.Blueprint?.IsHeroicAct})");
+
+                    // 타겟 유형에 따른 PlannedAction 생성
+                    switch (targetType)
+                    {
+                        case CombatAPI.UltimateTargetType.ImmediateAttack:
+                            var targetEntity = target.Entity as BaseUnitEntity;
+                            return PlannedAction.Attack(ability, targetEntity,
+                                $"Ultimate attack: {ability.Name}", cost);
+
+                        case CombatAPI.UltimateTargetType.AreaEffect:
+                            return PlannedAction.PositionalBuff(ability, target.Point,
+                                $"Ultimate area: {ability.Name}", cost);
+
+                        default:
+                            var buffTarget = (target.Entity as BaseUnitEntity) ?? unit;
+                            return PlannedAction.Buff(ability, buffTarget,
+                                $"Ultimate: {ability.Name}", cost);
+                    }
+                }
+                else
+                {
+                    Main.LogDebug($"[{roleName}] PlanUltimate: {ability.Name} -> {targetDesc} failed: {reason}");
+                }
+            }
+
+            Main.LogDebug($"[{roleName}] PlanUltimate: All candidates failed");
+            return null;
+        }
+
+        /// <summary>
+        /// ★ v3.8.41: 궁극기 사용 대상으로 최적 아군 선택 (Finest Hour! 등)
+        /// 우선순위: 풀AP 공격 가능한 강한 딜러 > HP 높은 아군 > 가장 가까운 아군
+        /// </summary>
+        private static BaseUnitEntity SelectBestAllyForUltimate(Situation situation)
+        {
+            if (situation.Allies == null || situation.Allies.Count == 0)
+                return null;
+
+            BaseUnitEntity bestAlly = null;
+            float bestScore = float.MinValue;
+
+            foreach (var ally in situation.Allies)
+            {
+                if (ally == null || !ally.IsConscious) continue;
+                if (ally == situation.Unit) continue;  // 자기 자신 제외
+
+                float score = 0f;
+
+                // HP가 높은 아군 우선 (생존 가능성)
+                float hpPercent = CombatAPI.GetHPPercent(ally);
+                score += hpPercent;
+
+                // DPS 역할 우선 (추가 턴의 가치 극대화)
+                var settings = ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
+                var role = settings?.Role ?? AIRole.Auto;
+                if (role == AIRole.Auto)
+                    role = RoleDetector.DetectOptimalRole(ally);
+
+                if (role == AIRole.DPS) score += 50f;
+                else if (role == AIRole.Tank) score += 20f;
+                else if (role == AIRole.Support) score += 10f;
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestAlly = ally;
+                }
+            }
+
+            if (bestAlly != null)
+                Main.LogDebug($"[BuffPlanner] Best ally for ultimate: {bestAlly.CharacterName} (score={bestScore:F0})");
+
+            return bestAlly;
+        }
+
+        /// <summary>
+        /// ★ v3.8.41: 구역 궁극기 최적 위치 계산 (Take and Hold, Orchestrated Firestorm 등)
+        /// </summary>
+        private static Vector3? FindBestUltimatePosition(AbilityData ability, Situation situation)
+        {
+            bool isOffensive = ability.Blueprint?.NotOffensive != true;
+            float radius = CombatAPI.GetAoERadius(ability);
+            if (radius <= 0) radius = 3f;
+
+            if (isOffensive)
+            {
+                // 공격형 구역: 적이 가장 많이 모인 위치
+                var enemies = situation.Enemies?.Where(e => e != null && e.IsConscious).ToList();
+                if (enemies == null || enemies.Count == 0) return null;
+
+                var clusters = ClusterDetector.FindClusters(enemies, radius);
+                if (clusters.Any())
+                {
+                    var bestCluster = clusters.OrderByDescending(c => c.Count).First();
+                    return bestCluster.Center;
+                }
+
+                // 폴백: 가장 가까운 적 위치
+                return situation.NearestEnemy?.Position;
+            }
+            else
+            {
+                // 지원형 구역: 아군이 가장 많이 모인 위치
+                var allies = situation.Allies?.Where(a => a != null && a.IsConscious).ToList();
+                if (allies == null || allies.Count == 0) return null;
+
+                return FindBestCoveragePosition(allies, radius,
+                    CalculateAveragePosition(allies));
+            }
+        }
+
+        /// <summary>
         /// 버프 계획 (AP 예약 고려)
         /// </summary>
         public static PlannedAction PlanBuffWithReservation(Situation situation, ref float remainingAP, float reservedAP, string roleName)

@@ -87,6 +87,8 @@ namespace CompanionAI_v3.Data
             // Other Buffs
             { "3e34d7ddd1dc4cc580dc8a578cc09beb", new AbilityInfo("3e34d7ddd1dc4cc580dc8a578cc09beb", "AuraOfFaith", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
             { "4eda9e3c69b24a8f866a21ba0f935a09", new AbilityInfo("4eda9e3c69b24a8f866a21ba0f935a09", "FinestHour", AbilityTiming.PreAttackBuff, flags: AbilityFlags.SelfTargetOnly) },
+            // ★ v3.8.21: ForcefulStrike - 강타 (다음 공격 밀기 효과)
+            { "93d58dfeb6c648858c130e0a902f6ed6", new AbilityInfo("93d58dfeb6c648858c130e0a902f6ed6", "ForcefulStrike", AbilityTiming.PreAttackBuff, flags: AbilityFlags.SelfTargetOnly) },
             { "51fe0021d50d4e3b8ce96c4bd7fe6b56", new AbilityInfo("51fe0021d50d4e3b8ce96c4bd7fe6b56", "BlessedBullets", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
 
             // ========================================
@@ -115,7 +117,8 @@ namespace CompanionAI_v3.Data
             { "742ab23861c544b38f26e17175d17183", new AbilityInfo("742ab23861c544b38f26e17175d17183", "Taunt", AbilityTiming.Taunt, flags: AbilityFlags.IsTauntAbility) },
             { "46e7a840c3d04703b154660efb45538b", new AbilityInfo("46e7a840c3d04703b154660efb45538b", "Taunt_Vanguard", AbilityTiming.Taunt, flags: AbilityFlags.IsTauntAbility) },
             { "a8c7d8404d104d4dad2d460ec2b470ee", new AbilityInfo("a8c7d8404d104d4dad2d460ec2b470ee", "Taunt_Servoskull", AbilityTiming.Taunt, flags: AbilityFlags.IsTauntAbility) },
-            { "13e41af1d54c458da81050336ce8e0fc", new AbilityInfo("13e41af1d54c458da81050336ce8e0fc", "MockingCry", AbilityTiming.Taunt, flags: AbilityFlags.IsTauntAbility) },
+            // ★ v3.8.21: PointTarget 플래그 추가 (Point-target AOE 도발)
+            { "13e41af1d54c458da81050336ce8e0fc", new AbilityInfo("13e41af1d54c458da81050336ce8e0fc", "MockingCry", AbilityTiming.Taunt, flags: AbilityFlags.PointTarget | AbilityFlags.IsTauntAbility) },
             { "383d89aaa52f4c3f8e19a02659ce19e7", new AbilityInfo("383d89aaa52f4c3f8e19a02659ce19e7", "ProvocatorHelm", AbilityTiming.Taunt, flags: AbilityFlags.IsTauntAbility) },
             { "beef5bd0b6724e5c8373fb9fbcd34084", new AbilityInfo("beef5bd0b6724e5c8373fb9fbcd34084", "TauntTargetAbility", AbilityTiming.Taunt, flags: AbilityFlags.EnemyTarget | AbilityFlags.IsTauntAbility) },
 
@@ -298,11 +301,13 @@ namespace CompanionAI_v3.Data
             // PointTarget: 셀 타겟 능력 → MovementPlanner에서 착지 위치 계산
             { "6f1b7cfb48a0450cb85ce8a8879502de", new AbilityInfo("6f1b7cfb48a0450cb85ce8a8879502de", "DeathFromAbove", AbilityTiming.GapCloser, flags: AbilityFlags.PointTarget) },
 
-            // ★ v3.1.24: 죽음 강림 (Death Descending) 변형들 - 모두 GapCloser + PointTarget
+            // ★ v3.1.24: 죽음 강림 (Death Descending) 변형들
+            // Free/Spring/Targeted: PointTarget (착지 위치 지정)
+            // ★ v3.8.17: Ultimate: EnemyTarget (적 직접 타겟 - 블루프린트 확인: CanTargetPoint=false, CanTargetEnemies=true)
             { "780c0fb08c2e4205a8f6df9b9fc2ed3b", new AbilityInfo("780c0fb08c2e4205a8f6df9b9fc2ed3b", "DeathFromAbove_Free", AbilityTiming.GapCloser, flags: AbilityFlags.PointTarget) },
             { "bdb0bd56d86a45dc914226ea4704f5f6", new AbilityInfo("bdb0bd56d86a45dc914226ea4704f5f6", "DeathFromAbove_Spring", AbilityTiming.GapCloser, flags: AbilityFlags.PointTarget) },
             { "2fe0f07d130c4af2ab23a9ce75efad5a", new AbilityInfo("2fe0f07d130c4af2ab23a9ce75efad5a", "DeathFromAbove_Targeted", AbilityTiming.GapCloser, flags: AbilityFlags.PointTarget) },
-            { "4c8e11fc01cc4923895e0246be178aea", new AbilityInfo("4c8e11fc01cc4923895e0246be178aea", "DeathFromAbove_Ultimate", AbilityTiming.GapCloser, flags: AbilityFlags.PointTarget) },
+            { "4c8e11fc01cc4923895e0246be178aea", new AbilityInfo("4c8e11fc01cc4923895e0246be178aea", "DeathFromAbove_Ultimate", AbilityTiming.GapCloser, flags: AbilityFlags.EnemyTarget) },
 
             // Death Waltz (Heroic Act) - Momentum 175+ 필요
             { "d52b8f3b44434f2798cd3a01c97fd1ed", new AbilityInfo("d52b8f3b44434f2798cd3a01c97fd1ed", "DeathWaltz_Heroic", AbilityTiming.HeroicAct, flags: AbilityFlags.SingleUse | AbilityFlags.EnemyTarget) },
@@ -320,8 +325,15 @@ namespace CompanionAI_v3.Data
             // Acrobatic Artistry - 턴 시작 위치로 복귀 (탈출 스킬)
             { "1798e1237504457db15655280481d549", new AbilityInfo("1798e1237504457db15655280481d549", "AcrobaticArtistry", AbilityTiming.TurnEnding, flags: AbilityFlags.SelfTargetOnly) },
 
-            // Veil of Blades - wound 소모 + 턴 종료 + 방어 자세
-            { "8b7bcaa093224422ac66c80ffcf69f6d", new AbilityInfo("8b7bcaa093224422ac66c80ffcf69f6d", "VeilOfBlades", AbilityTiming.TurnEnding, hpThreshold: 60f, flags: AbilityFlags.SelfTargetOnly) },
+            // ★ v3.8.18: Veil of Blades - wound 소모 + 턴 종료 + 방어 영역 생성
+            // 블루프린트: CanTargetPoint=true, Range=1, MinRange=1 (1타일 떨어진 지점에 영역 생성)
+            { "8b7bcaa093224422ac66c80ffcf69f6d", new AbilityInfo("8b7bcaa093224422ac66c80ffcf69f6d", "VeilOfBlades", AbilityTiming.TurnEnding, hpThreshold: 60f, flags: AbilityFlags.PointTarget) },
+
+            // ★ v3.8.18: Blade Dance - 주변 모든 적에게 다중 공격 (2 AP, 쿨다운 1)
+            // 블루프린트: AbilityCustomBladeDance, clearMPInsteadOfEndingTurn=true, AbilityCasterIsNearOtherUnits
+            // 공격 횟수: 2 + AgilityBonus/4 (쌍검 시 2배)
+            // ★ v3.8.24: 중복 GUID 제거 - BladeDance_Reaper(203줄)와 동일한 GUID, DangerousAoE 유지
+            // { "e955823f54d24088ae1fdefe88d3684d", new AbilityInfo("e955823f54d24088ae1fdefe88d3684d", "BladeDance", AbilityTiming.Normal, flags: AbilityFlags.SelfTargetOnly | AbilityFlags.IsWeaponAttack) },
 
             // ========================================
             // ★ v3.0.34: Assassin 스킬
@@ -342,8 +354,10 @@ namespace CompanionAI_v3.Data
             // Death Whisper - 0 AP 공격 + 출혈 (공격으로 분류됨)
             { "33214b7215b442519f4303bcd4a8ab34", new AbilityInfo("33214b7215b442519f4303bcd4a8ab34", "DeathWhisper", AbilityTiming.Normal, flags: AbilityFlags.EnemyTarget | AbilityFlags.IsWeaponAttack) },
 
-            // Danse Macabre - 이동 + 회피 버프 (갭클로저/이동)
-            { "af4b536f77d14e12907337ff0efb7f76", new AbilityInfo("af4b536f77d14e12907337ff0efb7f76", "DanseMacabre", AbilityTiming.GapCloser, flags: AbilityFlags.SelfTargetOnly) },
+            // ★ v3.8.18: Danse Macabre - 직선 이동 + 경로상 적 피해
+            // 블루프린트: AbilityCustomDirectMovement, CanTargetPoint=true, DamageAllUnitsInLine=true
+            // Range: AgilityBonus/2 + 1 (동적)
+            { "af4b536f77d14e12907337ff0efb7f76", new AbilityInfo("af4b536f77d14e12907337ff0efb7f76", "DanseMacabre", AbilityTiming.GapCloser, flags: AbilityFlags.PointTarget) },
 
             // ========================================
             // ★ v3.0.34: Arch-Militant 스킬
@@ -551,8 +565,9 @@ namespace CompanionAI_v3.Data
             // Warp Speed - 워프 속도 (아군 버프 - 이동/회피)
             { "b83829b067534eb0aaadab90b4d86452", new AbilityInfo("b83829b067534eb0aaadab90b4d86452", "WarpSpeed", AbilityTiming.PreCombatBuff, flags: AbilityFlags.AllyTarget) },
 
-            // Enfeeble - 허약 (적 디버프 - 특성 감소)
-            { "0fd6606266b245d19127ff2bf44e0d52", new AbilityInfo("0fd6606266b245d19127ff2bf44e0d52", "Enfeeble", AbilityTiming.Debuff, flags: AbilityFlags.EnemyTarget) },
+            // ★ v3.8.19: Enfeeble - 허약 (AOE 디버프 - 특성 감소)
+            // 블루프린트: CanTargetPoint=true, AbilityTargetsInPattern (범위 공격)
+            { "0fd6606266b245d19127ff2bf44e0d52", new AbilityInfo("0fd6606266b245d19127ff2bf44e0d52", "Enfeeble", AbilityTiming.Debuff, flags: AbilityFlags.PointTarget) },
 
             // Syphon Life - 생명력 흡수 (적 공격 + 회복)
             { "fb5efed90c6442acb6f9c756905072eb", new AbilityInfo("fb5efed90c6442acb6f9c756905072eb", "SyphonLife", AbilityTiming.Normal, flags: AbilityFlags.EnemyTarget) },
@@ -595,8 +610,9 @@ namespace CompanionAI_v3.Data
             // Perfect Timing - 절호의 기회 (자기 버프 - AP 회복)
             { "133771a21537411d989c1954e1fd7b23", new AbilityInfo("133771a21537411d989c1954e1fd7b23", "PerfectTiming", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
 
-            // Precognition - 예지 (자기 버프 - 전체 보너스)
-            { "8ebd436eedfe4f9fb8b705b043eeaf67", new AbilityInfo("8ebd436eedfe4f9fb8b705b043eeaf67", "Precognition", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
+            // ★ v3.8.19: Precognition - 예지 (아군 버프 - 전체 보너스)
+            // 블루프린트: CanTargetFriends=true, CanTargetSelf=true (자기+아군 타겟 가능)
+            { "8ebd436eedfe4f9fb8b705b043eeaf67", new AbilityInfo("8ebd436eedfe4f9fb8b705b043eeaf67", "Precognition", AbilityTiming.PreCombatBuff, flags: AbilityFlags.AllyTarget) },
 
             // Prescience - 선견지명 (아군 버프 - 전체 보너스)
             { "2a8341087cbb458b95bbe882a366642f", new AbilityInfo("2a8341087cbb458b95bbe882a366642f", "Prescience", AbilityTiming.PreCombatBuff, flags: AbilityFlags.AllyTarget) },
@@ -685,15 +701,18 @@ namespace CompanionAI_v3.Data
             // Controlled Burst - 제어 점사 (무기 공격)
             { "60c599a47ab74425a6bfeb53828db0b0", new AbilityInfo("60c599a47ab74425a6bfeb53828db0b0", "ControlledBurst", AbilityTiming.Normal, flags: AbilityFlags.EnemyTarget | AbilityFlags.IsWeaponAttack) },
 
-            // Soldier Dash - 질주 (이동 스킬)
-            { "9b09708aa0c244a6bc4a8e46d69c5884", new AbilityInfo("9b09708aa0c244a6bc4a8e46d69c5884", "SoldierDash", AbilityTiming.GapCloser, flags: AbilityFlags.SelfTargetOnly) },
+            // ★ v3.8.23: Soldier Dash - 질주 (포인트 타겟 이동 스킬, 후퇴 지원)
+            // 블루프린트: AiEscapeFromThreat Type="Retreat", IgnoreEnemies=true, DisableAttacksOfOpportunity=true
+            // GapCloser(접근) + RetreatCapable(후퇴) 양방향 이동 가능
+            { "9b09708aa0c244a6bc4a8e46d69c5884", new AbilityInfo("9b09708aa0c244a6bc4a8e46d69c5884", "SoldierDash", AbilityTiming.GapCloser, flags: AbilityFlags.PointTarget | AbilityFlags.IsRetreatCapable) },
 
             // ========================================
             // ★ v3.0.37: Vanguard 스킬
             // ========================================
 
-            // Fight Me (Forced Distraction) - 강제 교란 (아군 보호)
-            { "dac2896f1b4249648300531819f4d31d", new AbilityInfo("dac2896f1b4249648300531819f4d31d", "FightMe", AbilityTiming.Taunt, flags: AbilityFlags.AllyTarget) },
+            // ★ v3.8.19: Fight Me (Forced Distraction) - 강제 교란 (아군 보호 도발)
+            // 블루프린트: CanTargetFriends=true, Pattern Circle Radius 3 - 아군 주변 적 도발
+            { "dac2896f1b4249648300531819f4d31d", new AbilityInfo("dac2896f1b4249648300531819f4d31d", "FightMe", AbilityTiming.Taunt, flags: AbilityFlags.AllyTarget | AbilityFlags.IsTauntAbility) },
 
             // Follow My Lead - 내 뒤를 따라와 (자기 버프)
             { "6d2666949acd442bac7a4ab914af0b1f", new AbilityInfo("6d2666949acd442bac7a4ab914af0b1f", "FollowMyLead", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
@@ -847,8 +866,9 @@ namespace CompanionAI_v3.Data
 
         /// <summary>
         /// ★ v3.7.30: 블루프린트 속성 기반 완전 자동 타이밍 감지
+        /// ★ v3.7.73: AbilityClassificationData 기반 개선된 분류
         /// 게임이 제공하는 모든 관련 속성을 체계적으로 활용
-        /// 6단계 우선순위 기반 분류 시스템
+        /// 7단계 우선순위 기반 분류 시스템
         /// </summary>
         private static AbilityTiming AutoDetectTiming(AbilityData ability)
         {
@@ -858,35 +878,46 @@ namespace CompanionAI_v3.Data
                 if (bp == null) return AbilityTiming.Normal;
 
                 // ═══════════════════════════════════════════════════════════════
-                // 속성 캐싱 (성능 최적화)
+                // ★ v3.7.73: AbilityClassificationData 가져오기 (캐싱됨)
                 // ═══════════════════════════════════════════════════════════════
-                bool isHeroicAct = bp.IsHeroicAct;
-                bool isDesperateMeasure = bp.IsDesperateMeasure;
-                bool isCharge = bp.IsCharge;
-                bool isMoveUnit = bp.IsMoveUnit;
-                bool isStratagem = bp.IsStratagem;
-                bool isAoE = bp.IsAoE;
-                bool isAoEDamage = bp.IsAoEDamage;
-                bool isBurst = bp.IsBurst;
-                bool isGrenade = bp.IsGrenade;
-                bool isPsyker = bp.IsPsykerAbility;
-                bool isWeaponAbility = bp.IsWeaponAbility;
-                bool notOffensive = bp.NotOffensive;
-                bool canTargetSelf = bp.CanTargetSelf;
-                bool canTargetEnemies = bp.CanTargetEnemies;
-                bool canTargetFriends = bp.CanTargetFriends;
-                bool canTargetPoint = bp.CanTargetPoint;
-                bool canTargetDead = bp.CanCastToDeadTarget;
+                var classData = CombatAPI.GetClassificationData(ability);
 
-                var effectOnAlly = bp.EffectOnAlly;
-                var effectOnEnemy = bp.EffectOnEnemy;
-                var aoETargets = bp.AoETargets;
-                var range = bp.Range;
-                int aoERadius = bp.AoERadius;
+                // ═══════════════════════════════════════════════════════════════
+                // 속성 캐싱 (성능 최적화) - classData에서 추출
+                // ═══════════════════════════════════════════════════════════════
+                bool isHeroicAct = classData.IsHeroicAct;
+                bool isDesperateMeasure = classData.IsDesperateMeasure;
+                bool isCharge = classData.IsCharge;
+                bool isMoveUnit = classData.IsMoveUnit;
+                bool isStratagem = classData.IsStratagem;
+                bool isAoE = classData.IsAoE;
+                bool isAoEDamage = classData.IsAoE && classData.EffectOnEnemy == AbilityEffectOnUnit.Harmful;
+                bool isBurst = classData.IsBurst;
+                bool isGrenade = classData.IsGrenade;
+                bool isPsyker = classData.IsPsychic;
+                bool isWeaponAbility = classData.IsWeaponAbility;
+                bool notOffensive = classData.NotOffensive;
+                bool canTargetSelf = classData.CanTargetSelf;
+                bool canTargetEnemies = classData.CanTargetEnemies;
+                bool canTargetFriends = classData.CanTargetFriends;
+                bool canTargetPoint = classData.CanTargetPoint;
+                bool canTargetDead = classData.CanTargetDead;
+
+                var effectOnAlly = classData.EffectOnAlly;
+                var effectOnEnemy = classData.EffectOnEnemy;
+                var aoETargets = classData.AoETargets;
+                var range = classData.Range;
+                int aoERadius = classData.AoERadius;
+
+                // ★ v3.7.73: SpellDescriptor 기반 효과 감지
+                bool hasHardCC = classData.HasHardCC;   // Stun, Paralysis, Sleep, Petrified
+                bool hasSoftCC = classData.HasCC && !hasHardCC; // Fear, Confusion, etc.
+                bool hasDebuff = classData.HasDebuff;   // Sickened, Curse, etc.
+                bool hasDOT = classData.HasDOT;         // Fire, Acid, Poison, Bleed
+                bool hasDangerous = classData.HasDangerousEffect; // PsychicPhenomena, Death
 
                 bool hasWeapon = ability.Weapon != null;
                 bool hasMultiTarget = bp.GetComponent<AbilityMultiTarget>() != null;
-                string bpName = bp.name?.ToLower() ?? "";
 
                 // ═══════════════════════════════════════════════════════════════
                 // Phase 1: 게임 명시적 속성 (100% 신뢰)
@@ -908,6 +939,24 @@ namespace CompanionAI_v3.Data
                 // 돌진/이동 능력
                 if (isCharge || isMoveUnit)
                     return AbilityTiming.GapCloser;
+
+                // ★ v3.7.73: 수류탄 (AbilityTag 기반)
+                if (isGrenade)
+                    return AbilityTiming.Grenade;
+
+                // ═══════════════════════════════════════════════════════════════
+                // Phase 1.5: ★ v3.7.73 SpellDescriptor 기반 효과 분류
+                // CC, Debuff, DOT 등을 SpellDescriptor로 감지
+                // ═══════════════════════════════════════════════════════════════
+
+                // 강력 CC (Stun, Paralysis, Sleep, Petrified) → CrowdControl
+                // 적을 타겟하고 해로운 효과일 때만 CC로 분류
+                if (hasHardCC && canTargetEnemies && effectOnEnemy == AbilityEffectOnUnit.Harmful)
+                    return AbilityTiming.CrowdControl;
+
+                // 위험한 효과 (PsychicPhenomena, Death) → DangerousAoE
+                if (hasDangerous && effectOnAlly == AbilityEffectOnUnit.Harmful)
+                    return AbilityTiming.DangerousAoE;
 
                 // ═══════════════════════════════════════════════════════════════
                 // Phase 2: 컴포넌트 기반 (높은 신뢰도)
@@ -982,6 +1031,11 @@ namespace CompanionAI_v3.Data
                 if (notOffensive && canTargetEnemies && effectOnEnemy == AbilityEffectOnUnit.Harmful)
                     return AbilityTiming.Debuff;
 
+                // ★ v3.7.73: SpellDescriptor 기반 디버프 감지
+                // 약한 CC (Fear, Confusion 등) 또는 일반 디버프는 Debuff로 분류
+                if ((hasSoftCC || hasDebuff) && canTargetEnemies && effectOnEnemy == AbilityEffectOnUnit.Harmful)
+                    return AbilityTiming.Debuff;
+
                 // 아군에게 이로움 + 적 타겟 불가 → Buff 계열
                 if (effectOnAlly == AbilityEffectOnUnit.Helpful && !canTargetEnemies && !hasWeapon)
                 {
@@ -1018,7 +1072,7 @@ namespace CompanionAI_v3.Data
                         return AbilityTiming.PositionalBuff;
 
                     // Range=Custom + 범위 큼 → 구역 스킬
-                    if (range == AbilityRange.Custom && bp.CustomRange > 10)
+                    if (range == AbilityRange.Custom && classData.CustomRange > 10)
                         return AbilityTiming.PositionalBuff;
 
                     // 아군에게 이로움 → PositionalBuff
@@ -1141,9 +1195,61 @@ namespace CompanionAI_v3.Data
             return GetTiming(ability) == AbilityTiming.GapCloser;
         }
 
+        /// <summary>
+        /// ★ v3.8.23: 후퇴용 이동 스킬인지 확인 (SoldierDash 등)
+        /// 블루프린트에 AiEscapeFromThreat Type="Retreat" 컴포넌트가 있는 능력
+        /// - IgnoreEnemies: 적 무시하고 이동
+        /// - DisableAttacksOfOpportunity: 기회공격 무시
+        /// </summary>
+        public static bool IsRetreatCapable(AbilityData ability)
+        {
+            if (ability == null) return false;
+
+            var info = GetInfo(ability);
+            if (info != null && (info.Flags & AbilityFlags.IsRetreatCapable) != 0)
+                return true;
+
+            return false;
+        }
+
         public static bool IsTurnEnding(AbilityData ability)
         {
             return GetTiming(ability) == AbilityTiming.TurnEnding;
+        }
+
+        /// <summary>
+        /// ★ v3.7.87: 타겟에게 추가 턴을 부여하는 능력인지 확인 (쳐부숴라 등)
+        /// ContextActionStartAdditionalTurn 컴포넌트를 가진 능력 감지
+        /// 이미 행동한 유닛에게 이 능력을 쓰면 낭비이므로 필터링에 사용
+        /// </summary>
+        public static bool IsTurnGrantAbility(AbilityData ability)
+        {
+            if (ability == null) return false;
+
+            try
+            {
+                var bp = ability.Blueprint;
+                if (bp == null) return false;
+
+                var runAction = bp.GetComponent<AbilityEffectRunAction>();
+                if (runAction?.Actions?.Actions == null) return false;
+
+                foreach (var action in runAction.Actions.Actions)
+                {
+                    // ContextActionStartAdditionalTurn 타입 체크
+                    if (action?.GetType().Name == "ContextActionStartAdditionalTurn")
+                    {
+                        Main.LogDebug($"[AbilityDB] IsTurnGrantAbility: {ability.Name} has ContextActionStartAdditionalTurn");
+                        return true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[AbilityDB] IsTurnGrantAbility error for {ability.Name}: {ex.Message}");
+            }
+
+            return false;
         }
 
         /// <summary>

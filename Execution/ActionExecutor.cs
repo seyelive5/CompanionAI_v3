@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.Pathfinding;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Utility;
 using CompanionAI_v3.Core;
@@ -84,14 +85,28 @@ namespace CompanionAI_v3.Execution
 
             // ★ v3.7.20: 사역마 타겟 재해석 - stale 참조 방지
             // 계획 시점에 저장된 사역마 엔티티 참조가 실행 시점에 유효하지 않을 수 있음
+            // ★ v3.7.78: Point 타겟 능력은 사역마 위치로, Unit 타겟 능력은 사역마 유닛으로
+            // - Point 타겟 (Psychic Scream 등 AOE): 사역마 위치에 캐스트 (Warp Relay)
+            // - Unit 타겟: 사역마 유닛에 캐스트 (과충전/Momentum 이후에만 허용)
             if (action.IsFamiliarTarget)
             {
                 var caster = ability.Caster as BaseUnitEntity;
                 var freshFamiliar = FamiliarAPI.GetFamiliar(caster);
                 if (freshFamiliar != null)
                 {
-                    target = new TargetWrapper(freshFamiliar);
-                    Main.LogDebug($"[Executor] Familiar target re-resolved: {freshFamiliar.CharacterName}");
+                    // ★ v3.7.78: Point 타겟 능력 여부 체크
+                    if (CombatAPI.IsPointTargetAbility(ability))
+                    {
+                        // AOE 능력은 사역마 위치에 캐스트
+                        target = new TargetWrapper(freshFamiliar.Position);
+                        Main.LogDebug($"[Executor] Familiar target re-resolved to POSITION: ({freshFamiliar.Position.x:F1}, {freshFamiliar.Position.y:F1}, {freshFamiliar.Position.z:F1})");
+                    }
+                    else
+                    {
+                        // Unit 타겟 능력은 사역마 유닛에 캐스트
+                        target = new TargetWrapper(freshFamiliar);
+                        Main.LogDebug($"[Executor] Familiar target re-resolved to UNIT: {freshFamiliar.CharacterName}");
+                    }
                 }
                 else
                 {
@@ -120,6 +135,40 @@ namespace CompanionAI_v3.Execution
                 string reasons = string.Join(", ", unavailableReasons);
                 Main.LogWarning($"[Executor] Ability unavailable: {ability.Name} - {reasons}");
                 return ExecutionResult.Failure($"Ability unavailable: {reasons}");
+            }
+
+            // ★ v3.7.82: 실행 시점 도달 가능 검증 (플랜 연속 실행 대응)
+            // 계획 생성 후 이동이 실행되면 캐스터 위치가 변함
+            // 현재 위치에서 타겟에게 사거리+LOS 재검증 필수
+            var casterUnit = ability.Caster as BaseUnitEntity;
+            var targetUnit = target.Entity as BaseUnitEntity;
+
+            // ★ v3.7.84: 타겟 생존 여부 검증
+            // 이전 AOE 공격으로 타겟이 죽었을 수 있음
+            if ((action.Type == ActionType.Attack || action.Type == ActionType.Debuff) && targetUnit != null)
+            {
+                if (targetUnit.LifeState.IsDead)
+                {
+                    Main.LogWarning($"[Executor] ★ Target already dead: {ability.Name} -> {targetUnit.CharacterName}");
+                    return ExecutionResult.Failure($"Target is dead");
+                }
+                if (!targetUnit.IsConscious)
+                {
+                    Main.LogWarning($"[Executor] ★ Target unconscious: {ability.Name} -> {targetUnit.CharacterName}");
+                    return ExecutionResult.Failure($"Target is unconscious");
+                }
+            }
+
+            if ((action.Type == ActionType.Attack || action.Type == ActionType.Debuff)
+                && casterUnit != null && targetUnit != null
+                && (action.AllTargets == null || action.AllTargets.Count == 0))
+            {
+                if (!CombatAPI.CanReachTargetFromPosition(ability, casterUnit.Position, targetUnit))
+                {
+                    Main.LogWarning($"[Executor] ★ Execution-time reachability FAILED: {ability.Name} -> {targetUnit.CharacterName} from ({casterUnit.Position.x:F1}, {casterUnit.Position.z:F1})");
+                    return ExecutionResult.Failure($"Target unreachable from current position");
+                }
+                Main.LogDebug($"[Executor] Execution-time reachability OK: {ability.Name} -> {targetUnit.CharacterName}");
             }
 
             // 최종 검증 - 타겟에게 사용 가능한지
@@ -172,6 +221,45 @@ namespace CompanionAI_v3.Execution
             {
                 Main.Log($"[Executor] Cast MultiTarget: {ability.Name} ({action.AllTargets.Count} targets)");
                 return ExecutionResult.CastAbilityMultiTarget(ability, action.AllTargets);
+            }
+
+            // ★ v3.7.83: Point-target 능력 추가 로깅 (Relocate 등 실패 원인 파악)
+            if (target.Point.sqrMagnitude > 0.001f && target.Entity == null)
+            {
+                var caster = ability.Caster as BaseUnitEntity;
+                var targetNode = target.Point.GetNearestNodeXZ() as CustomGridNodeBase;
+                Main.LogDebug($"[Executor] Point-target ability: {ability.Name}");
+                Main.LogDebug($"[Executor]   Caster: {caster?.CharacterName} at ({caster?.Position.x:F1}, {caster?.Position.y:F1}, {caster?.Position.z:F1})");
+                Main.LogDebug($"[Executor]   Target point: ({target.Point.x:F2}, {target.Point.y:F2}, {target.Point.z:F2})");
+                if (targetNode != null)
+                {
+                    Main.LogDebug($"[Executor]   Target node: ({targetNode.XCoordinateInGrid}, {targetNode.ZCoordinateInGrid}), Walkable={targetNode.Walkable}");
+                    Main.LogDebug($"[Executor]   Node position: ({targetNode.Vector3Position.x:F2}, {targetNode.Vector3Position.y:F2}, {targetNode.Vector3Position.z:F2})");
+
+                    // 노드 점유 상태 확인
+                    if (targetNode.TryGetUnit(out var occupant))
+                    {
+                        Main.LogDebug($"[Executor]   Node occupied by: {occupant?.CharacterName}");
+                    }
+                }
+                else
+                {
+                    Main.LogDebug($"[Executor]   Target node: NULL (invalid position?)");
+                }
+
+                // Familiar 관련 추가 진단
+                if (FamiliarAPI.HasFamiliar(caster))
+                {
+                    var familiar = FamiliarAPI.GetFamiliar(caster);
+                    Main.LogDebug($"[Executor]   Familiar: {familiar?.CharacterName}, Conscious={familiar?.IsConscious}, Pos=({familiar?.Position.x:F1}, {familiar?.Position.y:F1}, {familiar?.Position.z:F1})");
+
+                    // 현재 위치에서 타겟까지 거리
+                    if (familiar != null)
+                    {
+                        float distToTarget = UnityEngine.Vector3.Distance(familiar.Position, target.Point);
+                        Main.LogDebug($"[Executor]   Familiar distance to target: {distToTarget:F1}m ({CombatAPI.MetersToTiles(distToTarget):F1} tiles)");
+                    }
+                }
             }
 
             // 일반 능력 실행 명령 반환

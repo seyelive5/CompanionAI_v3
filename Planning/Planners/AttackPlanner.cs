@@ -199,6 +199,27 @@ namespace CompanionAI_v3.Planning.Planners
                     }
                 }
 
+                // ★ v3.8.33: DangerousAoE Ray/Cone/Sector 패턴 거리 검증
+                // 게임은 RangeCells(무기 사거리)만 체크하지만, Ray 패턴은 patternRadius만큼만 뻗어나감
+                // 무기 사거리 15 + 패턴 반경 6 → 15타일 떨어진 적 타겟 가능하지만 실제 Ray는 6타일만 이동
+                if (AbilityDatabase.IsDangerousAoE(scored.Attack))
+                {
+                    var patternInfo = CombatAPI.GetPatternInfo(scored.Attack);
+                    if (patternInfo != null && patternInfo.IsValid && patternInfo.CanBeDirectional)
+                    {
+                        // Ray/Cone/Sector 패턴: caster에서 patternRadius만큼만 뻗어나감
+                        float patternRadius = patternInfo.Radius;
+                        float distanceToTarget = CombatCache.GetDistanceInTiles(situation.Unit, target);
+
+                        if (distanceToTarget > patternRadius)
+                        {
+                            Main.LogDebug($"[AttackPlanner] DangerousAoE pattern range failed: {scored.Attack.Name} -> {target.CharacterName} " +
+                                $"(dist={distanceToTarget:F1} > patternRadius={patternRadius:F0} tiles)");
+                            continue;
+                        }
+                    }
+                }
+
                 string reason;
                 if (CombatAPI.CanUseAbilityOn(scored.Attack, targetWrapper, out reason))
                 {
@@ -222,6 +243,24 @@ namespace CompanionAI_v3.Planning.Planners
                     {
                         Main.LogDebug($"[AttackPlanner] PrimaryAttack AOE height failed: {situation.PrimaryAttack.Name} -> {target.CharacterName}");
                         return null;  // ★ v3.6.10: 폴백도 실패
+                    }
+                }
+
+                // ★ v3.8.33: DangerousAoE Ray/Cone/Sector 패턴 거리 검증 (폴백에도 적용)
+                if (AbilityDatabase.IsDangerousAoE(situation.PrimaryAttack))
+                {
+                    var patternInfo = CombatAPI.GetPatternInfo(situation.PrimaryAttack);
+                    if (patternInfo != null && patternInfo.IsValid && patternInfo.CanBeDirectional)
+                    {
+                        float patternRadius = patternInfo.Radius;
+                        float distanceToTarget = CombatCache.GetDistanceInTiles(situation.Unit, target);
+
+                        if (distanceToTarget > patternRadius)
+                        {
+                            Main.LogDebug($"[AttackPlanner] PrimaryAttack DangerousAoE pattern range failed: {situation.PrimaryAttack.Name} -> {target.CharacterName} " +
+                                $"(dist={distanceToTarget:F1} > patternRadius={patternRadius:F0} tiles)");
+                            return null;
+                        }
                     }
                 }
 

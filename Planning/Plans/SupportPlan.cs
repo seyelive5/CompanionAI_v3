@@ -33,8 +33,16 @@ namespace CompanionAI_v3.Planning.Plans
 
             float reservedAP = CalculateReservedAPForPostMoveAttack(situation);
 
-            // ★ v3.0.57: Phase 0 제거 - SequenceOptimizer가 이동+공격 조합을 자동 비교
-            // 기존 Phase 0의 휴리스틱 판단 대신, Phase 6에서 최적 시퀀스 선택
+            // ★ v3.8.41: Phase 0 - 잠재력 초월 궁극기 (최우선)
+            if (CombatAPI.HasFreeUltimateBuff(situation.Unit))
+            {
+                var ultimateAction = PlanUltimate(situation, ref remainingAP);
+                if (ultimateAction != null)
+                {
+                    actions.Add(ultimateAction);
+                    return new TurnPlan(actions, TurnPriority.Critical, "Support ultimate (Transcend Potential)");
+                }
+            }
 
             // Phase 1: 긴급 자기 힐
             var selfHealAction = PlanEmergencyHeal(situation, ref remainingAP);
@@ -236,11 +244,13 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.7.07: 실제 사용된 키스톤 버프만 스킵 (실패한 건 아군에게 시전)
             // ★ v3.7.08 Fix: 계획된 버프 GUID 추적하여 무한 루프 방지 (0 AP 버프 문제)
             // ★ v3.7.09: 키스톤 디버프도 추적 (Raven Warp Relay)
+            // ★ v3.8.16: 턴 부여 능력 중복 방지 (같은 대상에게 쳐부숴라 여러 번 계획 방지)
             // AP가 남아있는 동안 계속 버프 (제한 없음)
             var usedAllyBuffGuids = new HashSet<string>(usedKeystoneAbilityGuids);  // 키스톤 + 아군 버프 통합 추적
+            var plannedTurnGrantTargets = new HashSet<string>();  // ★ v3.8.16: 턴 부여 대상 추적
             while (remainingAP >= 1f)
             {
-                var allyBuffAction = PlanAllyBuff(situation, ref remainingAP, usedAllyBuffGuids);
+                var allyBuffAction = PlanAllyBuff(situation, ref remainingAP, usedAllyBuffGuids, plannedTurnGrantTargets);
                 if (allyBuffAction == null) break;
 
                 // ★ v3.7.08: 계획된 버프 GUID 추가 (무한 루프 방지)
@@ -421,7 +431,8 @@ namespace CompanionAI_v3.Planning.Plans
                         }
                     }
 
-                    if (fallbackAction.Ability != null)
+                    // ★ v3.8.30: 적이 1명일 때는 능력도 제외하지 않음 (동일 능력으로 재공격 허용)
+                    if (fallbackAction.Ability != null && situation.HittableEnemies.Count > 1)
                     {
                         var guid = fallbackAction.Ability.Blueprint?.AssetGuid?.ToString();
                         if (!string.IsNullOrEmpty(guid))
@@ -449,7 +460,8 @@ namespace CompanionAI_v3.Planning.Plans
                         if (targetEntity != null && situation.HittableEnemies.Count > 1)
                             plannedTargetIds.Add(targetEntity.UniqueId);
 
-                        if (action.Ability != null)
+                        // ★ v3.8.30: 적이 1명일 때는 능력도 제외하지 않음 (동일 능력으로 재공격 허용)
+                        if (action.Ability != null && situation.HittableEnemies.Count > 1)
                         {
                             var guid = action.Ability.Blueprint?.AssetGuid?.ToString();
                             if (!string.IsNullOrEmpty(guid))
@@ -718,106 +730,8 @@ namespace CompanionAI_v3.Planning.Plans
             return null;
         }
 
-        /// <summary>
-        /// ★ v3.7.07: usedKeystoneGuids 파라미터 추가
-        /// Phase 1.75에서 사역마에게 실제 성공한 버프만 스킵
-        /// 실패한 버프(쳐부숴라! 등)는 아군에게 시전 가능
-        /// </summary>
-        private PlannedAction PlanAllyBuff(Situation situation, ref float remainingAP, HashSet<string> usedKeystoneGuids)
-        {
-            // ★ v3.2.15: 팀 전술에 따라 버프 대상 우선순위 조정
-            var tactic = TeamBlackboard.Instance.CurrentTactic;
-            var prioritizedTargets = new List<BaseUnitEntity>();
-
-            if (tactic == TacticalSignal.Retreat)
-            {
-                // 후퇴: 가장 위험한 아군 우선 (생존 버프)
-                var mostWounded = TeamBlackboard.Instance.GetMostWoundedAlly();
-                if (mostWounded != null)
-                {
-                    prioritizedTargets.Add(mostWounded);
-                    Main.LogDebug($"[Support] Phase 4: Retreat tactic - buff wounded ally {mostWounded.CharacterName}");
-                }
-            }
-            else if (tactic == TacticalSignal.Attack)
-            {
-                // 공격: DPS 우선 버프 (HP 50% 이상인 DPS)
-                foreach (var ally in situation.Allies.Where(a => a != null && !a.LifeState.IsDead))
-                {
-                    var settings = ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
-                    if (settings?.Role == AIRole.DPS && CombatAPI.GetHPPercent(ally) > 50f)
-                    {
-                        prioritizedTargets.Add(ally);
-                    }
-                }
-                if (prioritizedTargets.Count > 0)
-                {
-                    Main.LogDebug($"[Support] Phase 4: Attack tactic - buff DPS first");
-                }
-            }
-
-            // 기본 우선순위 (Defend 또는 위에서 대상 없을 때): Tank > DPS > 본인 > 기타
-            // 1. Tank 역할 먼저
-            foreach (var ally in situation.Allies.Where(a => a != null && !a.LifeState.IsDead))
-            {
-                var settings = ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
-                if (settings?.Role == AIRole.Tank && !prioritizedTargets.Contains(ally))
-                    prioritizedTargets.Add(ally);
-            }
-
-            // 2. DPS 역할
-            foreach (var ally in situation.Allies.Where(a => a != null && !a.LifeState.IsDead))
-            {
-                var settings = ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
-                if (settings?.Role == AIRole.DPS && !prioritizedTargets.Contains(ally))
-                    prioritizedTargets.Add(ally);
-            }
-
-            // 3. 본인
-            if (!prioritizedTargets.Contains(situation.Unit))
-                prioritizedTargets.Add(situation.Unit);
-
-            // 4. 나머지 아군
-            foreach (var ally in situation.Allies.Where(a => a != null && !a.LifeState.IsDead))
-            {
-                if (!prioritizedTargets.Contains(ally))
-                    prioritizedTargets.Add(ally);
-            }
-
-            foreach (var buff in situation.AvailableBuffs)
-            {
-                if (buff.Blueprint?.CanTargetFriends != true) continue;
-
-                // ★ v3.7.07 Fix: 실제 사역마에게 성공한 버프만 스킵
-                // 기존: IsExtrapolationTarget() → 실패한 버프도 무조건 스킵 (버그)
-                // 수정: usedKeystoneGuids.Contains() → 실제 성공한 것만 스킵
-                string buffGuid = buff.Blueprint?.AssetGuid?.ToString();
-                if (!string.IsNullOrEmpty(buffGuid) && usedKeystoneGuids != null && usedKeystoneGuids.Contains(buffGuid))
-                {
-                    Main.LogDebug($"[Support] Skip {buff.Name} - successfully used on familiar in Phase 1.75");
-                    continue;
-                }
-
-                float cost = CombatAPI.GetAbilityAPCost(buff);
-                if (cost > remainingAP) continue;
-
-                foreach (var target in prioritizedTargets)
-                {
-                    if (CombatAPI.HasActiveBuff(target, buff)) continue;
-
-                    var targetWrapper = new TargetWrapper(target);
-                    string reason;
-                    if (CombatAPI.CanUseAbilityOn(buff, targetWrapper, out reason))
-                    {
-                        remainingAP -= cost;
-                        Main.Log($"[Support] Buff ally: {buff.Name} -> {target.CharacterName}");
-                        return PlannedAction.Buff(buff, target, $"Buff {target.CharacterName}", cost);
-                    }
-                }
-            }
-
-            return null;
-        }
+        // ★ v3.7.93: PlanAllyBuff 메서드는 BasePlan으로 이동
+        // SupportPlan에서 BasePlan.PlanAllyBuff(situation, ref remainingAP, usedKeystoneGuids) 호출
 
         /// <summary>
         /// ★ v3.0.57: SequenceOptimizer 실패 시 폴백용

@@ -74,6 +74,13 @@ namespace CompanionAI_v3.Core
 
         #endregion
 
+        #region ★ v3.7.87: Round Action Tracking (보너스 턴 대응)
+
+        /// <summary>이번 라운드에 이미 행동한 유닛 ID 집합</summary>
+        private readonly HashSet<string> _actedThisRound = new HashSet<string>();
+
+        #endregion
+
         #region Team Tactical State
 
         /// <summary>팀 공유 타겟 (가장 많이 지정된 적)</summary>
@@ -153,6 +160,9 @@ namespace CompanionAI_v3.Core
             // ★ v3.5.10: 역할 예약 초기화
             ClearReservations();
 
+            // ★ v3.7.87: 라운드 행동 기록 초기화
+            _actedThisRound.Clear();
+
             Main.LogDebug("[TeamBlackboard] Cleared");
         }
 
@@ -180,6 +190,9 @@ namespace CompanionAI_v3.Core
 
             // ★ v3.5.10: 새 라운드 시작 시 역할 예약 초기화
             ClearReservations();
+
+            // ★ v3.7.87: 라운드 행동 기록 초기화 (보너스 턴 대응)
+            ClearActedThisRound();
 
             Main.Log($"[TeamBlackboard] Round {roundNumber} started. Combat kills={_combatKillCount}, DmgRatio={DamageRatio:F2}");
         }
@@ -514,6 +527,69 @@ namespace CompanionAI_v3.Core
             if (target == null || target.LifeState.IsDead) return;
             SharedTarget = target;
             Main.Log($"[TeamBlackboard] Shared target set: {target.CharacterName}");
+        }
+
+        #endregion
+
+        #region ★ v3.7.87: Round Action Tracking API
+
+        /// <summary>
+        /// 유닛이 이번 라운드에 행동했음을 기록
+        /// 보너스 턴(쳐부숴라 등)으로 행동한 경우에도 호출
+        /// </summary>
+        public void RecordUnitActed(BaseUnitEntity unit)
+        {
+            if (unit == null) return;
+
+            string id = unit.UniqueId ?? unit.CharacterName ?? "unknown";
+            if (_actedThisRound.Add(id))
+            {
+                Main.Log($"[Blackboard] ★ Unit acted this round: {unit.CharacterName}");
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.7.94: 유닛이 이번 라운드에 이미 행동했는지 확인
+        /// 게임 공식 API 사용 (수동 추적 대신)
+        /// </summary>
+        public bool HasActedThisRound(BaseUnitEntity unit)
+        {
+            if (unit == null) return false;
+
+            try
+            {
+                // ★ v3.7.94: 게임 공식 API - Initiative.ActedThisRound
+                // LastTurn == Game.Instance.TurnController.GameRound 로 계산됨
+                bool acted = unit.Initiative?.ActedThisRound ?? false;
+
+                if (acted)
+                {
+                    Main.LogDebug($"[Blackboard] Unit already acted this round (Game API): {unit.CharacterName}");
+                }
+
+                return acted;
+            }
+            catch (Exception ex)
+            {
+                // API 접근 실패 시 폴백 (레거시 방식)
+                Main.LogDebug($"[Blackboard] Initiative API failed, using fallback: {ex.Message}");
+                string id = unit.UniqueId ?? unit.CharacterName ?? "unknown";
+                return _actedThisRound.Contains(id);
+            }
+        }
+
+        /// <summary>
+        /// 라운드 행동 기록 초기화 (라운드 시작 시 자동 호출)
+        /// </summary>
+        private void ClearActedThisRound()
+        {
+            int count = _actedThisRound.Count;
+            _actedThisRound.Clear();
+
+            if (count > 0)
+            {
+                Main.LogDebug($"[Blackboard] Cleared {count} acted units for new round");
+            }
         }
 
         #endregion

@@ -35,6 +35,17 @@ namespace CompanionAI_v3.Planning.Plans
                 Main.Log($"[DPS] Reserving {reservedAP:F1} AP for post-move attack");
             }
 
+            // ★ v3.8.41: Phase 0 - 잠재력 초월 궁극기 (최우선)
+            if (CombatAPI.HasFreeUltimateBuff(situation.Unit))
+            {
+                var ultimateAction = PlanUltimate(situation, ref remainingAP);
+                if (ultimateAction != null)
+                {
+                    actions.Add(ultimateAction);
+                    return new TurnPlan(actions, TurnPriority.Critical, "DPS ultimate (Transcend Potential)");
+                }
+            }
+
             // Phase 1: 긴급 자기 힐
             var healAction = PlanEmergencyHeal(situation, ref remainingAP);
             if (healAction != null)
@@ -468,7 +479,9 @@ namespace CompanionAI_v3.Planning.Plans
                     }
                 }
 
-                if (attackAction.Ability != null)
+                // ★ v3.8.30: 적이 1명일 때는 능력도 제외하지 않음 (동일 능력으로 재공격 허용)
+                // 기존 로직은 타겟만 제외했지만 능력은 항상 제외 → 주력 공격 1개인 캐릭터가 한 번만 공격
+                if (attackAction.Ability != null && situation.HittableEnemies.Count > 1)
                 {
                     var guid = attackAction.Ability.Blueprint?.AssetGuid?.ToString();
                     if (!string.IsNullOrEmpty(guid))
@@ -700,6 +713,49 @@ namespace CompanionAI_v3.Planning.Plans
             if (turnEndAction != null)
             {
                 actions.Add(turnEndAction);
+            }
+
+            // ★ v3.7.85: 공격 도달 가능 여부 검증 (이동 유무와 관계없이)
+            // v3.7.81: 이동이 계획되어 있으면 이동 목적지에서 검증
+            // v3.7.85: Replan 시 이동이 없으면 현재 위치에서 검증 (사거리 밖 공격 방지)
+            var firstMoveAction = actions.FirstOrDefault(a => a.Type == ActionType.Move);
+            UnityEngine.Vector3 validationPosition;
+            bool hasMoveForValidation = firstMoveAction?.MoveDestination != null;
+
+            if (hasMoveForValidation)
+            {
+                validationPosition = firstMoveAction.MoveDestination.Value;
+            }
+            else
+            {
+                // 이동이 없으면 현재 유닛 위치에서 검증 (Replan 대응)
+                validationPosition = situation.Unit.Position;
+            }
+
+            var invalidAttacks = new List<PlannedAction>();
+
+            foreach (var action in actions)
+            {
+                if (action.Type != ActionType.Attack && action.Type != ActionType.Debuff) continue;
+                if (action.Ability == null) continue;
+
+                var targetEntity = action.Target?.Entity as BaseUnitEntity;
+                if (targetEntity == null) continue;  // Point 타겟은 스킵
+
+                // 검증 위치에서 타겟 도달 가능 여부 체크
+                if (!CombatAPI.CanReachTargetFromPosition(action.Ability, validationPosition, targetEntity))
+                {
+                    invalidAttacks.Add(action);
+                    Main.LogWarning($"[DPS] Attack validation FAILED: {action.Ability.Name} -> {targetEntity.CharacterName} " +
+                        $"(unreachable from {(hasMoveForValidation ? "move destination" : "current position")})");
+                }
+            }
+
+            // 도달 불가능한 공격 제거
+            foreach (var invalid in invalidAttacks)
+            {
+                actions.Remove(invalid);
+                Main.Log($"[DPS] ★ Removed unreachable attack: {invalid.Ability?.Name} -> {invalid.Target?.Entity?.ToString() ?? "?"}");
             }
 
             // 턴 종료

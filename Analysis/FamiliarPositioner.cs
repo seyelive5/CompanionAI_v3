@@ -4,6 +4,8 @@ using System.Linq;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Enums;
 using Kingmaker.Pathfinding;
+using Kingmaker.UnitLogic;
+using Pathfinding;
 using UnityEngine;
 using CompanionAI_v3.GameInterface;
 
@@ -13,6 +15,8 @@ namespace CompanionAI_v3.Analysis
     /// ★ v3.7.00: 사역마 위치 최적화 시스템
     /// - 4타일 반경 규칙 기반 최적 위치 계산
     /// - 사역마 타입별 다른 위치 전략
+    /// ★ v3.7.75: 게임 네이티브 API (GetNodesSpiralAround + CanStandHere) 사용으로 단순화
+    /// ★ v3.7.76: 탐색 반경을 MAX_SEARCH_RADIUS_TILES로 제한 (무한 루프 방지)
     /// </summary>
     public static class FamiliarPositioner
     {
@@ -30,14 +34,9 @@ namespace CompanionAI_v3.Analysis
         public const float MIN_RELOCATE_DISTANCE_TILES = 2f;
 
         /// <summary>
-        /// 위치 평가를 위한 샘플링 간격 (미터)
+        /// ★ v3.7.75: 최대 탐색 반경 (타일) - GetNodesSpiralAround 용
         /// </summary>
-        private const float POSITION_SAMPLE_INTERVAL = 2f;
-
-        /// <summary>
-        /// 최대 샘플링 반경 (미터)
-        /// </summary>
-        private const float MAX_SAMPLE_RADIUS = 15f;
+        private const int MAX_SEARCH_RADIUS_TILES = 10;
 
         #endregion
 
@@ -84,7 +83,8 @@ namespace CompanionAI_v3.Analysis
                 {
                     // 버프 확산형: 아군 중심
                     PetType.ServoskullSwarm => FindBuffCenterPosition(master, allies, enemies, maxRangeMeters),
-                    PetType.Raven => FindBuffCenterPosition(master, allies, enemies, maxRangeMeters),
+                    // ★ v3.7.90: Raven은 페이즈 기반 위치 결정
+                    PetType.Raven => FindRavenOptimalPosition(master, allies, enemies, maxRangeMeters),
 
                     // 적 제어형: 위협적 적 근처
                     PetType.Mastiff => FindApprehendPosition(master, allies, enemies, maxRangeMeters),
@@ -179,6 +179,115 @@ namespace CompanionAI_v3.Analysis
         }
 
         /// <summary>
+        /// ★ v3.7.90: Raven 페이즈 기반 최적 위치 결정
+        /// - 버프 페이즈: 아군 버프 커버리지 낮으면 아군 중심 위치
+        /// - 공격/디버프 페이즈: 아군 버프 충분하면 적 밀집 지역으로 이동
+        /// ★ v3.8.30: 물리적 거리 대신 실제 사이킥 버프 보유 여부로 커버리지 계산
+        /// </summary>
+        private static PositionScore FindRavenOptimalPosition(
+            BaseUnitEntity master,
+            List<BaseUnitEntity> allies,
+            List<BaseUnitEntity> enemies,
+            float maxRangeMeters = 0f)
+        {
+            var validAllies = allies?.Where(a => a != null && a.IsConscious && !FamiliarAPI.IsFamiliar(a)).ToList()
+                ?? new List<BaseUnitEntity>();
+            var validEnemies = enemies?.Where(e => e != null && e.IsConscious).ToList()
+                ?? new List<BaseUnitEntity>();
+
+            // ★ v3.8.30: 실제 사이킥 버프 커버리지 체크 (물리적 거리가 아닌 버프 보유 여부)
+            // Master가 시전한 사이킥 버프를 가진 아군 수를 계산
+            int alliesWithPsychicBuff = CountAlliesWithMasterPsychicBuff(master, validAllies);
+            int totalAllies = validAllies.Count;
+            float buffCoverage = totalAllies > 0 ? (float)alliesWithPsychicBuff / totalAllies : 0f;
+
+            // ★ v3.8.30: 페이즈 결정 기준 (실제 버프 기반)
+            // - 버프 페이즈: 실제 사이킥 버프 커버리지 < 60% 또는 버프받은 아군 < 2명
+            // - 공격 페이즈: 실제 사이킥 버프 커버리지 >= 60% 이고 버프받은 아군 >= 2명
+            bool isBuffPhase = buffCoverage < 0.6f || alliesWithPsychicBuff < 2;
+
+            if (isBuffPhase)
+            {
+                Main.LogDebug($"[FamiliarPositioner] Raven BUFF PHASE: coverage={buffCoverage:P0} ({alliesWithPsychicBuff}/{totalAllies} allies with psychic buff)");
+                var buffPos = FindBuffCenterPosition(master, allies, enemies, maxRangeMeters);
+                buffPos.Reason = $"Buff phase (psychic coverage={buffCoverage:P0})";
+                return buffPos;
+            }
+            else
+            {
+                Main.LogDebug($"[FamiliarPositioner] Raven ATTACK/DEBUFF PHASE: coverage={buffCoverage:P0} - moving to enemy cluster");
+
+                // 적 밀집 지역으로 이동 (디버프/공격용)
+                if (validEnemies.Count > 0)
+                {
+                    var enemyClusterCenter = FindEnemyClusterCenter(validEnemies);
+                    var attackPos = FindBestPositionAroundPoint(
+                        enemyClusterCenter,
+                        master,
+                        validAllies,
+                        validEnemies,
+                        prioritizeAllies: false,  // 적 우선
+                        maxRangeMeters: maxRangeMeters);
+
+                    attackPos.Reason = $"Attack phase - enemy cluster ({attackPos.EnemiesInRange} enemies)";
+                    Main.LogDebug($"[FamiliarPositioner] Raven Attack: {attackPos}");
+                    return attackPos;
+                }
+
+                // 적이 없으면 아군 위치 유지
+                return FindBuffCenterPosition(master, allies, enemies, maxRangeMeters);
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.8.30: Master가 시전한 사이킥 버프를 가진 아군 수 계산
+        /// - buff.Context.MaybeCaster == master 체크
+        /// - 사이킥 능력(IsPsykerAbility)으로 적용된 버프만 카운트
+        /// </summary>
+        private static int CountAlliesWithMasterPsychicBuff(BaseUnitEntity master, List<BaseUnitEntity> allies)
+        {
+            if (master == null || allies == null || allies.Count == 0)
+                return 0;
+
+            int count = 0;
+
+            try
+            {
+                foreach (var ally in allies)
+                {
+                    if (ally == null || ally.Buffs == null) continue;
+                    if (ally == master) continue; // 자기 자신 제외
+
+                    foreach (var buff in ally.Buffs)
+                    {
+                        if (buff?.Context == null) continue;
+
+                        // 버프의 시전자가 Master인지 확인
+                        var caster = buff.Context.MaybeCaster;
+                        if (caster != master) continue;
+
+                        // 버프가 사이킥 능력에서 온 것인지 확인
+                        // ★ v3.8.30: buff.Context.SourceAbility는 이미 BlueprintAbility 타입
+                        var sourceAbility = buff.Context.SourceAbility;
+                        if (sourceAbility != null && sourceAbility.IsPsykerAbility)
+                        {
+                            Main.LogDebug($"[FamiliarPositioner] {ally.CharacterName} has psychic buff '{buff.Name}' from {master.CharacterName}");
+                            count++;
+                            break; // 한 아군당 하나만 카운트 (중복 버프 무시)
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[FamiliarPositioner] CountAlliesWithMasterPsychicBuff error: {ex.Message}");
+            }
+
+            Main.LogDebug($"[FamiliarPositioner] Psychic buff coverage: {count}/{allies.Count} allies buffed by {master.CharacterName}");
+            return count;
+        }
+
+        /// <summary>
         /// Apprehend 타겟 (Cyber-Mastiff): 위협적 원거리 적 근처
         /// ★ v3.7.22: maxRangeMeters 파라미터 추가
         /// </summary>
@@ -260,9 +369,61 @@ namespace CompanionAI_v3.Analysis
         #region Position Calculation Helpers
 
         /// <summary>
+        /// ★ v3.7.75: 게임 네이티브 API를 사용하여 유효한 노드들 수집
+        /// UnitPartPetOwner.GetFreeNodeAround() 패턴 사용
+        /// ★ v3.7.77: 디버그 로깅 추가 - centerNode의 Y값 확인
+        /// </summary>
+        private static IEnumerable<CustomGridNodeBase> GetValidNodesAround(
+            BaseUnitEntity familiar,
+            Vector3 center,
+            int radius)
+        {
+            var centerNode = center.GetNearestNodeXZ() as CustomGridNodeBase;
+            if (centerNode == null)
+            {
+                Main.LogDebug($"[FamiliarPositioner] GetValidNodesAround: centerNode is null for center={center}");
+                yield break;
+            }
+
+            // ★ v3.7.77: centerNode의 Y 값 로깅
+            Main.LogDebug($"[FamiliarPositioner] GetValidNodesAround: center=({center.x:F1},{center.y:F1},{center.z:F1}) -> " +
+                $"centerNode.Vector3Position=({centerNode.Vector3Position.x:F1},{centerNode.Vector3Position.y:F1},{centerNode.Vector3Position.z:F1})");
+
+            int validCount = 0;
+            // ★ 게임 API 사용: GridAreaHelper.GetNodesSpiralAround
+            // 중심점에서 나선형으로 노드를 반환
+            foreach (var node in GridAreaHelper.GetNodesSpiralAround(
+                centerNode,
+                familiar?.SizeRect ?? new IntRect(0, 0, 0, 0),
+                radius,
+                ignoreHeightDiff: true))
+            {
+                // ★ 게임 API 사용: CanStandHere (Walkable + 크기 + 블로킹 종합 검증)
+                if (familiar != null && familiar.CanStandHere(node, null))
+                {
+                    validCount++;
+                    // ★ v3.7.77: 첫 5개 유효 노드의 Y값 로깅
+                    if (validCount <= 5)
+                    {
+                        Main.LogDebug($"[FamiliarPositioner] ValidNode #{validCount}: ({node.Vector3Position.x:F1},{node.Vector3Position.y:F1},{node.Vector3Position.z:F1})");
+                    }
+                    yield return node;
+                }
+                else if (familiar == null && node.Walkable)
+                {
+                    // 사역마가 없으면 단순 Walkable 체크
+                    yield return node;
+                }
+            }
+
+            Main.LogDebug($"[FamiliarPositioner] GetValidNodesAround: Found {validCount} valid nodes");
+        }
+
+        /// <summary>
         /// 주어진 점 주변에서 최적 위치 탐색
-        /// ★ v3.7.22: maxRangeMeters 추가 - 마스터로부터 이 범위 내 위치만 고려
-        /// ★ v3.7.70: Y좌표를 그리드 노드에서 가져와 정확한 지형 높이 사용
+        /// ★ v3.7.75: 게임 네이티브 API (GetNodesSpiralAround + CanStandHere + node.Vector3Position) 사용
+        /// - 복잡한 수동 샘플링 제거
+        /// - 정확한 Y 좌표 보장 (node.Vector3Position)
         /// </summary>
         private static PositionScore FindBestPositionAroundPoint(
             Vector3 center,
@@ -276,153 +437,44 @@ namespace CompanionAI_v3.Analysis
             float bestScore = float.MinValue;
             Vector3 masterPos = master?.Position ?? center;
 
-            // ★ v3.7.22: maxRange가 0이면 제한 없음
+            // ★ v3.7.75: maxRange 타일 단위로 변환
+            // ★ v3.7.76: 탐색 반경을 MAX_SEARCH_RADIUS_TILES로 제한 (무한 루프 방지)
             bool hasRangeLimit = maxRangeMeters > 0f;
+            int rawTiles = hasRangeLimit
+                ? Math.Max(1, (int)CombatAPI.MetersToTiles(maxRangeMeters))
+                : MAX_SEARCH_RADIUS_TILES;
+            int maxRangeTiles = Math.Min(rawTiles, MAX_SEARCH_RADIUS_TILES);
 
-            // 중심점에서 시작하여 나선형으로 탐색
-            for (float radius = 0; radius <= MAX_SAMPLE_RADIUS; radius += POSITION_SAMPLE_INTERVAL)
+            // ★ v3.7.75: 사역마 찾기 (CanStandHere 검증용)
+            BaseUnitEntity familiar = FamiliarAPI.GetFamiliar(master);
+
+            // ★ v3.7.75: 게임 네이티브 API로 유효한 노드 반복
+            foreach (var node in GetValidNodesAround(familiar, center, maxRangeTiles))
             {
-                if (radius == 0)
+                // ★ 핵심: node.Vector3Position은 올바른 Y 좌표 포함
+                Vector3 pos = node.Vector3Position;
+
+                // 범위 체크 (미터 단위)
+                if (hasRangeLimit && Vector3.Distance(masterPos, pos) > maxRangeMeters)
+                    continue;
+
+                var score = EvaluatePosition(pos, allies, enemies, prioritizeAllies);
+                if (score.Score > bestScore)
                 {
-                    // ★ v3.7.70: 중심점을 그리드에 스냅하고 유효성 검증
-                    Vector3 snappedCenter = SnapToGridWithValidation(center, out bool isCenterValid);
-
-                    // ★ v3.7.70: 유효하지 않은 위치면 스킵 (Walkable 아니거나 점유됨)
-                    if (!isCenterValid)
-                    {
-                        Main.LogDebug($"[FamiliarPositioner] Center position invalid, searching alternatives");
-                        continue;
-                    }
-
-                    // ★ v3.7.22: 범위 체크
-                    if (hasRangeLimit && Vector3.Distance(masterPos, snappedCenter) > maxRangeMeters)
-                    {
-                        // 범위 밖이지만 일단 평가 (폴백용)
-                        var score = EvaluatePosition(snappedCenter, allies, enemies, prioritizeAllies);
-                        score.Reason = "Out of range (fallback)";
-                        if (best == null || score.Score > bestScore)
-                        {
-                            bestScore = score.Score;
-                            best = score;
-                        }
-                    }
-                    else
-                    {
-                        var score = EvaluatePosition(snappedCenter, allies, enemies, prioritizeAllies);
-                        if (score.Score > bestScore)
-                        {
-                            bestScore = score.Score;
-                            best = score;
-                        }
-                    }
-                }
-                else
-                {
-                    // 원형으로 샘플링
-                    int samples = Mathf.Max(4, Mathf.RoundToInt(radius * 2));
-                    for (int i = 0; i < samples; i++)
-                    {
-                        float angle = (float)i / samples * Mathf.PI * 2;
-                        Vector3 rawPos = center + new Vector3(
-                            Mathf.Cos(angle) * radius,
-                            0,
-                            Mathf.Sin(angle) * radius);
-
-                        // ★ v3.7.70: 그리드에 스냅하고 유효성 검증
-                        Vector3 pos = SnapToGridWithValidation(rawPos, out bool isValid);
-
-                        // ★ v3.7.70: 유효하지 않은 위치면 스킵
-                        if (!isValid)
-                            continue;
-
-                        // ★ v3.7.22: 범위 체크 - 범위 내 위치만 고려
-                        if (hasRangeLimit && Vector3.Distance(masterPos, pos) > maxRangeMeters)
-                            continue;
-
-                        var score = EvaluatePosition(pos, allies, enemies, prioritizeAllies);
-                        if (score.Score > bestScore)
-                        {
-                            bestScore = score.Score;
-                            best = score;
-                        }
-                    }
+                    bestScore = score.Score;
+                    best = score;
                 }
             }
 
-            // ★ v3.7.22: 범위 내에 좋은 위치가 없으면, 마스터로부터 최적 방향으로 최대 거리 지점 사용
-            if (best != null && hasRangeLimit && best.Reason == "Out of range (fallback)")
+            // 유효한 위치를 찾지 못하면 폴백
+            if (best == null)
             {
-                // 최적 중심점 방향으로 maxRange만큼 이동한 위치
-                Vector3 direction = (center - masterPos).normalized;
-                Vector3 clampedRaw = masterPos + direction * maxRangeMeters;
-                Vector3 clampedPos = SnapToGridWithValidation(clampedRaw, out bool isClampedValid);  // ★ v3.7.70: 검증
-
-                if (isClampedValid)
-                {
-                    var clampedScore = EvaluatePosition(clampedPos, allies, enemies, prioritizeAllies);
-                    clampedScore.Reason = "Range-clamped position";
-                    Main.LogDebug($"[FamiliarPositioner] Optimal position out of range, using clamped position at {maxRangeMeters:F1}m");
-                    return clampedScore;
-                }
-                else
-                {
-                    Main.LogDebug($"[FamiliarPositioner] Clamped position also invalid, no valid Relocate target");
-                }
+                Main.LogDebug($"[FamiliarPositioner] No valid position found around ({center.x:F1}, {center.z:F1})");
+                return CreateDefaultPosition(center);
             }
 
-            return best ?? CreateDefaultPosition(center);
-        }
-
-        /// <summary>
-        /// ★ v3.7.70: 월드 좌표를 그리드 노드에 스냅하고 유효성 검사
-        /// Relocate 타겟 위치가 유효한 지형 높이를 갖도록 함
-        /// </summary>
-        /// <param name="worldPos">월드 좌표</param>
-        /// <param name="isValid">해당 위치가 유효한지 (Walkable, 미점유)</param>
-        private static Vector3 SnapToGridWithValidation(Vector3 worldPos, out bool isValid)
-        {
-            isValid = false;
-            try
-            {
-                // 가장 가까운 그리드 노드 찾기
-                var node = worldPos.GetNearestNodeXZ() as CustomGridNodeBase;
-                if (node != null)
-                {
-                    // 1. Walkable 체크
-                    if (!node.Walkable)
-                    {
-                        Main.LogDebug($"[FamiliarPositioner] Position not walkable: {worldPos}");
-                        return worldPos;
-                    }
-
-                    // 2. 유닛 점유 체크
-                    if (node.TryGetUnit(out var occupant) && occupant != null && occupant.IsConscious)
-                    {
-                        Main.LogDebug($"[FamiliarPositioner] Position occupied by {occupant.CharacterName}");
-                        return worldPos;
-                    }
-
-                    // 모든 검증 통과
-                    isValid = true;
-                    return node.Vector3Position;
-                }
-            }
-            catch (Exception ex)
-            {
-                Main.LogDebug($"[FamiliarPositioner] SnapToGridWithValidation error: {ex.Message}");
-            }
-
-            // 폴백: 원본 좌표 반환
-            return worldPos;
-        }
-
-        /// <summary>
-        /// 간단한 스냅 (검증 없이)
-        /// </summary>
-        private static Vector3 SnapToGrid(Vector3 worldPos)
-        {
-            bool ignored;
-            return SnapToGridWithValidation(worldPos, out ignored);
+            Main.LogDebug($"[FamiliarPositioner] Found best position: ({best.Position.x:F1}, {best.Position.y:F1}, {best.Position.z:F1}) Score={best.Score:F1}");
+            return best;
         }
 
         /// <summary>

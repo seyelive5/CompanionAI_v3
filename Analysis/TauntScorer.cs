@@ -35,6 +35,10 @@ namespace CompanionAI_v3.Analysis
             public int EnemiesTargetingAllies { get; set; }
             public float Score { get; set; }
             public List<BaseUnitEntity> AffectedEnemies { get; set; } = new List<BaseUnitEntity>();
+
+            // ★ v3.8.20: AllyTarget 도발 (FightMe 등) 지원
+            public BaseUnitEntity TargetAlly { get; set; }     // 아군 타겟 도발 시 보호 대상 아군
+            public bool IsAllyTargetTaunt { get; set; }        // 아군 타겟 도발 여부
         }
 
         #endregion
@@ -72,6 +76,26 @@ namespace CompanionAI_v3.Analysis
             foreach (var taunt in tauntAbilities)
             {
                 if (taunt == null) continue;
+
+                // ★ v3.8.20: AllyTarget 도발 감지 (FightMe 등)
+                // CanTargetFriends=true, CanTargetEnemies=false, CanTargetSelf=false
+                bool isAllyTargetTaunt = taunt.Blueprint?.CanTargetFriends == true &&
+                                         taunt.Blueprint?.CanTargetEnemies == false &&
+                                         taunt.Blueprint?.CanTargetSelf == false;
+
+                if (isAllyTargetTaunt)
+                {
+                    // ★ v3.8.20: AllyTarget 도발은 별도 평가 (아군 보호 기반)
+                    var allyTauntOption = EvaluateAllyTargetTaunt(situation, taunt);
+                    if (allyTauntOption != null)
+                    {
+                        options.Add(allyTauntOption);
+                        Main.LogDebug($"[TauntScorer] AllyTarget taunt {taunt.Name}: " +
+                            $"protectAlly={allyTauntOption.TargetAlly?.CharacterName}, " +
+                            $"enemies={allyTauntOption.EnemiesAffected}, score={allyTauntOption.Score:F0}");
+                    }
+                    continue;  // AllyTarget은 위치 이동 평가 스킵
+                }
 
                 // ★ v3.1.26: 패턴 정보 완전 조회
                 var patternInfo = CombatAPI.GetPatternInfo(taunt);
@@ -373,6 +397,126 @@ namespace CompanionAI_v3.Analysis
             }
 
             return options;
+        }
+
+        #endregion
+
+        #region AllyTarget Taunt Evaluation
+
+        /// <summary>
+        /// ★ v3.8.20: AllyTarget 도발 평가 (FightMe 등)
+        /// 아군 주변 적을 도발하는 능력 - 보호가 필요한 아군을 찾아 타겟팅
+        /// </summary>
+        private static TauntOption EvaluateAllyTargetTaunt(Situation situation, AbilityData taunt)
+        {
+            if (situation.Allies == null || situation.Allies.Count == 0)
+                return null;
+
+            var tank = situation.Unit;
+            float tauntRange = CombatAPI.GetAbilityRangeInTiles(taunt);
+
+            // 패턴 정보에서 AOE 반경 추출
+            var patternInfo = CombatAPI.GetPatternInfo(taunt);
+            float aoERadius = patternInfo?.Radius ?? 3f;  // 기본 3타일
+
+            BaseUnitEntity bestAlly = null;
+            float bestScore = 0f;
+            int bestEnemyCount = 0;
+            int bestTargetingAlliesCount = 0;
+            var bestAffectedEnemies = new List<BaseUnitEntity>();
+
+            foreach (var ally in situation.Allies)
+            {
+                // 자기 자신 제외 (CanTargetSelf=false)
+                if (ally == tank) continue;
+                if (ally == null || !ally.IsConscious) continue;
+
+                // 범위 체크 (Tank에서 아군까지 거리)
+                float distToAllyTiles = CombatAPI.MetersToTiles(Vector3.Distance(tank.Position, ally.Position));
+                if (distToAllyTiles > tauntRange)
+                {
+                    Main.LogDebug($"[TauntScorer] AllyTarget: {ally.CharacterName} out of range ({distToAllyTiles:F1} > {tauntRange:F1} tiles)");
+                    continue;
+                }
+
+                // 아군 주변 적 계산 (AOE 반경 내)
+                var nearbyEnemies = new List<BaseUnitEntity>();
+                int targetingAlliesCount = 0;
+
+                foreach (var enemy in situation.Enemies)
+                {
+                    if (enemy == null || !enemy.IsConscious) continue;
+
+                    float distToAlly = CombatAPI.MetersToTiles(Vector3.Distance(ally.Position, enemy.Position));
+                    if (distToAlly <= aoERadius)
+                    {
+                        nearbyEnemies.Add(enemy);
+
+                        // 이 적이 아군(ally 포함)을 타겟팅 중인지 확인
+                        if (situation.Allies.Any(a => a != null && CombatAPI.IsTargeting(enemy, a)))
+                            targetingAlliesCount++;
+                    }
+                }
+
+                if (nearbyEnemies.Count == 0)
+                {
+                    Main.LogDebug($"[TauntScorer] AllyTarget: {ally.CharacterName} has no nearby enemies");
+                    continue;
+                }
+
+                // 점수 계산
+                // - 아군 타겟팅 적 수 × 100
+                // - 일반 적 수 × 30
+                // - HP 낮은 아군 보너스 (최대 50점)
+                float score = targetingAlliesCount * WEIGHT_ENEMY_TARGETING_ALLY;
+                score += (nearbyEnemies.Count - targetingAlliesCount) * WEIGHT_ENEMY_HIT;
+                score += (1f - CombatAPI.GetHPPercent(ally)) * 50f;  // HP 0%면 50점 추가
+
+                Main.LogDebug($"[TauntScorer] AllyTarget: {ally.CharacterName} - " +
+                    $"enemies={nearbyEnemies.Count}, targetingAllies={targetingAlliesCount}, " +
+                    $"HP={CombatAPI.GetHPPercent(ally):P0}, score={score:F0}");
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestAlly = ally;
+                    bestEnemyCount = nearbyEnemies.Count;
+                    bestTargetingAlliesCount = targetingAlliesCount;
+                    bestAffectedEnemies = nearbyEnemies;
+                }
+            }
+
+            if (bestAlly == null)
+                return null;
+
+            // AP 체크
+            float apCost = CombatAPI.GetAbilityAPCost(taunt);
+            if (apCost > situation.CurrentAP)
+                return null;
+
+            // 사용 가능 여부 확인
+            var target = new TargetWrapper(bestAlly);
+            string reason;
+            if (!CombatAPI.CanUseAbilityOn(taunt, target, out reason))
+            {
+                Main.LogDebug($"[TauntScorer] AllyTarget: Cannot use {taunt.Name} on {bestAlly.CharacterName} - {reason}");
+                return null;
+            }
+
+            return new TauntOption
+            {
+                Ability = taunt,
+                Position = tank.Position,
+                TargetPoint = bestAlly.Position,  // 아군 위치
+                RequiresMove = false,
+                MoveCost = 0f,
+                EnemiesAffected = bestEnemyCount,
+                EnemiesTargetingAllies = bestTargetingAlliesCount,
+                Score = bestScore,
+                AffectedEnemies = bestAffectedEnemies,
+                TargetAlly = bestAlly,
+                IsAllyTargetTaunt = true
+            };
         }
 
         #endregion

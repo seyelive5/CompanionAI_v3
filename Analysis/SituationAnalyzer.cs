@@ -65,7 +65,13 @@ namespace CompanionAI_v3.Analysis
             catch (Exception ex)
             {
                 // ★ v3.5.36: 분석 실패 시 null 반환 - TurnOrchestrator에서 처리
+                // ★ v3.8.24: InnerException 출력 (TypeInitializationException 디버깅)
                 Main.LogError($"[Analyzer] Error analyzing situation: {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    Main.LogError($"[Analyzer] Inner exception: {ex.InnerException.Message}");
+                    Main.LogError($"[Analyzer] Inner stack: {ex.InnerException.StackTrace}");
+                }
                 Main.LogError($"[Analyzer] Stack: {ex.StackTrace}");
                 return null;
             }
@@ -174,6 +180,7 @@ namespace CompanionAI_v3.Analysis
         {
             // 공격 가능한 적 찾기
             situation.HittableEnemies = new List<BaseUnitEntity>();
+            situation.MeleeHittableEnemies = new List<BaseUnitEntity>();  // ★ v3.8.14: 근접 공격으로 가능한 적
 
             // ★ v3.0.78: 모든 AvailableAttacks를 기준으로 Hittable 계산
             // 이전: 단일 참조 능력 → 쿨다운이면 Hittable=0
@@ -236,7 +243,22 @@ namespace CompanionAI_v3.Analysis
                         float patternRadius = patternInfo.Radius;                   // 타일
                         float effectiveRange;
 
-                        if (castRange >= 1000)  // Unlimited range (RangeCells도 큰 값 반환)
+                        // ★ v3.8.08 -> v3.8.32: Ray/Cone/Sector 패턴은 시전자에서 뻗어나가는 패턴
+                        // - 무기 사거리로 "타겟 지점"을 지정할 수 있지만
+                        // - 실제 효과는 patternRadius만큼만 닿음 (caster에서 시작)
+                        // - ★ v3.8.32 FIX: IsDirectional 대신 CanBeDirectional 사용
+                        //   IsDirectional은 "방향 지정 여부"이고, CanBeDirectional은 "패턴 타입"
+                        //   Ray는 IsDirectional=false여도 caster에서 발사됨!
+                        bool canBeDirectionalPattern = patternInfo.CanBeDirectional;  // Ray/Cone/Sector
+
+                        if (canBeDirectionalPattern)
+                        {
+                            // Ray/Cone/Sector: caster에서 시작하여 patternRadius만큼 뻗음
+                            // 적이 patternRadius 내에 있어야 실제로 맞음
+                            effectiveRange = patternRadius;
+                            Main.LogDebug($"[Analyzer] {attack.Name}: Ray/Cone/Sector pattern, effective range={patternRadius:F0} tiles (not weapon range!)");
+                        }
+                        else if (castRange >= 1000)  // Unlimited range (Circle AOE)
                         {
                             // ★ v3.5.99: Unlimited = 맵 어디든 타겟 가능
                             // 적 위치를 직접 타겟하면 AOE 반경 내에 항상 포함됨 (거리 0)
@@ -312,6 +334,14 @@ namespace CompanionAI_v3.Analysis
                     situation.HittableEnemies.Add(enemy);
                     Main.LogDebug($"[Analyzer] {enemy.CharacterName} hittable by {hittableBy}");
                 }
+            }
+
+            // ★ v3.8.14: 근접 선호 캐릭터의 경우, 폴백 전에 근접 공격으로 타격 가능한 적 저장
+            // 폴백이 원거리 공격을 추가하면, 근접 캐릭터가 "공격 가능"으로 판단하여 접근 안 함
+            // MeleeHittableEnemies는 "실제 근접 공격이 닿는 적"을 추적
+            if (situation.RangePreference == RangePreference.PreferMelee)
+            {
+                situation.MeleeHittableEnemies = new List<BaseUnitEntity>(situation.HittableEnemies);
             }
 
             // Hittable 결과 로깅

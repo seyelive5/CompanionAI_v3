@@ -20,9 +20,14 @@ namespace CompanionAI_v3.Analysis
             public int Tank;
             public int DPS;
             public int Support;
+            public int Overseer;  // ★ v3.7.91: 사역마 중심 역할
 
             public AIRole GetBestRole()
             {
+                // ★ v3.7.91: Overseer는 사역마 보유 시 최우선 (임계값 10 이상)
+                if (Overseer >= 10)
+                    return AIRole.Overseer;
+
                 // 동점 시 우선순위: DPS > Tank > Support
                 if (DPS >= Tank && DPS >= Support)
                     return AIRole.DPS;
@@ -32,7 +37,7 @@ namespace CompanionAI_v3.Analysis
             }
 
             public override string ToString()
-                => $"Tank={Tank}, DPS={DPS}, Support={Support}";
+                => $"Tank={Tank}, DPS={DPS}, Support={Support}, Overseer={Overseer}";
         }
 
         /// <summary>
@@ -49,6 +54,18 @@ namespace CompanionAI_v3.Analysis
             {
                 // 능력이 없으면 무기 기반 판단
                 return DetectRoleFromWeapons(unit);
+            }
+
+            // ★ v3.7.91: 사역마 보유 체크 (Overseer 역할 우선)
+            if (FamiliarAPI.HasFamiliar(unit))
+            {
+                var familiarType = FamiliarAPI.GetFamiliarType(unit);
+                if (familiarType.HasValue)
+                {
+                    // 사역마 보유 = Overseer 역할 강력 추천
+                    scores.Overseer += 15;
+                    Main.LogDebug($"[RoleDetector] {unit.CharacterName}: Has familiar ({familiarType}) → Overseer +15");
+                }
             }
 
             // 1. 능력 분석

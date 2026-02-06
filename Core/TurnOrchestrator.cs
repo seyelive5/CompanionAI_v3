@@ -513,6 +513,9 @@ namespace CompanionAI_v3.Core
             // ★ v3.5.29: 전투 캐시 초기화 (거리/타겟팅)
             CombatCache.ClearAll();
 
+            // ★ v3.8.15: AI 패스파인딩 캐시 초기화 (스터터링 방지)
+            MovementAPI.InvalidateAiPathCache();
+
             // ★ v3.7.68: BattlefieldGrid 동적 확장 체크 (유닛이 경계 근처면 확장)
             try
             {
@@ -544,6 +547,13 @@ namespace CompanionAI_v3.Core
             string unitId = unit.UniqueId;
             if (_turnStates.TryGetValue(unitId, out var state))
             {
+                // ★ v3.7.87: 턴 종료 시 행동 기록 (보너스 턴 대응)
+                // 보너스 턴이 끝나면 기록 → 실제 턴에서 체크하여 턴 종료
+                if (state.ActionCount > 0)
+                {
+                    TeamBlackboard.Instance.RecordUnitActed(unit);
+                }
+
                 Main.Log($"[Orchestrator] Turn ended for {unit.CharacterName}: {state}");
                 _turnStates.Remove(unitId);
             }

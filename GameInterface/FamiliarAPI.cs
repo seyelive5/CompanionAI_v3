@@ -377,5 +377,106 @@ namespace CompanionAI_v3.GameInterface
         }
 
         #endregion
+
+        #region ★ v3.7.90: Familiar Ability Range
+
+        /// <summary>
+        /// ★ v3.7.90: 마스터의 사역마 대상 능력 중 최대 사거리 반환 (미터 단위)
+        /// 후퇴 시 이 거리 이내로 제한하여 사역마 스킬 시전 가능 유지
+        /// </summary>
+        /// <param name="master">오버시어 마스터</param>
+        /// <returns>최대 사역마 능력 사거리 (미터), 없으면 15f 기본값</returns>
+        public static float GetMaxFamiliarAbilityRange(BaseUnitEntity master)
+        {
+            const float DEFAULT_RANGE = 15f;  // 기본값 (기존 하드코딩 값)
+            const float MAX_RANGE_CAP = 20f;  // ★ v3.7.92: 최대 사거리 상한선 (너무 멀리 후퇴 방지)
+            const int UNLIMITED_THRESHOLD_TILES = 50;  // ★ v3.7.92: 이 값 이상은 Unlimited로 간주
+
+            if (master == null) return DEFAULT_RANGE;
+
+            try
+            {
+                var familiar = GetFamiliar(master);
+                if (familiar == null) return DEFAULT_RANGE;
+
+                var familiarType = GetFamiliarType(master);
+                if (familiarType == null) return DEFAULT_RANGE;
+
+                float maxRange = 0f;
+                int validAbilityCount = 0;
+
+                // 마스터의 모든 능력 조회
+                var abilities = master.Abilities?.RawFacts;
+                if (abilities == null || abilities.Count == 0) return DEFAULT_RANGE;
+
+                foreach (var fact in abilities)
+                {
+                    var ability = fact?.Data;
+                    if (ability?.Blueprint == null) continue;
+
+                    // 사역마 관련 능력만 체크
+                    if (!Data.FamiliarAbilities.IsFamiliarAbility(ability) &&
+                        !IsPetAbilityByName(ability.Blueprint.name))
+                        continue;
+
+                    // 사거리 추출 (타일 단위)
+                    int rangeTiles = CombatAPI.GetAbilityRangeInTiles(ability);
+
+                    // ★ v3.7.92: Unlimited 사거리 제외 (50타일 이상 또는 0 이하)
+                    if (rangeTiles >= UNLIMITED_THRESHOLD_TILES || rangeTiles <= 0)
+                    {
+                        Main.LogDebug($"[FamiliarAPI] Skipping unlimited range ability: {ability.Name} ({rangeTiles} tiles)");
+                        continue;
+                    }
+
+                    float rangeMeters = CombatAPI.TilesToMeters(rangeTiles);
+
+                    if (rangeMeters > maxRange)
+                    {
+                        maxRange = rangeMeters;
+                        validAbilityCount++;
+                        Main.LogDebug($"[FamiliarAPI] Familiar ability range: {ability.Name} = {rangeMeters:F1}m ({rangeTiles} tiles)");
+                    }
+                }
+
+                // 유효한 능력이 없으면 기본값
+                if (validAbilityCount == 0 || maxRange < 5f)
+                {
+                    Main.LogDebug($"[FamiliarAPI] No valid range abilities found, using default {DEFAULT_RANGE}m");
+                    return DEFAULT_RANGE;
+                }
+
+                // ★ v3.7.92: 최대 사거리 상한선 적용
+                if (maxRange > MAX_RANGE_CAP)
+                {
+                    Main.LogDebug($"[FamiliarAPI] Capping range from {maxRange:F1}m to {MAX_RANGE_CAP}m");
+                    maxRange = MAX_RANGE_CAP;
+                }
+
+                Main.LogDebug($"[FamiliarAPI] GetMaxFamiliarAbilityRange: {maxRange:F1}m for {master.CharacterName}");
+                return maxRange;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[FamiliarAPI] GetMaxFamiliarAbilityRange error: {ex.Message}");
+                return DEFAULT_RANGE;
+            }
+        }
+
+        /// <summary>
+        /// BlueprintName이 Pet 능력인지 확인 (접두사 기반)
+        /// </summary>
+        private static bool IsPetAbilityByName(string blueprintName)
+        {
+            if (string.IsNullOrEmpty(blueprintName)) return false;
+
+            return blueprintName.StartsWith("MastiffPet_", StringComparison.OrdinalIgnoreCase) ||
+                   blueprintName.StartsWith("EaglePet_", StringComparison.OrdinalIgnoreCase) ||
+                   blueprintName.StartsWith("RavenPet_", StringComparison.OrdinalIgnoreCase) ||
+                   blueprintName.StartsWith("ServoskullPet_", StringComparison.OrdinalIgnoreCase) ||
+                   blueprintName.StartsWith("Pet_", StringComparison.OrdinalIgnoreCase);
+        }
+
+        #endregion
     }
 }

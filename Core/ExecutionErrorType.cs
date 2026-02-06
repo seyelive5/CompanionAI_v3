@@ -31,6 +31,12 @@ namespace CompanionAI_v3.Core
         /// <summary>시전자 이동 - 위치 기반 능력 스킵</summary>
         CasterMoved = 105,
 
+        /// <summary>★ v3.7.86: 타겟에 시야가 없음 - 다른 타겟 시도</summary>
+        HasNoLosToTarget = 106,
+
+        /// <summary>★ v3.7.86: 타겟 도달 불가 - 다른 타겟 시도</summary>
+        TargetUnreachable = 107,
+
         // ═══════════════════════════════════════════════════════════
         // 재계획 필요
         // ═══════════════════════════════════════════════════════════
@@ -78,6 +84,11 @@ namespace CompanionAI_v3.Core
                 return ExecutionErrorType.NotEnoughResources;
             if (reason.Contains("CasterMoved"))
                 return ExecutionErrorType.CasterMoved;
+            // ★ v3.7.86: LOS/Range 에러 추가
+            if (reason.Contains("HasNoLosToTarget") || reason.Contains("No LOS"))
+                return ExecutionErrorType.HasNoLosToTarget;
+            if (reason.Contains("unreachable") || reason.Contains("Unreachable"))
+                return ExecutionErrorType.TargetUnreachable;
 
             // 재계획 필요
             if (reason.Contains("TargetDead") || reason.Contains("target is dead"))

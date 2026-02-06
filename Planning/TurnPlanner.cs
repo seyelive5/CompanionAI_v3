@@ -27,6 +27,7 @@ namespace CompanionAI_v3.Planning
         private static readonly TankPlan _tankPlan = new TankPlan();
         private static readonly DPSPlan _dpsPlan = new DPSPlan();
         private static readonly SupportPlan _supportPlan = new SupportPlan();
+        private static readonly OverseerPlan _overseerPlan = new OverseerPlan();  // ★ v3.7.91
 
         // ★ v3.0.92: Auto 모드에서 감지된 역할 캐싱 (전투 중 일관성 유지)
         private static readonly Dictionary<string, AIRole> _detectedRoles = new Dictionary<string, AIRole>();
@@ -68,6 +69,8 @@ namespace CompanionAI_v3.Planning
                         return _dpsPlan.CreatePlan(situation, turnState);
                     case AIRole.Support:
                         return _supportPlan.CreatePlan(situation, turnState);
+                    case AIRole.Overseer:  // ★ v3.7.91: 사역마 중심 전략
+                        return _overseerPlan.CreatePlan(situation, turnState);
                     default:
                         // Auto가 아닌 경우 여기 도달하지 않음, 폴백으로 DPS
                         return _dpsPlan.CreatePlan(situation, turnState);

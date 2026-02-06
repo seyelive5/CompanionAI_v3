@@ -35,6 +35,17 @@ namespace CompanionAI_v3.Planning.Plans
                 Main.Log($"[Tank] Reserving {reservedAP:F1} AP for post-move attack");
             }
 
+            // ★ v3.8.41: Phase 0 - 잠재력 초월 궁극기 (최우선)
+            if (CombatAPI.HasFreeUltimateBuff(situation.Unit))
+            {
+                var ultimateAction = PlanUltimate(situation, ref remainingAP);
+                if (ultimateAction != null)
+                {
+                    actions.Add(ultimateAction);
+                    return new TurnPlan(actions, TurnPriority.Critical, "Tank ultimate (Transcend Potential)");
+                }
+            }
+
             // Phase 1: 긴급 자기 힐
             var healAction = PlanEmergencyHeal(situation, ref remainingAP);
             if (healAction != null)
@@ -229,7 +240,14 @@ namespace CompanionAI_v3.Planning.Plans
                         {
                             remainingAP -= apCost;
 
-                            if (CombatAPI.IsPointTargetAbility(bestOption.Ability))
+                            // ★ v3.8.20: AllyTarget 도발 (FightMe 등) - 아군 주변 적 도발
+                            if (bestOption.IsAllyTargetTaunt && bestOption.TargetAlly != null)
+                            {
+                                actions.Add(PlannedAction.Buff(bestOption.Ability, bestOption.TargetAlly,
+                                    $"AllyTaunt - protecting {bestOption.TargetAlly.CharacterName} from {bestOption.EnemiesAffected} enemies", apCost));
+                                Main.Log($"[Tank] AllyTaunt: {bestOption.Ability.Name} -> {bestOption.TargetAlly.CharacterName}");
+                            }
+                            else if (CombatAPI.IsPointTargetAbility(bestOption.Ability))
                             {
                                 // ★ v3.1.26: AOE 도발 - TargetPoint 사용 (적 중심점)
                                 // Position = 캐스터 이동 위치, TargetPoint = 시전 타겟 위치
@@ -387,7 +405,8 @@ namespace CompanionAI_v3.Planning.Plans
                     }
                 }
 
-                if (attackAction.Ability != null)
+                // ★ v3.8.30: 적이 1명일 때는 능력도 제외하지 않음 (동일 능력으로 재공격 허용)
+                if (attackAction.Ability != null && situation.HittableEnemies.Count > 1)
                 {
                     var guid = attackAction.Ability.Blueprint?.AssetGuid?.ToString();
                     if (!string.IsNullOrEmpty(guid))
@@ -611,6 +630,15 @@ namespace CompanionAI_v3.Planning.Plans
                     continue;
 
                 if (CombatAPI.HasActiveBuff(situation.Unit, ability)) continue;
+
+                // ★ v3.8.25: AbilityCasterHasFacts 검증 (스택 버프 필요 여부)
+                // GetUnavailabilityReasons()가 감지하지 못하는 캐스터 제한 검증
+                string factReason;
+                if (!CombatAPI.MeetsCasterFactRequirements(ability, out factReason))
+                {
+                    Main.LogDebug($"[Tank] DefensiveStance skipped - {factReason}");
+                    continue;
+                }
 
                 string reason;
                 if (CombatAPI.CanUseAbilityOn(ability, target, out reason))

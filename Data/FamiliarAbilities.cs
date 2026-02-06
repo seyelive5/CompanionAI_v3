@@ -100,6 +100,24 @@ namespace CompanionAI_v3.Data
         };
 
         // ========================================
+        // ★ v3.8.02: 비피해 디버프 GUID (Warp Relay 확산 가능, Momentum 불필요)
+        // 이 능력들은 피해를 주지 않는 순수 디버프
+        // ========================================
+        private static readonly HashSet<string> NonDamagingDebuffGuids = new()
+        {
+            "8c86972daac142fea33bb3bc5c84396c",  // 감각 박탈 (Sensory Deprivation) - 실명 디버프
+        };
+
+        // ========================================
+        // ★ v3.8.02: 피해 능력 GUID (CanTargetFriends=True여도 피해 능력)
+        // 아군/적 모두 타겟 가능하지만 실제로는 피해를 주는 능력
+        // ========================================
+        private static readonly HashSet<string> DamageDealingAbilityGuids = new()
+        {
+            "a2cca43669184eaa9f0da981f204e1c9",  // 점화 (Ignition) - 화염 피해
+        };
+
+        // ========================================
         // Medicae Signal 능력
         // ========================================
         private static readonly HashSet<string> MedicaeBlueprintNames = new(StringComparer.OrdinalIgnoreCase)
@@ -538,6 +556,16 @@ namespace CompanionAI_v3.Data
 
                 // 5. 추가 턴 부여 능력 제외 (가이드 명시)
                 if (IsExtraTurnAbility(ability)) return false;
+
+                // 6. ★ v3.7.74: Point Target 능력 제외
+                // Warp Relay는 유닛 타겟 능력만 확산 가능
+                // 황제의 말씀 등 Point AOE 버프는 직접 위치에 캐스트해야 함
+                if (blueprint.CanTargetPoint && !blueprint.CanTargetEnemies)
+                {
+                    // Point AOE 버프 (아군 타겟은 AOE 범위 효과일 뿐)
+                    Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Point AOE - not Warp Relay target");
+                    return false;
+                }
 
                 Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Valid Warp Relay target (Enemy={blueprint.CanTargetEnemies}, Friend={blueprint.CanTargetFriends})");
                 return true;
@@ -1217,6 +1245,8 @@ namespace CompanionAI_v3.Data
         /// - 무기 공격: true
         /// - 직접 피해 컴포넌트 보유: true
         /// - Harmful + 적만 타겟 + AoEDamage: true
+        /// ★ v3.7.79: Point AOE + 적 타겟 능력 감지 강화 (사이킥 비명 등)
+        /// ★ v3.8.05: 중첩된 Actions 내부 ContextActionDealDamage 검색 (JBP 분석 기반)
         /// </summary>
         private static bool IsDamageDealingAbility(AbilityData ability)
         {
@@ -1224,56 +1254,188 @@ namespace CompanionAI_v3.Data
 
             try
             {
-                // 무기 공격은 항상 피해
-                if (ability.Weapon != null) return true;
-
                 var blueprint = ability.Blueprint;
                 if (blueprint == null) return false;
+
+                // ★ v3.8.02: GUID 기반 명시적 분류 (최우선 - 블루프린트 분석으로 확인된 분류)
+                // 게임 데이터 자체가 일관성 없으므로 (NotOffensive, EffectOnEnemy 신뢰 불가)
+                // 검증된 GUID 화이트리스트가 가장 신뢰할 수 있음
+                string guid = blueprint.AssetGuid?.ToString();
+                if (!string.IsNullOrEmpty(guid))
+                {
+                    // 명시적 피해 능력 (CanTargetFriends=True여도 피해)
+                    if (DamageDealingAbilityGuids.Contains(guid))
+                    {
+                        Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Known damage-dealing (whitelisted GUID)");
+                        return true;
+                    }
+
+                    // 명시적 비피해 디버프 (실제 피해 컴포넌트 없음)
+                    if (NonDamagingDebuffGuids.Contains(guid))
+                    {
+                        Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Known non-damaging debuff (whitelisted GUID)");
+                        return false;
+                    }
+                }
+
+                // 무기 공격은 항상 피해
+                if (ability.Weapon != null) return true;
 
                 // ★ v3.7.65: 게임 네이티브 API 사용 (AoEDamage는 피해 능력)
                 if (blueprint.IsAoEDamage) return true;
 
-                // ★ v3.7.65: 컴포넌트 기반 감지 - 직접 피해 컴포넌트
+                // ★ v3.8.00: AttackType이 있으면 피해 능력 (게임 API 직접 사용)
+                // AttackAbilityType: Melee, Scatter, Pattern, SingleShot
+                if (blueprint.AttackType.HasValue)
+                {
+                    Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Detected as damage-dealing (AttackType={blueprint.AttackType.Value})");
+                    return true;
+                }
+
+                // ★ v3.8.05: 중첩된 컴포넌트 검색 (ContextActionDealDamage, ContextActionApplyDOT)
+                // AbilityEffectRunAction.Actions.Actions 내부를 재귀적으로 검색
                 var components = blueprint.ComponentsArray;
                 if (components != null)
                 {
                     foreach (var component in components)
                     {
                         if (component == null) continue;
-                        string typeName = component.GetType().Name;
 
-                        // 직접 피해 컴포넌트 (ContextActionDealDamage, AbilityTargetsAround + damage 등)
+                        // AbilityEffectRunAction 컴포넌트에서 중첩된 Actions 검색
+                        var runAction = component as AbilityEffectRunAction;
+                        if (runAction?.Actions?.Actions != null)
+                        {
+                            if (ContainsDamageAction(runAction.Actions.Actions))
+                            {
+                                Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Detected as damage-dealing (ContextActionDealDamage found in Actions)");
+                                return true;
+                            }
+                        }
+
+                        // 최상위 컴포넌트 타입명 체크 (폴백)
+                        string typeName = component.GetType().Name;
                         if (typeName.Contains("DealDamage") || typeName.Contains("DirectDamage"))
                             return true;
                     }
                 }
 
-                // 게임 API: CanTargetEnemies && Harmful이면 피해 가능성이 높음
-                // 단, 버프/디버프 구분을 위해 CanTargetFriends가 아닌 것만
-                if (blueprint.CanTargetEnemies && !blueprint.CanTargetFriends &&
-                    blueprint.EffectOnEnemy == AbilityEffectOnUnit.Harmful)
+                // ★ v3.7.79: Point AOE + 적 타겟 = 피해 능력 (사이킹 비명 등)
+                // Point 타겟 + 적만 타겟 가능 + Harmful = 확실한 공격 능력
+                if (blueprint.CanTargetPoint && blueprint.CanTargetEnemies &&
+                    !blueprint.CanTargetFriends && blueprint.EffectOnEnemy == AbilityEffectOnUnit.Harmful)
                 {
-                    // 추가 조건: NotOffensive가 아니어야 함 (진짜 공격)
-                    if (!blueprint.NotOffensive)
-                    {
-                        Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Assumed damage-dealing (Harmful enemy-only offensive)");
-                        return true;
-                    }
+                    Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Detected as damage-dealing (Point AOE enemy-only harmful)");
+                    return true;
                 }
 
+                // ★ v3.8.05: 여기까지 도달하면 피해 능력이 아님
+                // NotOffensive 플래그는 신뢰할 수 없음 (감각박탈: NotOffensive=false이지만 피해 없음)
+                // EffectOnEnemy도 신뢰할 수 없음 (점화: EffectOnEnemy=None이지만 피해 있음)
+                // 위에서 DealDamage/ApplyDOT 컴포넌트를 찾지 못했으면 비피해 능력으로 판단
+                Main.LogDebug($"[FamiliarAbilities] {ability.Name}: No damage components found → non-damaging");
                 return false;
             }
-            catch
+            catch (Exception ex)
             {
+                Main.LogDebug($"[FamiliarAbilities] IsDamageDealingAbility error for {ability?.Name}: {ex.Message}");
                 return false;
             }
         }
 
         /// <summary>
+        /// ★ v3.8.05: Actions 배열 내에서 피해 액션 검색 (재귀)
+        /// ContextActionDealDamage, ContextActionApplyDOT 등
+        /// </summary>
+        private static bool ContainsDamageAction(Kingmaker.ElementsSystem.GameAction[] actions)
+        {
+            if (actions == null) return false;
+
+            foreach (var action in actions)
+            {
+                if (action == null) continue;
+
+                string typeName = action.GetType().Name;
+
+                // 직접 피해 액션
+                if (typeName == "ContextActionDealDamage" ||
+                    typeName == "ContextActionApplyDOT" ||
+                    typeName.Contains("DealDamage"))
+                {
+                    return true;
+                }
+
+                // 중첩된 Actions 검색 (SavingThrow, Conditional 등)
+                // Reflection으로 Actions 또는 Succeed/Failed 프로퍼티 검색
+                try
+                {
+                    var actionType = action.GetType();
+
+                    // ContextActionSavingThrow.Actions
+                    var actionsField = actionType.GetField("Actions");
+                    if (actionsField != null)
+                    {
+                        var nestedActionList = actionsField.GetValue(action);
+                        if (nestedActionList != null)
+                        {
+                            var nestedActionsField = nestedActionList.GetType().GetField("Actions");
+                            if (nestedActionsField != null)
+                            {
+                                var nestedActions = nestedActionsField.GetValue(nestedActionList) as Kingmaker.ElementsSystem.GameAction[];
+                                if (nestedActions != null && ContainsDamageAction(nestedActions))
+                                    return true;
+                            }
+                        }
+                    }
+
+                    // ContextActionConditionalSaved.Succeed/Failed
+                    var succeedField = actionType.GetField("Succeed");
+                    var failedField = actionType.GetField("Failed");
+
+                    if (succeedField != null)
+                    {
+                        var succeedActionList = succeedField.GetValue(action);
+                        if (succeedActionList != null)
+                        {
+                            var succeedActionsField = succeedActionList.GetType().GetField("Actions");
+                            if (succeedActionsField != null)
+                            {
+                                var succeedActions = succeedActionsField.GetValue(succeedActionList) as Kingmaker.ElementsSystem.GameAction[];
+                                if (succeedActions != null && ContainsDamageAction(succeedActions))
+                                    return true;
+                            }
+                        }
+                    }
+
+                    if (failedField != null)
+                    {
+                        var failedActionList = failedField.GetValue(action);
+                        if (failedActionList != null)
+                        {
+                            var failedActionsField = failedActionList.GetType().GetField("Actions");
+                            if (failedActionsField != null)
+                            {
+                                var failedActions = failedActionsField.GetValue(failedActionList) as Kingmaker.ElementsSystem.GameAction[];
+                                if (failedActions != null && ContainsDamageAction(failedActions))
+                                    return true;
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // Reflection 실패 무시 - 다음 액션 계속 검색
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// ★ v3.7.65: 사이킥 능력인지 확인 (게임 API 기반 - 키워드 매칭 제거)
         /// 게임 네이티브 IsPsykerAbility 사용
+        /// ★ v3.7.96: public으로 변경 (BasePlan에서 사용)
         /// </summary>
-        private static bool IsPsychicAbility(AbilityData ability)
+        public static bool IsPsychicAbility(AbilityData ability)
         {
             if (ability == null) return false;
 
@@ -1287,6 +1449,40 @@ namespace CompanionAI_v3.Data
             }
             catch
             {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.7.96: 피해를 주는 사이킥 공격인지 확인
+        /// Raven Warp Relay + Overcharge 상태에서 적에게 피해 전달용
+        /// </summary>
+        public static bool IsDamagingPsychicAttack(AbilityData ability)
+        {
+            if (ability == null) return false;
+
+            try
+            {
+                // 1. 사이킥 능력이어야 함
+                if (!IsPsychicAbility(ability)) return false;
+
+                // 2. 피해를 주는 능력이어야 함
+                if (!IsDamageDealingAbility(ability)) return false;
+
+                // 3. 적 타겟 가능해야 함
+                var blueprint = ability.Blueprint;
+                if (blueprint == null) return false;
+                if (!blueprint.CanTargetEnemies) return false;
+
+                // 4. 추가 턴 능력 제외
+                if (IsExtraTurnAbility(ability)) return false;
+
+                Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Valid damaging psychic attack for Warp Relay");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[FamiliarAbilities] IsDamagingPsychicAttack error: {ex.Message}");
                 return false;
             }
         }
