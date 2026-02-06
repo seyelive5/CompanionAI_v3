@@ -119,6 +119,10 @@ namespace CompanionAI_v3.Planning.Plans
         protected PlannedAction PlanMoveOrGapCloser(Situation situation, ref float remainingAP, bool forceMove, bool bypassCanMoveCheck, float predictedMP)
             => MovementPlanner.PlanMoveOrGapCloser(situation, ref remainingAP, RoleName, forceMove, bypassCanMoveCheck, predictedMP);
 
+        // ★ v3.8.44: AttackPhaseContext 전달 - 능력 사거리 기반 이동 위치 계산
+        protected PlannedAction PlanMoveOrGapCloser(Situation situation, ref float remainingAP, bool forceMove, bool bypassCanMoveCheck, float predictedMP, AttackPhaseContext attackContext)
+            => MovementPlanner.PlanMoveOrGapCloser(situation, ref remainingAP, RoleName, forceMove, bypassCanMoveCheck, predictedMP, attackContext);
+
         protected PlannedAction PlanGapCloser(Situation situation, BaseUnitEntity target, ref float remainingAP)
             => MovementPlanner.PlanGapCloser(situation, target, ref remainingAP, RoleName);
 
@@ -146,8 +150,17 @@ namespace CompanionAI_v3.Planning.Plans
             HashSet<string> excludeTargetIds = null, HashSet<string> excludeAbilityGuids = null)
             => AttackPlanner.PlanAttack(situation, ref remainingAP, RoleName, preferTarget, excludeTargetIds, excludeAbilityGuids);
 
+        // ★ v3.8.44: AttackPhaseContext 전달 - 공격 실패 이유 기록
+        protected PlannedAction PlanAttack(Situation situation, ref float remainingAP, AttackPhaseContext context,
+            BaseUnitEntity preferTarget = null, HashSet<string> excludeTargetIds = null, HashSet<string> excludeAbilityGuids = null)
+            => AttackPlanner.PlanAttack(situation, ref remainingAP, RoleName, preferTarget, excludeTargetIds, excludeAbilityGuids, context);
+
         protected AbilityData SelectBestAttack(Situation situation, BaseUnitEntity target, HashSet<string> excludeAbilityGuids = null)
             => AttackPlanner.SelectBestAttack(situation, target, excludeAbilityGuids);
+
+        // ★ v3.8.44: AttackPhaseContext 전달 오버로드
+        protected AbilityData SelectBestAttack(Situation situation, BaseUnitEntity target, HashSet<string> excludeAbilityGuids, AttackPhaseContext context)
+            => AttackPlanner.SelectBestAttack(situation, target, excludeAbilityGuids, context);
 
         protected PlannedAction PlanPostMoveAttack(Situation situation, BaseUnitEntity target, ref float remainingAP)
             => AttackPlanner.PlanPostMoveAttack(situation, target, ref remainingAP, RoleName);

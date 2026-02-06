@@ -388,13 +388,16 @@ namespace CompanionAI_v3.Planning.Plans
             // 사역마가 주력이므로 마스터는 안전한 원거리 공격만
             // ══════════════════════════════════════════════════════════════
             bool didPlanAttack = false;
+            // ★ v3.8.44: 공격 실패 이유 추적 (이동 Phase에 전달)
+            var attackContext = new AttackPhaseContext();
             var plannedTargetIds = new HashSet<string>();
             var plannedAbilityGuids = new HashSet<string>();
             int attacksPlanned = 0;
 
             while (remainingAP >= 0f && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
             {
-                var attackAction = PlanAttack(situation, ref remainingAP,
+                // ★ v3.8.44: attackContext 전달 - 실패 이유 기록
+                var attackAction = PlanAttack(situation, ref remainingAP, attackContext,
                     excludeTargetIds: plannedTargetIds,
                     excludeAbilityGuids: plannedAbilityGuids);
 
@@ -501,7 +504,8 @@ namespace CompanionAI_v3.Planning.Plans
                 else
                 {
                     // 원거리/적응형: 사역마 사거리 내에서 안전한 위치로 이동
-                    moveAction = PlanOverseerMovement(situation, remainingMP, !didPlanAttack && situation.HasHittableEnemies);
+                    // ★ v3.8.44: HasHittableEnemies → attackContext.ShouldForceMove (실패 이유 기반)
+                    moveAction = PlanOverseerMovement(situation, remainingMP, !didPlanAttack && attackContext.ShouldForceMove);
                     if (moveAction != null)
                     {
                         Main.Log($"[Overseer] Phase 8: Movement (within familiar range)");

@@ -286,6 +286,8 @@ namespace CompanionAI_v3.Planning.Plans
 
             // ★ v3.1.16: didPlanAttack 변수를 여기서 미리 선언 (Phase 4.4 AOE용)
             bool didPlanAttack = false;
+            // ★ v3.8.44: 공격 실패 이유 추적 (이동 Phase에 전달)
+            var attackContext = new AttackPhaseContext();
 
             // ★ v3.1.29: Phase 4.3: Self-Targeted AOE (BladeDance 등)
             // 아군이 인접하지 않고 적이 인접해 있을 때만 사용
@@ -449,10 +451,12 @@ namespace CompanionAI_v3.Planning.Plans
                 }
 
                 // 일반 공격 폴백
+                // ★ v3.8.44: attackContext 전달 - 실패 이유 기록
                 if (attackAction == null)
                 {
-                    attackAction = PlanAttack(situation, ref remainingAP, preferTarget: preferTarget,
-                        excludeTargetIds: plannedTargetIds, excludeAbilityGuids: plannedAbilityGuids);
+                    attackAction = PlanAttack(situation, ref remainingAP, attackContext,
+                        preferTarget: preferTarget, excludeTargetIds: plannedTargetIds,
+                        excludeAbilityGuids: plannedAbilityGuids);
                 }
 
                 if (attackAction == null) break;
@@ -667,12 +671,15 @@ namespace CompanionAI_v3.Planning.Plans
                 Main.Log($"[DPS] Phase 8: Trying move (attack planned={didPlanAttack}, predictedMP={remainingMP:F1}, isRangedInDanger={isRangedInDanger})");
                 // ★ v3.0.89: 공격 실패 시 forceMove=true로 이동 강제
                 // ★ v3.1.29: 원거리가 위험하면 공격 가능해도 후퇴 이동 강제
-                bool forceMove = (!didPlanAttack && situation.HasHittableEnemies) || isRangedInDanger;
+                // ★ v3.8.44: HasHittableEnemies → attackContext.ShouldForceMove (실패 이유 기반)
+                bool forceMove = (!didPlanAttack && attackContext.ShouldForceMove) || isRangedInDanger;
+                Main.LogDebug($"[DPS] Phase 8: {attackContext}, forceMove={forceMove}");
                 // ★ v3.1.00: MP 회복 예측 후 situation.CanMove=False여도 이동 가능
                 // PlanMoveToEnemy 내부의 CanMove 체크를 우회
                 bool bypassCanMoveCheck = !situation.CanMove && remainingMP > 0;
                 // ★ v3.1.01: remainingMP를 MovementAPI에 전달하여 실제로 이동 가능한 타일 계산
-                var moveOrGapCloser = PlanMoveOrGapCloser(situation, ref remainingAP, forceMove, bypassCanMoveCheck, remainingMP);
+                // ★ v3.8.44: attackContext 전달 - 능력 사거리 기반 이동 위치 계산
+                var moveOrGapCloser = PlanMoveOrGapCloser(situation, ref remainingAP, forceMove, bypassCanMoveCheck, remainingMP, attackContext);
                 if (moveOrGapCloser != null)
                 {
                     actions.Add(moveOrGapCloser);

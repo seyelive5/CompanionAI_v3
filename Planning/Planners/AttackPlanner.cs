@@ -24,9 +24,11 @@ namespace CompanionAI_v3.Planning.Planners
         /// 공격 계획
         /// ★ v3.5.11: 상세 로깅 추가 (공격 실패 원인 진단용)
         /// </summary>
+        /// ★ v3.8.44: AttackPhaseContext 지원 오버로드
         public static PlannedAction PlanAttack(Situation situation, ref float remainingAP,
             string roleName, BaseUnitEntity preferTarget = null,
-            HashSet<string> excludeTargetIds = null, HashSet<string> excludeAbilityGuids = null)
+            HashSet<string> excludeTargetIds = null, HashSet<string> excludeAbilityGuids = null,
+            AttackPhaseContext context = null)
         {
             var candidateTargets = new List<BaseUnitEntity>();
 
@@ -58,7 +60,7 @@ namespace CompanionAI_v3.Planning.Planners
 
             foreach (var target in candidateTargets)
             {
-                var attack = SelectBestAttack(situation, target, excludeAbilityGuids);
+                var attack = SelectBestAttack(situation, target, excludeAbilityGuids, context);
                 if (attack == null)
                 {
                     attackNullCount++;
@@ -100,12 +102,21 @@ namespace CompanionAI_v3.Planning.Planners
         /// 최적 공격 선택 (Utility 스코어링 기반)
         /// ★ v3.5.11: 상세 로깅 추가 (공격 실패 원인 진단용)
         /// ★ v3.7.89: AOO (기회공격) 회피 로직 추가
+        /// ★ v3.8.44: AttackPhaseContext 지원 - 실패 이유를 이동 Phase에 전달
         /// </summary>
         public static AbilityData SelectBestAttack(Situation situation, BaseUnitEntity target, HashSet<string> excludeAbilityGuids = null)
+            => SelectBestAttack(situation, target, excludeAbilityGuids, null);
+
+        /// <summary>
+        /// ★ v3.8.44: AttackPhaseContext를 받는 오버로드
+        /// context != null이면 실패 이유/능력 사거리를 기록하여 MovementPlanner가 활용
+        /// </summary>
+        public static AbilityData SelectBestAttack(Situation situation, BaseUnitEntity target, HashSet<string> excludeAbilityGuids, AttackPhaseContext context)
         {
             if (situation.AvailableAttacks.Count == 0)
             {
                 Main.LogDebug($"[AttackPlanner] SelectBestAttack: No attacks available");
+                if (context != null) context.AllAbilitiesFiltered = true;
                 return null;
             }
 
@@ -159,6 +170,18 @@ namespace CompanionAI_v3.Planning.Planners
             if (filteredAttacks.Count == 0 && situation.AvailableAttacks.Count > 0)
             {
                 Main.LogDebug($"[AttackPlanner] SelectBestAttack: All {situation.AvailableAttacks.Count} attacks filtered out");
+                if (context != null) context.AllAbilitiesFiltered = true;
+            }
+
+            // ★ v3.8.44: 필터링된 공격 중 최대 사거리 기록 (MovementPlanner용)
+            if (context != null && filteredAttacks.Count > 0)
+            {
+                foreach (var atk in filteredAttacks)
+                {
+                    float range = CombatAPI.GetAbilityRangeInTiles(atk);
+                    if (range > context.BestAbilityRange)
+                        context.BestAbilityRange = range;
+                }
             }
 
             if (rangePreference == RangePreference.PreferRanged)
@@ -195,6 +218,7 @@ namespace CompanionAI_v3.Planning.Planners
                     if (!CombatAPI.IsAoEHeightInRange(scored.Attack, situation.Unit, target))
                     {
                         Main.LogDebug($"[AttackPlanner] AOE height failed: {scored.Attack.Name} -> {target.CharacterName}");
+                        if (context != null) context.HeightCheckFailed = true;
                         continue;
                     }
                 }
@@ -229,6 +253,15 @@ namespace CompanionAI_v3.Planning.Planners
                 {
                     // ★ v3.5.11: CanUseAbilityOn 실패 원인 로깅
                     Main.LogDebug($"[AttackPlanner] CanUseAbilityOn failed: {scored.Attack.Name} -> {target.CharacterName} ({reason})");
+
+                    // ★ v3.8.44: 사거리 부족 감지 (문자열 매칭 없이 거리 비교)
+                    if (context != null)
+                    {
+                        float abilityRange = CombatAPI.GetAbilityRangeInTiles(scored.Attack);
+                        float distToTarget = CombatCache.GetDistanceInTiles(situation.Unit, target);
+                        if (distToTarget > abilityRange)
+                            context.RangeWasIssue = true;
+                    }
                 }
             }
 
@@ -242,6 +275,7 @@ namespace CompanionAI_v3.Planning.Planners
                     if (!CombatAPI.IsAoEHeightInRange(situation.PrimaryAttack, situation.Unit, target))
                     {
                         Main.LogDebug($"[AttackPlanner] PrimaryAttack AOE height failed: {situation.PrimaryAttack.Name} -> {target.CharacterName}");
+                        if (context != null) context.HeightCheckFailed = true;
                         return null;  // ★ v3.6.10: 폴백도 실패
                     }
                 }
@@ -269,9 +303,25 @@ namespace CompanionAI_v3.Planning.Planners
                 if (!canUsePrimary)
                 {
                     Main.LogDebug($"[AttackPlanner] PrimaryAttack fallback also failed: {situation.PrimaryAttack.Name} -> {target.CharacterName} ({fallbackReason})");
+
+                    // ★ v3.8.44: PrimaryAttack 폴백 사거리 부족 감지
+                    if (context != null)
+                    {
+                        float abilityRange = CombatAPI.GetAbilityRangeInTiles(situation.PrimaryAttack);
+                        float distToTarget = CombatCache.GetDistanceInTiles(situation.Unit, target);
+                        if (distToTarget > abilityRange)
+                            context.RangeWasIssue = true;
+                    }
+
                     return null;  // ★ v3.6.10: 명시적 null 반환
                 }
                 return situation.PrimaryAttack;
+            }
+
+            // ★ v3.8.44: context 요약 로그
+            if (context != null)
+            {
+                Main.LogDebug($"[AttackPlanner] {context}");
             }
 
             return null;

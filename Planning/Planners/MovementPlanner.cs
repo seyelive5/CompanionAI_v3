@@ -31,7 +31,8 @@ namespace CompanionAI_v3.Planning.Planners
         /// ★ v3.1.01: predictedMP 파라미터 추가 - MovementAPI에 예측 MP 전달
         /// ★ v3.5.18: Blackboard 통합 - SharedTarget 우선 이동
         /// </summary>
-        public static PlannedAction PlanMoveOrGapCloser(Situation situation, ref float remainingAP, string roleName, bool forceMove = false, bool bypassCanMoveCheck = false, float predictedMP = 0f)
+        /// ★ v3.8.44: AttackPhaseContext 파라미터 추가
+        public static PlannedAction PlanMoveOrGapCloser(Situation situation, ref float remainingAP, string roleName, bool forceMove = false, bool bypassCanMoveCheck = false, float predictedMP = 0f, AttackPhaseContext attackContext = null)
         {
             // ★ v3.0.89: forceMove=true면 HasHittableEnemies 체크 스킵
             // 사용 사례: 원거리 fallback으로 Hittable=True인데 PreferMelee라서 공격 못함 → 이동 필요
@@ -75,7 +76,7 @@ namespace CompanionAI_v3.Planning.Planners
             // GapCloser 없으면 일반 이동
             // ★ v3.1.01: bypassCanMoveCheck와 predictedMP 전달
             // ★ v3.5.18: tacticalTarget 전달
-            return PlanMoveToEnemy(situation, roleName, bypassCanMoveCheck, predictedMP, tacticalTarget);
+            return PlanMoveToEnemy(situation, roleName, bypassCanMoveCheck, predictedMP, tacticalTarget, attackContext);
         }
 
         /// <summary>
@@ -415,7 +416,8 @@ namespace CompanionAI_v3.Planning.Planners
         /// ★ v3.2.25: Role 추출하여 MovementAPI에 전달 - Frontline 기반 위치 점수
         /// ★ v3.5.18: tacticalTarget 파라미터 추가 - SharedTarget/BestTarget 우선 이동
         /// </summary>
-        public static PlannedAction PlanMoveToEnemy(Situation situation, string roleName, bool bypassCanMoveCheck = false, float predictedMP = 0f, BaseUnitEntity tacticalTarget = null)
+        /// ★ v3.8.44: AttackPhaseContext 파라미터 추가
+        public static PlannedAction PlanMoveToEnemy(Situation situation, string roleName, bool bypassCanMoveCheck = false, float predictedMP = 0f, BaseUnitEntity tacticalTarget = null, AttackPhaseContext attackContext = null)
         {
             bool isChaseMove = false;
 
@@ -477,24 +479,8 @@ namespace CompanionAI_v3.Planning.Planners
                 // 기존: 단순 벡터 계산 (적에게 3m 접근) → 위험!
                 // 수정: 엄폐, 안전거리, LOS 등 종합 점수화
 
-                float weaponRange = 15f;
-                try
-                {
-                    var primaryHand = unit.Body?.PrimaryHand;
-                    if (primaryHand?.HasWeapon == true && !primaryHand.Weapon.Blueprint.IsMelee)
-                    {
-                        int optRange = primaryHand.Weapon.AttackOptimalRange;
-                        if (optRange > 0 && optRange < 10000)
-                            weaponRange = optRange;
-                        else
-                        {
-                            int attackRange = primaryHand.Weapon.AttackRange;
-                            if (attackRange > 0 && attackRange < 10000)
-                                weaponRange = attackRange;
-                        }
-                    }
-                }
-                catch { }
+                // ★ v3.8.44: 능력 사거리 우선, 무기 사거리 폴백
+                float weaponRange = GetEffectiveRange(unit, attackContext);
 
                 // ★ v3.1.01: predictedMP 전달
                 // ★ v3.2.00: influenceMap 전달
@@ -629,25 +615,8 @@ namespace CompanionAI_v3.Planning.Planners
             // ★ v3.2.25: Role 추출
             AIRole role = situation.CharacterSettings?.Role ?? AIRole.Auto;
 
-            // ★ v3.7.11: 무기 사거리 계산 (후퇴 후에도 공격 가능해야 함)
-            float weaponRangeTiles = 15f;  // 기본값 (타일 단위)
-            try
-            {
-                var primaryHand = unit.Body?.PrimaryHand;
-                if (primaryHand?.HasWeapon == true && !primaryHand.Weapon.Blueprint.IsMelee)
-                {
-                    int optRange = primaryHand.Weapon.AttackOptimalRange;
-                    if (optRange > 0 && optRange < 10000)
-                        weaponRangeTiles = optRange;
-                    else
-                    {
-                        int attackRange = primaryHand.Weapon.AttackRange;
-                        if (attackRange > 0 && attackRange < 10000)
-                            weaponRangeTiles = attackRange;
-                    }
-                }
-            }
-            catch { }
+            // ★ v3.8.44: 무기 사거리 헬퍼 통합
+            float weaponRangeTiles = GetWeaponRange(unit);
 
             // ★ v3.7.15: 최대 후퇴 거리 = 무기 사거리 - 1 (안전 마진)
             // 핵심: 무기 사거리보다 더 멀리 후퇴하면 공격 불가!
@@ -790,25 +759,8 @@ namespace CompanionAI_v3.Planning.Planners
             float dashRange = CombatAPI.GetAbilityRangeInTiles(dashAbility);
             Main.LogDebug($"[MovementPlanner] FindRetreatDashLanding: {dashAbility.Name} range={dashRange:F1} tiles");
 
-            // 무기 사거리 확인 (후퇴 후에도 공격 가능해야 함)
-            float weaponRangeTiles = 15f;
-            try
-            {
-                var primaryHand = unit.Body?.PrimaryHand;
-                if (primaryHand?.HasWeapon == true && !primaryHand.Weapon.Blueprint.IsMelee)
-                {
-                    int optRange = primaryHand.Weapon.AttackOptimalRange;
-                    if (optRange > 0 && optRange < 10000)
-                        weaponRangeTiles = optRange;
-                    else
-                    {
-                        int attackRange = primaryHand.Weapon.AttackRange;
-                        if (attackRange > 0 && attackRange < 10000)
-                            weaponRangeTiles = attackRange;
-                    }
-                }
-            }
-            catch { }
+            // ★ v3.8.44: 무기 사거리 헬퍼 통합 (후퇴 후에도 공격 가능해야 함)
+            float weaponRangeTiles = GetWeaponRange(unit);
 
             // 적으로부터 반대 방향 계산
             Vector3 retreatDirection = (unit.Position - nearestEnemy.Position).normalized;
@@ -918,25 +870,8 @@ namespace CompanionAI_v3.Planning.Planners
             // ★ v3.2.25: Role 추출
             AIRole role = situation.CharacterSettings?.Role ?? AIRole.Auto;
 
-            // ★ v3.7.11: 무기 사거리 계산 (후퇴 후에도 공격 가능해야 함)
-            float weaponRangeTiles = 15f;
-            try
-            {
-                var primaryHand = unit.Body?.PrimaryHand;
-                if (primaryHand?.HasWeapon == true && !primaryHand.Weapon.Blueprint.IsMelee)
-                {
-                    int optRange = primaryHand.Weapon.AttackOptimalRange;
-                    if (optRange > 0 && optRange < 10000)
-                        weaponRangeTiles = optRange;
-                    else
-                    {
-                        int attackRange = primaryHand.Weapon.AttackRange;
-                        if (attackRange > 0 && attackRange < 10000)
-                            weaponRangeTiles = attackRange;
-                    }
-                }
-            }
-            catch { }
+            // ★ v3.8.44: 무기 사거리 헬퍼 통합
+            float weaponRangeTiles = GetWeaponRange(unit);
 
             // ★ v3.7.15: 최대 후퇴 거리 = 무기 사거리 - 1 (안전 마진)
             // 무기 사거리보다 더 멀리 후퇴하면 공격 불가!
@@ -1006,6 +941,50 @@ namespace CompanionAI_v3.Planning.Planners
         }
 
         #region Helper Methods
+
+        /// <summary>
+        /// ★ v3.8.44: 무기 사거리 추출 (중복 코드 4곳 → 1곳으로 통합)
+        /// 원거리 무기의 OptimalRange 또는 AttackRange 반환 (타일 단위)
+        /// </summary>
+        private static float GetWeaponRange(BaseUnitEntity unit)
+        {
+            float weaponRange = 15f;
+            try
+            {
+                var primaryHand = unit.Body?.PrimaryHand;
+                if (primaryHand?.HasWeapon == true && !primaryHand.Weapon.Blueprint.IsMelee)
+                {
+                    int optRange = primaryHand.Weapon.AttackOptimalRange;
+                    if (optRange > 0 && optRange < 10000)
+                        weaponRange = optRange;
+                    else
+                    {
+                        int attackRange = primaryHand.Weapon.AttackRange;
+                        if (attackRange > 0 && attackRange < 10000)
+                            weaponRange = attackRange;
+                    }
+                }
+            }
+            catch { }
+            return weaponRange;
+        }
+
+        /// <summary>
+        /// ★ v3.8.44: 유효 사거리 결정 (공격 Phase 컨텍스트 우선)
+        /// 1순위: AttackPhaseContext의 능력 사거리 (정확)
+        /// 2순위: 무기 사거리 (폴백)
+        /// </summary>
+        private static float GetEffectiveRange(BaseUnitEntity unit, AttackPhaseContext attackContext)
+        {
+            if (attackContext?.HasValidRange == true)
+            {
+                Main.LogDebug($"[MovementPlanner] GetEffectiveRange: ability={attackContext.BestAbilityRange:F1} (from context)");
+                return attackContext.BestAbilityRange;
+            }
+            float fallback = GetWeaponRange(unit);
+            Main.LogDebug($"[MovementPlanner] GetEffectiveRange: weapon={fallback:F1} (fallback)");
+            return fallback;
+        }
 
         private static Vector3 CalculateAveragePosition(IEnumerable<BaseUnitEntity> units)
         {
