@@ -101,6 +101,14 @@ namespace CompanionAI_v3.Planning.Plans
             // 이번 턴 WarpRelay 사용 여부 추적
             bool usedWarpRelay = false;
 
+            // ★ v3.8.52: 턴 단위 Raven 페이즈 판단
+            // FamiliarPositioner가 아군 버프 커버리지 기반으로 결정 (커버리지 < 60% → 버프 페이즈)
+            bool isRavenBuffPhase = situation.OptimalFamiliarPosition?.IsBuffPhase ?? true;
+            if (situation.FamiliarType == PetType.Raven && situation.HasFamiliar)
+            {
+                Main.Log($"[Overseer] Raven Turn Phase: {(isRavenBuffPhase ? "BUFF MODE (아군 버프 배포 우선)" : "DEBUFF MODE (적 디버프 전환)")}");
+            }
+
             // ★ v3.7.93: 키스톤 루프에서 실제 성공한 능력 GUID 추적 (아군 버프 Phase에서 중복 방지)
             var usedKeystoneAbilityGuids = new HashSet<string>();
 
@@ -186,29 +194,35 @@ namespace CompanionAI_v3.Planning.Plans
                 }
 
                 // ────────────────────────────────────────────────────────────
-                // 3.5.5: Raven Aggressive Relocate (버프 배포 후 적 밀집 지역으로 이동)
-                // ★ v3.8.13: WarpRelay 사용 후 아군 버프 충분하면 적 클러스터로 재배치
+                // 3.5.5: Raven Aggressive Relocate (WarpRelay 직후 즉시 재배치)
+                // ★ v3.8.52: 버프 페이즈에서는 스킵 (Raven은 아군 근처에 있어야 함)
+                //            공격 페이즈에서만 적 밀집 지역으로 이동
                 // ────────────────────────────────────────────────────────────
-                if (usedWarpRelay && situation.FamiliarType == PetType.Raven)
+                if (usedWarpRelay && situation.FamiliarType == PetType.Raven && !isRavenBuffPhase)
                 {
                     var aggressiveRelocate = PlanRavenAggressiveRelocate(situation, ref remainingAP);
                     if (aggressiveRelocate != null)
                     {
                         actions.Add(aggressiveRelocate);
-                        Main.Log($"[Overseer] Phase 3.5.5: Raven aggressive relocate to enemy cluster");
+                        Main.Log($"[Overseer] Phase 3.5.5: Raven aggressive relocate to enemy cluster (DEBUFF MODE)");
                     }
+                }
+                else if (usedWarpRelay && situation.FamiliarType == PetType.Raven && isRavenBuffPhase)
+                {
+                    Main.LogDebug($"[Overseer] Phase 3.5.5: Skipped - Raven in BUFF MODE (stay near allies)");
                 }
 
                 // ────────────────────────────────────────────────────────────
                 // 3.6: Raven Hex (적 디버프)
+                // ★ v3.8.52: 버프 페이즈에서는 Hex 스킵 (Raven이 아군 근처 → 적 사거리 밖)
                 // ────────────────────────────────────────────────────────────
-                if (situation.FamiliarType == PetType.Raven)
+                if (situation.FamiliarType == PetType.Raven && !isRavenBuffPhase)
                 {
                     var hex = PlanFamiliarHex(situation, ref remainingAP);
                     if (hex != null)
                     {
                         actions.Add(hex);
-                        Main.Log($"[Overseer] Phase 3.6: Raven Hex");
+                        Main.Log($"[Overseer] Phase 3.6: Raven Hex (DEBUFF MODE)");
                     }
                 }
 
@@ -361,26 +375,58 @@ namespace CompanionAI_v3.Planning.Plans
             // Phase 4.5: Ally Buffs (쳐부숴라!, 잠재력 초월 등) ★v3.7.93 신규★
             // 키스톤 루프에서 사역마에게 실패한 버프를 아군에게 시전
             // ★ v3.8.16: 턴 부여 능력 중복 방지 (같은 대상에게 쳐부숴라 여러 번 계획 방지)
-            // ★ v3.8.16: 인위적 3개 제한 제거 (SupportPlan과 일관성 + 자연 종료 조건 충분)
+            // ★ v3.8.51: 같은 버프를 여러 아군에게 사용 가능하도록 (buff,target) 쌍 추적
             // ══════════════════════════════════════════════════════════════
-            var usedAllyBuffGuids = new HashSet<string>(usedKeystoneAbilityGuids);
+            var keystoneOnlyGuids = new HashSet<string>(usedKeystoneAbilityGuids);  // ★ v3.8.51: 키스톤 GUID만 (버프 제외 아님)
             var plannedTurnGrantTargets = new HashSet<string>();  // ★ v3.8.16: 턴 부여 대상 추적
+            var plannedBuffTargetPairs = new HashSet<string>();   // ★ v3.8.51: (buffGuid:targetId) 쌍 추적
             int allyBuffCount = 0;
-            while (remainingAP >= 1f)  // ★ v3.8.16: 제한 제거 - AP/null반환으로 자연 종료
+            while (remainingAP >= 1f)
             {
-                var allyBuffAction = PlanAllyBuff(situation, ref remainingAP, usedAllyBuffGuids, plannedTurnGrantTargets);
+                var allyBuffAction = PlanAllyBuff(situation, ref remainingAP, keystoneOnlyGuids, plannedTurnGrantTargets, plannedBuffTargetPairs);
                 if (allyBuffAction == null) break;
 
-                // 계획된 버프 GUID 추가 (무한 루프 방지)
+                // ★ v3.8.51: (버프, 타겟) 쌍 추적 → 같은 버프를 다른 아군에게는 허용
                 string buffGuid = allyBuffAction.Ability?.Blueprint?.AssetGuid?.ToString();
+                var buffTarget = allyBuffAction.Target?.Entity as BaseUnitEntity;
+                string targetId = buffTarget?.UniqueId ?? buffTarget?.CharacterName ?? "unknown";
                 if (!string.IsNullOrEmpty(buffGuid))
                 {
-                    usedAllyBuffGuids.Add(buffGuid);
+                    plannedBuffTargetPairs.Add($"{buffGuid}:{targetId}");
                 }
 
                 actions.Add(allyBuffAction);
                 allyBuffCount++;
-                Main.Log($"[Overseer] Phase 4.5: Ally Buff #{allyBuffCount} - {allyBuffAction.Ability?.Name}");
+                Main.Log($"[Overseer] Phase 4.5: Ally Buff #{allyBuffCount} - {allyBuffAction.Ability?.Name} -> {buffTarget?.CharacterName}");
+            }
+
+            // ══════════════════════════════════════════════════════════════
+            // Phase 4.6: Raven Aggressive Relocate (디버프 모드에서만)
+            // ★ v3.8.52: 턴 단위 페이즈 기반 - 버프 페이즈에서는 스킵
+            // 공격 페이즈에서 Phase 3.5.5에서 못 했으면 여기서 재시도
+            // ══════════════════════════════════════════════════════════════
+            if (situation.FamiliarType == PetType.Raven && situation.HasFamiliar && remainingAP >= 1f && !isRavenBuffPhase)
+            {
+                // Phase 3.5.5에서 이미 relocate 했는지 확인
+                bool alreadyRelocated = false;
+                for (int i = 0; i < actions.Count; i++)
+                {
+                    if (actions[i].Reason != null && actions[i].Reason.Contains("enemy cluster"))
+                    {
+                        alreadyRelocated = true;
+                        break;
+                    }
+                }
+
+                if (!alreadyRelocated)
+                {
+                    var postBuffRelocate = PlanRavenAggressiveRelocate(situation, ref remainingAP, skipCoverageCheck: true);
+                    if (postBuffRelocate != null)
+                    {
+                        actions.Add(postBuffRelocate);
+                        Main.Log($"[Overseer] Phase 4.6: Raven relocate to enemy cluster (DEBUFF MODE, post-buff)");
+                    }
+                }
             }
 
             // ══════════════════════════════════════════════════════════════
@@ -391,7 +437,9 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.8.44: 공격 실패 이유 추적 (이동 Phase에 전달)
             var attackContext = new AttackPhaseContext();
             var plannedTargetIds = new HashSet<string>();
-            var plannedAbilityGuids = new HashSet<string>();
+            // ★ v3.8.57: 키스톤에서 사용된 능력 GUID를 Phase 5에 전달 → 이중 계획 방지
+            // (Warp Relay로 계획된 사이킥 공격이 직접 공격으로 또 계획되는 것 방지)
+            var plannedAbilityGuids = new HashSet<string>(usedKeystoneAbilityGuids);
             int attacksPlanned = 0;
 
             while (remainingAP >= 0f && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
@@ -923,9 +971,12 @@ namespace CompanionAI_v3.Planning.Plans
 
         /// <summary>
         /// ★ v3.8.13: 레이븐 공격적 재배치 (버프 배포 후 적 밀집 지역으로 이동)
+        /// ★ v3.8.51: skipCoverageCheck - 버프 완료 후 호출 시 커버리지 무시
+        /// ★ v3.8.55: Raven support ability 실제 사거리 사용 (하드코딩 20타일 제거)
         /// </summary>
-        private PlannedAction PlanRavenAggressiveRelocate(Situation situation, ref float remainingAP)
+        private PlannedAction PlanRavenAggressiveRelocate(Situation situation, ref float remainingAP, bool skipCoverageCheck = false)
         {
+
             // Raven Relocate 능력 찾기
             var relocate = situation.FamiliarAbilities?
                 .FirstOrDefault(a => FamiliarAbilities.IsRelocateAbility(a));
@@ -944,24 +995,36 @@ namespace CompanionAI_v3.Planning.Plans
                 return null;
             }
 
-            // 아군 버프 커버리지 확인 (60% 이상이어야 공격 모드)
+            // 아군 버프 커버리지 확인
             var raven = FamiliarAPI.GetFamiliar(situation.Unit);
             if (raven == null) return null;
+
+            // ★ v3.8.55: Raven support ability 실제 사거리 (하드코딩 제거)
+            int supportRangeTiles = FamiliarAPI.GetRavenSupportRange(raven);
+            float MAX_RAVEN_RELOCATE_METERS = CombatAPI.TilesToMeters(supportRangeTiles);
 
             var validAllies = situation.Allies?
                 .Where(a => a != null && a.IsConscious && !FamiliarAPI.IsFamiliar(a))
                 .ToList() ?? new List<BaseUnitEntity>();
 
-            int alliesInRavenRange = FamiliarAPI.CountAlliesInRadius(
-                raven.Position, FamiliarPositioner.EFFECT_RADIUS_TILES, validAllies);
-
-            float buffCoverage = validAllies.Count > 0 ? (float)alliesInRavenRange / validAllies.Count : 0f;
-
-            // 버프 커버리지가 충분하지 않으면 공격 모드 진입 안 함
-            if (buffCoverage < 0.5f || alliesInRavenRange < 2)
+            // ★ v3.8.51: skipCoverageCheck=true면 커버리지 무시 (Phase 4.6 - 버프 완료 후)
+            if (!skipCoverageCheck)
             {
-                Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Buff coverage too low ({buffCoverage:P0}, {alliesInRavenRange} allies)");
-                return null;
+                int alliesInRavenRange = FamiliarAPI.CountAlliesInRadius(
+                    raven.Position, FamiliarPositioner.EFFECT_RADIUS_TILES, validAllies);
+
+                float buffCoverage = validAllies.Count > 0 ? (float)alliesInRavenRange / validAllies.Count : 0f;
+
+                // 버프 커버리지가 충분하지 않으면 공격 모드 진입 안 함
+                if (buffCoverage < 0.5f || alliesInRavenRange < 2)
+                {
+                    Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Buff coverage too low ({buffCoverage:P0}, {alliesInRavenRange} allies)");
+                    return null;
+                }
+            }
+            else
+            {
+                Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Coverage check skipped (post-buff phase)");
             }
 
             // 적 밀집 지역 중심 찾기
@@ -969,9 +1032,10 @@ namespace CompanionAI_v3.Planning.Plans
                 .Where(e => e != null && e.IsConscious)
                 .ToList() ?? new List<BaseUnitEntity>();
 
-            if (validEnemies.Count < 2)
+            // ★ v3.8.56: 적 1명이라도 있으면 재배치 시도 (사람처럼 일단 뭐라도 하기)
+            if (validEnemies.Count < 1)
             {
-                Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Not enough enemies ({validEnemies.Count})");
+                Main.LogDebug($"[Overseer] RavenAggressiveRelocate: No conscious enemies");
                 return null;
             }
 
@@ -989,89 +1053,83 @@ namespace CompanionAI_v3.Planning.Plans
                 return null;
             }
 
+            // ★ v3.8.56: 적 클러스터가 사거리 밖이어도 포기하지 않음
+            // 사람처럼 "최대한 가까이라도 이동시키겠지"
+            // 노드 검색에서 사거리 제한이 적용되므로, 도달 가능한 가장 적에 가까운 위치를 자동 선택
+            if (distToEnemyCluster > MAX_RAVEN_RELOCATE_METERS)
+            {
+                Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Enemy cluster beyond support range ({distToEnemyCluster:F1}m > {MAX_RAVEN_RELOCATE_METERS:F1}m) - will find closest reachable position");
+            }
+
             // 적 클러스터 근처에서 최적 위치 찾기 (Relocate 사거리 내)
             float maxRange = CombatAPI.GetAbilityRange(relocate);
-            var optimalPos = FamiliarPositioner.FindOptimalPosition(
-                situation.Unit,
-                PetType.Raven,
-                validAllies,
-                validEnemies,
-                maxRange);
+            Vector3 ravenPos = raven.Position;
 
-            if (optimalPos == null || optimalPos.EnemiesInRange < 2)
+            // ★ v3.8.53: 최적 위치를 직접 검색 (FamiliarPositioner.FindOptimalPosition 대신)
+            // FindOptimalPosition은 페이즈에 따라 다른 위치를 반환하므로, 여기서는 적 중심으로만 검색
+            Vector3? bestPos = null;
+            float bestScore = float.MinValue;
+            int bestEnemies = 0;
+
+            const float TILE_SIZE = 1.35f;
+            int searchRadius = Math.Min((int)(maxRange / TILE_SIZE), 15); // 최대 15타일 반경 검색
+            Vector3 unitPos = situation.Unit.Position;
+            BaseUnitEntity familiar = raven;
+
+            foreach (var node in FamiliarPositioner.GetValidNodesAround(familiar, enemyCenter, searchRadius))
             {
-                Main.LogDebug($"[Overseer] RavenAggressiveRelocate: No good enemy cluster position");
+                Vector3 pos = node.Vector3Position;
+
+                // 마스터 사거리 제한
+                float distFromMaster = Vector3.Distance(unitPos, pos);
+                if (distFromMaster > maxRange)
+                    continue;
+
+                // ★ v3.8.55: Raven support ability 실제 사거리 제한
+                float distFromRaven = Vector3.Distance(ravenPos, pos);
+                if (distFromRaven > MAX_RAVEN_RELOCATE_METERS)
+                    continue;
+
+                // 적 커버리지 계산
+                int enemiesInRange = FamiliarAPI.CountEnemiesInRadius(
+                    pos, FamiliarPositioner.EFFECT_RADIUS_TILES, validEnemies);
+                int alliesInRange = FamiliarAPI.CountAlliesInRadius(
+                    pos, FamiliarPositioner.EFFECT_RADIUS_TILES, validAllies);
+
+                // 적 중심 점수 (적 우선, 아군 보너스)
+                float score = enemiesInRange * 30f + alliesInRange * 5f;
+                if (enemiesInRange >= 2) score += 40f;
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestPos = pos;
+                    bestEnemies = enemiesInRange;
+                }
+            }
+
+            // ★ v3.8.56: 적 1명이라도 커버 가능하면 재배치 진행
+            if (!bestPos.HasValue || bestEnemies < 1)
+            {
+                Main.LogDebug($"[Overseer] RavenAggressiveRelocate: No good position found (bestEnemies={bestEnemies})");
                 return null;
             }
 
             // LOS/타겟 가능 여부 확인
             string reason;
-            if (CombatAPI.CanUseAbilityOnPoint(relocate, optimalPos.Position, out reason))
+            if (CombatAPI.CanUseAbilityOnPoint(relocate, bestPos.Value, out reason))
             {
                 remainingAP -= apCost;
-                Main.Log($"[Overseer] ★ Raven aggressive relocate to enemy cluster ({optimalPos.EnemiesInRange} enemies in range)");
+                float finalDist = Vector3.Distance(ravenPos, bestPos.Value);
+                Main.Log($"[Overseer] ★ Raven aggressive relocate to enemy cluster ({bestEnemies} enemies, dist={finalDist:F1}m from Raven)");
                 return PlannedAction.PositionalBuff(
                     relocate,
-                    optimalPos.Position,
-                    $"Raven to enemy cluster ({optimalPos.EnemiesInRange} enemies)",
+                    bestPos.Value,
+                    $"Raven to enemy cluster ({bestEnemies} enemies)",
                     apCost);
             }
 
-            // ★ v3.8.13: 최적 위치 불가 시 적 클러스터 방향으로 최대한 가까운 위치 찾기
-            Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Optimal blocked ({reason}), finding closest valid position");
-
-            Vector3? bestFallbackPos = null;
-            float bestFallbackDist = float.MaxValue;
-            int bestFallbackEnemies = 0;
-
-            // 적 클러스터 방향으로 이동 가능한 위치 탐색 (그리드 검색)
-            const float TILE_SIZE = 1.35f;
-            int searchRadius = (int)(maxRange / TILE_SIZE);
-            Vector3 unitPos = situation.Unit.Position;
-
-            // 레이븐 현재 위치에서 적 클러스터 방향으로 검색
-            Vector3 direction = (enemyCenter - raven.Position).normalized;
-
-            for (int dx = -searchRadius; dx <= searchRadius; dx++)
-            {
-                for (int dz = -searchRadius; dz <= searchRadius; dz++)
-                {
-                    Vector3 pos = unitPos + new Vector3(dx * TILE_SIZE, 0, dz * TILE_SIZE);
-
-                    // 유닛 사거리 내인지 확인
-                    float distFromUnit = Vector3.Distance(pos, unitPos);
-                    if (distFromUnit > maxRange)
-                        continue;
-
-                    string posReason;
-                    if (!CombatAPI.CanUseAbilityOnPoint(relocate, pos, out posReason))
-                        continue;
-
-                    float distToCluster = Vector3.Distance(pos, enemyCenter);
-                    int enemiesNear = validEnemies.Count(e => Vector3.Distance(pos, e.Position) <= FamiliarPositioner.EFFECT_RADIUS_TILES * 1.5f);
-
-                    // 현재 레이븐 위치보다 적 클러스터에 가까워야 함
-                    if (distToCluster < distToEnemyCluster && distToCluster < bestFallbackDist)
-                    {
-                        bestFallbackDist = distToCluster;
-                        bestFallbackPos = pos;
-                        bestFallbackEnemies = enemiesNear;
-                    }
-                }
-            }
-
-            if (bestFallbackPos.HasValue)
-            {
-                remainingAP -= apCost;
-                Main.Log($"[Overseer] ★ Raven relocate toward enemy cluster (fallback, {bestFallbackEnemies} enemies nearby, dist={bestFallbackDist:F1}m)");
-                return PlannedAction.PositionalBuff(
-                    relocate,
-                    bestFallbackPos.Value,
-                    $"Raven toward enemy cluster ({bestFallbackDist:F1}m)",
-                    apCost);
-            }
-
-            Main.LogDebug($"[Overseer] RavenAggressiveRelocate: No valid fallback position found");
+            Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Best position blocked ({reason})");
             return null;
         }
 

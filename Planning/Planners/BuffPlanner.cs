@@ -315,7 +315,7 @@ namespace CompanionAI_v3.Planning.Planners
                 if (!CanAffordBuffWithReservation(cost, remainingAP, reservedAP, isEssential))
                     continue;
 
-                if (CombatAPI.HasActiveBuff(situation.Unit, ability)) continue;
+                if (AllyStateCache.HasBuff(situation.Unit, ability)) continue;
 
                 // ★ v3.8.25: AbilityCasterHasFacts 검증 (스택 버프 필요 여부)
                 // GetUnavailabilityReasons()가 감지하지 못하는 캐스터 제한 검증
@@ -377,7 +377,7 @@ namespace CompanionAI_v3.Planning.Planners
                 if (!CanAffordBuffWithReservation(cost, remainingAP, effectiveReservedAP, isEssential))
                     continue;
 
-                if (CombatAPI.HasActiveBuff(situation.Unit, buff)) continue;
+                if (AllyStateCache.HasBuff(situation.Unit, buff)) continue;
 
                 string reason;
                 if (CombatAPI.CanUseAbilityOn(buff, target, out reason))
@@ -408,7 +408,7 @@ namespace CompanionAI_v3.Planning.Planners
                 float cost = CombatAPI.GetAbilityAPCost(taunt);
                 if (cost > remainingAP) continue;
 
-                if (CombatAPI.HasActiveBuff(situation.Unit, taunt)) continue;
+                if (AllyStateCache.HasBuff(situation.Unit, taunt)) continue;
 
                 TargetWrapper target;
                 if (taunt.Blueprint?.CanTargetSelf == true)
@@ -518,7 +518,7 @@ namespace CompanionAI_v3.Planning.Planners
                     continue;
                 }
 
-                if (CombatAPI.HasActiveBuff(situation.Unit, heroic)) continue;
+                if (AllyStateCache.HasBuff(situation.Unit, heroic)) continue;
 
                 string reason;
                 if (CombatAPI.CanUseAbilityOn(heroic, target, out reason))
@@ -548,7 +548,7 @@ namespace CompanionAI_v3.Planning.Planners
                 float cost = CombatAPI.GetAbilityAPCost(debuff);
                 if (cost > remainingAP) continue;
 
-                if (CombatAPI.HasActiveBuff(target, debuff)) continue;
+                if (AllyStateCache.HasBuff(target, debuff)) continue;
 
                 string reason;
                 if (CombatAPI.CanUseAbilityOn(debuff, targetWrapper, out reason))
@@ -578,7 +578,7 @@ namespace CompanionAI_v3.Planning.Planners
                 float cost = CombatAPI.GetAbilityAPCost(marker);
                 if (cost > remainingAP) continue;
 
-                if (CombatAPI.HasActiveBuff(target, marker)) continue;
+                if (AllyStateCache.HasBuff(target, marker)) continue;
 
                 string reason;
                 if (CombatAPI.CanUseAbilityOn(marker, targetWrapper, out reason))
@@ -601,7 +601,7 @@ namespace CompanionAI_v3.Planning.Planners
 
             // ★ v3.5.75: 통합 API 사용
             var defensiveBuffs = situation.AvailableBuffs
-                .Where(a => !CombatAPI.HasActiveBuff(situation.Unit, a))
+                .Where(a => !AllyStateCache.HasBuff(situation.Unit, a))
                 .Where(a => AbilityDatabase.IsDefensiveStance(a))
                 .ToList();
 

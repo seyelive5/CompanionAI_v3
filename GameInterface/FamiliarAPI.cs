@@ -378,6 +378,77 @@ namespace CompanionAI_v3.GameInterface
 
         #endregion
 
+        #region ★ v3.8.55: Raven Support Ability Range
+
+        /// <summary>
+        /// ★ v3.8.55: Raven Support Ability 실제 사거리 (타일 단위)
+        /// 마스터의 RavenPet_Redirect_Ability = Unlimited이지만,
+        /// Raven 엔티티의 RavenPet_Redirect_Support_Ability는 제한된 사거리
+        /// 재배치 시 이 사거리를 초과하면 TargetTooFar 에러 발생
+        /// </summary>
+        private static int _cachedRavenSupportRange = -1;
+        private const int DEFAULT_RAVEN_SUPPORT_RANGE = 13; // ~17.5m (24.8m에서 TargetTooFar → 보수적 기본값)
+        private const string RAVEN_SUPPORT_ABILITY_GUID = "1300cf8d118b4910a4f93770ffa1b827";
+
+        public static int GetRavenSupportRange(BaseUnitEntity familiar)
+        {
+            if (_cachedRavenSupportRange > 0) return _cachedRavenSupportRange;
+            if (familiar == null) return DEFAULT_RAVEN_SUPPORT_RANGE;
+
+            try
+            {
+                // Raven 엔티티의 능력 목록에서 Support Ability 찾기
+                var ravenAbilities = familiar.Abilities?.RawFacts;
+                if (ravenAbilities != null)
+                {
+                    foreach (var fact in ravenAbilities)
+                    {
+                        var guid = fact.Blueprint?.AssetGuid?.ToString();
+                        if (guid == RAVEN_SUPPORT_ABILITY_GUID)
+                        {
+                            int range = CombatAPI.GetAbilityRangeInTiles(fact.Data);
+                            if (range > 0 && range < 100)
+                            {
+                                _cachedRavenSupportRange = range;
+                                Main.Log($"[FamiliarAPI] ★ Raven support ability range: {range} tiles ({CombatAPI.TilesToMeters(range):F1}m)");
+                                return range;
+                            }
+                            else
+                            {
+                                Main.LogDebug($"[FamiliarAPI] Raven support ability range unexpected: {range} tiles, using default");
+                            }
+                        }
+                    }
+                }
+
+                Main.LogDebug($"[FamiliarAPI] Raven support ability not found on familiar, using default {DEFAULT_RAVEN_SUPPORT_RANGE} tiles");
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[FamiliarAPI] GetRavenSupportRange error: {ex.Message}");
+            }
+
+            return DEFAULT_RAVEN_SUPPORT_RANGE;
+        }
+
+        /// <summary>
+        /// ★ v3.8.55: Raven support 사거리를 미터 단위로 반환
+        /// </summary>
+        public static float GetRavenSupportRangeMeters(BaseUnitEntity familiar)
+        {
+            return CombatAPI.TilesToMeters(GetRavenSupportRange(familiar));
+        }
+
+        /// <summary>
+        /// ★ v3.8.55: 전투 종료 시 캐시 초기화
+        /// </summary>
+        public static void ClearRangeCache()
+        {
+            _cachedRavenSupportRange = -1;
+        }
+
+        #endregion
+
         #region ★ v3.7.90: Familiar Ability Range
 
         /// <summary>

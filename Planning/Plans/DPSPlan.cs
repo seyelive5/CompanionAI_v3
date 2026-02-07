@@ -206,6 +206,10 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     Main.Log($"[DPS] Phase 3: Kill sequence found for {situation.BestTarget.CharacterName} ({killSequence.Abilities.Count} abilities, {killSequence.TotalDamage:F0} dmg)");
 
+                    // ★ v3.8.54: Kill Sequence 아군 안전 - AP/액션 저장 (안전 차단 시 복원용)
+                    float savedAPBeforeKillSeq = remainingAP;
+                    int actionsBeforeKillSeq = actions.Count;
+
                     foreach (var ability in killSequence.Abilities)
                     {
                         // ★ v3.4.01: P1-1 능력 사용 가능 여부 재확인
@@ -228,14 +232,26 @@ namespace CompanionAI_v3.Planning.Plans
                             }
                             else
                             {
-                                // ★ v3.4.02: P0 수정 - reason, apCost 파라미터 추가
+                                // ★ v3.8.54: Kill Sequence 공격의 아군 안전 체크 (CanTargetFriends/사선)
+                                if (CombatAPI.IsPointTargetAbility(ability) || ability.Blueprint?.CanTargetFriends == true)
+                                {
+                                    if (!AoESafetyChecker.IsAoESafeForUnitTarget(ability, situation.Unit, killSequence.Target, situation.Allies))
+                                    {
+                                        Main.Log($"[DPS] Phase 3: Kill sequence BLOCKED by ally safety: {ability.Name} -> {killSequence.Target.CharacterName}");
+                                        // 킬 시퀀스에서 추가된 액션 제거 + AP 복원
+                                        while (actions.Count > actionsBeforeKillSeq)
+                                            actions.RemoveAt(actions.Count - 1);
+                                        remainingAP = savedAPBeforeKillSeq;
+                                        break;
+                                    }
+                                }
                                 actions.Add(PlannedAction.Attack(ability, killSequence.Target, "Kill sequence attack", apCost));
                             }
                             remainingAP -= apCost;
                         }
                     }
 
-                    if (actions.Count > 0)
+                    if (actions.Count > actionsBeforeKillSeq)
                     {
                         didPlanKillSequence = true;
                         // ★ v3.5.79: 킬 시퀀스 타겟을 Phase 5에서 SharedTarget으로 덮어쓰지 않도록 등록
@@ -639,7 +655,7 @@ namespace CompanionAI_v3.Planning.Plans
                     float cost = CombatAPI.GetAbilityAPCost(buff);
                     if (cost > remainingAP) continue;
 
-                    if (CombatAPI.HasActiveBuff(situation.Unit, buff)) continue;
+                    if (AllyStateCache.HasBuff(situation.Unit, buff)) continue;
 
                     // ★ Self 또는 Ally 타겟 버프
                     var bp = buff.Blueprint;
@@ -886,7 +902,7 @@ namespace CompanionAI_v3.Planning.Plans
                     continue;
                 }
 
-                if (CombatAPI.HasActiveBuff(situation.Unit, heroic)) continue;
+                if (AllyStateCache.HasBuff(situation.Unit, heroic)) continue;
 
                 string reason;
                 if (CombatAPI.CanUseAbilityOn(heroic, target, out reason))
@@ -987,7 +1003,7 @@ namespace CompanionAI_v3.Planning.Plans
                 if (!CanAffordBuffWithReservation(cost, remainingAP, effectiveReservedAP, isEssential))
                     continue;
 
-                if (CombatAPI.HasActiveBuff(situation.Unit, buff)) continue;
+                if (AllyStateCache.HasBuff(situation.Unit, buff)) continue;
 
                 string reason;
                 if (CombatAPI.CanUseAbilityOn(buff, target, out reason))

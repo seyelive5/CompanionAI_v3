@@ -246,22 +246,23 @@ namespace CompanionAI_v3.Planning.Plans
 
             // Phase 4: 아군 버프 (Tank > DPS > 기타 우선순위)
             // ★ v3.7.07: 실제 사용된 키스톤 버프만 스킵 (실패한 건 아군에게 시전)
-            // ★ v3.7.08 Fix: 계획된 버프 GUID 추적하여 무한 루프 방지 (0 AP 버프 문제)
-            // ★ v3.7.09: 키스톤 디버프도 추적 (Raven Warp Relay)
+            // ★ v3.8.51: (버프,타겟) 쌍 추적으로 같은 버프를 여러 아군에게 사용 가능
             // ★ v3.8.16: 턴 부여 능력 중복 방지 (같은 대상에게 쳐부숴라 여러 번 계획 방지)
-            // AP가 남아있는 동안 계속 버프 (제한 없음)
-            var usedAllyBuffGuids = new HashSet<string>(usedKeystoneAbilityGuids);  // 키스톤 + 아군 버프 통합 추적
+            var keystoneOnlyGuids = new HashSet<string>(usedKeystoneAbilityGuids);  // ★ v3.8.51: 키스톤 GUID만
             var plannedTurnGrantTargets = new HashSet<string>();  // ★ v3.8.16: 턴 부여 대상 추적
+            var plannedBuffTargetPairs = new HashSet<string>();   // ★ v3.8.51: (buffGuid:targetId) 쌍
             while (remainingAP >= 1f)
             {
-                var allyBuffAction = PlanAllyBuff(situation, ref remainingAP, usedAllyBuffGuids, plannedTurnGrantTargets);
+                var allyBuffAction = PlanAllyBuff(situation, ref remainingAP, keystoneOnlyGuids, plannedTurnGrantTargets, plannedBuffTargetPairs);
                 if (allyBuffAction == null) break;
 
-                // ★ v3.7.08: 계획된 버프 GUID 추가 (무한 루프 방지)
+                // ★ v3.8.51: (버프, 타겟) 쌍 추적
                 string buffGuid = allyBuffAction.Ability?.Blueprint?.AssetGuid?.ToString();
+                var buffTarget = allyBuffAction.Target?.Entity as BaseUnitEntity;
+                string targetId = buffTarget?.UniqueId ?? buffTarget?.CharacterName ?? "unknown";
                 if (!string.IsNullOrEmpty(buffGuid))
                 {
-                    usedAllyBuffGuids.Add(buffGuid);
+                    plannedBuffTargetPairs.Add($"{buffGuid}:{targetId}");
                 }
 
                 actions.Add(allyBuffAction);
@@ -545,7 +546,7 @@ namespace CompanionAI_v3.Planning.Plans
                     float cost = CombatAPI.GetAbilityAPCost(buff);
                     if (cost > remainingAP) continue;
 
-                    if (CombatAPI.HasActiveBuff(situation.Unit, buff)) continue;
+                    if (AllyStateCache.HasBuff(situation.Unit, buff)) continue;
 
                     // ★ Self 또는 Ally 타겟 버프
                     var bp = buff.Blueprint;

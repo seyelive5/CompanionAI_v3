@@ -51,7 +51,7 @@ namespace CompanionAI_v3.Execution
                     case ActionType.Support:
                     case ActionType.Special:
                     case ActionType.Reload:
-                        return ExecuteAbility(action);
+                        return ExecuteAbility(action, situation);
 
                     case ActionType.Move:
                         return ExecuteMove(action);
@@ -72,8 +72,9 @@ namespace CompanionAI_v3.Execution
 
         /// <summary>
         /// 능력 실행
+        /// ★ v3.8.55: situation 파라미터 추가 (Warp Relay 적 수 재확인용)
         /// </summary>
-        private ExecutionResult ExecuteAbility(PlannedAction action)
+        private ExecutionResult ExecuteAbility(PlannedAction action, Situation situation)
         {
             var ability = action.Ability;
             var target = action.Target;
@@ -94,6 +95,24 @@ namespace CompanionAI_v3.Execution
                 var freshFamiliar = FamiliarAPI.GetFamiliar(caster);
                 if (freshFamiliar != null)
                 {
+                    // ★ v3.8.55: Warp Relay 디버프/공격 실행 전 Raven 주변 적 수 재확인
+                    // 재배치 실패 시 Raven이 아군 근처에 머물 → 디버프 낭비 방지
+                    // ★ v3.8.56: 적 1명이라도 있으면 실행 허용 (사람처럼 일단 뭐라도 하기)
+                    if (action.Type == ActionType.Attack || action.Type == ActionType.Debuff)
+                    {
+                        var validEnemies = situation?.Enemies?.FindAll(e => e != null && e.IsConscious);
+                        int enemiesNearRaven = validEnemies != null
+                            ? FamiliarAPI.CountEnemiesInRadius(freshFamiliar.Position, FamiliarPositioner.EFFECT_RADIUS_TILES, validEnemies)
+                            : 0;
+
+                        if (enemiesNearRaven < 1)
+                        {
+                            Main.Log($"[Executor] ★ v3.8.56: Warp Relay debuff SKIPPED - Raven at ({freshFamiliar.Position.x:F1}, {freshFamiliar.Position.z:F1}) has 0 enemies nearby");
+                            return ExecutionResult.Failure("No enemies near familiar for Warp Relay");
+                        }
+                        Main.LogDebug($"[Executor] Warp Relay check OK: {enemiesNearRaven} enemies near Raven");
+                    }
+
                     // ★ v3.7.78: Point 타겟 능력 여부 체크
                     if (CombatAPI.IsPointTargetAbility(ability))
                     {
@@ -263,7 +282,11 @@ namespace CompanionAI_v3.Execution
                     if (familiar != null)
                     {
                         float distToTarget = UnityEngine.Vector3.Distance(familiar.Position, target.Point);
-                        Main.LogDebug($"[Executor]   Familiar distance to target: {distToTarget:F1}m ({CombatAPI.MetersToTiles(distToTarget):F1} tiles)");
+                        // ★ v3.8.55: support range 대비 거리 표시
+                        float supportRange = FamiliarAPI.GetRavenSupportRangeMeters(familiar);
+                        bool withinRange = distToTarget <= supportRange;
+                        Main.LogDebug($"[Executor]   Familiar distance to target: {distToTarget:F1}m ({CombatAPI.MetersToTiles(distToTarget):F1} tiles) " +
+                            $"[support range={supportRange:F1}m, {(withinRange ? "OK" : "★ OUT OF RANGE")}]");
                     }
                 }
             }

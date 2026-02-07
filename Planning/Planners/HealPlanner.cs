@@ -150,11 +150,11 @@ namespace CompanionAI_v3.Planning.Planners
                 // 이미 버프가 있는 아군 제외
                 var candidates = situation.Allies
                     .Where(a => a != null && !a.LifeState.IsDead)
-                    .Where(a => !CombatAPI.HasActiveBuff(a, buff))
+                    .Where(a => !AllyStateCache.HasBuff(a, buff))
                     .ToList();
 
                 // 본인도 후보에 추가 (버프 없으면)
-                if (!CombatAPI.HasActiveBuff(situation.Unit, buff) && !candidates.Contains(situation.Unit))
+                if (!AllyStateCache.HasBuff(situation.Unit, buff) && !candidates.Contains(situation.Unit))
                     candidates.Add(situation.Unit);
 
                 var bestTarget = TargetScorer.SelectBestAllyForBuff(candidates, situation);

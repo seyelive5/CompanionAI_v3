@@ -502,7 +502,7 @@ namespace CompanionAI_v3.Planning.Plans
                     if (cost > remainingAP) continue;
 
                     // 이미 활성화된 버프 스킵
-                    if (CombatAPI.HasActiveBuff(situation.Unit, buff)) continue;
+                    if (AllyStateCache.HasBuff(situation.Unit, buff)) continue;
 
                     // ★ Self 또는 Ally 타겟 버프 (강철 팔은 AllyTarget이므로 CanTargetFriends 체크)
                     var bp = buff.Blueprint;
@@ -703,7 +703,7 @@ namespace CompanionAI_v3.Planning.Plans
                 if (!CanAffordBuffWithReservation(cost, remainingAP, reservedAP, isEssential))
                     continue;
 
-                if (CombatAPI.HasActiveBuff(situation.Unit, ability)) continue;
+                if (AllyStateCache.HasBuff(situation.Unit, ability)) continue;
 
                 // ★ v3.8.25: AbilityCasterHasFacts 검증 (스택 버프 필요 여부)
                 // GetUnavailabilityReasons()가 감지하지 못하는 캐스터 제한 검증

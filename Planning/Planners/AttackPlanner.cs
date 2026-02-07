@@ -914,7 +914,7 @@ namespace CompanionAI_v3.Planning.Planners
                 if (cost > remainingAP) continue;
 
                 // 이미 활성화된 버프 스킵
-                if (CombatAPI.HasActiveBuff(situation.Unit, ability)) continue;
+                if (AllyStateCache.HasBuff(situation.Unit, ability)) continue;
 
                 // ★ v3.1.29: MinEnemiesForAoE 설정값 적용
                 int minEnemiesForAoE = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
@@ -1185,7 +1185,16 @@ namespace CompanionAI_v3.Planning.Planners
                 }
                 else
                 {
-                    // ★ v3.5.00: 누락된 reason, apCost 파라미터 추가
+                    // ★ v3.8.54: Kill Sequence 공격의 아군 안전 체크 (CanTargetFriends/사선)
+                    if (CombatAPI.IsPointTargetAbility(ability) || ability.Blueprint?.CanTargetFriends == true)
+                    {
+                        if (!AoESafetyChecker.IsAoESafeForUnitTarget(ability, situation.Unit, target, situation.Allies))
+                        {
+                            Main.LogDebug($"[AttackPlanner] Kill sequence BLOCKED by ally safety: {ability.Name} -> {target.CharacterName}");
+                            actions.Clear();
+                            return actions;
+                        }
+                    }
                     actions.Add(PlannedAction.Attack(ability, target, "Kill sequence attack", apCost));
                 }
             }

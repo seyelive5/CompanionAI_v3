@@ -333,8 +333,8 @@ namespace CompanionAI_v3.Planning.Plans
                 float cost = CombatAPI.GetAbilityAPCost(ability);
                 if (cost > remainingAP) continue;
 
-                // 이미 활성화된 버프 스킵
-                if (CombatAPI.HasActiveBuff(situation.Unit, ability)) continue;
+                // ★ v3.8.58: 이미 활성화된 버프 스킵 (캐시된 매핑 사용)
+                if (AllyStateCache.HasBuff(situation.Unit, ability)) continue;
 
                 var bestPosition = AoESafetyChecker.FindBestAllyAoEPosition(
                     ability,
@@ -426,8 +426,9 @@ namespace CompanionAI_v3.Planning.Plans
         /// <param name="remainingAP">남은 AP</param>
         /// <param name="usedKeystoneGuids">키스톤 루프에서 이미 사용된 버프 GUID (중복 방지)</param>
         /// <param name="plannedTurnGrantTargetIds">★ v3.8.16: 이미 턴 부여가 계획된 대상 ID (중복 방지)</param>
+        /// <param name="plannedBuffTargetPairs">★ v3.8.51: 이미 계획된 (버프GUID:타겟ID) 쌍 (같은 버프를 다른 아군에게 사용 허용)</param>
         /// <returns>아군 버프 행동 또는 null</returns>
-        protected PlannedAction PlanAllyBuff(Situation situation, ref float remainingAP, HashSet<string> usedKeystoneGuids = null, HashSet<string> plannedTurnGrantTargetIds = null)
+        protected PlannedAction PlanAllyBuff(Situation situation, ref float remainingAP, HashSet<string> usedKeystoneGuids = null, HashSet<string> plannedTurnGrantTargetIds = null, HashSet<string> plannedBuffTargetPairs = null)
         {
             // ★ v3.2.15: 팀 전술에 따라 버프 대상 우선순위 조정
             var tactic = TeamBlackboard.Instance.CurrentTactic;
@@ -508,6 +509,16 @@ namespace CompanionAI_v3.Planning.Plans
 
                 foreach (var target in prioritizedTargets)
                 {
+                    // ★ v3.8.51: 이미 계획된 (버프, 타겟) 쌍 스킵
+                    // 같은 버프를 다른 아군에게는 사용 가능하지만, 동일 조합은 중복 방지
+                    string targetId = target.UniqueId ?? target.CharacterName ?? "unknown";
+                    if (plannedBuffTargetPairs != null && !string.IsNullOrEmpty(buffGuid))
+                    {
+                        string pairKey = $"{buffGuid}:{targetId}";
+                        if (plannedBuffTargetPairs.Contains(pairKey))
+                            continue;
+                    }
+
                     // ★ v3.7.95: 스마트 버프 체크 - 버프 지속시간 확인해서 갱신 필요 여부 판단
                     // NeedsBuffRefresh: 버프 없거나 2라운드 이하 남으면 true (갱신 필요)
                     if (!CombatAPI.NeedsBuffRefresh(target, buff))
@@ -527,7 +538,6 @@ namespace CompanionAI_v3.Planning.Plans
 
                     // ★ v3.8.16: 턴 전달 능력이 이미 이 턴에 계획된 대상에게 중복 사용 방지
                     // 같은 계획 단계에서 같은 대상에게 여러 번 쳐부숴라 계획 방지
-                    string targetId = target.UniqueId ?? target.CharacterName ?? "unknown";
                     if (isTurnGrant && plannedTurnGrantTargetIds != null && plannedTurnGrantTargetIds.Contains(targetId))
                     {
                         Main.LogDebug($"[{RoleName}] Skip {buff.Name} -> {target.CharacterName}: turn grant already planned for this target");
@@ -957,8 +967,8 @@ namespace CompanionAI_v3.Planning.Plans
                 FamiliarPositioner.EFFECT_RADIUS_TILES,
                 validAllies);
 
-            // ★ 버프 처리 (아군 2명+ 필요)
-            if (keystoneBuffs.Count > 0 && optimalPos.AlliesInRange >= 2)
+            // ★ v3.8.57: 아군 1명이라도 있으면 Raven Warp Relay 경유 (직접 시전과 동일 AP + 추가 확산 가능성)
+            if (keystoneBuffs.Count > 0 && optimalPos.AlliesInRange >= 1)
             {
                 foreach (var buff in keystoneBuffs)
                 {
@@ -971,21 +981,21 @@ namespace CompanionAI_v3.Planning.Plans
                     float cost = CombatAPI.GetAbilityAPCost(buff);
                     if (cost > remainingAP) continue;
 
-                    // 이미 활성화된 버프 스킵 (사역마 체크)
-                    if (CombatAPI.HasActiveBuff(situation.Familiar, buff)) continue;
+                    // ★ v3.8.58: 이미 활성화된 버프 스킵 (사역마 체크, 캐시된 매핑 사용)
+                    if (AllyStateCache.HasBuff(situation.Familiar, buff)) continue;
 
-                    // ★ v3.7.22: 범위 내 아군 중 버프가 없는 아군 수 체크
-                    // 버프가 이미 있는 아군에게 중복 확산은 AP 낭비
+                    // ★ v3.8.58: AllyStateCache 기반 버프 보유 체크 (캐시된 아군은 게임 API 호출 없음)
                     int alliesNeedingBuff = 0;
                     foreach (var ally in alliesInRange)
                     {
-                        if (!CombatAPI.HasActiveBuff(ally, buff))
+                        if (!AllyStateCache.HasBuff(ally, buff))
                             alliesNeedingBuff++;
                     }
 
-                    if (alliesNeedingBuff < 2)
+                    // ★ v3.8.57: 1명이라도 필요하면 Raven 경유 (직접 시전 대비 손해 없고 추가 확산 가능)
+                    if (alliesNeedingBuff < 1)
                     {
-                        Main.LogDebug($"[{RoleName}] Keystone Loop: {buff.Name} skipped - only {alliesNeedingBuff} allies need it");
+                        Main.LogDebug($"[{RoleName}] Keystone Loop: {buff.Name} skipped - no allies need it (all {alliesInRange.Count} already have it)");
                         continue;
                     }
 
@@ -1062,9 +1072,51 @@ namespace CompanionAI_v3.Planning.Plans
                 Main.LogDebug($"[{RoleName}] Keystone: Momentum check - heroicActPlanned={heroicActPlanned}, buffActive={buffActive}, hasMomentum={hasMomentum}");
             }
 
-            // ★ 비피해 디버프 처리 (Momentum 불필요) - 적 2명+ 필요
-            if (keystoneDebuffs.Count > 0 && optimalPos.EnemiesInRange >= 2)
+            // ★ v3.8.52: 턴 단위 페이즈 기반 디버프 제어
+            // 버프 페이즈: Raven이 아군 근처 → 디버프 시전해도 Warp Relay가 적에게 도달 불가 → 스킵
+            // 공격 페이즈: Raven이 적 근처로 재배치됨 → 디버프 Warp Relay가 적에게 확산
+            bool isRavenBuffPhase = optimalPos.IsBuffPhase;
+            if (situation.FamiliarType == PetType.Raven && keystoneDebuffs.Count > 0)
             {
+                Main.Log($"[{RoleName}] Raven Phase: {(isRavenBuffPhase ? "BUFF (아군 버프 우선)" : "DEBUFF (적 디버프 전환)")}");
+            }
+
+            // ★ 비피해 디버프 처리 (Momentum 불필요) - 적 2명+ 필요
+            // ★ v3.8.52: 버프 페이즈에서는 디버프 완전 스킵 (Raven이 아군 근처이므로 무의미)
+            // ★ v3.8.53: optimalPos.EnemiesInRange는 재배치 예정(NeedsFamiliarRelocate)일 때만 사용
+            //   - 재배치가 Phase 3.3에서 먼저 실행되므로, 디버프 실행 시 Raven은 최적 위치에 있음
+            //   - 재배치 없이 optimalPos만 보면 Raven이 아군 근처인데 디버프가 계획되는 버그 발생
+            int actualEnemiesNearRaven = 0;
+            bool hasEnoughEnemiesForDebuff = false;
+            if (!isRavenBuffPhase && keystoneDebuffs.Count > 0 && situation.Familiar != null)
+            {
+                var ravenCurrentPos = situation.Familiar.Position;
+                var validEnemiesForDebuff = situation.Enemies?.Where(e => e != null && e.IsConscious).ToList()
+                    ?? new List<BaseUnitEntity>();
+                actualEnemiesNearRaven = FamiliarAPI.CountEnemiesInRadius(
+                    ravenCurrentPos, FamiliarPositioner.EFFECT_RADIUS_TILES, validEnemiesForDebuff);
+
+                // ★ v3.8.53: 재배치 예정 여부에 따라 적 수 판단
+                // NeedsFamiliarRelocate=true → Phase 3.3에서 최적 위치로 이동 예정 → optimalPos 기준 사용 가능
+                // NeedsFamiliarRelocate=false → Raven은 현재 위치에 머물 → 현재 위치 기준만 사용
+                bool willRelocate = situation.NeedsFamiliarRelocate;
+                int effectiveEnemyEstimate = willRelocate
+                    ? Math.Max(actualEnemiesNearRaven, optimalPos.EnemiesInRange)
+                    : actualEnemiesNearRaven;
+
+                Main.LogDebug($"[{RoleName}] Keystone Debuff: Enemies near Raven current={actualEnemiesNearRaven}, " +
+                    $"optimal={optimalPos.EnemiesInRange}, willRelocate={willRelocate}, effective={effectiveEnemyEstimate}");
+                // ★ v3.8.56: 적 1명이라도 있으면 디버프 허용 (사람처럼 일단 뭐라도 하기)
+                hasEnoughEnemiesForDebuff = effectiveEnemyEstimate >= 1;
+            }
+            else if (isRavenBuffPhase && keystoneDebuffs.Count > 0)
+            {
+                Main.LogDebug($"[{RoleName}] Keystone Debuff: Skipped (Raven in BUFF phase - prioritizing ally buff distribution)");
+            }
+
+            if (keystoneDebuffs.Count > 0 && hasEnoughEnemiesForDebuff)
+            {
+                int effectiveEnemyCount = Math.Max(actualEnemiesNearRaven, optimalPos.EnemiesInRange);
                 foreach (var debuff in keystoneDebuffs)
                 {
                     if (remainingAP < 1f) break;
@@ -1089,25 +1141,26 @@ namespace CompanionAI_v3.Planning.Plans
                         usedAbilityGuids.Add(guid);
 
                     Main.Log($"[{RoleName}] ★ Familiar Keystone Debuff: {debuff.Name} on {typeName} " +
-                        $"({optimalPos.EnemiesInRange} enemies in range) - Warp Relay spread");
+                        $"({effectiveEnemyCount} enemies in range) - Warp Relay spread");
 
                     var debuffAction = PlannedAction.Attack(
                         debuff,
                         situation.Familiar,
-                        $"Warp Relay debuff: {debuff.Name} ({optimalPos.EnemiesInRange} enemies)",
+                        $"Warp Relay debuff: {debuff.Name} ({effectiveEnemyCount} enemies)",
                         cost);
                     debuffAction.IsFamiliarTarget = true;
                     actions.Add(debuffAction);
                 }
             }
-            else if (keystoneDebuffs.Count > 0)
+            else if (keystoneDebuffs.Count > 0 && !isRavenBuffPhase)
             {
-                Main.LogDebug($"[{RoleName}] Keystone Debuff: Not enough enemies in range ({optimalPos.EnemiesInRange})");
+                Main.LogDebug($"[{RoleName}] Keystone Debuff: Not enough enemies near Raven (current={actualEnemiesNearRaven}, optimal={optimalPos.EnemiesInRange})");
             }
 
-            // ★ v3.7.96: 피해 사이킥 공격 처리 (Momentum 필요!) - 적 2명+ 필요
-            // Overcharge(과충전) 상태에서만 사이킥 데미지를 Raven에게 사용해 적에게 전달 가능
-            if (hasMomentum && optimalPos.EnemiesInRange >= 2 && situation.AvailableAttacks != null)
+            // ★ v3.7.96: 피해 사이킥 공격 처리 (Momentum 필요!) ★ v3.8.56: 적 1명+ 허용
+            // Overcharge(과충전) 상태에서만 사이킹 데미지를 Raven에게 사용해 적에게 전달 가능
+            // ★ v3.8.52: 버프 페이즈에서는 피해 사이킹 공격도 스킵 (Raven이 아군 근처)
+            if (hasMomentum && hasEnoughEnemiesForDebuff && !isRavenBuffPhase && situation.AvailableAttacks != null)
             {
                 foreach (var attack in situation.AvailableAttacks)
                 {
@@ -1157,9 +1210,20 @@ namespace CompanionAI_v3.Planning.Plans
                     actions.Add(attackAction);
                 }
             }
-            else if (hasMomentum && optimalPos.EnemiesInRange < 2)
+            else if (hasMomentum && isRavenBuffPhase)
             {
-                Main.LogDebug($"[{RoleName}] Warp Relay Attack: Momentum active but not enough enemies ({optimalPos.EnemiesInRange})");
+                // ★ v3.8.57: Warp Relay 불가 → Phase 5에서 직접 적 공격으로 폴백
+                Main.LogDebug($"[{RoleName}] Warp Relay Attack: Momentum active but in BUFF phase - psychic attacks available as direct cast in Phase 5");
+            }
+            else if (hasMomentum && !hasEnoughEnemiesForDebuff)
+            {
+                // ★ v3.8.57: Warp Relay 불가 → Phase 5에서 직접 적 공격으로 폴백
+                Main.LogDebug($"[{RoleName}] Warp Relay Attack: Momentum active but no enemies near Raven - psychic attacks available as direct cast in Phase 5");
+            }
+            else if (!hasMomentum && situation.FamiliarType == PetType.Raven)
+            {
+                // ★ v3.8.57: Momentum 없어도 사이킹 공격은 Phase 5에서 직접 캐스팅 가능
+                Main.LogDebug($"[{RoleName}] No Momentum: psychic attacks available as direct cast in Phase 5 (no Warp Relay AOE spread)");
             }
 
             if (actions.Count > 0)
@@ -2294,7 +2358,7 @@ namespace CompanionAI_v3.Planning.Plans
             if (remainingAP < apCost) return null;
 
             // 이미 버프 활성화 확인
-            if (CombatAPI.HasActiveBuff(situation.Familiar, signal)) return null;
+            if (AllyStateCache.HasBuff(situation.Familiar, signal)) return null;
 
             // Self-target이므로 Unit에게 시전
             var selfTarget = new TargetWrapper(situation.Unit);
@@ -2376,15 +2440,38 @@ namespace CompanionAI_v3.Planning.Plans
             float apCost = CombatAPI.GetAbilityAPCost(hex);
             if (remainingAP < apCost) return null;
 
-            // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
-            // 고위협 적 선택 (HP 높은 순)
-            var target = CollectionHelper.MaxByWhere(situation.Enemies,
-                e => e.IsConscious,
-                e => (float)(e.Health?.MaxHitPoints ?? 0));
+            // ★ v3.8.51: 레이븐 범위 내 적만 타겟 가능
+            // Hex는 레이븐 능력이므로 레이븐 근처 적에게만 효과적
+            var raven = situation.Familiar;
+            if (raven == null)
+            {
+                Main.LogDebug($"[{RoleName}] Hex: No raven available");
+                return null;
+            }
+
+            // 레이븐 효과 범위 (EFFECT_RADIUS_TILES) × 2 이내 적만 후보
+            float maxHexRange = CombatAPI.TilesToMeters(FamiliarPositioner.EFFECT_RADIUS_TILES * 2f);
+            BaseUnitEntity target = null;
+            float bestHP = 0f;
+            for (int i = 0; i < situation.Enemies.Count; i++)
+            {
+                var enemy = situation.Enemies[i];
+                if (!enemy.IsConscious) continue;
+
+                float distToRaven = UnityEngine.Vector3.Distance(raven.Position, enemy.Position);
+                if (distToRaven > maxHexRange) continue;
+
+                float hp = (float)(enemy.Health?.MaxHitPoints ?? 0);
+                if (hp > bestHP)
+                {
+                    bestHP = hp;
+                    target = enemy;
+                }
+            }
 
             if (target == null)
             {
-                Main.LogDebug($"[{RoleName}] Hex: No valid target");
+                Main.LogDebug($"[{RoleName}] Hex: No enemies within Raven range ({maxHexRange:F1}m)");
                 return null;
             }
 
@@ -2397,7 +2484,7 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             remainingAP -= apCost;
-            Main.Log($"[{RoleName}] ★ Raven Hex: {target.CharacterName}");
+            Main.Log($"[{RoleName}] ★ Raven Hex: {target.CharacterName} (within Raven range)");
 
             return PlannedAction.Attack(hex, target,
                 $"Hex on {target.CharacterName}", apCost);
@@ -2458,7 +2545,7 @@ namespace CompanionAI_v3.Planning.Plans
             if (remainingAP < apCost) return null;
 
             // 이미 버프 활성화 확인
-            if (CombatAPI.HasActiveBuff(situation.Familiar, fast)) return null;
+            if (AllyStateCache.HasBuff(situation.Familiar, fast)) return null;
 
             var selfTarget = new TargetWrapper(situation.Unit);
             string reason;

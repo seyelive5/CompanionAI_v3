@@ -330,10 +330,12 @@ namespace CompanionAI_v3.GameInterface
                     {
                         playerPartyAlliesInRange++;
 
-                        if (playerPartyAlliesInRange > aoeConfig.MaxPlayerAlliesHit)
+                        // ★ v3.8.54: 사선(LoF) 직격은 0 허용 - CanTargetFriends 직격은 AOE 스플래시보다 위험
+                        int effectiveMaxAllies = (aoERadius <= 0 && canTargetFriends) ? 0 : aoeConfig.MaxPlayerAlliesHit;
+                        if (playerPartyAlliesInRange > effectiveMaxAllies)
                         {
-                            string checkType = aoERadius > 0 ? $"radius={aoERadius:F1}" : "CanTargetFriends";
-                            CompanionAI_v3.Main.LogDebug($"[AOE] Unit-target safety: {ability.Name} -> {target.CharacterName} blocked ({checkType}, allies={playerPartyAlliesInRange} > max={aoeConfig.MaxPlayerAlliesHit})");
+                            string checkType = aoERadius > 0 ? $"radius={aoERadius:F1}" : "CanTargetFriends(LoF)";
+                            CompanionAI_v3.Main.LogDebug($"[AOE] Unit-target safety: {ability.Name} -> {target.CharacterName} blocked ({checkType}, allies={playerPartyAlliesInRange} > max={effectiveMaxAllies})");
                             return false;
                         }
                     }

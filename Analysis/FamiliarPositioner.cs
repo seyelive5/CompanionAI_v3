@@ -53,6 +53,9 @@ namespace CompanionAI_v3.Analysis
             public float Score { get; set; }
             public string Reason { get; set; }
 
+            /// <summary>★ v3.8.52: Raven 턴 단위 페이즈 - true면 버프 배포 우선, false면 디버프/공격 전환</summary>
+            public bool IsBuffPhase { get; set; } = true;
+
             public override string ToString()
             {
                 return $"Pos=({Position.x:F1}, {Position.z:F1}), Allies={AlliesInRange}, Enemies={EnemiesInRange}, Score={Score:F1}";
@@ -104,6 +107,7 @@ namespace CompanionAI_v3.Analysis
         /// <summary>
         /// Relocate가 필요한지 판단
         /// ★ v3.7.22: 현재 위치 대비 커버리지 향상 기반으로 판단 (절대 점수 기준 제거)
+        /// ★ v3.8.53: 페이즈 인식 - 디버프 모드에서는 적 커버리지 향상만으로 재배치 허용
         /// </summary>
         public static bool ShouldRelocate(
             BaseUnitEntity familiar,
@@ -120,21 +124,39 @@ namespace CompanionAI_v3.Analysis
             if (distanceTiles < MIN_RELOCATE_DISTANCE_TILES)
                 return false;
 
-            // 2. 최적 위치에서 효과를 받을 유닛이 2명 이상이어야 의미 있음
+            // ★ v3.8.56: 디버프 모드 여부 먼저 확인
+            bool isDebuffMode = !optimalPosition.IsBuffPhase;
+
+            // 2. 최적 위치에서 효과를 받을 유닛 수 체크
+            // ★ v3.8.56: 디버프 모드에서는 적 1명이라도 있으면 재배치 가치 있음
+            //   사람 플레이어라면 "일단 뭐라도 해야겠다" → 적 1명이라도 찾아 이동
             int totalAffected = optimalPosition.AlliesInRange + optimalPosition.EnemiesInRange;
-            if (totalAffected < 2)
+            int minAffected = isDebuffMode ? 1 : 2;
+            if (totalAffected < minAffected)
                 return false;
 
             // ★ v3.7.22: 커버리지 향상 기준으로 판단
-            // 현재 위치 대비 아군 또는 적 1명 이상 추가 커버 가능하면 Relocate 가치 있음
             int alliesGained = optimalPosition.AlliesInRange - currentAlliesInRange;
             int enemiesGained = optimalPosition.EnemiesInRange - currentEnemiesInRange;
             int netGain = alliesGained + enemiesGained;
 
-            // 최소 1명 이상 추가 커버 가능해야 함
+            // ★ v3.8.56: 디버프 모드에서는 적 1명 이상 커버 가능하면 재배치 가치 있음
+            // 적이 흩어져 있어도 가장 가까운/강한 적이라도 찾아 디버프/공격
+            if (isDebuffMode && enemiesGained >= 1)
+            {
+                Main.LogDebug($"[FamiliarPositioner] ShouldRelocate: Yes (DEBUFF MODE - enemy gain={enemiesGained}, " +
+                    $"allies {currentAlliesInRange}→{optimalPosition.AlliesInRange}, " +
+                    $"enemies {currentEnemiesInRange}→{optimalPosition.EnemiesInRange})");
+                return true;
+            }
+
+            // 버프 모드: 최소 1명 이상 추가 커버 가능해야 함 (기존 로직)
             if (netGain < 1)
             {
-                Main.LogDebug($"[FamiliarPositioner] ShouldRelocate: No (no coverage gain: allies {currentAlliesInRange}→{optimalPosition.AlliesInRange}, enemies {currentEnemiesInRange}→{optimalPosition.EnemiesInRange})");
+                Main.LogDebug($"[FamiliarPositioner] ShouldRelocate: No (no coverage gain: " +
+                    $"allies {currentAlliesInRange}→{optimalPosition.AlliesInRange}, " +
+                    $"enemies {currentEnemiesInRange}→{optimalPosition.EnemiesInRange}, " +
+                    $"phase={( isDebuffMode ? "DEBUFF" : "BUFF")})");
                 return false;
             }
 
@@ -195,22 +217,22 @@ namespace CompanionAI_v3.Analysis
             var validEnemies = enemies?.Where(e => e != null && e.IsConscious).ToList()
                 ?? new List<BaseUnitEntity>();
 
-            // ★ v3.8.30: 실제 사이킥 버프 커버리지 체크 (물리적 거리가 아닌 버프 보유 여부)
-            // Master가 시전한 사이킥 버프를 가진 아군 수를 계산
-            int alliesWithPsychicBuff = CountAlliesWithMasterPsychicBuff(master, validAllies);
-            int totalAllies = validAllies.Count;
-            float buffCoverage = totalAllies > 0 ? (float)alliesWithPsychicBuff / totalAllies : 0f;
+            // ★ v3.8.58: AllyStateCache 기반 정확한 커버리지 (모든 사이킨 버프 타입별 개별 확인)
+            // 기존: ANY ONE 사이킨 버프 보유 → "buffed" 판정 (조짐만 확산해도 100%)
+            // 변경: 총 (아군×버프타입) 인스턴스 / 가능 최대 = 정확한 커버리지
+            float buffCoverage = Core.AllyStateCache.GetPsychicBuffCoverage();
+            int totalBuffTypes = Core.AllyStateCache.MasterWarpRelayBuffCount;
 
-            // ★ v3.8.30: 페이즈 결정 기준 (실제 버프 기반)
-            // - 버프 페이즈: 실제 사이킥 버프 커버리지 < 60% 또는 버프받은 아군 < 2명
-            // - 공격 페이즈: 실제 사이킥 버프 커버리지 >= 60% 이고 버프받은 아군 >= 2명
-            bool isBuffPhase = buffCoverage < 0.6f || alliesWithPsychicBuff < 2;
+            // totalBuffTypes=0 → 확산할 사이킨 버프 없음 → 디버프/공격 페이즈
+            // coverage < 60% → 아직 확산할 버프 남음 → 버프 페이즈 유지
+            bool isBuffPhase = totalBuffTypes > 0 && buffCoverage < 0.6f;
 
             if (isBuffPhase)
             {
-                Main.LogDebug($"[FamiliarPositioner] Raven BUFF PHASE: coverage={buffCoverage:P0} ({alliesWithPsychicBuff}/{totalAllies} allies with psychic buff)");
+                Main.LogDebug($"[FamiliarPositioner] Raven BUFF PHASE: coverage={buffCoverage:P0} ({totalBuffTypes} WR buff types, {Core.AllyStateCache.AllyCount} allies)");
                 var buffPos = FindBuffCenterPosition(master, allies, enemies, maxRangeMeters);
                 buffPos.Reason = $"Buff phase (psychic coverage={buffCoverage:P0})";
+                buffPos.IsBuffPhase = true;  // ★ v3.8.52: 턴 단위 페이즈 전달
                 return buffPos;
             }
             else
@@ -220,6 +242,11 @@ namespace CompanionAI_v3.Analysis
                 // 적 밀집 지역으로 이동 (디버프/공격용)
                 if (validEnemies.Count > 0)
                 {
+                    // ★ v3.8.55: Raven support ability 실제 사거리로 도달 가능 범위 제한
+                    var familiar = FamiliarAPI.GetFamiliar(master);
+                    float supportRangeMeters = FamiliarAPI.GetRavenSupportRangeMeters(familiar);
+                    Vector3? ravenPos = familiar?.Position;
+
                     var enemyClusterCenter = FindEnemyClusterCenter(validEnemies);
                     var attackPos = FindBestPositionAroundPoint(
                         enemyClusterCenter,
@@ -227,64 +254,30 @@ namespace CompanionAI_v3.Analysis
                         validAllies,
                         validEnemies,
                         prioritizeAllies: false,  // 적 우선
-                        maxRangeMeters: maxRangeMeters);
+                        maxRangeMeters: maxRangeMeters,
+                        familiarPos: ravenPos,
+                        familiarRangeMeters: supportRangeMeters);
 
                     attackPos.Reason = $"Attack phase - enemy cluster ({attackPos.EnemiesInRange} enemies)";
-                    Main.LogDebug($"[FamiliarPositioner] Raven Attack: {attackPos}");
+                    attackPos.IsBuffPhase = false;  // ★ v3.8.52: 공격/디버프 페이즈
+
+                    if (ravenPos.HasValue)
+                    {
+                        float distFromRaven = Vector3.Distance(ravenPos.Value, attackPos.Position);
+                        Main.LogDebug($"[FamiliarPositioner] Raven Attack: {attackPos} (dist from Raven={distFromRaven:F1}m, supportRange={supportRangeMeters:F1}m)");
+                    }
+                    else
+                    {
+                        Main.LogDebug($"[FamiliarPositioner] Raven Attack: {attackPos}");
+                    }
                     return attackPos;
                 }
 
                 // 적이 없으면 아군 위치 유지
-                return FindBuffCenterPosition(master, allies, enemies, maxRangeMeters);
+                var fallbackPos = FindBuffCenterPosition(master, allies, enemies, maxRangeMeters);
+                fallbackPos.IsBuffPhase = false;  // ★ v3.8.52: 커버리지 충분하지만 적 없음
+                return fallbackPos;
             }
-        }
-
-        /// <summary>
-        /// ★ v3.8.30: Master가 시전한 사이킥 버프를 가진 아군 수 계산
-        /// - buff.Context.MaybeCaster == master 체크
-        /// - 사이킥 능력(IsPsykerAbility)으로 적용된 버프만 카운트
-        /// </summary>
-        private static int CountAlliesWithMasterPsychicBuff(BaseUnitEntity master, List<BaseUnitEntity> allies)
-        {
-            if (master == null || allies == null || allies.Count == 0)
-                return 0;
-
-            int count = 0;
-
-            try
-            {
-                foreach (var ally in allies)
-                {
-                    if (ally == null || ally.Buffs == null) continue;
-                    if (ally == master) continue; // 자기 자신 제외
-
-                    foreach (var buff in ally.Buffs)
-                    {
-                        if (buff?.Context == null) continue;
-
-                        // 버프의 시전자가 Master인지 확인
-                        var caster = buff.Context.MaybeCaster;
-                        if (caster != master) continue;
-
-                        // 버프가 사이킥 능력에서 온 것인지 확인
-                        // ★ v3.8.30: buff.Context.SourceAbility는 이미 BlueprintAbility 타입
-                        var sourceAbility = buff.Context.SourceAbility;
-                        if (sourceAbility != null && sourceAbility.IsPsykerAbility)
-                        {
-                            Main.LogDebug($"[FamiliarPositioner] {ally.CharacterName} has psychic buff '{buff.Name}' from {master.CharacterName}");
-                            count++;
-                            break; // 한 아군당 하나만 카운트 (중복 버프 무시)
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Main.LogDebug($"[FamiliarPositioner] CountAlliesWithMasterPsychicBuff error: {ex.Message}");
-            }
-
-            Main.LogDebug($"[FamiliarPositioner] Psychic buff coverage: {count}/{allies.Count} allies buffed by {master.CharacterName}");
-            return count;
         }
 
         /// <summary>
@@ -373,7 +366,7 @@ namespace CompanionAI_v3.Analysis
         /// UnitPartPetOwner.GetFreeNodeAround() 패턴 사용
         /// ★ v3.7.77: 디버그 로깅 추가 - centerNode의 Y값 확인
         /// </summary>
-        private static IEnumerable<CustomGridNodeBase> GetValidNodesAround(
+        internal static IEnumerable<CustomGridNodeBase> GetValidNodesAround(
             BaseUnitEntity familiar,
             Vector3 center,
             int radius)
@@ -424,6 +417,7 @@ namespace CompanionAI_v3.Analysis
         /// ★ v3.7.75: 게임 네이티브 API (GetNodesSpiralAround + CanStandHere + node.Vector3Position) 사용
         /// - 복잡한 수동 샘플링 제거
         /// - 정확한 Y 좌표 보장 (node.Vector3Position)
+        /// ★ v3.8.55: familiarPos/familiarRangeMeters - Raven support ability 사거리 제한
         /// </summary>
         private static PositionScore FindBestPositionAroundPoint(
             Vector3 center,
@@ -431,7 +425,9 @@ namespace CompanionAI_v3.Analysis
             List<BaseUnitEntity> allies,
             List<BaseUnitEntity> enemies,
             bool prioritizeAllies,
-            float maxRangeMeters = 0f)
+            float maxRangeMeters = 0f,
+            Vector3? familiarPos = null,
+            float familiarRangeMeters = 0f)
         {
             PositionScore best = null;
             float bestScore = float.MinValue;
@@ -457,6 +453,14 @@ namespace CompanionAI_v3.Analysis
                 // 범위 체크 (미터 단위)
                 if (hasRangeLimit && Vector3.Distance(masterPos, pos) > maxRangeMeters)
                     continue;
+
+                // ★ v3.8.55: Raven 도달 가능 거리 체크
+                // Raven support ability 사거리를 초과하면 재배치 시 TargetTooFar 에러
+                if (familiarPos.HasValue && familiarRangeMeters > 0f)
+                {
+                    if (Vector3.Distance(familiarPos.Value, pos) > familiarRangeMeters)
+                        continue;
+                }
 
                 var score = EvaluatePosition(pos, allies, enemies, prioritizeAllies);
                 if (score.Score > bestScore)

@@ -212,7 +212,7 @@ namespace CompanionAI_v3.Analysis
                 score += 25f;
 
             // ★ 중복 패널티: 이미 활성화된 버프
-            if (CombatAPI.HasActiveBuff(situation.Unit, buff))
+            if (AllyStateCache.HasBuff(situation.Unit, buff))
                 score -= 100f;
 
             // ★ 이미 버프한 턴에는 추가 버프 약간 감점 (한 턴에 너무 많은 버프 방지)

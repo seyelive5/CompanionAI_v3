@@ -567,7 +567,7 @@ namespace CompanionAI_v3.Analysis
                                 break;  // HP 부족 - 추가하지 않음
                             }
                             // HP 충분하면 버프로 추가 (TurnPlanner에서 상황에 맞게 사용)
-                            if (!CombatAPI.HasActiveBuff(unit, ability))
+                            if (!AllyStateCache.HasBuff(unit, ability))
                             {
                                 situation.AvailableBuffs.Add(ability);
                                 Main.LogDebug($"[Analyzer] SelfDamage available: {ability.Name} (HP={situation.HPPercent:F0}% >= {hpThreshold}%)");
@@ -578,7 +578,7 @@ namespace CompanionAI_v3.Analysis
                     case AbilityTiming.PreCombatBuff:
                     case AbilityTiming.PreAttackBuff:
                         // 이미 활성화된 버프 제외
-                        if (!CombatAPI.HasActiveBuff(unit, ability))
+                        if (!AllyStateCache.HasBuff(unit, ability))
                         {
                             situation.AvailableBuffs.Add(ability);
                         }
@@ -881,6 +881,12 @@ namespace CompanionAI_v3.Analysis
                     int rangeTiles = GameInterface.CombatAPI.GetAbilityRangeInTiles(relocateAbility);
                     relocateRangeMeters = rangeTiles * 1.35f;
                     Main.LogDebug($"[Analyzer] Relocate range: {rangeTiles} tiles ({relocateRangeMeters:F1}m)");
+                }
+
+                // ★ v3.8.58: 아군 상태 캐시 갱신 (Raven/Servo-Skull 버프 확산 커버리지 정확 계산)
+                if (situation.FamiliarType == PetType.Raven || situation.FamiliarType == PetType.ServoskullSwarm)
+                {
+                    AllyStateCache.Refresh(unit, situation.Allies);
                 }
 
                 // 7. 최적 위치 계산 (Relocate 범위 제한 적용)

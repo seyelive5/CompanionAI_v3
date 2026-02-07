@@ -616,6 +616,12 @@ namespace CompanionAI_v3.Core
             // ★ v3.2.10: TeamBlackboard 정리
             TeamBlackboard.Instance.Clear();
 
+            // ★ v3.8.58: 아군 상태 캐시 정리
+            AllyStateCache.Clear();
+
+            // ★ v3.8.55: Raven support 사거리 캐시 정리
+            GameInterface.FamiliarAPI.ClearRangeCache();
+
             // ★ v3.8.48: 리플렉션 캐시 정리
             GameInterface.CustomBehaviourTreePatch.ClearTreeCache();
 
