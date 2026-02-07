@@ -518,6 +518,22 @@ namespace CompanionAI_v3.Planning.Plans
                 if (moveAction != null)
                 {
                     actions.Add(moveAction);
+
+                    // ★ v3.8.47: 이동 후 공격 (Post-Move Attack)
+                    // 근접 접근 후 즉시 공격 시도 - DPS/Tank/Support와 동일 패턴
+                    // 문제: 근접 선호 오버시어가 이동만 하고 공격하지 않음
+                    // 원인: Phase 5(공격) → Phase 8(이동) 순서라 이동 후 공격 기회 없음
+                    if (needsApproach && remainingAP > 0 && situation.NearestEnemy != null)
+                    {
+                        UnityEngine.Vector3? moveDestination = moveAction.Target?.Point;
+                        var postMoveAttack = PlanPostMoveAttack(situation, situation.NearestEnemy, ref remainingAP, moveDestination);
+                        if (postMoveAttack != null)
+                        {
+                            actions.Add(postMoveAttack);
+                            didPlanAttack = true;
+                            Main.Log($"[Overseer] Phase 8: Post-move attack after approach");
+                        }
+                    }
                 }
             }
 

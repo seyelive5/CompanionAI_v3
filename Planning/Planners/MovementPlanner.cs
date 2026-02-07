@@ -389,11 +389,17 @@ namespace CompanionAI_v3.Planning.Planners
 
             // ★ 폴백: MovementAPI 사용 (기존 로직)
             AIRole role = situation?.CharacterSettings?.Role ?? AIRole.Auto;
+            // ★ v3.8.50: 근접 AOE 스플래시 보너스 전달
+            var bestMeleeAoE = situation?.AvailableAttacks != null
+                ? CombatHelpers.GetBestMeleeAoEAbility(situation.AvailableAttacks)
+                : null;
             var meleePosition = MovementAPI.FindMeleeAttackPositionSync(
                 unit, target, 2f, 0f,
                 situation?.InfluenceMap,
                 role,
-                situation?.PredictiveThreatMap);
+                situation?.PredictiveThreatMap,
+                bestMeleeAoE,
+                situation?.Enemies);
 
             if (meleePosition != null)
             {
@@ -497,6 +503,15 @@ namespace CompanionAI_v3.Planning.Planners
                     situation.PredictiveThreatMap
                 );
 
+                // ★ v3.8.47: HittableEnemyCount가 0이면 유효한 공격 위치가 아님
+                // 넓은 맵에서 LOS-only 폴백으로 현재 위치 근처가 반환되면
+                // 적에게 접근하지 못하고 계속 멈춰있는 문제 수정
+                if (bestPosition != null && bestPosition.HittableEnemyCount == 0)
+                {
+                    Main.LogDebug($"[{roleName}] PlanMoveToEnemy: Best position has no hittable enemies (HittableEnemyCount=0) - using approach fallback");
+                    bestPosition = null;
+                }
+
                 if (bestPosition == null)
                 {
                     // ★ v3.8.45: 원거리 캐릭터 접근 폴백 안전 체크
@@ -579,6 +594,8 @@ namespace CompanionAI_v3.Planning.Planners
                 // ★ v3.2.00: influenceMap 전달
                 // ★ v3.2.25: role 전달 (Frontline 점수)
                 // ★ v3.4.00: predictiveMap 전달 (적 이동 예측)
+                // ★ v3.8.50: 근접 AOE 스플래시 보너스 전달
+                var bestMeleeAoEForMove = CombatHelpers.GetBestMeleeAoEAbility(situation.AvailableAttacks);
                 var bestPosition = MovementAPI.FindMeleeAttackPositionSync(
                     unit,
                     target,
@@ -586,7 +603,9 @@ namespace CompanionAI_v3.Planning.Planners
                     effectiveMP,
                     situation.InfluenceMap,
                     role,
-                    situation.PredictiveThreatMap
+                    situation.PredictiveThreatMap,
+                    bestMeleeAoEForMove,
+                    situation.Enemies
                 );
 
                 if (bestPosition == null)

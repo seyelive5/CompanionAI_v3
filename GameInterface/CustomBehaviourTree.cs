@@ -53,6 +53,11 @@ namespace CompanionAI_v3.GameInterface
         private static readonly FieldInfo _behaviourTreeField = typeof(PartUnitBrain)
             .GetField("m_BehaviourTree", BindingFlags.NonPublic | BindingFlags.Instance);
 
+        // ★ v3.8.48: 리플렉션 캐싱 — 이미 커스텀 트리로 교체된 brain은 리플렉션 스킵
+        // 60fps × 5유닛 = 초당 300회 리플렉션 → ~0회로 감소
+        private static readonly Dictionary<PartUnitBrain, BehaviourTree> _lastKnownTree
+            = new Dictionary<PartUnitBrain, BehaviourTree>();
+
         /// <summary>
         /// ★ 턴 시작 시간 추적 (IsActingEnabled 구현용)
         /// </summary>
@@ -104,11 +109,18 @@ namespace CompanionAI_v3.GameInterface
                     return;
                 }
 
+                // ★ v3.8.48: 캐시된 트리 참조로 리플렉션 스킵
+                if (_lastKnownTree.TryGetValue(__instance, out var cachedTree) && cachedTree != null)
+                {
+                    return;  // 이미 커스텀 트리로 교체 완료 → 리플렉션 불필요
+                }
+
                 var currentTree = _behaviourTreeField.GetValue(__instance) as BehaviourTree;
 
                 // 이미 커스텀 트리인지 확인 (루트가 Loop인지)
                 if (IsCustomTree(currentTree))
                 {
+                    _lastKnownTree[__instance] = currentTree;  // ★ v3.8.48: 캐시에 등록
                     return;  // 이미 커스텀 트리 → 교체 불필요
                 }
 
@@ -124,6 +136,7 @@ namespace CompanionAI_v3.GameInterface
 
                 // 새 트리 설정
                 _behaviourTreeField.SetValue(__instance, customTree);
+                _lastKnownTree[__instance] = customTree;  // ★ v3.8.48: 캐시에 등록
 
                 // 트리 초기화 (중요!)
                 customTree.Init();
@@ -309,6 +322,14 @@ namespace CompanionAI_v3.GameInterface
         public static void ClearTurnStart(string unitId)
         {
             _turnStartTimes.Remove(unitId);
+        }
+
+        /// <summary>
+        /// ★ v3.8.48: 전투 종료 시 리플렉션 캐시 정리
+        /// </summary>
+        public static void ClearTreeCache()
+        {
+            _lastKnownTree.Clear();
         }
 
         /// <summary>

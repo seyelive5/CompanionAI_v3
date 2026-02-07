@@ -62,12 +62,15 @@ namespace CompanionAI_v3.Planning.Planners
 
             Main.Log($"[{roleName}] PlanUltimate: Found {ultimates.Count} ultimates: {string.Join(", ", ultimates.Select(a => a.Name))}");
 
+            // ★ v3.8.48: anonymous type → ValueTuple (GC 압박 감소)
             // 점수 기반 정렬 (ScoreBuff 사용 → FreeUltimateBuff 보너스 포함)
-            var scored = ultimates
-                .Select(a => new { Ability = a, Score = UtilityScorer.ScoreBuff(a, situation) })
-                .Where(x => x.Score > 0)
-                .OrderByDescending(x => x.Score)
-                .ToList();
+            var scored = new List<(AbilityData Ability, float Score)>();
+            for (int i = 0; i < ultimates.Count; i++)
+            {
+                float s = UtilityScorer.ScoreBuff(ultimates[i], situation);
+                if (s > 0) scored.Add((ultimates[i], s));
+            }
+            scored.Sort((x, y) => y.Score.CompareTo(x.Score));
 
             if (scored.Count == 0)
             {
@@ -75,9 +78,9 @@ namespace CompanionAI_v3.Planning.Planners
                 return null;
             }
 
-            foreach (var candidate in scored)
+            for (int idx = 0; idx < scored.Count; idx++)
             {
-                var ability = candidate.Ability;
+                var ability = scored[idx].Ability;
                 float cost = CombatAPI.GetAbilityAPCost(ability);
 
                 // 0 코스트가 아닌 경우 AP 체크
@@ -148,7 +151,7 @@ namespace CompanionAI_v3.Planning.Planners
                 {
                     remainingAP -= cost;
                     Main.Log($"[{roleName}] ★ ULTIMATE: {ability.Name} -> {targetDesc} " +
-                        $"(type={targetType}, score={candidate.Score:F0}, heroic={ability.Blueprint?.IsHeroicAct})");
+                        $"(type={targetType}, score={scored[idx].Score:F0}, heroic={ability.Blueprint?.IsHeroicAct})");
 
                     // 타겟 유형에 따른 PlannedAction 생성
                     switch (targetType)
@@ -819,11 +822,20 @@ namespace CompanionAI_v3.Planning.Planners
                 }
             }
 
+            // ★ v3.8.48: LINQ → 수동 루프 (0 할당)
             // 최적 위치 선택: 커버 수 > 스코어 순
-            var best = candidates
-                .OrderByDescending(c => c.count)
-                .ThenByDescending(c => c.score)
-                .FirstOrDefault();
+            var best = (pos: Vector3.zero, count: 0, score: 0f);
+            float bestComposite = float.MinValue;
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                var c = candidates[i];
+                float composite = c.count * 100000f + c.score;
+                if (composite > bestComposite)
+                {
+                    bestComposite = composite;
+                    best = c;
+                }
+            }
 
             if (best.count > 0)
             {

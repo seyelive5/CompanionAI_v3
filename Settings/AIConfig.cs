@@ -269,6 +269,13 @@ namespace CompanionAI_v3.Settings
         public int SelfAoeMinAdjacentEnemies { get; set; } = 1;
 
         /// <summary>
+        /// ★ v3.8.50: 근접 AOE 패턴 내 최대 허용 아군 수
+        /// Self-AoE(0~1명)보다 관대 - 근접전에서는 아군이 근처에 있을 확률이 높음
+        /// </summary>
+        [JsonProperty("meleeAoeMaxAdjacentAllies")]
+        public int MeleeAoeMaxAdjacentAllies { get; set; } = 1;
+
+        /// <summary>
         /// DangerousAoE 자동 선택 허용 여부
         /// true면 SelectBestAttack에서 DangerousAoE도 선택 가능
         /// </summary>
@@ -302,6 +309,104 @@ namespace CompanionAI_v3.Settings
 
         // ★ v3.6.15: DangerousAoEAllyPenalty, AoEAllyCheckRadius 삭제
         // 이제 실제 AOE 반경을 사용하고 아군 있으면 무조건 차단
+    }
+
+    /// <summary>
+    /// ★ v3.8.46: 스코어링 가중치 외부화
+    /// UtilityScorer, TargetScorer 등의 하드코딩 가중치를 JSON 설정 가능하게 함
+    /// </summary>
+    [Serializable]
+    public class ScoringConfig
+    {
+        // ========================================
+        // Phase 배율 (ScoreBuff)
+        // ========================================
+
+        /// <summary>초반 페이즈 버프 배율</summary>
+        [JsonProperty("openingPhaseBuffMult")] public float OpeningPhaseBuffMult { get; set; } = 1.3f;
+
+        /// <summary>정리 페이즈 버프 배율</summary>
+        [JsonProperty("cleanupPhaseBuffMult")] public float CleanupPhaseBuffMult { get; set; } = 0.7f;
+
+        /// <summary>위기 페이즈 비방어 버프 배율</summary>
+        [JsonProperty("desperateNonDefMult")] public float DesperateNonDefMult { get; set; } = 0.5f;
+
+        // ========================================
+        // 타이밍 보너스 (ScoreBuff)
+        // ========================================
+
+        /// <summary>선제 버프 - 초반 보너스</summary>
+        [JsonProperty("preCombatOpeningBonus")] public float PreCombatOpeningBonus { get; set; } = 30f;
+
+        /// <summary>선제 버프 - 정리 페널티</summary>
+        [JsonProperty("preCombatCleanupPenalty")] public float PreCombatCleanupPenalty { get; set; } = 20f;
+
+        /// <summary>공격 전 버프 - 적 타격 가능 보너스</summary>
+        [JsonProperty("preAttackHittableBonus")] public float PreAttackHittableBonus { get; set; } = 25f;
+
+        /// <summary>공격 전 버프 - 적 부재 페널티</summary>
+        [JsonProperty("preAttackNoEnemyPenalty")] public float PreAttackNoEnemyPenalty { get; set; } = 10f;
+
+        /// <summary>긴급 버프 - 위기 상황 보너스</summary>
+        [JsonProperty("emergencyDesperateBonus")] public float EmergencyDesperateBonus { get; set; } = 40f;
+
+        /// <summary>긴급 버프 - 비위기 페널티</summary>
+        [JsonProperty("emergencyNonDesperatePenalty")] public float EmergencyNonDesperatePenalty { get; set; } = 20f;
+
+        /// <summary>도발 - 근접 적 다수 보너스</summary>
+        [JsonProperty("tauntNearEnemiesBonus")] public float TauntNearEnemiesBonus { get; set; } = 25f;
+
+        /// <summary>도발 - 적 부족 페널티</summary>
+        [JsonProperty("tauntFewEnemiesPenalty")] public float TauntFewEnemiesPenalty { get; set; } = 15f;
+
+        // ========================================
+        // 시너지 (CalculateSynergyBonus)
+        // ========================================
+
+        /// <summary>공격 버프 + 공격 시너지</summary>
+        [JsonProperty("buffAttackSynergy")] public float BuffAttackSynergy { get; set; } = 25f;
+
+        /// <summary>이동 + 공격 시너지 (갭클로저)</summary>
+        [JsonProperty("moveAttackSynergy")] public float MoveAttackSynergy { get; set; } = 10f;
+
+        /// <summary>연속 공격 시너지 (공격당)</summary>
+        [JsonProperty("multiAttackPerAttack")] public float MultiAttackPerAttack { get; set; } = 10f;
+
+        /// <summary>★ v3.8.46: 방어 버프 + 이동 시너지</summary>
+        [JsonProperty("defenseRetreatSynergy")] public float DefenseRetreatSynergy { get; set; } = 15f;
+
+        /// <summary>★ v3.8.46: 킬 확정 시너지 (플랜 데미지 ≥ 타겟 HP)</summary>
+        [JsonProperty("killConfirmSynergy")] public float KillConfirmSynergy { get; set; } = 30f;
+
+        /// <summary>★ v3.8.46: 거의 킬 시너지 (플랜 데미지 ≥ 90% HP)</summary>
+        [JsonProperty("almostKillSynergy")] public float AlmostKillSynergy { get; set; } = 15f;
+
+        // ========================================
+        // 공격 점수 (ScoreAttack)
+        // ========================================
+
+        /// <summary>ClearMP + 위험 상황 기본 감점</summary>
+        [JsonProperty("clearMPDangerBase")] public float ClearMPDangerBase { get; set; } = 60f;
+
+        /// <summary>AOE 추가 적당 보너스</summary>
+        [JsonProperty("aoeBonusPerEnemy")] public float AoEBonusPerEnemy { get; set; } = 15f;
+
+        // ========================================
+        // 타겟 관성 (P1)
+        // ========================================
+
+        /// <summary>이전 턴 동일 타겟 공격 보너스 (SharedTarget +50보다 낮게 유지)</summary>
+        [JsonProperty("inertiaBonus")] public float InertiaBonus { get; set; } = 20f;
+
+        // ========================================
+        // 디버프 활용 (P3)
+        // ========================================
+
+        /// <summary>Hard CC (기절/고정) 적 공격 보너스</summary>
+        [JsonProperty("hardCCExploitBonus")] public float HardCCExploitBonus { get; set; } = 15f;
+
+        /// <summary>DOT (출혈/독/화상) 적 공격 보너스</summary>
+        [JsonProperty("dotFollowUpBonus")] public float DOTFollowUpBonus { get; set; } = 8f;
     }
 
     /// <summary>
@@ -362,6 +467,10 @@ namespace CompanionAI_v3.Settings
         [JsonProperty("performance")]
         public PerformanceConfig Performance { get; set; }
 
+        /// <summary>★ v3.8.46: 스코어링 가중치 설정</summary>
+        [JsonProperty("scoring")]
+        public ScoringConfig Scoring { get; set; }
+
         /// <summary>
         /// 싱글톤 인스턴스
         /// </summary>
@@ -406,7 +515,8 @@ namespace CompanionAI_v3.Settings
                     OneHitKillBonus = 1.5f
                 },
                 Thresholds = new ThresholdConfig(),
-                Performance = new PerformanceConfig()
+                Performance = new PerformanceConfig(),
+                Scoring = new ScoringConfig()
             };
         }
 
@@ -564,6 +674,12 @@ namespace CompanionAI_v3.Settings
         public static PerformanceConfig GetPerformance()
         {
             return Instance?.Performance ?? new PerformanceConfig();
+        }
+
+        /// <summary>★ v3.8.46: 스코어링 가중치 (null-safe)</summary>
+        public static ScoringConfig GetScoringConfig()
+        {
+            return Instance?.Scoring ?? new ScoringConfig();
         }
 
         /// <summary>Role별 가중치 (null-safe)</summary>

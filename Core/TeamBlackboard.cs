@@ -81,6 +81,13 @@ namespace CompanionAI_v3.Core
 
         #endregion
 
+        #region ★ v3.8.46: Target Inertia (타겟 관성)
+
+        /// <summary>유닛별 이전 턴 공격 타겟 (UniqueId → 타겟)</summary>
+        private readonly Dictionary<string, BaseUnitEntity> _previousTargets = new Dictionary<string, BaseUnitEntity>();
+
+        #endregion
+
         #region Team Tactical State
 
         /// <summary>팀 공유 타겟 (가장 많이 지정된 적)</summary>
@@ -162,6 +169,9 @@ namespace CompanionAI_v3.Core
 
             // ★ v3.7.87: 라운드 행동 기록 초기화
             _actedThisRound.Clear();
+
+            // ★ v3.8.46: 타겟 관성 초기화 (전투 종료 시에만)
+            _previousTargets.Clear();
 
             Main.LogDebug("[TeamBlackboard] Cleared");
         }
@@ -590,6 +600,48 @@ namespace CompanionAI_v3.Core
             {
                 Main.LogDebug($"[Blackboard] Cleared {count} acted units for new round");
             }
+        }
+
+        #endregion
+
+        #region ★ v3.8.46: Target Inertia API
+
+        /// <summary>
+        /// 공격 실행 후 타겟 기록 (다음 턴 관성 보너스용)
+        /// 라운드 간 유지, 전투 종료 시에만 초기화
+        /// </summary>
+        public void SetPreviousTarget(string unitId, BaseUnitEntity target)
+        {
+            if (string.IsNullOrEmpty(unitId) || target == null) return;
+            _previousTargets[unitId] = target;
+            Main.LogDebug($"[Blackboard] Previous target set: {unitId} -> {target.CharacterName}");
+        }
+
+        /// <summary>
+        /// 이전 턴 공격 타겟 조회 (사망/무효 시 자동 제거)
+        /// </summary>
+        public BaseUnitEntity GetPreviousTarget(string unitId)
+        {
+            if (string.IsNullOrEmpty(unitId)) return null;
+            if (!_previousTargets.TryGetValue(unitId, out var target)) return null;
+
+            try
+            {
+                // 사망한 타겟은 관성 대상에서 제거
+                if (target.LifeState?.IsDead == true)
+                {
+                    _previousTargets.Remove(unitId);
+                    return null;
+                }
+            }
+            catch
+            {
+                // Stale reference 처리
+                _previousTargets.Remove(unitId);
+                return null;
+            }
+
+            return target;
         }
 
         #endregion

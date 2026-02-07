@@ -222,6 +222,27 @@ namespace CompanionAI_v3.Planning.Plans
             return null;
         }
 
+        /// ★ v3.8.50: 근접 AOE 계획 (유닛 타겟 근접 스플래시)
+        protected PlannedAction PlanMeleeAoE(Situation situation, ref float remainingAP)
+        {
+            // AvailableAttacks에서 근접 AOE 검색
+            var meleeAoEAbilities = situation.AvailableAttacks
+                .Where(a => CombatAPI.IsMeleeAoEAbility(a))
+                .ToList();
+
+            // DangerousAoE 필터로 제외되었을 수 있으니 전체에서 다시 찾기
+            if (meleeAoEAbilities.Count == 0)
+            {
+                meleeAoEAbilities = CombatAPI.GetAvailableAbilities(situation.Unit)
+                    .Where(a => CombatAPI.IsMeleeAoEAbility(a))
+                    .ToList();
+            }
+
+            if (meleeAoEAbilities.Count == 0) return null;
+
+            return AttackPlanner.PlanMeleeAoEAttack(situation, ref remainingAP, RoleName);
+        }
+
         #endregion
 
         #region AOE Heal/Buff (v3.1.17)
@@ -780,8 +801,9 @@ namespace CompanionAI_v3.Planning.Plans
         /// </summary>
         protected int CountNearbyEnemies(Situation situation, float range)
         {
-            return situation.Enemies.Count(e =>
-                e != null && !e.LifeState.IsDead &&
+            // ★ v3.8.48: LINQ → CollectionHelper (0 할당)
+            return CollectionHelper.CountWhere(situation.Enemies, e =>
+                !e.LifeState.IsDead &&
                 CombatAPI.GetDistance(situation.Unit, e) <= range);
         }
 
@@ -1338,11 +1360,11 @@ namespace CompanionAI_v3.Planning.Plans
             // HP가 낮은 적을 우선 (Master가 마무리하기 좋음)
             if (situation.HittableEnemies != null && situation.HittableEnemies.Count > 0)
             {
+                // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
                 // HP%가 낮은 순으로 정렬 (마무리 타겟)
-                var bestHittable = situation.HittableEnemies
-                    .Where(e => e != null && e.IsConscious)
-                    .OrderBy(e => CombatAPI.GetHPPercent(e))
-                    .FirstOrDefault();
+                var bestHittable = CollectionHelper.MinByWhere(situation.HittableEnemies,
+                    e => e.IsConscious,
+                    e => CombatAPI.GetHPPercent(e));
 
                 if (bestHittable != null)
                 {
@@ -1377,20 +1399,19 @@ namespace CompanionAI_v3.Planning.Plans
             // 3순위: 원거리 위협 적
             if (targetEnemy == null)
             {
-                targetEnemy = situation.Enemies
-                    .Where(e => e != null && e.IsConscious)
-                    .Where(e => CombatAPI.HasRangedWeapon(e))  // 원거리 적
-                    .OrderByDescending(e => e.Health?.MaxHitPoints ?? 0)  // HP가 높은 적이 더 위협적
-                    .FirstOrDefault();
+                // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
+                targetEnemy = CollectionHelper.MaxByWhere(situation.Enemies,
+                    e => e.IsConscious && CombatAPI.HasRangedWeapon(e),
+                    e => (float)(e.Health?.MaxHitPoints ?? 0));
             }
 
             // 4순위: 아무 적이라도
             if (targetEnemy == null)
             {
-                targetEnemy = situation.Enemies
-                    .Where(e => e != null && e.IsConscious)
-                    .OrderByDescending(e => e.Health?.MaxHitPoints ?? 0)
-                    .FirstOrDefault();
+                // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
+                targetEnemy = CollectionHelper.MaxByWhere(situation.Enemies,
+                    e => e.IsConscious,
+                    e => (float)(e.Health?.MaxHitPoints ?? 0));
             }
 
             if (targetEnemy == null)
@@ -1455,19 +1476,18 @@ namespace CompanionAI_v3.Planning.Plans
             if (remainingAP < apCost)
                 return null;
 
+            // ★ v3.8.48: LINQ → CollectionHelper (O(n²) 클러스터링 but 0 할당)
             // 적 밀집 지역 (2명 이상) 또는 위협적 적 찾기
-            var targetEnemy = situation.Enemies
-                .Where(e => e != null && e.IsConscious)
-                .OrderByDescending(e =>
+            // 합산 scorer: nearbyCount * 10000 + maxHP로 ThenByDescending 시뮬레이션
+            var targetEnemy = CollectionHelper.MaxByWhere(situation.Enemies,
+                e => e.IsConscious,
+                e =>
                 {
-                    // 주변 적 수 (클러스터링)
-                    int nearbyEnemies = situation.Enemies.Count(other =>
-                        other != null && other.IsConscious && other != e &&
+                    int nearbyCount = CollectionHelper.CountWhere(situation.Enemies,
+                        other => other.IsConscious && other != e &&
                         CombatCache.GetDistanceInTiles(e, other) <= 3f);
-                    return nearbyEnemies;
-                })
-                .ThenByDescending(e => e.Health?.MaxHitPoints ?? 0)
-                .FirstOrDefault();
+                    return nearbyCount * 10000f + (float)(e.Health?.MaxHitPoints ?? 0);
+                });
 
             if (targetEnemy == null)
             {
@@ -1517,19 +1537,18 @@ namespace CompanionAI_v3.Planning.Plans
             if (remainingAP < apCost)
                 return null;
 
+            // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
             // 보호할 아군 찾기 (HP 낮거나 주변 적이 많은 아군)
-            var allyToProtect = situation.Allies
-                .Where(a => a != null && a.IsConscious)
-                .Where(a => !FamiliarAPI.IsFamiliar(a))  // 사역마 제외
-                .Where(a => a != situation.Unit)  // 자신 제외
-                .OrderBy(a => CombatAPI.GetHPPercent(a))  // HP 낮은 순
-                .ThenByDescending(a =>  // 주변 적이 많은 순
+            // HP 낮을수록 우선 (MinBy), 같은 HP면 주변 적이 많은 순 (ThenByDescending 시뮬)
+            // scorer: HP% * 100 - nearbyEnemies (낮을수록 우선)
+            var allyToProtect = CollectionHelper.MinByWhere(situation.Allies,
+                a => a.IsConscious && !FamiliarAPI.IsFamiliar(a) && a != situation.Unit,
+                a =>
                 {
-                    return situation.Enemies.Count(e =>
-                        e != null && e.IsConscious &&
-                        CombatCache.GetDistanceInTiles(a, e) <= 3f);
-                })
-                .FirstOrDefault();
+                    int nearbyEnemyCount = CollectionHelper.CountWhere(situation.Enemies,
+                        e => e.IsConscious && CombatCache.GetDistanceInTiles(a, e) <= 3f);
+                    return CombatAPI.GetHPPercent(a) * 100f - nearbyEnemyCount;
+                });
 
             if (allyToProtect == null)
             {
@@ -1539,8 +1558,9 @@ namespace CompanionAI_v3.Planning.Plans
 
             // HP가 70% 이상이고 주변 적이 없으면 스킵
             float allyHP = CombatAPI.GetHPPercent(allyToProtect);
-            int nearbyEnemies = situation.Enemies.Count(e =>
-                e != null && e.IsConscious &&
+            // ★ v3.8.48: LINQ → CollectionHelper (0 할당)
+            int nearbyEnemies = CollectionHelper.CountWhere(situation.Enemies, e =>
+                e.IsConscious &&
                 CombatCache.GetDistanceInTiles(allyToProtect, e) <= 3f);
 
             if (allyHP > 70f && nearbyEnemies == 0)
@@ -1909,36 +1929,43 @@ namespace CompanionAI_v3.Planning.Plans
 
             BaseUnitEntity targetEnemy = null;
 
-            // 1순위: 원거리 적 (실명 효과 극대화)
-            var rangedEnemies = enemies
-                .Where(e => CombatAPI.HasRangedWeapon(e))
-                .OrderByDescending(e => CombatAPI.GetHPPercent(e)) // HP 높은 적 (오래 살아남아 실명 효과 지속)
-                .ToList();
-
-            foreach (var enemy in rangedEnemies)
+            // ★ v3.8.48: LINQ → for 루프 (GC 압박 감소)
+            // 1순위: 원거리 적 (실명 효과 극대화) - HP 높은 순
             {
-                var targetWrapper = new TargetWrapper(enemy);
-                if (CombatAPI.CanUseAbilityOn(blindingDive, targetWrapper, out _))
+                float bestHP = float.MinValue;
+                for (int i = 0; i < enemies.Count; i++)
                 {
-                    targetEnemy = enemy;
-                    break;
+                    var e = enemies[i];
+                    if (!CombatAPI.HasRangedWeapon(e)) continue;
+                    float hp = CombatAPI.GetHPPercent(e);
+                    if (hp > bestHP)
+                    {
+                        var tw = new TargetWrapper(e);
+                        if (CombatAPI.CanUseAbilityOn(blindingDive, tw, out _))
+                        {
+                            targetEnemy = e;
+                            bestHP = hp;
+                        }
+                    }
                 }
             }
 
             // 2순위: 고HP 적 (실명 지속 효과)
             if (targetEnemy == null)
             {
-                var highHPEnemies = enemies
-                    .OrderByDescending(e => CombatAPI.GetHPPercent(e))
-                    .ToList();
-
-                foreach (var enemy in highHPEnemies)
+                float bestHP = float.MinValue;
+                for (int i = 0; i < enemies.Count; i++)
                 {
-                    var targetWrapper = new TargetWrapper(enemy);
-                    if (CombatAPI.CanUseAbilityOn(blindingDive, targetWrapper, out _))
+                    var e = enemies[i];
+                    float hp = CombatAPI.GetHPPercent(e);
+                    if (hp > bestHP)
                     {
-                        targetEnemy = enemy;
-                        break;
+                        var tw = new TargetWrapper(e);
+                        if (CombatAPI.CanUseAbilityOn(blindingDive, tw, out _))
+                        {
+                            targetEnemy = e;
+                            bestHP = hp;
+                        }
                     }
                 }
             }
@@ -1990,44 +2017,52 @@ namespace CompanionAI_v3.Planning.Plans
 
             BaseUnitEntity targetEnemy = null;
 
+            // ★ v3.8.48: LINQ → for 루프 (anonymous type 제거, O(n²) → 최적화된 O(n²))
             // 1순위: 적 클러스터 중심 (주변 적이 많은 적)
-            var clusteredEnemies = enemies
-                .Select(e => new {
-                    Enemy = e,
-                    NearbyCount = enemies.Count(other =>
-                        other != e &&
-                        UnityEngine.Vector3.Distance(e.Position, other.Position) <= 4f) // 4m 이내
-                })
-                .Where(x => x.NearbyCount >= 1) // 최소 1명 이상 주변에 있어야
-                .OrderByDescending(x => x.NearbyCount)
-                .ThenBy(x => CombatAPI.GetHPPercent(x.Enemy))
-                .ToList();
-
-            foreach (var cluster in clusteredEnemies)
             {
-                var targetWrapper = new TargetWrapper(cluster.Enemy);
-                if (CombatAPI.CanUseAbilityOn(jumpClaws, targetWrapper, out _))
+                float bestClusterScore = float.MinValue;
+                for (int i = 0; i < enemies.Count; i++)
                 {
-                    targetEnemy = cluster.Enemy;
-                    Main.LogDebug($"[{RoleName}] Jump Claws cluster target: {cluster.NearbyCount} nearby");
-                    break;
+                    var e = enemies[i];
+                    int nearbyCount = 0;
+                    for (int j = 0; j < enemies.Count; j++)
+                    {
+                        var other = enemies[j];
+                        if (other != e && UnityEngine.Vector3.Distance(e.Position, other.Position) <= 4f)
+                            nearbyCount++;
+                    }
+                    if (nearbyCount < 1) continue;
+                    // nearbyCount * 10000 - HP% (클러스터 우선, 같으면 저HP 우선)
+                    float score = nearbyCount * 10000f - CombatAPI.GetHPPercent(e);
+                    if (score > bestClusterScore)
+                    {
+                        var tw = new TargetWrapper(e);
+                        if (CombatAPI.CanUseAbilityOn(jumpClaws, tw, out _))
+                        {
+                            targetEnemy = e;
+                            bestClusterScore = score;
+                            Main.LogDebug($"[{RoleName}] Jump Claws cluster target: {nearbyCount} nearby");
+                        }
+                    }
                 }
             }
 
             // 2순위: 저HP 적 (마무리)
             if (targetEnemy == null)
             {
-                var lowHPEnemies = enemies
-                    .OrderBy(e => CombatAPI.GetHPPercent(e))
-                    .ToList();
-
-                foreach (var enemy in lowHPEnemies)
+                float bestHP = float.MaxValue;
+                for (int i = 0; i < enemies.Count; i++)
                 {
-                    var targetWrapper = new TargetWrapper(enemy);
-                    if (CombatAPI.CanUseAbilityOn(jumpClaws, targetWrapper, out _))
+                    var e = enemies[i];
+                    float hp = CombatAPI.GetHPPercent(e);
+                    if (hp < bestHP)
                     {
-                        targetEnemy = enemy;
-                        break;
+                        var tw = new TargetWrapper(e);
+                        if (CombatAPI.CanUseAbilityOn(jumpClaws, tw, out _))
+                        {
+                            targetEnemy = e;
+                            bestHP = hp;
+                        }
                     }
                 }
             }
@@ -2035,17 +2070,19 @@ namespace CompanionAI_v3.Planning.Plans
             // 3순위: 가장 가까운 적
             if (targetEnemy == null)
             {
-                var nearestEnemies = enemies
-                    .OrderBy(e => UnityEngine.Vector3.Distance(situation.Unit.Position, e.Position))
-                    .ToList();
-
-                foreach (var enemy in nearestEnemies)
+                float bestDist = float.MaxValue;
+                for (int i = 0; i < enemies.Count; i++)
                 {
-                    var targetWrapper = new TargetWrapper(enemy);
-                    if (CombatAPI.CanUseAbilityOn(jumpClaws, targetWrapper, out _))
+                    var e = enemies[i];
+                    float dist = UnityEngine.Vector3.Distance(situation.Unit.Position, e.Position);
+                    if (dist < bestDist)
                     {
-                        targetEnemy = enemy;
-                        break;
+                        var tw = new TargetWrapper(e);
+                        if (CombatAPI.CanUseAbilityOn(jumpClaws, tw, out _))
+                        {
+                            targetEnemy = e;
+                            bestDist = dist;
+                        }
                     }
                 }
             }
@@ -2096,35 +2133,42 @@ namespace CompanionAI_v3.Planning.Plans
 
             BaseUnitEntity targetEnemy = null;
 
+            // ★ v3.8.48: LINQ → for 루프 (0 할당)
             // 1순위: 저HP 적 (마무리)
-            var lowHPEnemies = enemies
-                .OrderBy(e => CombatAPI.GetHPPercent(e))
-                .ToList();
-
-            foreach (var enemy in lowHPEnemies)
             {
-                var targetWrapper = new TargetWrapper(enemy);
-                if (CombatAPI.CanUseAbilityOn(claws, targetWrapper, out _))
+                float bestHP = float.MaxValue;
+                for (int i = 0; i < enemies.Count; i++)
                 {
-                    targetEnemy = enemy;
-                    break;
+                    var e = enemies[i];
+                    float hp = CombatAPI.GetHPPercent(e);
+                    if (hp < bestHP)
+                    {
+                        var tw = new TargetWrapper(e);
+                        if (CombatAPI.CanUseAbilityOn(claws, tw, out _))
+                        {
+                            targetEnemy = e;
+                            bestHP = hp;
+                        }
+                    }
                 }
             }
 
             // 2순위: 가장 가까운 적
             if (targetEnemy == null)
             {
-                var nearestEnemies = enemies
-                    .OrderBy(e => UnityEngine.Vector3.Distance(situation.Unit.Position, e.Position))
-                    .ToList();
-
-                foreach (var enemy in nearestEnemies)
+                float bestDist = float.MaxValue;
+                for (int i = 0; i < enemies.Count; i++)
                 {
-                    var targetWrapper = new TargetWrapper(enemy);
-                    if (CombatAPI.CanUseAbilityOn(claws, targetWrapper, out _))
+                    var e = enemies[i];
+                    float dist = UnityEngine.Vector3.Distance(situation.Unit.Position, e.Position);
+                    if (dist < bestDist)
                     {
-                        targetEnemy = enemy;
-                        break;
+                        var tw = new TargetWrapper(e);
+                        if (CombatAPI.CanUseAbilityOn(claws, tw, out _))
+                        {
+                            targetEnemy = e;
+                            bestDist = dist;
+                        }
                     }
                 }
             }
@@ -2166,13 +2210,11 @@ namespace CompanionAI_v3.Planning.Plans
             if (remainingAP < apCost)
                 return null;
 
+            // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
             // 보호할 아군 찾기 (HP 낮거나 위협받는 아군)
-            var allyToScreen = situation.Allies
-                .Where(a => a != null && a.IsConscious)
-                .Where(a => !FamiliarAPI.IsFamiliar(a))
-                .Where(a => a != situation.Unit)
-                .OrderBy(a => CombatAPI.GetHPPercent(a))
-                .FirstOrDefault();
+            var allyToScreen = CollectionHelper.MinByWhere(situation.Allies,
+                a => a.IsConscious && !FamiliarAPI.IsFamiliar(a) && a != situation.Unit,
+                a => CombatAPI.GetHPPercent(a));
 
             if (allyToScreen == null)
                 return null;
@@ -2287,12 +2329,13 @@ namespace CompanionAI_v3.Planning.Plans
             float apCost = CombatAPI.GetAbilityAPCost(signal);
             if (remainingAP < apCost) return null;
 
+            // ★ v3.8.48: LINQ → CollectionHelper (0 할당)
             // 범위 내 부상 아군 수 계산 (4타일 = 약 5.4m)
-            int woundedInRange = situation.Allies
-                .Where(a => a != null && a.IsConscious)
-                .Where(a => CombatAPI.GetHPPercent(a) < 70f)
-                .Count(a => situation.Familiar != null &&
-                    CombatCache.GetDistanceInTiles(situation.Familiar, a) <= 4f);
+            int woundedInRange = situation.Familiar != null
+                ? CollectionHelper.CountWhere(situation.Allies, a =>
+                    a.IsConscious && CombatAPI.GetHPPercent(a) < 70f &&
+                    CombatCache.GetDistanceInTiles(situation.Familiar, a) <= 4f)
+                : 0;
 
             // 2명 이상 부상 아군이 범위 내 있어야 의미
             if (woundedInRange < 2)
@@ -2333,11 +2376,11 @@ namespace CompanionAI_v3.Planning.Plans
             float apCost = CombatAPI.GetAbilityAPCost(hex);
             if (remainingAP < apCost) return null;
 
+            // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
             // 고위협 적 선택 (HP 높은 순)
-            var target = situation.Enemies
-                .Where(e => e != null && e.IsConscious)
-                .OrderByDescending(e => e.Health?.MaxHitPoints ?? 0)
-                .FirstOrDefault();
+            var target = CollectionHelper.MaxByWhere(situation.Enemies,
+                e => e.IsConscious,
+                e => (float)(e.Health?.MaxHitPoints ?? 0));
 
             if (target == null)
             {

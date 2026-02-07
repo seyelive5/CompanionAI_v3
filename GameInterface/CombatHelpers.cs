@@ -39,6 +39,43 @@ namespace CompanionAI_v3.GameInterface
             return false;
         }
 
+        /// <summary>
+        /// ★ v3.8.50: 공격 목록에 근접 AOE 능력이 있는지 확인
+        /// </summary>
+        public static bool HasMeleeAoEAbility(IList<AbilityData> availableAttacks)
+        {
+            if (availableAttacks == null) return false;
+            for (int i = 0; i < availableAttacks.Count; i++)
+            {
+                if (CombatAPI.IsMeleeAoEAbility(availableAttacks[i]))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// ★ v3.8.50: 가장 좋은 근접 AOE 능력 반환 (가장 넓은 패턴)
+        /// </summary>
+        public static AbilityData GetBestMeleeAoEAbility(IList<AbilityData> availableAttacks)
+        {
+            if (availableAttacks == null) return null;
+            AbilityData best = null;
+            float bestRadius = 0f;
+            for (int i = 0; i < availableAttacks.Count; i++)
+            {
+                var a = availableAttacks[i];
+                if (!CombatAPI.IsMeleeAoEAbility(a)) continue;
+                float r = CombatAPI.GetAoERadius(a);
+                if (r <= 0) r = 2f; // 근접 기본 반경
+                if (best == null || r > bestRadius)
+                {
+                    best = a;
+                    bestRadius = r;
+                }
+            }
+            return best;
+        }
+
         #endregion
 
         #region Grenade Detection

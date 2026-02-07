@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;  // ★ v3.8.48: Stopwatch 프로파일링
 using System.Linq;
 using Kingmaker;
 using Kingmaker.EntitySystem.Entities;
@@ -51,6 +52,13 @@ namespace CompanionAI_v3.Core
 
         /// <summary>★ v3.5.00: 마지막으로 처리한 라운드 (TeamBlackboard.OnRoundStart 호출용)</summary>
         private int _lastProcessedRound = -1;
+
+        // ★ v3.8.48: 프로파일링 (Stopwatch)
+        private readonly Stopwatch _profilerStopwatch = new Stopwatch();
+        private long _totalAnalyzeMs;
+        private long _totalPlanMs;
+        private long _totalExecuteMs;
+        private int _profilerTurnCount;
 
         // ★ v3.0.72: _allowedCoverSeekOnce 제거
         // IsFinishedTurn = true + Status.Success 방식으로 전환하여 불필요해짐
@@ -259,6 +267,9 @@ namespace CompanionAI_v3.Core
         /// <returns>분석된 Situation, null이면 분석 실패</returns>
         private Situation CreateOrUpdatePlan(BaseUnitEntity unit, string unitId, string unitName, TurnState turnState)
         {
+            // ★ v3.8.48: 분석 시간 측정
+            _profilerStopwatch.Restart();
+
             // 상황 분석
             var situation = _analyzer.Analyze(unit, turnState);
 
@@ -268,8 +279,15 @@ namespace CompanionAI_v3.Core
                 return null;
             }
 
+            // ★ v3.8.48: 분석 시간 기록
+            _profilerStopwatch.Stop();
+            _totalAnalyzeMs += _profilerStopwatch.ElapsedMilliseconds;
+
             // TeamBlackboard에 상황 등록
             TeamBlackboard.Instance.RegisterUnitSituation(unitId, situation);
+
+            // ★ v3.8.48: 계획 시간 측정
+            _profilerStopwatch.Restart();
 
             // 계획이 없거나 완료되면 새 계획 생성
             if (turnState.Plan == null || turnState.Plan.IsComplete)
@@ -286,6 +304,10 @@ namespace CompanionAI_v3.Core
                 turnState.Plan = _planner.CreatePlan(situation, turnState);
                 TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
             }
+
+            // ★ v3.8.48: 계획 시간 기록
+            _profilerStopwatch.Stop();
+            _totalPlanMs += _profilerStopwatch.ElapsedMilliseconds;
 
             return situation;
         }
@@ -304,9 +326,24 @@ namespace CompanionAI_v3.Core
                 return ExecutionResult.EndTurn("Plan complete");
             }
 
+            // ★ v3.8.48: 실행 시간 측정
+            _profilerStopwatch.Restart();
+
             // 행동 실행
             Main.Log($"[Orchestrator] {unitName}: Executing {nextAction}");
             var result = _executor.Execute(nextAction, situation);
+
+            // ★ v3.8.48: 실행 시간 기록 + 10턴마다 평균 출력
+            _profilerStopwatch.Stop();
+            _totalExecuteMs += _profilerStopwatch.ElapsedMilliseconds;
+            _profilerTurnCount++;
+            if (_profilerTurnCount % 10 == 0)
+            {
+                Main.Log($"[Profiler] Last {_profilerTurnCount} turns avg: " +
+                    $"Analyze={_totalAnalyzeMs / _profilerTurnCount}ms, " +
+                    $"Plan={_totalPlanMs / _profilerTurnCount}ms, " +
+                    $"Execute={_totalExecuteMs / _profilerTurnCount}ms");
+            }
 
             // 결과 기록
             bool success = result.Type == ResultType.CastAbility || result.Type == ResultType.MoveTo;
@@ -578,6 +615,12 @@ namespace CompanionAI_v3.Core
 
             // ★ v3.2.10: TeamBlackboard 정리
             TeamBlackboard.Instance.Clear();
+
+            // ★ v3.8.48: 리플렉션 캐시 정리
+            GameInterface.CustomBehaviourTreePatch.ClearTreeCache();
+
+            // ★ v3.8.48: Situation 풀 정리
+            _analyzer.ClearPool();
         }
 
         #endregion

@@ -299,6 +299,18 @@ namespace CompanionAI_v3.Planning.Plans
                 Main.Log($"[DPS] Phase 4.3: Self-Targeted AOE planned");
             }
 
+            // ★ v3.8.50: Phase 4.3b: Melee AOE (유닛 타겟 근접 스플래시)
+            if (!didPlanAttack && remainingAP >= 1f)
+            {
+                var meleeAoEAction = PlanMeleeAoE(situation, ref remainingAP);
+                if (meleeAoEAction != null)
+                {
+                    actions.Add(meleeAoEAction);
+                    didPlanAttack = true;
+                    Main.Log($"[DPS] Phase 4.3b: Melee AOE planned");
+                }
+            }
+
             // ★ v3.1.16: Phase 4.4: AOE 공격 (적 2명 이상 근처일 때)
             // ★ v3.3.00: 클러스터 기반 AOE 기회 탐색
             // ★ v3.5.37: MinEnemiesForAoE 설정 적용
@@ -312,9 +324,11 @@ namespace CompanionAI_v3.Planning.Plans
                 if (useAoEOptimization)
                 {
                     // ★ v3.5.74: 클러스터 기반 AOE 기회 탐색 (게임 API + AttackCategory)
+                    // ★ v3.8.50: 근접 AOE도 클러스터 탐지에 포함
                     foreach (var aoeAbility in situation.AvailableAttacks
                         .Where(a => CombatAPI.IsPointTargetAbility(a) ||
-                                    CombatAPI.GetAttackCategory(a) == AttackCategory.AoE))
+                                    CombatAPI.GetAttackCategory(a) == AttackCategory.AoE ||
+                                    CombatAPI.IsMeleeAoEAbility(a)))
                     {
                         float aoERadius = CombatAPI.GetAoERadius(aoeAbility);  // 타일 반환
                         // ★ v3.6.4: 기본 5타일 ≈ 6.75m

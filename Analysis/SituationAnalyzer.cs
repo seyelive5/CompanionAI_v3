@@ -20,15 +20,35 @@ namespace CompanionAI_v3.Analysis
     /// </summary>
     public class SituationAnalyzer
     {
+        // ★ v3.8.48: per-unit Situation 풀 — 턴당 0 할당 (기존: 1 Situation + 13 List per turn)
+        private readonly Dictionary<string, Situation> _situationPool = new Dictionary<string, Situation>();
+
+        /// <summary>
+        /// ★ v3.8.48: 전투 종료 시 풀 정리
+        /// </summary>
+        public void ClearPool()
+        {
+            _situationPool.Clear();
+        }
+
         /// <summary>
         /// 현재 상황 분석
         /// </summary>
         public Situation Analyze(BaseUnitEntity unit, TurnState turnState)
         {
-            var situation = new Situation
+            // ★ v3.8.48: 객체 풀링 — new Situation() 대신 재사용
+            string unitId = unit.UniqueId;
+            Situation situation;
+            if (!_situationPool.TryGetValue(unitId, out situation))
             {
-                Unit = unit
-            };
+                situation = new Situation();
+                _situationPool[unitId] = situation;
+            }
+            else
+            {
+                situation.Reset();
+            }
+            situation.Unit = unit;
 
             try
             {
@@ -119,22 +139,21 @@ namespace CompanionAI_v3.Analysis
             // 아군 목록
             situation.Allies = CombatAPI.GetAllies(unit);
 
-            // 가장 가까운 적
+            // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
             // ★ v3.5.29: 캐시된 거리 사용
-            situation.NearestEnemy = situation.Enemies
-                .Where(e => e != null && !e.LifeState.IsDead)
-                .OrderBy(e => CombatCache.GetDistance(unit, e))
-                .FirstOrDefault();
+            situation.NearestEnemy = CollectionHelper.MinByWhere(situation.Enemies,
+                e => !e.LifeState.IsDead,
+                e => CombatCache.GetDistance(unit, e));
 
             situation.NearestEnemyDistance = situation.NearestEnemy != null
                 ? CombatCache.GetDistance(unit, situation.NearestEnemy)
                 : float.MaxValue;
 
+            // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
             // 가장 부상당한 아군
-            situation.MostWoundedAlly = situation.Allies
-                .Where(a => a != null && !a.LifeState.IsDead && a != unit)
-                .OrderBy(a => CombatAPI.GetHPPercent(a))
-                .FirstOrDefault();
+            situation.MostWoundedAlly = CollectionHelper.MinByWhere(situation.Allies,
+                a => !a.LifeState.IsDead && a != unit,
+                a => CombatAPI.GetHPPercent(a));
 
             // ★ v3.1.25: 위협 분석 (아군 타겟팅 적)
             AnalyzeThreats(situation, unit);
@@ -179,8 +198,9 @@ namespace CompanionAI_v3.Analysis
         private void AnalyzeTargets(Situation situation, BaseUnitEntity unit)
         {
             // 공격 가능한 적 찾기
-            situation.HittableEnemies = new List<BaseUnitEntity>();
-            situation.MeleeHittableEnemies = new List<BaseUnitEntity>();  // ★ v3.8.14: 근접 공격으로 가능한 적
+            // ★ v3.8.48: new List → Clear() (풀링된 리스트 재사용)
+            situation.HittableEnemies.Clear();
+            situation.MeleeHittableEnemies.Clear();  // ★ v3.8.14: 근접 공격으로 가능한 적
 
             // ★ v3.0.78: 모든 AvailableAttacks를 기준으로 Hittable 계산
             // 이전: 단일 참조 능력 → 쿨다운이면 Hittable=0
@@ -341,7 +361,10 @@ namespace CompanionAI_v3.Analysis
             // MeleeHittableEnemies는 "실제 근접 공격이 닿는 적"을 추적
             if (situation.RangePreference == RangePreference.PreferMelee)
             {
-                situation.MeleeHittableEnemies = new List<BaseUnitEntity>(situation.HittableEnemies);
+                // ★ v3.8.48: new List → Clear+AddRange (풀링된 리스트 재사용)
+                situation.MeleeHittableEnemies.Clear();
+                for (int i = 0; i < situation.HittableEnemies.Count; i++)
+                    situation.MeleeHittableEnemies.Add(situation.HittableEnemies[i]);
             }
 
             // Hittable 결과 로깅
@@ -999,11 +1022,12 @@ namespace CompanionAI_v3.Analysis
             // ★ CombatHelpers.GetAttackPriority 사용 - 상황 기반 최적 공격 선택
             var bestTarget = situation.BestTarget;
 
-            return attacks
-                .Where(a => a.Weapon != null)
-                .OrderBy(a => CombatHelpers.GetAttackPriority(a, unit, bestTarget, situation.Enemies, situation.Allies))
-                .ThenBy(a => CombatAPI.GetAbilityAPCost(a))
-                .FirstOrDefault();
+            // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
+            // Priority(int, 낮을수록 좋음) * 1000 + APCost(float)로 합산하여 MinBy 사용
+            return CollectionHelper.MinByWhere(attacks,
+                a => a.Weapon != null,
+                a => CombatHelpers.GetAttackPriority(a, unit, bestTarget, situation.Enemies, situation.Allies) * 1000f
+                    + CombatAPI.GetAbilityAPCost(a));
         }
 
         /// <summary>

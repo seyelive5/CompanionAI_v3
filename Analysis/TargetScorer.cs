@@ -8,6 +8,7 @@ using CompanionAI_v3.Core;
 using CompanionAI_v3.Data;
 using CompanionAI_v3.GameInterface;
 using CompanionAI_v3.Settings;
+using Kingmaker.Blueprints.Classes.Experience;  // ★ v3.8.49: UnitDifficultyType
 
 namespace CompanionAI_v3.Analysis
 {
@@ -31,6 +32,7 @@ namespace CompanionAI_v3.Analysis
             public float Hittable { get; set; }       // 현재 공격 가능 보너스
             public float DebuffState { get; set; }    // DOT 등 디버프 상태
             public float SpecialRole { get; set; }    // Healer/Caster 보너스
+            public float Difficulty { get; set; }      // ★ v3.8.49: 적 등급 (Boss/Elite 등) 보너스
         }
 
         /// <summary>
@@ -58,7 +60,8 @@ namespace CompanionAI_v3.Analysis
             CanKill = 1.5f,       // 매우 높음 - 1타 킬 최우선
             Hittable = 0.6f,      // 중간
             DebuffState = 0.7f,   // 높음 - DOT 콤보
-            SpecialRole = 0.5f    // 중간
+            SpecialRole = 0.5f,   // 중간
+            Difficulty = 0.6f     // ★ v3.8.49: 중간 - 보스 공격하되 킬 가능한 졸개 우선
         };
 
         // Tank: 가까운 적 우선, 거리 중시
@@ -70,7 +73,8 @@ namespace CompanionAI_v3.Analysis
             CanKill = 0.4f,       // 낮음 - 킬보다 어그로
             Hittable = 0.8f,      // 높음 - 바로 공격 가능
             DebuffState = 0.2f,   // 낮음
-            SpecialRole = 0.3f    // 낮음
+            SpecialRole = 0.3f,   // 낮음
+            Difficulty = 1.0f     // ★ v3.8.49: 매우 높음 - 보스 어그로/교전 최우선
         };
 
         // Support: 안전한 공격, 위협 제거
@@ -82,7 +86,8 @@ namespace CompanionAI_v3.Analysis
             CanKill = 0.6f,       // 중간
             Hittable = 1.0f,      // 매우 높음 - 이동 없이 공격
             DebuffState = 0.8f,   // 높음 - 디버프 활용
-            SpecialRole = 0.9f    // 높음 - Healer/Caster 우선
+            SpecialRole = 0.9f,   // 높음 - Healer/Caster 우선
+            Difficulty = 0.8f     // ★ v3.8.49: 높음 - 보스에 디버프/CC 집중
         };
 
         // Support 아군 타겟 가중치
@@ -221,6 +226,17 @@ namespace CompanionAI_v3.Analysis
                     Main.LogDebug($"[TargetScorer] +50 SharedTarget: {target.CharacterName}");
                 }
 
+                // ★ v3.8.46: Target Inertia (타겟 관성)
+                // 이전 턴에 공격한 타겟에 보너스 → 동일 타겟 집중 공격 유도
+                // Inertia(+20) < SharedTarget(+50) → 팀 협동이 항상 우선
+                var previousTarget = TeamBlackboard.Instance.GetPreviousTarget(situation.Unit?.UniqueId);
+                if (previousTarget != null && previousTarget == target)
+                {
+                    float inertiaBonus = AIConfig.GetScoringConfig().InertiaBonus;
+                    score += inertiaBonus;
+                    Main.LogDebug($"[TargetScorer] +{inertiaBonus:F0} Inertia: {target.CharacterName}");
+                }
+
                 // ★ v3.2.15: 아군이 타겟팅 중인 적 보너스 (화력 집중)
                 int alliesTargeting = TeamBlackboard.Instance.CountAlliesTargeting(target);
                 if (alliesTargeting > 0)
@@ -247,6 +263,25 @@ namespace CompanionAI_v3.Analysis
                     {
                         score += 10f;
                     }
+                }
+
+                // ★ v3.8.49: 적 등급(DifficultyType) 기반 전략적 중요도
+                // 게임 디자이너의 공식 난도 분류 (Swarm~ChapterBoss)를 활용
+                // EvaluateThreat(행동 기반)와 분리 — 게임 분류 기반 독립 요소
+                var difficultyType = CombatAPI.GetDifficultyType(target);
+                float difficultyScore = 0f;
+                switch (difficultyType)
+                {
+                    case UnitDifficultyType.Elite:       difficultyScore = 8f;  break;
+                    case UnitDifficultyType.MiniBoss:    difficultyScore = 15f; break;
+                    case UnitDifficultyType.Boss:        difficultyScore = 25f; break;
+                    case UnitDifficultyType.ChapterBoss: difficultyScore = 30f; break;
+                    // Swarm/Common/Hard = 0 (기본 적)
+                }
+                if (difficultyScore > 0f)
+                {
+                    score += difficultyScore * weights.Difficulty;
+                    Main.LogDebug($"[TargetScorer] {target.CharacterName}: +{difficultyScore * weights.Difficulty:F0} difficulty ({difficultyType})");
                 }
 
                 // ★ v3.2.30: 킬 시뮬레이터 확정 킬 보너스 (설정으로 토글 가능)
@@ -356,20 +391,20 @@ namespace CompanionAI_v3.Analysis
 
             try
             {
-                var scored = candidates
-                    .Where(t => t != null)
-                    .Where(t => {
+                // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
+                float bestScore;
+                var best = CollectionHelper.MaxByWhere(candidates,
+                    t => {
                         try { return t.LifeState?.IsDead != true; }
                         catch { return true; }
-                    })
-                    .Select(t => new { Target = t, Score = ScoreEnemy(t, situation, role) })
-                    .OrderByDescending(x => x.Score)
-                    .FirstOrDefault();
+                    },
+                    t => ScoreEnemy(t, situation, role),
+                    out bestScore);
 
-                if (scored != null)
+                if (best != null)
                 {
-                    Main.LogDebug($"[TargetScorer] Best enemy for {role}: {scored.Target.CharacterName} (score={scored.Score:F1})");
-                    return scored.Target;
+                    Main.LogDebug($"[TargetScorer] Best enemy for {role}: {best.CharacterName} (score={bestScore:F1})");
+                    return best;
                 }
             }
             catch (Exception ex)
@@ -466,21 +501,20 @@ namespace CompanionAI_v3.Analysis
 
             try
             {
-                var scored = allies
-                    .Where(a => a != null)
-                    .Where(a => {
-                        try { return a.LifeState?.IsDead != true; }
-                        catch { return true; }
-                    })
-                    .Where(a => CombatAPI.GetHPPercent(a) < hpThreshold)
-                    .Select(a => new { Ally = a, Score = ScoreAllyForHealing(a, situation) })
-                    .OrderByDescending(x => x.Score)
-                    .FirstOrDefault();
+                // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
+                float bestScore;
+                var best = CollectionHelper.MaxByWhere(allies,
+                    a => {
+                        try { return a.LifeState?.IsDead != true && CombatAPI.GetHPPercent(a) < hpThreshold; }
+                        catch { return false; }
+                    },
+                    a => ScoreAllyForHealing(a, situation),
+                    out bestScore);
 
-                if (scored != null)
+                if (best != null)
                 {
-                    Main.LogDebug($"[TargetScorer] Best ally for healing: {scored.Ally.CharacterName} (score={scored.Score:F1})");
-                    return scored.Ally;
+                    Main.LogDebug($"[TargetScorer] Best ally for healing: {best.CharacterName} (score={bestScore:F1})");
+                    return best;
                 }
             }
             catch (Exception ex)
@@ -503,21 +537,21 @@ namespace CompanionAI_v3.Analysis
 
             try
             {
+                // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
                 // 버프는 역할 우선순위 중시, HP는 덜 중요
-                var scored = allies
-                    .Where(a => a != null)
-                    .Where(a => {
+                float bestScore;
+                var best = CollectionHelper.MaxByWhere(allies,
+                    a => {
                         try { return a.LifeState?.IsDead != true && a.IsConscious; }
-                        catch { return true; }
-                    })
-                    .Select(a => new { Ally = a, Score = GetBuffPriority(a, situation) })
-                    .OrderByDescending(x => x.Score)
-                    .FirstOrDefault();
+                        catch { return false; }
+                    },
+                    a => GetBuffPriority(a, situation),
+                    out bestScore);
 
-                if (scored != null)
+                if (best != null)
                 {
-                    Main.LogDebug($"[TargetScorer] Best ally for buff: {scored.Ally.CharacterName} (score={scored.Score:F1})");
-                    return scored.Ally;
+                    Main.LogDebug($"[TargetScorer] Best ally for buff: {best.CharacterName} (score={bestScore:F1})");
+                    return best;
                 }
             }
             catch (Exception ex)

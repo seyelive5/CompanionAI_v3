@@ -310,6 +310,93 @@ namespace CompanionAI_v3.Analysis
 
         #endregion
 
+        /// <summary>
+        /// ★ v3.8.48: 객체 풀링용 Reset — 모든 필드를 기본값으로, List는 Clear()
+        /// new Situation() 대신 기존 인스턴스를 재사용하여 GC 압박 제거
+        /// </summary>
+        public void Reset()
+        {
+            // Unit State
+            Unit = null;
+            HPPercent = 0f;
+            CurrentAP = 0f;
+            CurrentMP = 0f;
+            CanMove = false;
+            CanAct = false;
+
+            // Settings
+            CharacterSettings = null;
+            RangePreference = RangePreference.Adaptive;
+            MinSafeDistance = 0f;
+
+            // Weapon & Ammo
+            NeedsReload = false;
+            HasRangedWeapon = false;
+            HasMeleeWeapon = false;
+            CurrentAmmo = 0;
+            MaxAmmo = 0;
+
+            // Battlefield
+            Enemies.Clear();
+            Allies.Clear();
+            NearestEnemyDistance = 0f;
+            NearestEnemy = null;
+            MostWoundedAlly = null;
+
+            // Target Analysis
+            HittableEnemies.Clear();
+            MeleeHittableEnemies.Clear();
+            BestTarget = null;
+            CanKillBestTarget = false;
+
+            // Threat Analysis
+            AlliesUnderThreat = 0;
+            EnemiesTargetingAllies = 0;
+
+            // Position Analysis
+            IsInDanger = false;
+            HasCover = false;
+            BetterPositionAvailable = false;
+            NeedsReposition = false;
+            InfluenceMap = null;
+            PredictiveThreatMap = null;
+
+            // Abilities
+            AvailableBuffs.Clear();
+            AvailableAttacks.Clear();
+            AvailableHeals.Clear();
+            AvailableDebuffs.Clear();
+            AvailableSpecialAbilities.Clear();
+            AvailablePositionalBuffs.Clear();
+            AvailableStratagems.Clear();
+            AvailableMarkers.Clear();
+            ReloadAbility = null;
+            PrimaryAttack = null;
+            BestBuff = null;
+            RunAndGunAbility = null;
+
+            // Turn State
+            HasPerformedFirstAction = false;
+            HasBuffedThisTurn = false;
+            HasAttackedThisTurn = false;
+            HasHealedThisTurn = false;
+            HasReloadedThisTurn = false;
+            HasMovedThisTurn = false;
+            MoveCount = 0;
+            AllowPostAttackMove = false;
+            AllowChaseMove = false;
+
+            // Familiar
+            HasFamiliar = false;
+            Familiar = null;
+            FamiliarType = null;
+            FamiliarPosition = default;
+            OptimalFamiliarPosition = null;
+            FamiliarAbilities.Clear();
+            NeedsFamiliarRelocate = false;
+            IsFamiliarUnit = false;
+        }
+
         public override string ToString()
         {
             // ★ v3.0.52: MP 추가 (이동 디버깅용)

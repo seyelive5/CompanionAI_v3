@@ -203,6 +203,12 @@ namespace CompanionAI_v3.Execution
                     TeamBlackboard.Instance.RecordDamageDealt(estimatedDamage);
                     Main.LogDebug($"[Executor] Attack: {ability.Name} -> {targetEntity.CharacterName}, EstDmg={estimatedDamage:F0}");
                 }
+
+                // ★ v3.8.46: Target Inertia - 공격 타겟 기록 (다음 턴 관성 보너스용)
+                if (casterUnit != null)
+                {
+                    TeamBlackboard.Instance.SetPreviousTarget(casterUnit.UniqueId, targetEntity);
+                }
             }
 
             // ★ v3.5.29: 캐시 무효화 - 타겟 위치가 변할 수 있는 능력

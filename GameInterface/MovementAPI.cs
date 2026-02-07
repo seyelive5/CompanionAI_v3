@@ -6,6 +6,7 @@ using Kingmaker.AI;
 using Kingmaker.AI.AreaScanning;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Pathfinding;
+using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.View.Covers;
 using Pathfinding;
 using UnityEngine;
@@ -77,10 +78,13 @@ namespace CompanionAI_v3.GameInterface
             /// <summary>★ v3.6.18: 실제 공격 가능 적 수 (CanTargetFromNode 검증)</summary>
             public int HittableEnemyCount { get; set; }
 
+            /// <summary>★ v3.8.50: 근접 AOE 스플래시 보너스 (패턴 내 추가 적 수 기반)</summary>
+            public float MeleeAoESplashBonus { get; set; }
+
             public float TotalScore => CoverScore + DistanceScore - ThreatScore + AttackScore
                                        - InfluenceThreatScore + InfluenceControlBonus
                                        + SharedTargetBonus + TacticalAdjustment
-                                       - PathRiskScore + HitChanceBonus;
+                                       - PathRiskScore + HitChanceBonus + MeleeAoESplashBonus;
 
             public bool CanStand { get; set; }
             public bool HasLosToEnemy { get; set; }
@@ -94,7 +98,8 @@ namespace CompanionAI_v3.GameInterface
                 (SharedTargetBonus > 0 ? $" [ST:{SharedTargetBonus:F1}]" : "") +
                 (TacticalAdjustment != 0 ? $" [Tac:{TacticalAdjustment:F1}]" : "") +
                 (PathRiskScore > 0 ? $" [Path:{PathRiskScore:F1}]" : "") +
-                (HitChanceBonus != 0 ? $" [Hit:{HitChanceBonus:F1}]" : "");
+                (HitChanceBonus != 0 ? $" [Hit:{HitChanceBonus:F1}]" : "") +
+                (MeleeAoESplashBonus > 0 ? $" [Splash:{MeleeAoESplashBonus:F1}]" : "");
         }
 
         public enum MovementGoal
@@ -569,7 +574,8 @@ namespace CompanionAI_v3.GameInterface
                 scores.Add(score);
             }
 
-            return scores.OrderByDescending(s => s.TotalScore).ToList();
+            // ★ v3.8.48: 정렬 제거 (호출자가 필요 시 직접 정렬)
+            return scores;
         }
 
         public static PositionScore EvaluatePosition(
@@ -792,21 +798,17 @@ namespace CompanionAI_v3.GameInterface
                     unit, score.Node, enemies, primaryAttack);
             }
 
-            // 위협 점수가 반영된 후 재정렬
-            scores = scores.OrderByDescending(s => s.TotalScore).ToList();
-
+            // ★ v3.8.48: O(n log n) 정렬 제거 → O(n) MaxByWhere 사용 (100+ 요소 최적화)
             // ★ v3.6.18: 실제 공격 가능한 위치 우선 선택 (HittableEnemyCount > 0)
-            var best = scores.FirstOrDefault(s =>
-                s.CanStand &&
-                s.HittableEnemyCount > 0 &&
-                s.DistanceScore >= 20f);
+            var best = CollectionHelper.MaxByWhere(scores,
+                s => s.CanStand && s.HittableEnemyCount > 0 && s.DistanceScore >= 20f,
+                s => s.TotalScore);
 
             if (best == null)
             {
-                best = scores.FirstOrDefault(s =>
-                    s.CanStand &&
-                    s.HittableEnemyCount > 0 &&
-                    s.DistanceScore > 0f);
+                best = CollectionHelper.MaxByWhere(scores,
+                    s => s.CanStand && s.HittableEnemyCount > 0 && s.DistanceScore > 0f,
+                    s => s.TotalScore);
             }
 
             // ★ v3.8.45: 3차 폴백에 MinSafeDistance 체크 추가
@@ -815,29 +817,26 @@ namespace CompanionAI_v3.GameInterface
             // (DistanceScore < 0 = nearestEnemyDist < minSafeDistance → 위험 지역)
             if (best == null)
             {
-                best = scores.FirstOrDefault(s =>
-                    s.CanStand &&
-                    s.HittableEnemyCount > 0 &&
-                    s.DistanceScore >= 0f);
+                best = CollectionHelper.MaxByWhere(scores,
+                    s => s.CanStand && s.HittableEnemyCount > 0 && s.DistanceScore >= 0f,
+                    s => s.TotalScore);
             }
 
             // ★ v3.6.18: 공격 가능 위치 없으면 기존 LOS 기반 폴백 (접근 이동용)
             if (best == null)
             {
                 Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No hittable position found, fallback to LOS-based");
-                best = scores.FirstOrDefault(s =>
-                    s.CanStand &&
-                    s.HasLosToEnemy &&
-                    s.DistanceScore >= 20f);
+                best = CollectionHelper.MaxByWhere(scores,
+                    s => s.CanStand && s.HasLosToEnemy && s.DistanceScore >= 20f,
+                    s => s.TotalScore);
             }
 
             // ★ v3.8.45: LOS 폴백도 MinSafeDistance 준수
             if (best == null)
             {
-                best = scores.FirstOrDefault(s =>
-                    s.CanStand &&
-                    s.HasLosToEnemy &&
-                    s.DistanceScore >= 0f);
+                best = CollectionHelper.MaxByWhere(scores,
+                    s => s.CanStand && s.HasLosToEnemy && s.DistanceScore >= 0f,
+                    s => s.TotalScore);
             }
 
             if (best != null)
@@ -867,7 +866,9 @@ namespace CompanionAI_v3.GameInterface
             float predictedMP = 0f,
             BattlefieldInfluenceMap influenceMap = null,
             AIRole role = AIRole.Auto,
-            Analysis.PredictiveThreatMap predictiveMap = null)
+            Analysis.PredictiveThreatMap predictiveMap = null,
+            AbilityData meleeAoEAbility = null,
+            List<BaseUnitEntity> enemies = null)
         {
             if (unit == null || target == null) return null;
 
@@ -962,6 +963,19 @@ namespace CompanionAI_v3.GameInterface
                     }
                 }
 
+                // ★ v3.8.50: 근접 AOE 스플래시 보너스
+                // 이 위치에서 근접 AOE를 사용할 때 패턴 내 추가 적 수 계산
+                // 원형: 위치 무관, 원뿔/부채꼴: 방향에 따라 다른 적 포함
+                if (meleeAoEAbility != null && enemies != null)
+                {
+                    int splashCount = CombatAPI.CountEnemiesInPattern(
+                        meleeAoEAbility, targetPos, pos, enemies);
+                    if (splashCount >= 2)
+                    {
+                        posScore.MeleeAoESplashBonus = (splashCount - 1) * 12f;
+                    }
+                }
+
                 candidates.Add(posScore);
             }
 
@@ -971,7 +985,8 @@ namespace CompanionAI_v3.GameInterface
                 return null;
             }
 
-            var best = candidates.OrderByDescending(c => c.TotalScore).First();
+            // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
+            var best = CollectionHelper.MaxBy(candidates, c => c.TotalScore);
             float finalDist = Vector3.Distance(best.Position, targetPos);
             Main.Log($"[MovementAPI] {unit.CharacterName}: Melee position at ({best.Position.x:F1},{best.Position.z:F1}) " +
                 $"dist={finalDist:F1}m, score={best.TotalScore:F1}");
@@ -1222,7 +1237,8 @@ namespace CompanionAI_v3.GameInterface
                 return null;
             }
 
-            var best = candidates.OrderByDescending(c => c.TotalScore).First();
+            // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
+            var best = CollectionHelper.MaxBy(candidates, c => c.TotalScore);
             Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Retreat to ({best.Position.x:F1},{best.Position.z:F1}) score={best.TotalScore:F1}");
 
             return best;

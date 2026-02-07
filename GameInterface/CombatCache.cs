@@ -167,6 +167,9 @@ namespace CompanionAI_v3.GameInterface
         /// 특정 타겟 관련 캐시만 무효화
         /// 밀치기/이동 스킬 실행 후 호출
         /// </summary>
+        // ★ v3.8.48: 정적 리스트 재사용 (LINQ .ToList() 할당 제거)
+        private static readonly List<(string, string)> _keysToRemove = new List<(string, string)>(32);
+
         public static void InvalidateTarget(BaseUnitEntity target)
         {
             if (target == null) return;
@@ -175,23 +178,30 @@ namespace CompanionAI_v3.GameInterface
             int invalidatedDist = 0;
             int invalidatedTarget = 0;
 
+            // ★ v3.8.48: LINQ → 직접 순회 (0 할당)
             // 거리 캐시에서 해당 타겟 관련 항목 제거
-            var distKeysToRemove = _distanceCache.Keys
-                .Where(k => k.Item1 == targetId || k.Item2 == targetId)
-                .ToList();
-            foreach (var key in distKeysToRemove)
+            _keysToRemove.Clear();
+            foreach (var key in _distanceCache.Keys)
             {
-                _distanceCache.Remove(key);
+                if (key.Item1 == targetId || key.Item2 == targetId)
+                    _keysToRemove.Add(key);
+            }
+            for (int i = 0; i < _keysToRemove.Count; i++)
+            {
+                _distanceCache.Remove(_keysToRemove[i]);
                 invalidatedDist++;
             }
 
             // 타겟팅 캐시에서 해당 타겟 관련 항목 제거
-            var targetKeysToRemove = _targetingCache.Keys
-                .Where(k => k.Item2 == targetId || k.Item2.StartsWith("point_"))
-                .ToList();
-            foreach (var key in targetKeysToRemove)
+            _keysToRemove.Clear();
+            foreach (var key in _targetingCache.Keys)
             {
-                _targetingCache.Remove(key);
+                if (key.Item2 == targetId || key.Item2.StartsWith("point_"))
+                    _keysToRemove.Add(key);
+            }
+            for (int i = 0; i < _keysToRemove.Count; i++)
+            {
+                _targetingCache.Remove(_keysToRemove[i]);
                 invalidatedTarget++;
             }
 
@@ -213,27 +223,29 @@ namespace CompanionAI_v3.GameInterface
             var casterId = caster.UniqueId;
             int invalidated = 0;
 
+            // ★ v3.8.48: LINQ → 직접 순회 (0 할당)
             // 거리 캐시에서 시전자 관련 항목 제거
-            var distKeysToRemove = _distanceCache.Keys
-                .Where(k => k.Item1 == casterId || k.Item2 == casterId)
-                .ToList();
-            foreach (var key in distKeysToRemove)
+            _keysToRemove.Clear();
+            foreach (var key in _distanceCache.Keys)
             {
-                _distanceCache.Remove(key);
+                if (key.Item1 == casterId || key.Item2 == casterId)
+                    _keysToRemove.Add(key);
+            }
+            for (int i = 0; i < _keysToRemove.Count; i++)
+            {
+                _distanceCache.Remove(_keysToRemove[i]);
                 invalidated++;
             }
 
+            // ★ v3.8.48: .Keys.ToList() → .Clear() (전부 지우는 거니까)
             // 타겟팅 캐시에서 시전자 능력 관련 항목 제거
             // 주의: 시전자 이동 후 능력의 타겟팅 결과가 달라질 수 있음
-            var targetKeysToRemove = _targetingCache.Keys.ToList();
-            foreach (var key in targetKeysToRemove)
-            {
-                _targetingCache.Remove(key);
-            }
+            int targetingCleared = _targetingCache.Count;
+            _targetingCache.Clear();
 
-            if (invalidated > 0)
+            if (invalidated > 0 || targetingCleared > 0)
             {
-                Main.LogDebug($"[CombatCache] Caster moved {caster.CharacterName}: cleared {invalidated} distance entries, all targeting entries");
+                Main.LogDebug($"[CombatCache] Caster moved {caster.CharacterName}: cleared {invalidated} distance entries, {targetingCleared} targeting entries");
             }
         }
 

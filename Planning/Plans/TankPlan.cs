@@ -304,14 +304,40 @@ namespace CompanionAI_v3.Planning.Plans
                 actions.Add(stratagemAction);
             }
 
-            // ★ v3.5.37: Phase 4.8 - AOE 공격 기회 (Tank도 DangerousAoE 사용)
+            // ★ v3.5.37: Phase 4.8 - AOE 공격 기회
             bool didPlanAttack = false;
             // ★ v3.8.44: 공격 실패 이유 추적 (이동 Phase에 전달)
             var attackContext = new AttackPhaseContext();
+
+            // ★ v3.8.50: Phase 4.8a: Self-Targeted AOE (BladeDance 등)
+            var selfAoEAction = PlanSelfTargetedAoE(situation, ref remainingAP);
+            if (selfAoEAction != null)
+            {
+                actions.Add(selfAoEAction);
+                didPlanAttack = true;
+                Main.Log($"[Tank] Phase 4.8a: Self-Targeted AOE planned");
+            }
+
+            // ★ v3.8.50: Phase 4.8b: Melee AOE (유닛 타겟 근접 스플래시)
+            // Tank는 근접 역할이므로 근접 AOE 사용이 매우 적합
+            if (!didPlanAttack && remainingAP >= 1f)
+            {
+                var meleeAoEAction = PlanMeleeAoE(situation, ref remainingAP);
+                if (meleeAoEAction != null)
+                {
+                    actions.Add(meleeAoEAction);
+                    didPlanAttack = true;
+                    Main.Log($"[Tank] Phase 4.8b: Melee AOE planned");
+                }
+            }
+
+            // ★ v3.5.37: Phase 4.8c: Point-AOE (Tank도 DangerousAoE 사용)
+            // ★ v3.8.50: 근접 AOE도 클러스터 탐지에 포함
             var pointAoEAttacks = situation.AvailableAttacks
-                .Where(a => CombatAPI.IsPointTargetAbility(a) || AbilityDatabase.IsDangerousAoE(a))
+                .Where(a => CombatAPI.IsPointTargetAbility(a) || AbilityDatabase.IsDangerousAoE(a) ||
+                            CombatAPI.IsMeleeAoEAbility(a))
                 .ToList();
-            if (situation.HasLivingEnemies && pointAoEAttacks.Count > 0)
+            if (!didPlanAttack && situation.HasLivingEnemies && pointAoEAttacks.Count > 0)
             {
                 bool useAoEOptimization = situation.CharacterSettings?.UseAoEOptimization ?? true;
                 int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
@@ -347,7 +373,7 @@ namespace CompanionAI_v3.Planning.Plans
                     {
                         actions.Add(aoE);
                         didPlanAttack = true;
-                        Main.Log($"[Tank] Phase 4.8: AOE attack planned");
+                        Main.Log($"[Tank] Phase 4.8c: Point-AOE attack planned");
                     }
                 }
             }

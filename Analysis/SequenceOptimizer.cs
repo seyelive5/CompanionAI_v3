@@ -117,7 +117,7 @@ namespace CompanionAI_v3.Analysis
             // 4. 로깅 및 최적 시퀀스 선택
             LogSequenceComparison(sequences);
 
-            var best = sequences.OrderByDescending(s => s.TotalScore).First();
+            var best = CollectionHelper.MaxBy(sequences, s => s.TotalScore);
 
             // ★ v3.0.59: "공격 안 함"이 선택되면 null 반환 (공격 스킵)
             if (best.Description == "Skip attack")
@@ -156,7 +156,7 @@ namespace CompanionAI_v3.Analysis
             if (allSequences.Count == 0)
                 return null;
 
-            return allSequences.OrderByDescending(s => s.TotalScore).First();
+            return CollectionHelper.MaxBy(allSequences, s => s.TotalScore);
         }
 
         /// <summary>
@@ -214,7 +214,7 @@ namespace CompanionAI_v3.Analysis
             }
 
             LogSequenceComparison(sequences);
-            return sequences.OrderByDescending(s => s.TotalScore).First();
+            return CollectionHelper.MaxBy(sequences, s => s.TotalScore);
         }
 
         #endregion

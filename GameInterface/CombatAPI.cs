@@ -25,6 +25,7 @@ using CompanionAI_v3.Data;
 using CompanionAI_v3.Settings;
 using Kingmaker.UnitLogic;  // ★ v3.7.89: AOO API
 using Kingmaker.UnitLogic.Buffs.Components;  // ★ v3.8.36: WarhammerAbilityRestriction
+using Kingmaker.Blueprints.Classes.Experience;  // ★ v3.8.49: UnitDifficultyType
 
 namespace CompanionAI_v3.GameInterface
 {
@@ -1951,6 +1952,20 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
+        /// ★ v3.8.49: 적 난도 등급 조회
+        /// 게임 BlueprintUnit.DifficultyType (Swarm~ChapterBoss 7단계)
+        /// </summary>
+        public static UnitDifficultyType GetDifficultyType(BaseUnitEntity unit)
+        {
+            if (unit == null) return UnitDifficultyType.Common;
+            try
+            {
+                return unit.Blueprint.DifficultyType;
+            }
+            catch { return UnitDifficultyType.Common; }
+        }
+
+        /// <summary>
         /// ★ v3.0.1: 게임 API를 사용한 정확한 데미지 예측
         /// ability.GetDamagePrediction(target, casterPosition, context) 사용
         /// </summary>
@@ -3113,6 +3128,33 @@ namespace CompanionAI_v3.GameInterface
 
                 // DangerousAoE로 분류된 능력만
                 return AbilityDatabase.IsDangerousAoE(ability);
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// ★ v3.8.50: 근접 AOE 능력 감지 (유닛 타겟형)
+        /// BladeDance(Self-Target)는 제외 — 적을 직접 타겟하는 근접 AOE만 감지
+        /// 게임 AbilityMeleeBurst + Pattern 기반 근접 스플래시 공격
+        /// </summary>
+        public static bool IsMeleeAoEAbility(AbilityData ability)
+        {
+            if (ability == null) return false;
+            try
+            {
+                // Self-Target AOE는 이미 Phase 4.3에서 별도 처리
+                if (IsSelfTargetedAoEAttack(ability)) return false;
+
+                // 근접 능력이어야 함
+                if (!ability.IsMelee) return false;
+
+                // AOE 패턴이 있어야 함 (게임 네이티브 + 커스텀 감지)
+                if (CombatHelpers.IsAoEAbility(ability)) return true;
+
+                // 패턴 설정 직접 확인 (IsAoEAbility에서 놓칠 수 있는 케이스)
+                if (ability.GetPatternSettings() != null) return true;
+
+                return false;
             }
             catch { return false; }
         }

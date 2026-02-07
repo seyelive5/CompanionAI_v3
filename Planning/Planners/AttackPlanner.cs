@@ -154,6 +154,10 @@ namespace CompanionAI_v3.Planning.Planners
                         return true;
                     }
 
+                    // ★ v3.8.50: 근접 AOE는 DangerousAoE 필터 완화
+                    // Phase 4.3b에서 최적 조건이 아니었더라도 일반 공격으로 사용 가능
+                    if (CombatAPI.IsMeleeAoEAbility(a)) return true;
+
                     if (!aoeConfig.AllowDangerousAoEAutoSelect) return false;
                     // 충분한 적이 있을 때만 허용
                     return situation.Enemies.Count(e => e != null && e.IsConscious) >= aoeConfig.DangerousAoEMinEnemies;
@@ -197,11 +201,15 @@ namespace CompanionAI_v3.Planning.Planners
                     filteredAttacks = meleeOnly;
             }
 
-            var scoredAttacks = filteredAttacks
-                .Select(a => new { Attack = a, Score = UtilityScorer.ScoreAttack(a, target, situation) })
-                .Where(x => x.Score > 0)
-                .OrderByDescending(x => x.Score)
-                .ToList();
+            // ★ v3.8.48: anonymous type → ValueTuple (GC 압박 감소)
+            var scoredAttacks = new List<(AbilityData Attack, float Score)>();
+            for (int i = 0; i < filteredAttacks.Count; i++)
+            {
+                var a = filteredAttacks[i];
+                float s = UtilityScorer.ScoreAttack(a, target, situation);
+                if (s > 0) scoredAttacks.Add((a, s));
+            }
+            scoredAttacks.Sort((x, y) => y.Score.CompareTo(x.Score));
 
             // ★ v3.5.11: 스코어링 결과 로깅
             if (scoredAttacks.Count == 0 && filteredAttacks.Count > 0)
@@ -209,15 +217,18 @@ namespace CompanionAI_v3.Planning.Planners
                 Main.LogDebug($"[AttackPlanner] SelectBestAttack: {filteredAttacks.Count} filtered attacks, but all scored 0 or less");
             }
 
-            foreach (var scored in scoredAttacks)
+            for (int i = 0; i < scoredAttacks.Count; i++)
             {
+                var attack = scoredAttacks[i].Attack;
+                var score = scoredAttacks[i].Score;
+
                 // ★ v3.6.9: Point 타겟 AOE의 높이 차이 체크
                 // Hittable 체크에서 필터링되어도 AvailableAttacks에는 남아있을 수 있음
-                if (CombatAPI.IsPointTargetAbility(scored.Attack))
+                if (CombatAPI.IsPointTargetAbility(attack))
                 {
-                    if (!CombatAPI.IsAoEHeightInRange(scored.Attack, situation.Unit, target))
+                    if (!CombatAPI.IsAoEHeightInRange(attack, situation.Unit, target))
                     {
-                        Main.LogDebug($"[AttackPlanner] AOE height failed: {scored.Attack.Name} -> {target.CharacterName}");
+                        Main.LogDebug($"[AttackPlanner] AOE height failed: {attack.Name} -> {target.CharacterName}");
                         if (context != null) context.HeightCheckFailed = true;
                         continue;
                     }
@@ -226,9 +237,9 @@ namespace CompanionAI_v3.Planning.Planners
                 // ★ v3.8.33: DangerousAoE Ray/Cone/Sector 패턴 거리 검증
                 // 게임은 RangeCells(무기 사거리)만 체크하지만, Ray 패턴은 patternRadius만큼만 뻗어나감
                 // 무기 사거리 15 + 패턴 반경 6 → 15타일 떨어진 적 타겟 가능하지만 실제 Ray는 6타일만 이동
-                if (AbilityDatabase.IsDangerousAoE(scored.Attack))
+                if (AbilityDatabase.IsDangerousAoE(attack))
                 {
-                    var patternInfo = CombatAPI.GetPatternInfo(scored.Attack);
+                    var patternInfo = CombatAPI.GetPatternInfo(attack);
                     if (patternInfo != null && patternInfo.IsValid && patternInfo.CanBeDirectional)
                     {
                         // Ray/Cone/Sector 패턴: caster에서 patternRadius만큼만 뻗어나감
@@ -237,7 +248,7 @@ namespace CompanionAI_v3.Planning.Planners
 
                         if (distanceToTarget > patternRadius)
                         {
-                            Main.LogDebug($"[AttackPlanner] DangerousAoE pattern range failed: {scored.Attack.Name} -> {target.CharacterName} " +
+                            Main.LogDebug($"[AttackPlanner] DangerousAoE pattern range failed: {attack.Name} -> {target.CharacterName} " +
                                 $"(dist={distanceToTarget:F1} > patternRadius={patternRadius:F0} tiles)");
                             continue;
                         }
@@ -245,31 +256,31 @@ namespace CompanionAI_v3.Planning.Planners
                 }
 
                 string reason;
-                if (CombatAPI.CanUseAbilityOn(scored.Attack, targetWrapper, out reason))
+                if (CombatAPI.CanUseAbilityOn(attack, targetWrapper, out reason))
                 {
                     // ★ v3.8.45: 아군 피격 안전 체크 (AOE point-target + CanTargetFriends 능력)
                     // Point-target AOE: 타겟 주변 반경 내 아군 체크
                     // CanTargetFriends (점사 사격 등): 타겟 근접 + 사선 체크
-                    if (CombatAPI.IsPointTargetAbility(scored.Attack) || scored.Attack.Blueprint?.CanTargetFriends == true)
+                    if (CombatAPI.IsPointTargetAbility(attack) || attack.Blueprint?.CanTargetFriends == true)
                     {
-                        if (!AoESafetyChecker.IsAoESafeForUnitTarget(scored.Attack, situation.Unit, target, situation.Allies))
+                        if (!AoESafetyChecker.IsAoESafeForUnitTarget(attack, situation.Unit, target, situation.Allies))
                         {
-                            Main.LogDebug($"[AttackPlanner] Ally safety blocked: {scored.Attack.Name} -> {target.CharacterName}");
+                            Main.LogDebug($"[AttackPlanner] Ally safety blocked: {attack.Name} -> {target.CharacterName}");
                             continue;
                         }
                     }
 
-                    return scored.Attack;
+                    return attack;
                 }
                 else
                 {
                     // ★ v3.5.11: CanUseAbilityOn 실패 원인 로깅
-                    Main.LogDebug($"[AttackPlanner] CanUseAbilityOn failed: {scored.Attack.Name} -> {target.CharacterName} ({reason})");
+                    Main.LogDebug($"[AttackPlanner] CanUseAbilityOn failed: {attack.Name} -> {target.CharacterName} ({reason})");
 
                     // ★ v3.8.44: 사거리 부족 감지 (문자열 매칭 없이 거리 비교)
                     if (context != null)
                     {
-                        float abilityRange = CombatAPI.GetAbilityRangeInTiles(scored.Attack);
+                        float abilityRange = CombatAPI.GetAbilityRangeInTiles(attack);
                         float distToTarget = CombatCache.GetDistanceInTiles(situation.Unit, target);
                         if (distToTarget > abilityRange)
                             context.RangeWasIssue = true;
@@ -457,10 +468,10 @@ namespace CompanionAI_v3.Planning.Planners
         {
             if (enemies == null || enemies.Count == 0) return null;
 
-            return enemies
-                .Where(e => e != null && e.IsConscious)
-                .OrderBy(e => UnityEngine.Vector3.Distance(position, e.Position))
-                .FirstOrDefault();
+            // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
+            return CollectionHelper.MinByWhere(enemies,
+                e => e.IsConscious,
+                e => UnityEngine.Vector3.Distance(position, e.Position));
         }
 
         /// <summary>
@@ -527,24 +538,29 @@ namespace CompanionAI_v3.Planning.Planners
             var targetWrapper = new TargetWrapper(target);
             float currentAP = remainingAP;  // ★ v3.5.83: 람다용 로컬 복사
 
+            // ★ v3.8.48: anonymous type → ValueTuple (GC 압박 감소)
             // ★ v3.5.83: 스코어 기반 finisher 선택 (AOE 보너스 포함)
-            var scoredFinishers = finishers
-                .Select(f => {
-                    float cost = CombatAPI.GetAbilityAPCost(f);
-                    string r;
-                    bool canUse = cost <= currentAP && CombatAPI.CanUseAbilityOn(f, targetWrapper, out r);
-                    bool canKill = canUse && CombatAPI.CanKillInOneHit(f, target);
-                    float score = canUse ? UtilityScorer.ScoreAttack(f, target, situation) : float.MinValue;
-                    return new { Finisher = f, Cost = cost, CanUse = canUse, CanKill = canKill, Score = score };
-                })
-                .Where(x => x.CanUse)
-                .OrderByDescending(x => x.CanKill)  // 킬 가능 우선
-                .ThenByDescending(x => x.Score)     // 그 다음 AOE 보너스 포함 스코어
-                .ToList();
+            var scoredFinishers = new List<(AbilityData Finisher, float Cost, bool CanKill, float Score)>();
+            for (int i = 0; i < finishers.Count; i++)
+            {
+                var f = finishers[i];
+                float cost = CombatAPI.GetAbilityAPCost(f);
+                string r;
+                bool canUse = cost <= currentAP && CombatAPI.CanUseAbilityOn(f, targetWrapper, out r);
+                if (!canUse) continue;
+                bool canKill = CombatAPI.CanKillInOneHit(f, target);
+                float score = UtilityScorer.ScoreAttack(f, target, situation);
+                scoredFinishers.Add((f, cost, canKill, score));
+            }
+            // 킬 가능 우선, 그 다음 스코어 순
+            scoredFinishers.Sort((x, y) => {
+                int killCmp = y.CanKill.CompareTo(x.CanKill);
+                return killCmp != 0 ? killCmp : y.Score.CompareTo(x.Score);
+            });
 
             if (scoredFinishers.Count > 0)
             {
-                var best = scoredFinishers.First();
+                var best = scoredFinishers[0];
                 remainingAP -= best.Cost;
 
                 if (best.CanKill)
@@ -579,19 +595,21 @@ namespace CompanionAI_v3.Planning.Planners
             var targetWrapper = new TargetWrapper(target);
             float currentAP = remainingAP;
 
-            var scoredAbilities = situation.AvailableSpecialAbilities
-                .Select(a => new
-                {
-                    Ability = a,
-                    Score = SpecialAbilityHandler.GetSpecialAbilityEffectivenessScore(a, target, enemies),
-                    Cost = CombatAPI.GetAbilityAPCost(a)
-                })
-                .Where(x => x.Cost <= currentAP && x.Score > 0)
-                .OrderByDescending(x => x.Score)
-                .ToList();
-
-            foreach (var entry in scoredAbilities)
+            // ★ v3.8.48: anonymous type → ValueTuple (GC 압박 감소)
+            var scoredAbilities = new List<(AbilityData Ability, float Score, float Cost)>();
+            for (int i = 0; i < situation.AvailableSpecialAbilities.Count; i++)
             {
+                var a = situation.AvailableSpecialAbilities[i];
+                float cost = CombatAPI.GetAbilityAPCost(a);
+                if (cost > currentAP) continue;
+                float score = SpecialAbilityHandler.GetSpecialAbilityEffectivenessScore(a, target, enemies);
+                if (score > 0) scoredAbilities.Add((a, score, cost));
+            }
+            scoredAbilities.Sort((x, y) => y.Score.CompareTo(x.Score));
+
+            for (int i = 0; i < scoredAbilities.Count; i++)
+            {
+                var entry = scoredAbilities[i];
                 var ability = entry.Ability;
 
                 if (!SpecialAbilityHandler.CanUseSpecialAbilityEffectively(ability, target, enemies))
@@ -621,13 +639,16 @@ namespace CompanionAI_v3.Planning.Planners
         public static PlannedAction PlanSafeRangedAttack(Situation situation, ref float remainingAP,
             string roleName, HashSet<string> excludeTargetIds = null, HashSet<string> excludeAbilityGuids = null)
         {
+            // ★ v3.8.48: LINQ → for 루프 (GC 압박 감소)
             // ★ v3.0.49: !a.IsMelee만 체크 - 사이킥 능력(Weapon=null)도 원거리 공격으로 허용
-            var rangedAttacks = situation.AvailableAttacks
-                .Where(a => !a.IsMelee)
-                .Where(a => !AbilityDatabase.IsDangerousAoE(a))
-                .Where(a => !IsAbilityExcluded(a, excludeAbilityGuids))
-                .OrderBy(a => CombatAPI.GetAbilityAPCost(a))
-                .ToList();
+            var rangedAttacks = new List<AbilityData>();
+            for (int i = 0; i < situation.AvailableAttacks.Count; i++)
+            {
+                var a = situation.AvailableAttacks[i];
+                if (!a.IsMelee && !AbilityDatabase.IsDangerousAoE(a) && !IsAbilityExcluded(a, excludeAbilityGuids))
+                    rangedAttacks.Add(a);
+            }
+            rangedAttacks.Sort((x, y) => CombatAPI.GetAbilityAPCost(x).CompareTo(CombatAPI.GetAbilityAPCost(y)));
 
             if (rangedAttacks.Count == 0) return null;
 
@@ -692,28 +713,23 @@ namespace CompanionAI_v3.Planning.Planners
         {
             var primaryAttack = situation.PrimaryAttack;
 
+            // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
             if (primaryAttack != null)
             {
-                var oneHitKill = situation.HittableEnemies
-                    .Where(e => e != null && !e.LifeState.IsDead)
-                    .Where(e => CombatAPI.CanKillInOneHit(primaryAttack, e))
-                    .OrderBy(e => CombatAPI.GetActualHP(e))
-                    .FirstOrDefault();
+                var oneHitKill = CollectionHelper.MinByWhere(situation.HittableEnemies,
+                    e => !e.LifeState.IsDead && CombatAPI.CanKillInOneHit(primaryAttack, e),
+                    e => (float)CombatAPI.GetActualHP(e));
 
                 if (oneHitKill != null) return oneHitKill;
             }
 
-            var hittableLowHP = situation.HittableEnemies
-                .Where(e => e != null && !e.LifeState.IsDead)
-                .Where(e => CombatAPI.GetHPPercent(e) <= threshold)
-                .OrderBy(e => CombatAPI.GetActualHP(e))
-                .FirstOrDefault();
+            var hittableLowHP = CollectionHelper.MinByWhere(situation.HittableEnemies,
+                e => !e.LifeState.IsDead && CombatAPI.GetHPPercent(e) <= threshold,
+                e => (float)CombatAPI.GetActualHP(e));
 
-            return hittableLowHP ?? situation.Enemies
-                .Where(e => e != null && !e.LifeState.IsDead)
-                .Where(e => CombatAPI.GetHPPercent(e) <= threshold)
-                .OrderBy(e => CombatAPI.GetActualHP(e))
-                .FirstOrDefault();
+            return hittableLowHP ?? CollectionHelper.MinByWhere(situation.Enemies,
+                e => !e.LifeState.IsDead && CombatAPI.GetHPPercent(e) <= threshold,
+                e => (float)CombatAPI.GetActualHP(e));
         }
 
         /// <summary>
@@ -1004,6 +1020,103 @@ namespace CompanionAI_v3.Planning.Planners
             // ★ 자신을 타겟으로 하는 Buff 형태로 반환
             return PlannedAction.Buff(attack, caster,
                 $"Self-AoE attack hitting {adjacentEnemies} enemies", cost);
+        }
+
+        /// <summary>
+        /// ★ v3.8.50: 근접 AOE 공격 계획
+        /// 적을 직접 타겟하되, 패턴 내 추가 적을 최대화하는 타겟 선택
+        /// BladeDance(Self-Target)와 Point-Target AOE 사이의 데드존 해결
+        /// </summary>
+        public static PlannedAction PlanMeleeAoEAttack(
+            Situation situation,
+            ref float remainingAP,
+            string roleName)
+        {
+            if (situation?.AvailableAttacks == null || situation.Enemies == null)
+                return null;
+
+            var aoeConfig = AIConfig.GetAoEConfig();
+            int minEnemiesForAoE = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+            var caster = situation.Unit;
+
+            // 1. 근접 AOE 능력 찾기 (AvailableAttacks에서)
+            var meleeAoEAbilities = new List<AbilityData>();
+            for (int i = 0; i < situation.AvailableAttacks.Count; i++)
+            {
+                if (CombatAPI.IsMeleeAoEAbility(situation.AvailableAttacks[i]))
+                    meleeAoEAbilities.Add(situation.AvailableAttacks[i]);
+            }
+
+            // AvailableAttacks에서 없으면 전체 능력에서 재검색 (DangerousAoE 필터 우회)
+            if (meleeAoEAbilities.Count == 0)
+            {
+                var allAbilities = CombatAPI.GetAvailableAbilities(caster);
+                if (allAbilities != null)
+                {
+                    for (int i = 0; i < allAbilities.Count; i++)
+                    {
+                        if (CombatAPI.IsMeleeAoEAbility(allAbilities[i]))
+                            meleeAoEAbilities.Add(allAbilities[i]);
+                    }
+                }
+            }
+
+            if (meleeAoEAbilities.Count == 0) return null;
+
+            // 2. 각 능력에 대해 최적 타겟 평가
+            for (int abilityIdx = 0; abilityIdx < meleeAoEAbilities.Count; abilityIdx++)
+            {
+                var ability = meleeAoEAbilities[abilityIdx];
+                float cost = CombatAPI.GetAbilityAPCost(ability);
+                if (cost > remainingAP) continue;
+
+                // 3. Hittable 적 중 패턴 내 적 수가 최대인 타겟 선택
+                BaseUnitEntity bestTarget = null;
+                int bestEnemyCount = 0;
+
+                var hittableEnemies = situation.HittableEnemies ?? situation.Enemies;
+                for (int enemyIdx = 0; enemyIdx < hittableEnemies.Count; enemyIdx++)
+                {
+                    var enemy = hittableEnemies[enemyIdx];
+                    if (enemy == null) continue;
+                    try { if (enemy.LifeState?.IsDead == true) continue; } catch { }
+
+                    int enemies = CombatAPI.CountEnemiesInPattern(
+                        ability, enemy.Position, caster.Position, situation.Enemies);
+                    int allies = CombatAPI.CountAlliesInPattern(
+                        ability, enemy.Position, caster.Position, caster, situation.Allies);
+
+                    // 아군 안전 체크
+                    if (allies > aoeConfig.MeleeAoeMaxAdjacentAllies) continue;
+
+                    if (enemies > bestEnemyCount)
+                    {
+                        bestEnemyCount = enemies;
+                        bestTarget = enemy;
+                    }
+                }
+
+                // 4. 최소 적 수 충족 시 실행
+                if (bestTarget != null && bestEnemyCount >= minEnemiesForAoE)
+                {
+                    var targetWrapper = new TargetWrapper(bestTarget);
+                    string reason;
+                    if (!CombatAPI.CanUseAbilityOn(ability, targetWrapper, out reason))
+                    {
+                        Main.LogDebug($"[{roleName}] Melee AOE {ability.Name} blocked on {bestTarget.CharacterName}: {reason}");
+                        continue;
+                    }
+
+                    remainingAP -= cost;
+                    Main.Log($"[{roleName}] Melee AOE: {ability.Name} -> {bestTarget.CharacterName} " +
+                        $"(hitting {bestEnemyCount} enemies)");
+
+                    return PlannedAction.Attack(ability, bestTarget,
+                        $"Melee AOE hitting {bestEnemyCount} enemies", cost);
+                }
+            }
+
+            return null;
         }
 
         #endregion
