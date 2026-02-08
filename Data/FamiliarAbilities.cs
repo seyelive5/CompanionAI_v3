@@ -6,6 +6,8 @@ using Kingmaker.Enums;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.UnitLogic.Abilities.Blueprints;
 using Kingmaker.UnitLogic.Abilities.Components;
+using Kingmaker.UnitLogic.Mechanics.Actions;
+using Kingmaker.Mechanics.Actions;
 using CompanionAI_v3.GameInterface;
 
 namespace CompanionAI_v3.Data
@@ -423,20 +425,37 @@ namespace CompanionAI_v3.Data
 
         /// <summary>
         /// Reactivate 능력인지 확인 (사역마 부활)
-        /// TODO: GUID 확인 후 추가
+        /// ★ v3.8.59: GUID 우선 체크 + Blueprint 이름 폴백 (GUID 자동 등록)
         /// </summary>
+        private static string _reactivateGuid;
         public static bool IsReactivateAbility(AbilityData ability)
         {
             if (ability == null) return false;
 
             try
             {
+                string guid = AbilityDatabase.GetGuid(ability);
+
+                // GUID 캐시 히트
+                if (!string.IsNullOrEmpty(_reactivateGuid) && guid == _reactivateGuid)
+                    return true;
+
+                // Blueprint 이름으로 확인 후 GUID 자동 등록
                 string blueprintName = ability.Blueprint?.name;
                 if (string.IsNullOrEmpty(blueprintName)) return false;
 
-                // 정확한 BlueprintName 매칭
-                return blueprintName.Equals("Reactivate_Ability", StringComparison.OrdinalIgnoreCase) ||
-                       blueprintName.Equals("Pet_Reactivate_Ability", StringComparison.OrdinalIgnoreCase);
+                if (blueprintName.Equals("Reactivate_Ability", StringComparison.OrdinalIgnoreCase) ||
+                    blueprintName.Equals("Pet_Reactivate_Ability", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!string.IsNullOrEmpty(guid) && _reactivateGuid == null)
+                    {
+                        _reactivateGuid = guid;
+                        Main.LogDebug($"[FamiliarAbilities] Reactivate GUID registered: {guid}");
+                    }
+                    return true;
+                }
+
+                return false;
             }
             catch
             {
@@ -580,18 +599,34 @@ namespace CompanionAI_v3.Data
         /// <summary>
         /// Purification Discharge 능력인지 확인
         /// </summary>
+        /// ★ v3.8.59: GUID 우선 체크 + Blueprint 이름 폴백 (GUID 자동 등록)
+        private static string _purificationDischargeGuid;
         public static bool IsPurificationDischarge(AbilityData ability)
         {
             if (ability == null) return false;
 
             try
             {
+                string guid = AbilityDatabase.GetGuid(ability);
+
+                if (!string.IsNullOrEmpty(_purificationDischargeGuid) && guid == _purificationDischargeGuid)
+                    return true;
+
                 string blueprintName = ability.Blueprint?.name;
                 if (string.IsNullOrEmpty(blueprintName)) return false;
 
-                // 정확한 BlueprintName 매칭
-                return blueprintName.Equals("RavenPet_PurificationDischarge_Ability", StringComparison.OrdinalIgnoreCase) ||
-                       blueprintName.Equals("PurificationDischarge", StringComparison.OrdinalIgnoreCase);
+                if (blueprintName.Equals("RavenPet_PurificationDischarge_Ability", StringComparison.OrdinalIgnoreCase) ||
+                    blueprintName.Equals("PurificationDischarge", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!string.IsNullOrEmpty(guid) && _purificationDischargeGuid == null)
+                    {
+                        _purificationDischargeGuid = guid;
+                        Main.LogDebug($"[FamiliarAbilities] PurificationDischarge GUID registered: {guid}");
+                    }
+                    return true;
+                }
+
+                return false;
             }
             catch
             {
@@ -1005,14 +1040,9 @@ namespace CompanionAI_v3.Data
 
             try
             {
-                // GUID 체크
+                // ★ v3.8.59: GUID 전용 (string 폴백 제거)
                 string guid = AbilityDatabase.GetGuid(ability);
-                if (guid == "33aa1b047d084a9b8faf534767a3a534")
-                    return true;
-
-                // BlueprintName 체크
-                string bpName = ability.Blueprint?.name;
-                return bpName?.Equals("ServoskullPet_PrioritySignal_Ability", StringComparison.OrdinalIgnoreCase) ?? false;
+                return guid == "33aa1b047d084a9b8faf534767a3a534";
             }
             catch
             {
@@ -1029,14 +1059,9 @@ namespace CompanionAI_v3.Data
 
             try
             {
-                // GUID 체크
+                // ★ v3.8.59: GUID 전용 (string 폴백 제거)
                 string guid = AbilityDatabase.GetGuid(ability);
-                if (guid == "62eeb81743734fc5b8fac71b34b14683")
-                    return true;
-
-                // BlueprintName 체크
-                string bpName = ability.Blueprint?.name;
-                return bpName?.Equals("ServoskullPet_VitalitySignal_Ability", StringComparison.OrdinalIgnoreCase) ?? false;
+                return guid == "62eeb81743734fc5b8fac71b34b14683";
             }
             catch
             {
@@ -1294,28 +1319,14 @@ namespace CompanionAI_v3.Data
 
                 // ★ v3.8.05: 중첩된 컴포넌트 검색 (ContextActionDealDamage, ContextActionApplyDOT)
                 // AbilityEffectRunAction.Actions.Actions 내부를 재귀적으로 검색
-                var components = blueprint.ComponentsArray;
-                if (components != null)
+                // ★ v3.8.62: BlueprintCache 캐시 사용 (ComponentsArray 순회 제거)
+                var runAction = BlueprintCache.GetCachedRunAction(blueprint);
+                if (runAction?.Actions?.Actions != null)
                 {
-                    foreach (var component in components)
+                    if (ContainsDamageAction(runAction.Actions.Actions))
                     {
-                        if (component == null) continue;
-
-                        // AbilityEffectRunAction 컴포넌트에서 중첩된 Actions 검색
-                        var runAction = component as AbilityEffectRunAction;
-                        if (runAction?.Actions?.Actions != null)
-                        {
-                            if (ContainsDamageAction(runAction.Actions.Actions))
-                            {
-                                Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Detected as damage-dealing (ContextActionDealDamage found in Actions)");
-                                return true;
-                            }
-                        }
-
-                        // 최상위 컴포넌트 타입명 체크 (폴백)
-                        string typeName = component.GetType().Name;
-                        if (typeName.Contains("DealDamage") || typeName.Contains("DirectDamage"))
-                            return true;
+                        Main.LogDebug($"[FamiliarAbilities] {ability.Name}: Detected as damage-dealing (ContextActionDealDamage found in Actions)");
+                        return true;
                     }
                 }
 
@@ -1354,12 +1365,9 @@ namespace CompanionAI_v3.Data
             {
                 if (action == null) continue;
 
-                string typeName = action.GetType().Name;
-
-                // 직접 피해 액션
-                if (typeName == "ContextActionDealDamage" ||
-                    typeName == "ContextActionApplyDOT" ||
-                    typeName.Contains("DealDamage"))
+                // ★ v3.8.59: 타입 안전 체크 (string 매칭 제거)
+                if (action is ContextActionDealDamage ||
+                    action is ContextActionApplyDOT)
                 {
                     return true;
                 }
@@ -1490,18 +1498,33 @@ namespace CompanionAI_v3.Data
         /// <summary>
         /// 추가 턴 부여 능력인지 확인 (Extrapolation/Warp Relay 제외 대상)
         /// </summary>
+        /// ★ v3.8.59: GUID 우선 체크 + Blueprint 이름 폴백 (GUID 자동 등록)
+        private static string _extraTurnGuid;
         private static bool IsExtraTurnAbility(AbilityData ability)
         {
             if (ability == null) return false;
 
             try
             {
-                // BlueprintName으로 확인 (정확한 이름만)
+                string guid = AbilityDatabase.GetGuid(ability);
+
+                if (!string.IsNullOrEmpty(_extraTurnGuid) && guid == _extraTurnGuid)
+                    return true;
+
                 string blueprintName = ability.Blueprint?.name;
                 if (string.IsNullOrEmpty(blueprintName)) return false;
 
-                // 알려진 추가 턴 능력 (정확한 이름)
-                return blueprintName.Equals("BringItDown_ExtraTurn_Ability", StringComparison.OrdinalIgnoreCase);
+                if (blueprintName.Equals("BringItDown_ExtraTurn_Ability", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!string.IsNullOrEmpty(guid) && _extraTurnGuid == null)
+                    {
+                        _extraTurnGuid = guid;
+                        Main.LogDebug($"[FamiliarAbilities] ExtraTurn GUID registered: {guid}");
+                    }
+                    return true;
+                }
+
+                return false;
             }
             catch
             {

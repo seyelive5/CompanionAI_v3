@@ -285,7 +285,7 @@ namespace CompanionAI_v3.Data
             // ========================================
 
             // Endure - 방어 버프 (Deflection + Temporary Wounds)
-            { "4d2f2a839d2340388d45cf4cf66c947b", new AbilityInfo("4d2f2a839d2340388d45cf4cf66c947b", "Endure", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
+            { "4d2f2a839d2340388d45cf4cf66c947b", new AbilityInfo("4d2f2a839d2340388d45cf4cf66c947b", "Endure", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly | AbilityFlags.IsDefensiveStance) }, // ★ v3.8.61: HP 위급 시 방어 능력
 
             // ★ v3.6.6: Break Through - 베기(Slice) 4회 보너스 부여
             // PostFirstAction → PreAttackBuff로 변경: MP 회복 없이 보너스 공격만 부여하므로
@@ -917,7 +917,8 @@ namespace CompanionAI_v3.Data
                 bool hasDangerous = classData.HasDangerousEffect; // PsychicPhenomena, Death
 
                 bool hasWeapon = ability.Weapon != null;
-                bool hasMultiTarget = bp.GetComponent<AbilityMultiTarget>() != null;
+                // ★ v3.8.62: BlueprintCache 캐시 사용 (GetComponent O(n) → O(1))
+                bool hasMultiTarget = BlueprintCache.IsMultiTarget(ability);
 
                 // ═══════════════════════════════════════════════════════════════
                 // Phase 1: 게임 명시적 속성 (100% 신뢰)
@@ -967,7 +968,8 @@ namespace CompanionAI_v3.Data
                 if (hasMultiTarget)
                     return AbilityTiming.FamiliarOnly;
 
-                var runAction = bp.GetComponent<AbilityEffectRunAction>();
+                // ★ v3.8.62: BlueprintCache 캐시 사용 (GetComponent O(n) → O(1))
+                var runAction = BlueprintCache.GetCachedRunAction(bp);
                 if (runAction?.Actions?.Actions != null)
                 {
                     var actions = runAction.Actions.Actions;
@@ -1231,13 +1233,14 @@ namespace CompanionAI_v3.Data
                 var bp = ability.Blueprint;
                 if (bp == null) return false;
 
-                var runAction = bp.GetComponent<AbilityEffectRunAction>();
+                // ★ v3.8.62: BlueprintCache 캐시 사용 (GetComponent O(n) → O(1))
+                var runAction = BlueprintCache.GetCachedRunAction(bp);
                 if (runAction?.Actions?.Actions == null) return false;
 
                 foreach (var action in runAction.Actions.Actions)
                 {
-                    // ContextActionStartAdditionalTurn 타입 체크
-                    if (action?.GetType().Name == "ContextActionStartAdditionalTurn")
+                    // ★ v3.8.59: 타입 안전 체크 (string 매칭 제거)
+                    if (action is ContextActionStartAdditionalTurn)
                     {
                         Main.LogDebug($"[AbilityDB] IsTurnGrantAbility: {ability.Name} has ContextActionStartAdditionalTurn");
                         return true;
@@ -1275,7 +1278,8 @@ namespace CompanionAI_v3.Data
                     try
                     {
                         // AC/Dodge 보너스를 주는 능력은 방어 태세
-                        var contextActions = bp.GetComponent<AbilityEffectRunAction>();
+                        // ★ v3.8.62: BlueprintCache 캐시 사용
+                        var contextActions = BlueprintCache.GetCachedRunAction(bp);
                         if (contextActions?.Actions?.Actions != null)
                         {
                             foreach (var action in contextActions.Actions.Actions)
@@ -1288,7 +1292,7 @@ namespace CompanionAI_v3.Data
                             }
                         }
                     }
-                    catch { }
+                    catch (Exception ex) { Main.LogDebug($"[AbilityDB] {ex.Message}"); }
                 }
             }
 
@@ -1318,14 +1322,10 @@ namespace CompanionAI_v3.Data
             catch { return false; }
         }
 
+        /// ★ v3.8.61: String 폴백 제거 — GUID 전용 (RevelInSlaughter_Soldier 등록 확인됨)
         public static bool IsRighteousFury(AbilityData ability)
         {
-            if (GetTiming(ability) == AbilityTiming.RighteousFury)
-                return true;
-
-            // 이름 기반 폴백
-            string bpName = ability?.Blueprint?.name?.ToLower() ?? "";
-            return bpName.Contains("revelinslaughter") || bpName.Contains("righteousfury");
+            return GetTiming(ability) == AbilityTiming.RighteousFury;
         }
 
         public static bool IsDOTIntensify(AbilityData ability)
@@ -1347,17 +1347,29 @@ namespace CompanionAI_v3.Data
             return GetTiming(ability) == AbilityTiming.Marker;
         }
 
+        /// ★ v3.8.61: String 폴백 제거 — GUID HashSet 전용
+        private static readonly HashSet<string> MedikitGUIDs = new HashSet<string>
+        {
+            "083d5280759b4ed3a2d0b61254653273", // Medikit
+            "b6e3c9398ea94c75afdbf61633ce2f85", // Medikit_BattleMedic
+            "dd2e9a6170b448d4b2ec5a7fe0321e65", // CombatStimMedikit
+            "ededbc48a7f24738a0fdb708fc48bb4c", // MedicMedikit
+            "1359b77cf6714555895e2d3577f6f9b9", // GladiatorHealKit
+            "48ac9afb9b6d4caf8d488ea85d3d60ac", // SkinPatch
+            "2e9a23383b574408b4acdf6b62f6ed9b", // LabourerMedikit
+            "2081944e0fd8481e84c30ec03cfdc04e", // ProperCare
+            "d722bfac662c40f9b2a47dc6ea70d00a", // LargeMedikit
+            "0a88bfaa16ff41ea847ea14f58b384da", // TraumaCare
+            "6aa84dbf3a3d4ae4a50db8425dc9e62e", // BasicMedikit
+            "12e98698daeb44748efed608fedc4645", // ExtendedMedikit
+            "c888846cba094af0a56f7036e3fc0854", // BlastMedikit
+            "7218ef4b24b04fe89ab460f960c0b769", // Medikit_Argenta
+        };
+
         public static bool IsMedikit(AbilityData ability)
         {
-            var info = GetInfo(ability);
-            if (info != null && info.Timing == AbilityTiming.Healing &&
-                (info.Flags & AbilityFlags.IsConsumable) != 0)
-            {
-                return true;
-            }
-
-            string name = ability?.Blueprint?.name?.ToLower() ?? "";
-            return name.Contains("medikit");
+            string guid = GetGuid(ability);
+            return !string.IsNullOrEmpty(guid) && MedikitGUIDs.Contains(guid);
         }
 
         public static float GetHPThreshold(AbilityData ability)
@@ -1398,7 +1410,7 @@ namespace CompanionAI_v3.Data
                 float radius = blueprint.AoERadius;
                 if (radius > 0) return true;
             }
-            catch { }
+            catch (Exception ex) { Main.LogDebug($"[AbilityDB] {ex.Message}"); }
 
             return false;
         }
@@ -1419,7 +1431,7 @@ namespace CompanionAI_v3.Data
                 if (ability?.Blueprint?.AbilityParamsSource == WarhammerAbilityParamsSource.PsychicPower)
                     return true;
             }
-            catch { }
+            catch (Exception ex) { Main.LogDebug($"[AbilityDB] {ex.Message}"); }
 
             // ★ v3.5.74: 문자열 기반 폴백 제거 - 게임 API만 신뢰
             return false;

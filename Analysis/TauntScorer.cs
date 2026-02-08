@@ -432,7 +432,7 @@ namespace CompanionAI_v3.Analysis
                 if (ally == null || !ally.IsConscious) continue;
 
                 // 범위 체크 (Tank에서 아군까지 거리)
-                float distToAllyTiles = CombatAPI.MetersToTiles(Vector3.Distance(tank.Position, ally.Position));
+                float distToAllyTiles = CombatCache.GetDistanceInTiles(tank, ally);
                 if (distToAllyTiles > tauntRange)
                 {
                     Main.LogDebug($"[TauntScorer] AllyTarget: {ally.CharacterName} out of range ({distToAllyTiles:F1} > {tauntRange:F1} tiles)");
@@ -447,7 +447,7 @@ namespace CompanionAI_v3.Analysis
                 {
                     if (enemy == null || !enemy.IsConscious) continue;
 
-                    float distToAlly = CombatAPI.MetersToTiles(Vector3.Distance(ally.Position, enemy.Position));
+                    float distToAlly = CombatCache.GetDistanceInTiles(ally, enemy);
                     if (distToAlly <= aoERadius)
                     {
                         nearbyEnemies.Add(enemy);
@@ -470,11 +470,11 @@ namespace CompanionAI_v3.Analysis
                 // - HP 낮은 아군 보너스 (최대 50점)
                 float score = targetingAlliesCount * WEIGHT_ENEMY_TARGETING_ALLY;
                 score += (nearbyEnemies.Count - targetingAlliesCount) * WEIGHT_ENEMY_HIT;
-                score += (1f - CombatAPI.GetHPPercent(ally)) * 50f;  // HP 0%면 50점 추가
+                score += (1f - CombatCache.GetHPPercent(ally)) * 50f;  // HP 0%면 50점 추가
 
                 Main.LogDebug($"[TauntScorer] AllyTarget: {ally.CharacterName} - " +
                     $"enemies={nearbyEnemies.Count}, targetingAllies={targetingAlliesCount}, " +
-                    $"HP={CombatAPI.GetHPPercent(ally):P0}, score={score:F0}");
+                    $"HP={CombatCache.GetHPPercent(ally):P0}, score={score:F0}");
 
                 if (score > bestScore)
                 {

@@ -211,7 +211,7 @@ namespace CompanionAI_v3.Execution
                 _targetSnapshots[targetId] = new TargetSnapshot
                 {
                     Target = targetEntity,
-                    HPBefore = CombatAPI.GetHPPercent(targetEntity),
+                    HPBefore = CombatCache.GetHPPercent(targetEntity),
                     WasAlive = !targetEntity.LifeState.IsDead
                 };
 

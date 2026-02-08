@@ -21,7 +21,7 @@ namespace CompanionAI_v3.Analysis
         #region Constants
 
         /// <summary>★ v3.6.3: 그리드 셀 크기 - GridCellSize와 통일 (1.35m = 1타일)</summary>
-        private const float CELL_SIZE = 1.35f;  // CombatAPI.GridCellSize
+        private static readonly float CELL_SIZE = CombatAPI.GridCellSize;
 
         /// <summary>영향력 최대 거리 (미터)</summary>
         private const float MAX_INFLUENCE_DISTANCE = 20.0f;
@@ -482,7 +482,7 @@ namespace CompanionAI_v3.Analysis
                 foreach (var enemy in _enemies)
                 {
                     if (enemy == null) continue;
-                    float dist = Vector3.Distance(ally.Position, enemy.Position);
+                    float dist = CombatCache.GetDistance(ally, enemy);
                     if (dist < nearestDist)
                     {
                         nearestDist = dist;
@@ -596,7 +596,7 @@ namespace CompanionAI_v3.Analysis
                 float baseThreat = 1.0f;
 
                 // HP 비율에 따른 위협도 (죽어가는 적은 덜 위협적)
-                float hpPercent = CombatAPI.GetHPPercent(enemy);
+                float hpPercent = CombatCache.GetHPPercent(enemy);
                 float hpFactor = hpPercent / 100f;
                 baseThreat *= (0.5f + 0.5f * hpFactor);
 
@@ -624,7 +624,7 @@ namespace CompanionAI_v3.Analysis
                 float baseStrength = 1.0f;
 
                 // HP 비율에 따른 통제력
-                float hpPercent = CombatAPI.GetHPPercent(ally);
+                float hpPercent = CombatCache.GetHPPercent(ally);
                 float hpFactor = hpPercent / 100f;
                 baseStrength *= (0.3f + 0.7f * hpFactor);
 

@@ -201,7 +201,7 @@ namespace CompanionAI_v3.Planning.Planners
                 float score = 0f;
 
                 // HP가 높은 아군 우선 (생존 가능성)
-                float hpPercent = CombatAPI.GetHPPercent(ally);
+                float hpPercent = CombatCache.GetHPPercent(ally);
                 score += hpPercent;
 
                 // DPS 역할 우선 (추가 턴의 가치 극대화)
@@ -472,12 +472,12 @@ namespace CompanionAI_v3.Planning.Planners
 
                 // 주변 적 수 계산 (반경 3m 내)
                 int nearbyEnemies = situation.Enemies?.Count(e =>
-                    e.IsConscious && Vector3.Distance(ally.Position, e.Position) <= 4.5f) ?? 0;
+                    e.IsConscious && CombatCache.GetDistance(ally, e) <= 4.5f) ?? 0;
 
                 score += nearbyEnemies * 50f;  // 적 1명당 50점
 
                 // HP 비율 낮을수록 높은 점수
-                float hpPercent = CombatAPI.GetHPPercent(ally);
+                float hpPercent = CombatCache.GetHPPercent(ally);
                 score += (1f - hpPercent) * 100f;  // HP 0%면 100점 추가
 
                 // 탱크가 아닌 캐릭터 우선 (딜러/서포터 보호)
@@ -814,7 +814,7 @@ namespace CompanionAI_v3.Planning.Planners
                     if (t1 == null || t2 == null || !t1.IsConscious || !t2.IsConscious) continue;
 
                     // ★ v3.5.98: 두 타겟이 너무 멀면 중간점 스킵 (타일 단위)
-                    if (CombatAPI.MetersToTiles(Vector3.Distance(t1.Position, t2.Position)) > radius * 2) continue;
+                    if (CombatCache.GetDistanceInTiles(t1, t2) > radius * 2) continue;
 
                     Vector3 midpoint = (t1.Position + t2.Position) / 2f;
                     var (count, score) = EvaluateCoverageAt(midpoint, targets, radius);
@@ -996,7 +996,7 @@ namespace CompanionAI_v3.Planning.Planners
                             if (distTiles <= zoneRadiusTiles)
                             {
                                 allyCount++;
-                                if (CombatAPI.GetHPPercent(ally) < 50f)
+                                if (CombatCache.GetHPPercent(ally) < 50f)
                                     lowHPAllyCount++;
                             }
                         }
@@ -1192,11 +1192,11 @@ namespace CompanionAI_v3.Planning.Planners
         {
             if (ability == null) return false;
 
-            // ★ v3.5.75: 통합 API 사용
+            // ★ v3.8.61: String 매칭 제거 → AbilityDatabase API 전용
+            // "heal" → IsHealing(), "endure" → IsDefensiveStance (Endure에 플래그 추가됨)
             if (situation.IsHPCritical)
             {
-                string bpName = ability.Blueprint?.name?.ToLower() ?? "";
-                if (bpName.Contains("heal") || bpName.Contains("endure") ||
+                if (AbilityDatabase.IsHealing(ability) ||
                     AbilityDatabase.IsDefensiveStance(ability))
                     return true;
             }

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Kingmaker.Designers.Mechanics.Facts;
+using Kingmaker.Designers.Mechanics.Facts.Damage;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Utility;
@@ -357,7 +359,8 @@ namespace CompanionAI_v3.Analysis
 
             try
             {
-                // 1. Blueprint 컴포넌트에서 데미지 증가 효과 분석 시도
+                // ★ v3.8.60: 타입 안전 체크 (string 매칭 제거)
+                // 게임 디컴파일에서 확인된 실제 타입으로 직접 비교
                 var components = buff.Blueprint.ComponentsArray;
                 if (components != null)
                 {
@@ -365,28 +368,20 @@ namespace CompanionAI_v3.Analysis
                     {
                         if (component == null) continue;
 
-                        string typeName = component.GetType().Name;
-
-                        // 데미지 보너스 컴포넌트 감지
-                        if (typeName.Contains("DamageBonus") || typeName.Contains("AddOutgoingDamageBonus"))
+                        // 데미지 수정/보너스 컴포넌트 (WarhammerDamageModifier 추상 베이스 → 3개 구현체 모두 매칭)
+                        if (component is WarhammerDamageModifier ||
+                            component is WarhammerDamageBonusAgainstSize ||
+                            component is WarhammerModifyOutgoingAttackDamage)
                         {
-                            // 보수적으로 30% 증가로 가정
-                            Main.LogDebug($"[KillSimulator] Found damage bonus component: {typeName}");
+                            Main.LogDebug($"[KillSimulator] Found damage bonus component: {component.GetType().Name}");
                             return 1.3f;
                         }
 
-                        // 추가 공격 컴포넌트 감지
-                        if (typeName.Contains("ExtraAttack") || typeName.Contains("AdditionalAttack"))
+                        // 크리티컬 데미지 수정 컴포넌트 (추상 베이스 → Initiator/Target/Global 모두 매칭)
+                        if (component is WarhammerCriticalDamageModifier)
                         {
-                            Main.LogDebug($"[KillSimulator] Found extra attack component: {typeName}");
-                            return 1.5f;  // 추가 공격은 50% 증가로 추정
-                        }
-
-                        // 크리티컬 보너스 컴포넌트 감지
-                        if (typeName.Contains("CriticalBonus") || typeName.Contains("CriticalChance"))
-                        {
-                            Main.LogDebug($"[KillSimulator] Found critical bonus component: {typeName}");
-                            return 1.2f;  // 크리티컬 보너스는 20% 증가로 추정
+                            Main.LogDebug($"[KillSimulator] Found critical bonus component: {component.GetType().Name}");
+                            return 1.2f;
                         }
                     }
                 }

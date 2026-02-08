@@ -231,8 +231,8 @@ namespace CompanionAI_v3.GameInterface
 
             // ★ v3.7.50: 게임처럼 경로 너비 2타일 (이동 + 양옆 1타일)
             // 실제 게임은 노드 점유로 판정하지만, 간소화를 위해 넓은 히트박스 사용
-            const float TILE_SIZE = 1.35f;
-            const float PATH_WIDTH = TILE_SIZE * 2f;  // 경로 너비 = 2타일
+            float TILE_SIZE = CombatAPI.GridCellSize;
+            float PATH_WIDTH = TILE_SIZE * 2f;  // 경로 너비 = 2타일
 
             foreach (var enemy in enemies)
             {
@@ -822,7 +822,7 @@ namespace CompanionAI_v3.GameInterface
             Vector3 masterPos = (Vector3)masterNode.Vector3Position;
             float baseY = eaglePos.y;
 
-            const float TILE_SIZE = 1.35f;
+            float TILE_SIZE = CombatAPI.GridCellSize;
             const float MAX_HEIGHT_DIFF = 2.5f;
 
             Main.LogDebug($"[PointTargetingHelper] FindBestPath: Master at ({masterPos.x:F1},{masterPos.z:F1}), " +

@@ -152,7 +152,7 @@ namespace CompanionAI_v3.GameInterface
         /// 4타일 반경을 미터로 변환
         /// </summary>
         public const float FAMILIAR_EFFECT_RADIUS_TILES = 4f;
-        public const float FAMILIAR_EFFECT_RADIUS_METERS = 4f * 1.35f;  // 약 5.4m
+        public static readonly float FAMILIAR_EFFECT_RADIUS_METERS = 4f * CombatAPI.GridCellSize;  // 약 5.4m
 
         /// <summary>
         /// 지정 위치에서 반경 내 아군 수 계산
@@ -161,7 +161,7 @@ namespace CompanionAI_v3.GameInterface
         {
             if (allies == null) return 0;
 
-            float radiusMeters = radiusTiles * 1.35f;  // 타일 → 미터 변환
+            float radiusMeters = radiusTiles * CombatAPI.GridCellSize;  // 타일 → 미터 변환
             int count = 0;
 
             foreach (var ally in allies)
@@ -184,7 +184,7 @@ namespace CompanionAI_v3.GameInterface
         {
             if (enemies == null) return 0;
 
-            float radiusMeters = radiusTiles * 1.35f;
+            float radiusMeters = radiusTiles * CombatAPI.GridCellSize;
             int count = 0;
 
             foreach (var enemy in enemies)
@@ -207,7 +207,7 @@ namespace CompanionAI_v3.GameInterface
             var result = new List<BaseUnitEntity>();
             if (allies == null) return result;
 
-            float radiusMeters = radiusTiles * 1.35f;
+            float radiusMeters = radiusTiles * CombatAPI.GridCellSize;
 
             foreach (var ally in allies)
             {
@@ -230,7 +230,7 @@ namespace CompanionAI_v3.GameInterface
             var result = new List<BaseUnitEntity>();
             if (enemies == null) return result;
 
-            float radiusMeters = radiusTiles * 1.35f;
+            float radiusMeters = radiusTiles * CombatAPI.GridCellSize;
 
             foreach (var enemy in enemies)
             {

@@ -13,6 +13,7 @@ namespace CompanionAI_v3.GameInterface
     /// 성능 최적화 목적:
     /// - 거리 캐시: 유닛 쌍별 거리 (같은 턴 내 위치 불변) - 94% 히트율
     /// - 타겟팅 캐시: 능력-타겟 쌍별 사용 가능 여부 - 46-82% 히트율
+    /// - HP% 캐시: 유닛별 HP 비율 (같은 계획 사이클 내 불변) ★ v3.8.60
     ///
     /// 캐시 생명주기:
     /// - ClearAll(): 턴 시작 시 전체 캐시 클리어
@@ -87,6 +88,41 @@ namespace CompanionAI_v3.GameInterface
 
         #endregion
 
+        #region HP Percent Cache
+
+        /// <summary>
+        /// ★ v3.8.60: HP% 캐시: unit_id → HP percent (0-100)
+        /// 같은 계획 사이클 내 동일 유닛의 HP를 반복 조회하지 않음
+        /// 150-200회/턴 → 캐시 히트로 property 접근 제거
+        /// </summary>
+        private static readonly Dictionary<string, float> _hpPercentCache = new Dictionary<string, float>();
+
+        /// <summary>캐시 통계</summary>
+        public static int HPHits { get; private set; }
+        public static int HPMisses { get; private set; }
+
+        /// <summary>
+        /// ★ v3.8.60: 캐시된 HP% 반환
+        /// </summary>
+        public static float GetHPPercent(BaseUnitEntity unit)
+        {
+            if (unit == null) return 0f;
+
+            string key = unit.UniqueId;
+            if (_hpPercentCache.TryGetValue(key, out float cached))
+            {
+                HPHits++;
+                return cached;
+            }
+
+            HPMisses++;
+            float hp = CombatAPI.GetHPPercent(unit);
+            _hpPercentCache[key] = hp;
+            return hp;
+        }
+
+        #endregion
+
         #region Targeting Cache
 
         /// <summary>
@@ -142,12 +178,14 @@ namespace CompanionAI_v3.GameInterface
         {
             int distCount = _distanceCache.Count;
             int targetCount = _targetingCache.Count;
+            int hpCount = _hpPercentCache.Count;
 
             _distanceCache.Clear();
             _targetingCache.Clear();
+            _hpPercentCache.Clear();
 
             // 통계 로깅 (이전 턴의 캐시 효율)
-            if (DistanceHits + DistanceMisses > 0 || TargetingHits + TargetingMisses > 0)
+            if (DistanceHits + DistanceMisses > 0 || TargetingHits + TargetingMisses > 0 || HPHits + HPMisses > 0)
             {
                 float distHitRate = DistanceHits + DistanceMisses > 0
                     ? (float)DistanceHits / (DistanceHits + DistanceMisses) * 100f
@@ -155,9 +193,13 @@ namespace CompanionAI_v3.GameInterface
                 float targetHitRate = TargetingHits + TargetingMisses > 0
                     ? (float)TargetingHits / (TargetingHits + TargetingMisses) * 100f
                     : 0f;
+                float hpHitRate = HPHits + HPMisses > 0
+                    ? (float)HPHits / (HPHits + HPMisses) * 100f
+                    : 0f;
 
                 Main.LogDebug($"[CombatCache] Cleared: Distance({distCount}, {distHitRate:F0}%), " +
-                             $"Targeting({targetCount}, {targetHitRate:F0}%)");
+                             $"Targeting({targetCount}, {targetHitRate:F0}%), " +
+                             $"HP({hpCount}, {hpHitRate:F0}%)");
             }
 
             ResetStats();
@@ -205,10 +247,13 @@ namespace CompanionAI_v3.GameInterface
                 invalidatedTarget++;
             }
 
+            // ★ v3.8.60: HP 캐시도 무효화 (데미지/힐 후 HP 변경)
+            _hpPercentCache.Remove(targetId);
+
             if (invalidatedDist > 0 || invalidatedTarget > 0)
             {
                 Main.LogDebug($"[CombatCache] Invalidated for {target.CharacterName}: " +
-                             $"Distance={invalidatedDist}, Targeting={invalidatedTarget}");
+                             $"Distance={invalidatedDist}, Targeting={invalidatedTarget}, HP=1");
             }
         }
 
@@ -258,6 +303,8 @@ namespace CompanionAI_v3.GameInterface
             DistanceMisses = 0;
             TargetingHits = 0;
             TargetingMisses = 0;
+            HPHits = 0;
+            HPMisses = 0;
         }
 
         #endregion
@@ -276,8 +323,13 @@ namespace CompanionAI_v3.GameInterface
                 ? (float)TargetingHits / (TargetingHits + TargetingMisses) * 100f
                 : 0f;
 
+            float hpHitRate = HPHits + HPMisses > 0
+                ? (float)HPHits / (HPHits + HPMisses) * 100f
+                : 0f;
+
             return $"Distance: {_distanceCache.Count} ({distHitRate:F0}%), " +
-                   $"Targeting: {_targetingCache.Count} ({targetHitRate:F0}%)";
+                   $"Targeting: {_targetingCache.Count} ({targetHitRate:F0}%), " +
+                   $"HP: {_hpPercentCache.Count} ({hpHitRate:F0}%)";
         }
 
         #endregion

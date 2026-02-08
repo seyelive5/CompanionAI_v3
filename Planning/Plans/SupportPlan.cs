@@ -206,7 +206,7 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             var woundedAlly = TeamBlackboard.Instance.GetMostWoundedAlly();
-            if (woundedAlly == null || CombatAPI.GetHPPercent(woundedAlly) >= 80f)
+            if (woundedAlly == null || CombatCache.GetHPPercent(woundedAlly) >= 80f)
             {
                 woundedAlly = FindWoundedAlly(situation, healThreshold);  // Confidence 기반 임계값
             }
@@ -222,7 +222,7 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.1.17: Phase 2.5 - AOE 힐 (부상 아군 2명 이상)
             var woundedAlliesForAoe = situation.Allies
                 .Where(a => a != null && a.IsConscious)
-                .Where(a => CombatAPI.GetHPPercent(a) < 70f)
+                .Where(a => CombatCache.GetHPPercent(a) < 70f)
                 .ToList();
 
             if (woundedAlliesForAoe.Count >= 2)
@@ -801,16 +801,12 @@ namespace CompanionAI_v3.Planning.Plans
                     float cost = CombatAPI.GetAbilityAPCost(attack);
                     if (cost > remainingAP) continue;
 
-                    // ★ v3.6.3: AoE 아군 피해 체크 (타일 단위로 수정)
+                    // ★ v3.8.64: AoESafetyChecker 통합 (간이 3타일 체크 → 게임 기반 스캐터 패턴)
                     if (attack.Blueprint?.CanTargetFriends == true)
                     {
-                        bool allyNearTarget = situation.Allies.Any(ally =>
-                            ally != null && !ally.LifeState.IsDead &&
-                            CombatCache.GetDistanceInTiles(ally, target) < 3f);  // 3타일 ≈ 4m
-
-                        if (allyNearTarget)
+                        if (!AoESafetyChecker.IsAoESafeForUnitTarget(attack, situation.Unit, target, situation.Allies))
                         {
-                            Main.LogDebug($"[Support] Fallback: Skipping {attack.Name} - ally near target");
+                            Main.LogDebug($"[Support] Fallback: Skipping {attack.Name} - ally in scatter zone");
                             continue;
                         }
                     }

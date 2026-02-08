@@ -19,7 +19,7 @@ namespace CompanionAI_v3.Analysis
         #region Constants
 
         /// <summary>★ v3.6.3: 그리드 셀 크기 - GridCellSize와 통일 (1.35m = 1타일)</summary>
-        private const float CELL_SIZE = 1.35f;  // CombatAPI.GridCellSize
+        private static readonly float CELL_SIZE = CombatAPI.GridCellSize;
 
         /// <summary>예측 위협 최대 거리</summary>
         private const float MAX_PREDICTION_DISTANCE = 25f;
@@ -257,7 +257,7 @@ namespace CompanionAI_v3.Analysis
             try
             {
                 // HP 비율 기반 위협 (살아있을수록 위험)
-                float hpPercent = CombatAPI.GetHPPercent(enemy) / 100f;
+                float hpPercent = CombatCache.GetHPPercent(enemy) / 100f;
 
                 // 기본 위협 1.0, HP에 따라 0.5-1.5 범위
                 return 0.5f + hpPercent;

@@ -1071,7 +1071,7 @@ namespace CompanionAI_v3.Planning.Plans
             float bestScore = float.MinValue;
             int bestEnemies = 0;
 
-            const float TILE_SIZE = 1.35f;
+            float TILE_SIZE = CombatAPI.GridCellSize;
             int searchRadius = Math.Min((int)(maxRange / TILE_SIZE), 15); // 최대 15타일 반경 검색
             Vector3 unitPos = situation.Unit.Position;
             BaseUnitEntity familiar = raven;

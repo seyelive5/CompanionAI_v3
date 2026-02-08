@@ -342,7 +342,7 @@ namespace CompanionAI_v3.Analysis
             return enemies.Count(e =>
                 e != seed &&
                 !assigned.Contains(e) &&
-                CombatAPI.MetersToTiles(Vector3.Distance(seed.Position, e.Position)) <= radius &&
+                CombatCache.GetDistanceInTiles(seed, e) <= radius &&
                 Mathf.Abs(seed.Position.y - e.Position.y) <= CombatAPI.AoELevelDiffCircle);  // 높이 체크
         }
 

@@ -103,7 +103,7 @@ namespace CompanionAI_v3.Analysis
 
         private void AnalyzeUnitState(Situation situation, BaseUnitEntity unit, TurnState turnState)
         {
-            situation.HPPercent = CombatAPI.GetHPPercent(unit);
+            situation.HPPercent = CombatCache.GetHPPercent(unit);
             // ★ v3.0.10: Commands.Empty 체크로 게임 상태가 완전히 업데이트된 후 분석됨
             // 따라서 게임 API 값을 직접 사용 (TurnState 값은 참조용)
             situation.CurrentAP = CombatAPI.GetCurrentAP(unit);
@@ -153,7 +153,7 @@ namespace CompanionAI_v3.Analysis
             // 가장 부상당한 아군
             situation.MostWoundedAlly = CollectionHelper.MinByWhere(situation.Allies,
                 a => !a.LifeState.IsDead && a != unit,
-                a => CombatAPI.GetHPPercent(a));
+                a => CombatCache.GetHPPercent(a));
 
             // ★ v3.1.25: 위협 분석 (아군 타겟팅 적)
             AnalyzeThreats(situation, unit);
@@ -599,7 +599,8 @@ namespace CompanionAI_v3.Analysis
                     case AbilityTiming.PositionalBuff:
                         // ★ v3.7.30: AbilityMultiTarget 컴포넌트가 있으면 제외 (실명 공격 — 활공 등)
                         // MultiTarget 능력은 FamiliarAbilities에서만 처리됨
-                        if (ability.Blueprint?.GetComponent<AbilityMultiTarget>() != null)
+                        // ★ v3.8.62: BlueprintCache 캐시 사용 (GetComponent O(n) → O(1))
+                        if (Data.BlueprintCache.IsMultiTarget(ability))
                         {
                             Main.LogDebug($"[Analyzer] Excluded MultiTarget from PositionalBuff: {ability.Name}");
                             break;
@@ -668,7 +669,8 @@ namespace CompanionAI_v3.Analysis
                     case AbilityTiming.GapCloser:
                         // ★ v3.7.29: AbilityMultiTarget 컴포넌트가 있으면 제외 (GUID 매칭보다 확실)
                         // MultiTarget 능력은 FamiliarAbilities에서만 처리됨
-                        if (ability.Blueprint?.GetComponent<AbilityMultiTarget>() != null)
+                        // ★ v3.8.62: BlueprintCache 캐시 사용
+                        if (Data.BlueprintCache.IsMultiTarget(ability))
                         {
                             Main.LogDebug($"[Analyzer] Excluded MultiTarget ability (component): {ability.Name}");
                             break;
@@ -703,7 +705,8 @@ namespace CompanionAI_v3.Analysis
                         if (IsAttackAbility(ability, situation.RangePreference))
                         {
                             // ★ v3.7.29: MultiTarget 능력은 제외 (단일 타겟 경로로 계획되면 예외 발생)
-                            if (ability.Blueprint?.GetComponent<AbilityMultiTarget>() != null)
+                            // ★ v3.8.62: BlueprintCache 캐시 사용
+                            if (Data.BlueprintCache.IsMultiTarget(ability))
                             {
                                 Main.LogDebug($"[Analyzer] Excluded MultiTarget from default attacks: {ability.Name}");
                                 break;
@@ -879,7 +882,7 @@ namespace CompanionAI_v3.Analysis
                 {
                     // 타일 → 미터 변환 (1 타일 ≈ 1.35m)
                     int rangeTiles = GameInterface.CombatAPI.GetAbilityRangeInTiles(relocateAbility);
-                    relocateRangeMeters = rangeTiles * 1.35f;
+                    relocateRangeMeters = rangeTiles * CombatAPI.GridCellSize;
                     Main.LogDebug($"[Analyzer] Relocate range: {rangeTiles} tiles ({relocateRangeMeters:F1}m)");
                 }
 
@@ -987,7 +990,7 @@ namespace CompanionAI_v3.Analysis
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex) { Main.LogDebug($"[Analyzer] {ex.Message}"); }
             }
 
             // 무기 공격

@@ -52,7 +52,7 @@ namespace CompanionAI_v3.Planning.Planners
             // 우선순위: SharedTarget > BestTarget > NearestEnemy
             var tacticalTarget = GetTacticalMoveTarget(situation);
             float tacticalTargetDistance = tacticalTarget != null
-                ? Vector3.Distance(situation.Unit.Position, tacticalTarget.Position)
+                ? CombatCache.GetDistance(situation.Unit, tacticalTarget)
                 : situation.NearestEnemyDistance;
 
             // ★ v3.5.19: Main.Log로 변경하여 검증 가능하게
@@ -121,7 +121,8 @@ namespace CompanionAI_v3.Planning.Planners
             var gapClosers = situation.AvailableAttacks
                 .Where(a => AbilityDatabase.IsGapCloser(a))
                 // ★ v3.7.27: MultiTarget 능력 이중 체크 (컴포넌트 + 명시적 제외)
-                .Where(a => a.Blueprint.GetComponent<AbilityMultiTarget>() == null)
+                // ★ v3.8.62: BlueprintCache 캐시 사용 (GetComponent O(n) → O(1))
+                .Where(a => !BlueprintCache.IsMultiTarget(a))
                 .Where(a => !FamiliarAbilities.IsMultiTargetFamiliarAbility(a))
                 .ToList();
 
@@ -289,7 +290,7 @@ namespace CompanionAI_v3.Planning.Planners
             Main.LogDebug($"[MovementPlanner] FindGapCloserLanding: ability={gapCloserAbility.Name}, range={abilityRange:F1} tiles");
 
             // ★ v3.5.98: 타일 단위로 변환
-            float targetDistance = CombatAPI.MetersToTiles(Vector3.Distance(unit.Position, target.Position));
+            float targetDistance = CombatCache.GetDistanceInTiles(unit, target);
 
             // ★ v3.5.98: 적이 너무 멀면 갭클로저 사용 안 함
             float meleeAttackRange = 2f;  // 타일
@@ -588,7 +589,7 @@ namespace CompanionAI_v3.Planning.Planners
                             meleeRange = attackRange;
                     }
                 }
-                catch { }
+                catch (Exception ex) { Main.LogDebug($"[MovePlanner] {ex.Message}"); }
 
                 // ★ v3.1.01: predictedMP 전달
                 // ★ v3.2.00: influenceMap 전달
@@ -1014,7 +1015,7 @@ namespace CompanionAI_v3.Planning.Planners
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { Main.LogDebug($"[MovePlanner] {ex.Message}"); }
             return weaponRange;
         }
 

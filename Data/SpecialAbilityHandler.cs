@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Code.Enums;
+using Kingmaker.Blueprints;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Abilities;
+using Kingmaker.UnitLogic.Abilities.Components;
+using Kingmaker.UnitLogic.Buffs.Components;
 using UnityEngine;
 
 namespace CompanionAI_v3.Data
@@ -121,35 +125,16 @@ namespace CompanionAI_v3.Data
         /// <summary>
         /// 능력의 특수 타입 가져오기
         /// </summary>
+        /// ★ v3.8.60: String 폴백 제거 — GUID 전용
         public static SpecialAbilityType GetSpecialType(AbilityData ability)
         {
             if (ability == null) return SpecialAbilityType.None;
 
             string guid = AbilityDatabase.GetGuid(ability);
+            if (string.IsNullOrEmpty(guid)) return SpecialAbilityType.None;
 
-            // GUID 기반 우선 확인
-            if (!string.IsNullOrEmpty(guid))
-            {
-                if (DOTIntensifyAbilities.Contains(guid)) return SpecialAbilityType.DOTIntensify;
-                if (ChainEffectAbilities.Contains(guid)) return SpecialAbilityType.ChainEffect;
-            }
-
-            // 블루프린트 이름 기반 폴백 감지
-            string bpName = ability.Blueprint?.name?.ToLower() ?? "";
-
-            if (bpName.Contains("symphony") || bpName.Contains("intensify") ||
-                bpName.Contains("교향곡") || bpName.Contains("강화"))
-            {
-                if (ContainsAny(bpName, BurningDOTPatterns))
-                    return SpecialAbilityType.DOTIntensify;
-            }
-
-            if (bpName.Contains("chain") || bpName.Contains("연쇄") || bpName.Contains("arc"))
-                return SpecialAbilityType.ChainEffect;
-
-            if (bpName.Contains("followup") || bpName.Contains("combo") ||
-                bpName.Contains("후속") || bpName.Contains("연계"))
-                return SpecialAbilityType.ComboFollowup;
+            if (DOTIntensifyAbilities.Contains(guid)) return SpecialAbilityType.DOTIntensify;
+            if (ChainEffectAbilities.Contains(guid)) return SpecialAbilityType.ChainEffect;
 
             return SpecialAbilityType.None;
         }
@@ -248,6 +233,7 @@ namespace CompanionAI_v3.Data
 
         /// <summary>
         /// 타겟에 DoT가 있는지 확인
+        /// ★ v3.8.60: 게임 PartDOTDirector API 사용 (string 매칭 제거)
         /// </summary>
         public static bool HasDoT(BaseUnitEntity target, DOTType? specificType = null)
         {
@@ -255,32 +241,13 @@ namespace CompanionAI_v3.Data
 
             try
             {
-                foreach (var buff in target.Buffs.Enumerable)
+                if (specificType.HasValue)
                 {
-                    string buffName = buff.Blueprint?.name?.ToLower() ?? "";
-
-                    if (specificType.HasValue)
-                    {
-                        if (IsDOTBuff(buffName, specificType.Value))
-                            return true;
-                    }
-                    else
-                    {
-                        if (IsAnyDOTBuff(buffName))
-                            return true;
-                    }
+                    return DOTLogic.GetDamageOfTypeInstancesCount(target, MapToGameDOT(specificType.Value)) > 0;
                 }
 
-                // PartDOTDirector 접근 시도
-                try
-                {
-                    var dotDirector = target.GetOptional<Kingmaker.UnitLogic.Buffs.Components.DOTLogic.PartDOTDirector>();
-                    if (dotDirector != null)
-                        return true;
-                }
-                catch { }
-
-                return false;
+                // Any DOT — PartDOTDirector는 첫 DOT 등록 시 생성, 모두 만료 시 제거
+                return target.GetOptional<DOTLogic.PartDOTDirector>() != null;
             }
             catch (Exception ex)
             {
@@ -291,72 +258,50 @@ namespace CompanionAI_v3.Data
 
         /// <summary>
         /// DoT 스택 수 계산
+        /// ★ v3.8.60: 게임 PartDOTDirector API 사용 (string 매칭 제거)
         /// </summary>
         public static int CountDOTStacks(BaseUnitEntity target, DOTType? specificType = null)
         {
             if (target == null) return 0;
 
-            int count = 0;
-
             try
             {
-                foreach (var buff in target.Buffs.Enumerable)
+                if (specificType.HasValue)
                 {
-                    string buffName = buff.Blueprint?.name?.ToLower() ?? "";
-
-                    if (specificType.HasValue)
-                    {
-                        if (IsDOTBuff(buffName, specificType.Value))
-                            count++;
-                    }
-                    else
-                    {
-                        if (IsAnyDOTBuff(buffName))
-                            count++;
-                    }
+                    return DOTLogic.GetDamageOfTypeInstancesCount(target, MapToGameDOT(specificType.Value));
                 }
+
+                // 모든 DOT 타입 합산
+                int count = 0;
+                foreach (DOT dotValue in Enum.GetValues(typeof(DOT)))
+                {
+                    count += DOTLogic.GetDamageOfTypeInstancesCount(target, dotValue);
+                }
+                return count;
             }
             catch (Exception ex)
             {
                 Main.LogDebug($"[SpecialAbility] CountDOTStacks error: {ex.Message}");
-            }
-
-            return count;
-        }
-
-        private static bool IsDOTBuff(string buffName, DOTType dotType)
-        {
-            switch (dotType)
-            {
-                case DOTType.Burning:
-                case DOTType.PsykerBurning:
-                case DOTType.NavigatorBurning:
-                    return ContainsAny(buffName, BurningDOTPatterns);
-
-                case DOTType.Bleeding:
-                case DOTType.AssassinHaemorrhage:
-                    return ContainsAny(buffName, BleedingDOTPatterns);
-
-                case DOTType.Toxic:
-                case DOTType.PsykerToxin:
-                    return ContainsAny(buffName, ToxicDOTPatterns);
-
-                default:
-                    return false;
+                return 0;
             }
         }
 
-        private static bool IsAnyDOTBuff(string buffName)
-        {
-            return ContainsAny(buffName, BurningDOTPatterns) ||
-                   ContainsAny(buffName, BleedingDOTPatterns) ||
-                   ContainsAny(buffName, ToxicDOTPatterns);
-        }
+        // ★ v3.8.61: IsDOTBuff/IsAnyDOTBuff 제거 — v3.8.60 PartDOTDirector API + v3.8.61 IsEnemy 체크로 대체
 
+        /// ★ v3.8.60: GUID 우선 확인 추가
         private static DOTType? InferDOTTypeFromAbility(AbilityData ability)
         {
             if (ability == null) return null;
 
+            // GUID 기반 우선 확인
+            string guid = AbilityDatabase.GetGuid(ability);
+            if (!string.IsNullOrEmpty(guid))
+            {
+                if (DOTIntensifyAbilities.Contains(guid) || BurningDOTAbilities.Contains(guid))
+                    return DOTType.Burning;
+            }
+
+            // 블루프린트 이름 폴백 (GUID 미등록 능력의 DOT 타입 추론)
             string bpName = ability.Blueprint?.name?.ToLower() ?? "";
 
             if (ContainsAny(bpName, BurningDOTPatterns))
@@ -382,8 +327,35 @@ namespace CompanionAI_v3.Data
         {
             if (ability == null || initialTarget == null || enemies == null) return 0;
 
-            float chainRadius = 7f;  // 기본 연쇄 범위
-            int maxChainTargets = 5;  // 기본 최대 연쇄
+            // ★ v3.8.63: 블루프린트에서 연쇄 파라미터 추출 (기존 하드코딩 대체)
+            float chainRadius = 7f;  // 폴백: 기본 연쇄 범위 (미터)
+            int maxChainTargets = 5;  // 폴백: 기본 최대 연쇄
+
+            try
+            {
+                var deliverChain = ability.Blueprint?.GetComponent<AbilityDeliverChain>();
+                if (deliverChain != null)
+                {
+                    // Radius는 셀 단위 → 미터로 변환
+                    if (deliverChain.Radius > 0)
+                        chainRadius = deliverChain.Radius * GameInterface.CombatAPI.GridCellSize;
+
+                    // TargetsCount — 정적 값 사용 (런타임 컨텍스트 없이 접근 가능)
+                    int targets = deliverChain.TargetsCount.Value;
+                    if (targets > 0)
+                        maxChainTargets = targets;
+
+                    Main.LogDebug($"[SpecialAbility] Chain params from blueprint: radius={chainRadius:F1}m ({deliverChain.Radius} cells), maxTargets={maxChainTargets}");
+                }
+                else
+                {
+                    Main.LogDebug($"[SpecialAbility] No AbilityDeliverChain on {ability.Name} — using fallback: radius={chainRadius}m, maxTargets={maxChainTargets}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[SpecialAbility] Chain blueprint extraction error: {ex.Message}");
+            }
 
             int count = 1;  // 초기 타겟 포함
             var usedTargets = new HashSet<BaseUnitEntity> { initialTarget };
@@ -423,6 +395,7 @@ namespace CompanionAI_v3.Data
 
         /// <summary>
         /// 타겟에 디버프가 있는지 확인
+        /// ★ v3.8.61: String 키워드 매칭 → 게임 API (적 시전 버프 = 디버프)
         /// </summary>
         public static bool HasDebuff(BaseUnitEntity target)
         {
@@ -430,10 +403,17 @@ namespace CompanionAI_v3.Data
 
             try
             {
+                // DOT 존재 = 디버프
+                if (target.GetOptional<DOTLogic.PartDOTDirector>() != null)
+                    return true;
+
+                // 적이 부여한 버프 = 디버프 (게임의 BuffUIGroup.Enemy 분류 기준)
                 foreach (var buff in target.Buffs.Enumerable)
                 {
-                    string buffName = buff.Blueprint?.name?.ToLower() ?? "";
-                    if (IsDebuffByName(buffName))
+                    var caster = buff.Context?.MaybeCaster as BaseUnitEntity;
+                    if (caster != null && target.CombatGroup?.IsEnemy(caster) == true)
+                        return true;
+                    if (buff.Blueprint != null && buff.Blueprint.IsDOTVisual)
                         return true;
                 }
 
@@ -447,6 +427,7 @@ namespace CompanionAI_v3.Data
 
         /// <summary>
         /// 타겟의 디버프 수 계산
+        /// ★ v3.8.61: String 키워드 매칭 → 게임 API
         /// </summary>
         public static int CountDebuffs(BaseUnitEntity target)
         {
@@ -458,23 +439,19 @@ namespace CompanionAI_v3.Data
             {
                 foreach (var buff in target.Buffs.Enumerable)
                 {
-                    string buffName = buff.Blueprint?.name?.ToLower() ?? "";
-                    if (IsDebuffByName(buffName))
+                    var caster = buff.Context?.MaybeCaster as BaseUnitEntity;
+                    if (caster != null && target.CombatGroup?.IsEnemy(caster) == true)
+                    {
+                        count++;
+                        continue;
+                    }
+                    if (buff.Blueprint != null && buff.Blueprint.IsDOTVisual)
                         count++;
                 }
             }
-            catch { }
+            catch (Exception ex) { Main.LogDebug($"[SpecialAbility] CountDebuffs error: {ex.Message}"); }
 
             return count;
-        }
-
-        private static bool IsDebuffByName(string buffName)
-        {
-            return buffName.Contains("weaken") || buffName.Contains("slow") ||
-                   buffName.Contains("stun") || buffName.Contains("blind") ||
-                   buffName.Contains("fear") || buffName.Contains("vulnerability") ||
-                   buffName.Contains("expose") || buffName.Contains("mark") ||
-                   IsAnyDOTBuff(buffName);
         }
 
         #endregion
@@ -484,49 +461,37 @@ namespace CompanionAI_v3.Data
         /// <summary>
         /// 능력이 Burning DoT를 적용하는지 확인
         /// </summary>
+        /// ★ v3.8.60: String 폴백 제거 — GUID 전용
         public static bool AppliesBurningDOT(AbilityData ability)
         {
             if (ability == null) return false;
 
             string guid = AbilityDatabase.GetGuid(ability);
-            if (!string.IsNullOrEmpty(guid) && BurningDOTAbilities.Contains(guid))
-                return true;
-
-            string bpName = ability.Blueprint?.name?.ToLower() ?? "";
-            return bpName.Contains("inferno") || bpName.Contains("firestorm") ||
-                   bpName.Contains("인페르노") || bpName.Contains("화염폭풍");
+            return !string.IsNullOrEmpty(guid) && BurningDOTAbilities.Contains(guid);
         }
 
         /// <summary>
         /// DoT 강화 능력인지 확인
         /// </summary>
+        /// ★ v3.8.60: String 폴백 제거 — GUID 전용
         public static bool IsDOTIntensifyAbility(AbilityData ability)
         {
             if (ability == null) return false;
 
             string guid = AbilityDatabase.GetGuid(ability);
-            if (!string.IsNullOrEmpty(guid) && DOTIntensifyAbilities.Contains(guid))
-                return true;
-
-            string bpName = ability.Blueprint?.name?.ToLower() ?? "";
-            return bpName.Contains("shapeflames") || bpName.Contains("fantheflames") ||
-                   bpName.Contains("symphony") || bpName.Contains("교향곡");
+            return !string.IsNullOrEmpty(guid) && DOTIntensifyAbilities.Contains(guid);
         }
 
         /// <summary>
         /// 연쇄 효과 능력인지 확인
         /// </summary>
+        /// ★ v3.8.60: String 폴백 제거 — GUID 전용
         public static bool IsChainEffectAbility(AbilityData ability)
         {
             if (ability == null) return false;
 
             string guid = AbilityDatabase.GetGuid(ability);
-            if (!string.IsNullOrEmpty(guid) && ChainEffectAbilities.Contains(guid))
-                return true;
-
-            string bpName = ability.Blueprint?.name?.ToLower() ?? "";
-            return bpName.Contains("chainlightning") || bpName.Contains("chain") ||
-                   bpName.Contains("연쇄");
+            return !string.IsNullOrEmpty(guid) && ChainEffectAbilities.Contains(guid);
         }
 
         /// <summary>
@@ -568,6 +533,15 @@ namespace CompanionAI_v3.Data
         #endregion
 
         #region Helper Methods
+
+        /// <summary>
+        /// 내부 DOTType → 게임 DOT enum 변환
+        /// 두 enum의 값이 동일 (Bleeding=0, Burning=1, ... AssassinHaemorrhage=6)
+        /// </summary>
+        private static DOT MapToGameDOT(DOTType dotType)
+        {
+            return (DOT)(int)dotType;
+        }
 
         private static bool ContainsAny(string text, string[] patterns)
         {

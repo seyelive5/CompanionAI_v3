@@ -201,6 +201,15 @@ namespace CompanionAI_v3.GameInterface
             Vector3 targetPosition,
             List<BaseUnitEntity> allies)
         {
+            // ★ v3.8.64: AvoidFriendlyFire 설정 반영
+            try
+            {
+                var settings = ModSettings.Instance?.GetOrCreateSettings(caster.UniqueId);
+                if (settings != null && !settings.AvoidFriendlyFire)
+                    return true;  // 사용자가 아군 피격 방지 비활성화
+            }
+            catch { }
+
             float aoERadius = CombatAPI.GetAoERadius(ability);
             if (aoERadius <= 0) return true;
 
@@ -228,7 +237,7 @@ namespace CompanionAI_v3.GameInterface
                             return false;
                     }
                 }
-                catch { }
+                catch (Exception ex) { Main.LogDebug($"[AoESafety] {ex.Message}"); }
             }
 
             // 설정된 수 이하는 허용 (EvaluateAoEPosition에서 페널티로 처리)
@@ -239,7 +248,8 @@ namespace CompanionAI_v3.GameInterface
         /// ★ v3.8.45: 유닛 타겟 능력의 아군 안전 체크
         /// AOE point-target 능력 + CanTargetFriends 능력(점사 사격 등) 모두 처리
         /// - AOE 반경 있음: 반경 내 아군 체크
-        /// - CanTargetFriends=true (AOE 반경 0): 타겟 근접 + 사선(line-of-fire) 체크
+        /// - CanTargetFriends=true (AOE 반경 0): 5-레이 스캐터 패턴 기반 체크
+        /// ★ v3.8.64: 게임 검증 — GridPatterns.CalcScatterShot 기반으로 재작성
         /// </summary>
         public static bool IsAoESafeForUnitTarget(
             AbilityData ability,
@@ -247,6 +257,15 @@ namespace CompanionAI_v3.GameInterface
             BaseUnitEntity target,
             List<BaseUnitEntity> allies)
         {
+            // ★ v3.8.64: AvoidFriendlyFire 설정 반영
+            try
+            {
+                var settings = ModSettings.Instance?.GetOrCreateSettings(caster.UniqueId);
+                if (settings != null && !settings.AvoidFriendlyFire)
+                    return true;  // 사용자가 아군 피격 방지 비활성화
+            }
+            catch { }
+
             // AOE 반경 결정: GetAoERadius → GetPatternInfo 폴백
             float aoERadius = CombatAPI.GetAoERadius(ability);
             if (aoERadius <= 0)
@@ -257,11 +276,14 @@ namespace CompanionAI_v3.GameInterface
             }
 
             // ★ v3.8.45: CanTargetFriends 체크 - AOE 반경이 0이어도 아군 피격 가능
-            // 점사 사격(Burst Fire) 같은 능력은 AOE 패턴 없이도 주변 아군 피격 발생
             bool canTargetFriends = ability?.Blueprint?.CanTargetFriends == true;
 
             // AOE 효과도 없고 아군 타겟 불가능하면 안전
             if (aoERadius <= 0 && !canTargetFriends) return true;
+
+            // ★ v3.8.65: 게임 검증 — 스캐터 레이 사거리 제한
+            // 게임: CalcScatterShot → m_FromNode.CellDistanceTo(cell) <= m_Range
+            int scatterRange = canTargetFriends ? CombatAPI.GetAbilityRangeInTiles(ability) : 0;
             if (allies == null) return true;
 
             var aoeConfig = AIConfig.GetAoEConfig();
@@ -283,40 +305,33 @@ namespace CompanionAI_v3.GameInterface
                 }
                 else if (canTargetFriends)
                 {
-                    // ★ v3.8.45: CanTargetFriends 능력 - 타겟 근접 + 사선 체크
-                    // 점사 사격 등은 타겟 주변으로 탄이 퍼지고, 사선 상 아군도 피격 가능
+                    // ★ v3.8.64~65: 게임 검증 — 5-레이 스캐터 패턴 기반 체크
+                    // 게임: GridPatterns.CalcScatterShot → 5개 레이 (중심±2셀)
+                    // 레이는 캐스터에서 ability.RangeCells까지 (CellDistanceTo <= m_Range)
+                    Vector3 casterToTarget = target.Position - caster.Position;
+                    Vector3 casterToAlly = ally.Position - caster.Position;
+                    float casterToTargetMag = casterToTarget.magnitude;
 
-                    float allyToTargetDist = CombatCache.GetDistanceInTiles(ally, target);
-
-                    // Check 1: 타겟 주변 아군 (burst spread - 3타일 이내)
-                    if (allyToTargetDist < 3f)
+                    if (casterToTargetMag > 0.1f)
                     {
-                        isInDanger = true;
-                    }
-                    else
-                    {
-                        // Check 2: 사선(line-of-fire) 체크 - 캐스터와 타겟 사이 아군
-                        Vector3 casterToTarget = target.Position - caster.Position;
-                        Vector3 casterToAlly = ally.Position - caster.Position;
-                        float casterToTargetMag = casterToTarget.magnitude;
+                        Vector3 dirNorm = casterToTarget / casterToTargetMag;
 
-                        if (casterToTargetMag > 0.1f)
+                        // 캐스터 뒤에 있으면 안전 (스캐터 레이는 전방으로만)
+                        float projection = Vector3.Dot(casterToAlly, dirNorm);
+                        if (projection > 0)
                         {
-                            Vector3 dirNorm = casterToTarget / casterToTargetMag;
+                            // ★ v3.8.65: 사거리 제한 — 게임은 CellDistanceTo <= RangeCells로 제한
+                            float projectionTiles = CombatAPI.MetersToTiles(projection);
+                            if (projectionTiles > scatterRange) continue;
 
-                            // 아군이 캐스터~타겟 구간에 있는지 (뒤에 있으면 무시)
-                            float projection = Vector3.Dot(casterToAlly, dirNorm);
-                            if (projection > 0 && projection < casterToTargetMag)
+                            // 사선으로부터의 수직 거리 (타일 단위)
+                            float perpDistMeters = Vector3.Cross(dirNorm, casterToAlly).magnitude;
+                            float perpDistTiles = CombatAPI.MetersToTiles(perpDistMeters);
+
+                            // 게임: 5-레이 패턴, 중심선에서 수직 2셀 이내
+                            if (perpDistTiles <= 2f)
                             {
-                                // 사선으로부터의 수직 거리 (타일 단위)
-                                float perpDistMeters = Vector3.Cross(dirNorm, casterToAlly).magnitude;
-                                float perpDistTiles = CombatAPI.MetersToTiles(perpDistMeters);
-
-                                // 2타일 이내면 위험 (burst/scatter spread)
-                                if (perpDistTiles < 2f)
-                                {
-                                    isInDanger = true;
-                                }
+                                isInDanger = true;
                             }
                         }
                     }
@@ -330,17 +345,17 @@ namespace CompanionAI_v3.GameInterface
                     {
                         playerPartyAlliesInRange++;
 
-                        // ★ v3.8.54: 사선(LoF) 직격은 0 허용 - CanTargetFriends 직격은 AOE 스플래시보다 위험
+                        // ★ v3.8.54: CanTargetFriends 직격은 0 허용 — 스캐터 레이 직격은 AOE 스플래시보다 위험
                         int effectiveMaxAllies = (aoERadius <= 0 && canTargetFriends) ? 0 : aoeConfig.MaxPlayerAlliesHit;
                         if (playerPartyAlliesInRange > effectiveMaxAllies)
                         {
-                            string checkType = aoERadius > 0 ? $"radius={aoERadius:F1}" : "CanTargetFriends(LoF)";
+                            string checkType = aoERadius > 0 ? $"radius={aoERadius:F1}" : "CanTargetFriends(scatter)";
                             CompanionAI_v3.Main.LogDebug($"[AOE] Unit-target safety: {ability.Name} -> {target.CharacterName} blocked ({checkType}, allies={playerPartyAlliesInRange} > max={effectiveMaxAllies})");
                             return false;
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex) { Main.LogDebug($"[AoESafety] {ex.Message}"); }
             }
 
             return true;
@@ -374,7 +389,7 @@ namespace CompanionAI_v3.GameInterface
                 // 힐 AOE: 부상 아군만 카운트
                 if (requiresWounded)
                 {
-                    float hpPercent = CombatAPI.GetHPPercent(unit);
+                    float hpPercent = CombatCache.GetHPPercent(unit);
                     if (hpPercent >= 90f) continue;  // 거의 풀피면 스킵
                 }
 
@@ -393,7 +408,7 @@ namespace CompanionAI_v3.GameInterface
                 // 힐 AOE: HP가 낮을수록 보너스
                 if (requiresWounded)
                 {
-                    float hpPercent = CombatAPI.GetHPPercent(unit);
+                    float hpPercent = CombatCache.GetHPPercent(unit);
                     float hpBonus = (100f - hpPercent) * 100f;  // HP 50% = +5000
                     distanceBonus += hpBonus;
                 }
@@ -435,7 +450,7 @@ namespace CompanionAI_v3.GameInterface
                 // 힐: 풀피 아군은 스킵
                 if (requiresWounded)
                 {
-                    float hpPercent = CombatAPI.GetHPPercent(ally);
+                    float hpPercent = CombatCache.GetHPPercent(ally);
                     if (hpPercent >= 90f) continue;
                 }
 
@@ -633,59 +648,8 @@ namespace CompanionAI_v3.GameInterface
             return score;
         }
 
-        /// <summary>
-        /// ★ v3.1.18: 유닛이 방향성 패턴 내에 있는지 확인
-        /// ★ v3.6.10: 높이 체크 추가 (Directional은 0.3m 제한)
-        /// ★ v3.8.09: Custom 패턴 지원 추가
-        /// </summary>
-        public static bool IsInDirectionalPattern(
-            Vector3 toUnit,
-            Vector3 direction,
-            Kingmaker.Blueprints.PatternType patternType,
-            float radius,  // 타일 단위
-            float angle)
-        {
-            // ★ v3.5.98: 타일 단위로 변환 (radius는 타일)
-            float dist2D = CombatAPI.MetersToTiles(new Vector3(toUnit.x, 0, toUnit.z).magnitude);
-            if (dist2D > radius) return false;
-            // ★ v3.6.4: 캐스터 위치 제외 - 0.5타일 ≈ 0.67m (기존 0.1f는 너무 작음)
-            if (dist2D < 0.5f) return false;
-
-            // ★ v3.6.10: Directional 패턴은 0.3m 높이 제한
-            float heightDiff = Mathf.Abs(toUnit.y);
-            if (heightDiff > CombatAPI.AoELevelDiffDirectional) return false;
-
-            // 방향과의 각도 계산 (2D)
-            Vector3 toUnit2D = new Vector3(toUnit.x, 0, toUnit.z);
-            Vector3 direction2D = new Vector3(direction.x, 0, direction.z);
-            float unitAngle = Vector3.Angle(direction2D, toUnit2D);
-
-            switch (patternType)
-            {
-                case Kingmaker.Blueprints.PatternType.Ray:
-                    // Ray: 매우 좁은 직선 (약 15도 - 1타일 폭)
-                    return unitAngle <= 15f;
-
-                case Kingmaker.Blueprints.PatternType.Cone:
-                case Kingmaker.Blueprints.PatternType.Sector:
-                    // Cone/Sector: 지정된 각도의 절반 이내
-                    return unitAngle <= angle / 2f;
-
-                case Kingmaker.Blueprints.PatternType.Custom:
-                    // ★ v3.8.09: Custom 패턴 - 각도가 설정되어 있으면 사용, 아니면 전방향 (360)
-                    // Custom 패턴은 BlueprintAttackPattern의 Angle 프로퍼티 사용
-                    // 360도면 거리 체크만으로 충분 (이미 통과)
-                    if (angle >= 360f) return true;
-                    return unitAngle <= angle / 2f;
-
-                case Kingmaker.Blueprints.PatternType.Circle:
-                    // Circle은 방향성이 없으므로 거리 체크만 (이미 통과)
-                    return true;
-
-                default:
-                    return false;
-            }
-        }
+        // ★ v3.8.65: IsInDirectionalPattern 삭제 — 데드코드였음
+        // 실제 사용 코드: CombatAPI.IsUnitInDirectionalAoERange (Ray 수정 반영 완료)
 
         #endregion
 

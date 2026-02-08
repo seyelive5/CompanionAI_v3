@@ -285,7 +285,8 @@ namespace CompanionAI_v3.Core
             var mappings = new List<BuffMapping>();
             try
             {
-                var runAction = ability.Blueprint.GetComponent<AbilityEffectRunAction>();
+                // ★ v3.8.62: BlueprintCache 캐시 사용 (GetComponent O(n) → O(1))
+                var runAction = BlueprintCache.GetCachedRunAction(ability.Blueprint);
                 if (runAction?.Actions?.Actions != null)
                 {
                     for (int i = 0; i < runAction.Actions.Actions.Length; i++)

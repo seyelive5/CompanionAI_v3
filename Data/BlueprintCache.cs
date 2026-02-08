@@ -97,6 +97,12 @@ namespace CompanionAI_v3.Data
 
         private static readonly object _lock = new object();
 
+        // ★ v3.8.62: AbilityEffectRunAction 컴포넌트 캐시
+        // GetComponent<T>()는 O(n) ComponentsArray 순회 — 같은 블루프린트에 대해 반복 호출 불필요
+        // 블루프린트 컴포넌트는 불변이므로 세션 단위 캐시 안전
+        private static readonly Dictionary<string, AbilityEffectRunAction> _runActionCache
+            = new Dictionary<string, AbilityEffectRunAction>();
+
         // ========================================
         // 능력 분석 및 캐시
         // ========================================
@@ -310,6 +316,48 @@ namespace CompanionAI_v3.Data
             return info?.HasMultiTarget == true;
         }
 
+        /// <summary>
+        /// ★ v3.8.62: AbilityData 직접 받는 오버로드 (미캐시 시 자동 캐시)
+        /// </summary>
+        public static bool IsMultiTarget(AbilityData ability)
+        {
+            if (ability?.Blueprint == null) return false;
+            string guid = ability.Blueprint.AssetGuid?.ToString();
+            if (string.IsNullOrEmpty(guid)) return false;
+
+            var info = GetByGuid(guid);
+            if (info != null) return info.HasMultiTarget;
+
+            // 미캐시: CacheAbility 후 재시도
+            info = CacheAbility(ability);
+            return info?.HasMultiTarget == true;
+        }
+
+        /// <summary>
+        /// ★ v3.8.62: 캐시된 AbilityEffectRunAction 컴포넌트 반환
+        /// GetComponent 호출을 능력당 최초 1회로 제한 (이후 O(1) 캐시 히트)
+        /// null도 캐시 (컴포넌트 없는 능력에 대해 반복 검색 방지)
+        /// </summary>
+        public static AbilityEffectRunAction GetCachedRunAction(BlueprintAbility bp)
+        {
+            if (bp == null) return null;
+            string guid = bp.AssetGuid?.ToString();
+            if (string.IsNullOrEmpty(guid)) return null;
+
+            lock (_lock)
+            {
+                if (_runActionCache.TryGetValue(guid, out var cached))
+                    return cached;
+            }
+
+            var runAction = bp.GetComponent<AbilityEffectRunAction>();
+            lock (_lock)
+            {
+                _runActionCache[guid] = runAction;
+            }
+            return runAction;
+        }
+
         public static List<AbilityBlueprintInfo> GetByCategory(AbilityCategory category)
         {
             lock (_lock)
@@ -434,6 +482,7 @@ namespace CompanionAI_v3.Data
             {
                 _guidCache.Clear();
                 _nameToGuidCache.Clear();
+                _runActionCache.Clear();  // ★ v3.8.62
             }
         }
     }

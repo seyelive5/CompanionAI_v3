@@ -139,7 +139,8 @@ namespace CompanionAI_v3.Planning.Planners
                 .Where(a => !AbilityDatabase.IsTurnEnding(a))
                 .Where(a => !AbilityDatabase.IsFinisher(a))
                 // ★ v3.7.27: MultiTarget 능력 이중 체크 (컴포넌트 + 명시적 제외)
-                .Where(a => a.Blueprint.GetComponent<AbilityMultiTarget>() == null)
+                // ★ v3.8.62: BlueprintCache 캐시 사용 (GetComponent O(n) → O(1))
+                .Where(a => !BlueprintCache.IsMultiTarget(a))
                 .Where(a => !FamiliarAbilities.IsMultiTargetFamiliarAbility(a))
                 .Where(a => {
                     // ★ v3.5.76: DangerousAoE 설정 기반 허용
@@ -677,16 +678,12 @@ namespace CompanionAI_v3.Planning.Planners
                     float cost = CombatAPI.GetAbilityAPCost(attack);
                     if (cost > remainingAP) continue;
 
-                    // ★ v3.6.3: AoE 아군 피해 체크 (타일 단위로 수정)
+                    // ★ v3.8.64: AoESafetyChecker 통합 (간이 3타일 체크 → 게임 기반 스캐터 패턴)
                     if (attack.Blueprint?.CanTargetFriends == true)
                     {
-                        bool allyNearTarget = situation.Allies.Any(ally =>
-                            ally != null && !ally.LifeState.IsDead &&
-                            CombatCache.GetDistanceInTiles(ally, target) < 3f);  // 3타일 ≈ 4m
-
-                        if (allyNearTarget)
+                        if (!AoESafetyChecker.IsAoESafeForUnitTarget(attack, situation.Unit, target, situation.Allies))
                         {
-                            Main.LogDebug($"[{roleName}] Skipping {attack.Name} - ally near target {target.CharacterName}");
+                            Main.LogDebug($"[{roleName}] Skipping {attack.Name} - ally in scatter zone of {target.CharacterName}");
                             continue;
                         }
                     }
@@ -724,11 +721,11 @@ namespace CompanionAI_v3.Planning.Planners
             }
 
             var hittableLowHP = CollectionHelper.MinByWhere(situation.HittableEnemies,
-                e => !e.LifeState.IsDead && CombatAPI.GetHPPercent(e) <= threshold,
+                e => !e.LifeState.IsDead && CombatCache.GetHPPercent(e) <= threshold,
                 e => (float)CombatAPI.GetActualHP(e));
 
             return hittableLowHP ?? CollectionHelper.MinByWhere(situation.Enemies,
-                e => !e.LifeState.IsDead && CombatAPI.GetHPPercent(e) <= threshold,
+                e => !e.LifeState.IsDead && CombatCache.GetHPPercent(e) <= threshold,
                 e => (float)CombatAPI.GetActualHP(e));
         }
 

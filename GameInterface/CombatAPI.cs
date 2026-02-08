@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Kingmaker;
 using Kingmaker.Blueprints;
+using Kingmaker.EntitySystem;  // ★ v3.8.66: EntityHelper.DistanceToInCells 확장 메서드
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Items;
 using Kingmaker.Pathfinding;
@@ -662,7 +663,11 @@ namespace CompanionAI_v3.GameInterface
         public static float GetDistance(BaseUnitEntity from, BaseUnitEntity to)
         {
             if (from == null || to == null) return float.MaxValue;
-            try { return Vector3.Distance(from.Position, to.Position); }
+            try
+            {
+                // ★ v3.8.66: 게임 API 기반 (SizeRect 반영) — 미터 단위
+                return (float)from.DistanceToInCells(to) * GridCellSize;
+            }
             catch { return float.MaxValue; }
         }
 
@@ -1445,7 +1450,8 @@ namespace CompanionAI_v3.GameInterface
                 if (ability.Blueprint == null) return false;
 
                 // 능력의 버프 블루프린트 추출
-                var runAction = ability.Blueprint.GetComponent<AbilityEffectRunAction>();
+                // ★ v3.8.62: BlueprintCache 캐시 사용 (GetComponent O(n) → O(1))
+                var runAction = BlueprintCache.GetCachedRunAction(ability.Blueprint);
                 if (runAction?.Actions?.Actions != null)
                 {
                     foreach (var action in runAction.Actions.Actions)
@@ -1485,7 +1491,8 @@ namespace CompanionAI_v3.GameInterface
 
             try
             {
-                var runAction = ability.Blueprint.GetComponent<AbilityEffectRunAction>();
+                // ★ v3.8.62: BlueprintCache 캐시 사용 (GetComponent O(n) → O(1))
+                var runAction = BlueprintCache.GetCachedRunAction(ability.Blueprint);
                 if (runAction?.Actions?.Actions != null)
                 {
                     foreach (var action in runAction.Actions.Actions)
@@ -2477,28 +2484,15 @@ namespace CompanionAI_v3.GameInterface
 
         #region Ability Type Detection
 
-        /// <summary>
-        /// 능력이 Momentum 생성 능력인지 확인
-        /// </summary>
-        public static bool IsMomentumGeneratingAbility(AbilityData ability)
-        {
-            if (ability == null) return false;
-
-            string bpName = ability.Blueprint?.name?.ToLower() ?? "";
-            return bpName.Contains("momentum") || bpName.Contains("inspire") ||
-                   bpName.Contains("rally") || bpName.Contains("warcry");
-        }
+        // ★ v3.8.61: IsMomentumGeneratingAbility 제거 — 호출부 없는 데드코드 (string 매칭만)
 
         /// <summary>
         /// 능력이 방어 자세인지 확인
+        /// ★ v3.8.61: String 매칭 제거 → AbilityDatabase 위임 (GUID + Flag 기반)
         /// </summary>
         public static bool IsDefensiveStanceAbility(AbilityData ability)
         {
-            if (ability == null) return false;
-
-            string bpName = ability.Blueprint?.name?.ToLower() ?? "";
-            return bpName.Contains("defensive") || bpName.Contains("stance") ||
-                   bpName.Contains("guard") || bpName.Contains("bulwark");
+            return AbilityDatabase.IsDefensiveStance(ability);
         }
 
         /// <summary>
@@ -2511,20 +2505,11 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// 능력이 Righteous Fury (Revel in Slaughter)인지 확인
+        /// ★ v3.8.61: 플레이스홀더 GUID + String 매칭 제거 → AbilityDatabase 위임
         /// </summary>
         public static bool IsRighteousFuryAbility(AbilityData ability)
         {
-            if (ability == null) return false;
-
-            string bpName = ability.Blueprint?.name?.ToLower() ?? "";
-            string guid = AbilityDatabase.GetGuid(ability);
-
-            // GUID 체크
-            if (guid == "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")  // 실제 GUID로 교체 필요
-                return true;
-
-            return bpName.Contains("revelinslaughter") || bpName.Contains("righteousfury") ||
-                   bpName.Contains("학살") || bpName.Contains("분노");
+            return AbilityDatabase.IsRighteousFury(ability);
         }
 
         /// <summary>
@@ -2581,13 +2566,16 @@ namespace CompanionAI_v3.GameInterface
                     return ability.Weapon.AttackRange;
                 }
 
-                // 3. 폴백: 원거리 기본값
-                return 15f;
+                // 3. ★ v3.8.63: 무기 타입인데 무기 없음 — 근접 사거리 폴백
+                // 기존 15f(원거리)는 비무장 능력에 대해 잘못된 값이었음
+                // bp.GetRange() == -1 + Weapon == null = 비무장/근접 능력
+                Main.LogDebug($"[CombatAPI] GetAbilityRange: {bp.name} has weapon-type range but no weapon — fallback to melee range");
+                return GridCellSize * 2;  // 약 2.7m (근접 2셀)
             }
             catch (Exception ex)
             {
                 Main.LogDebug($"[CombatAPI] GetAbilityRange error: {ex.Message}");
-                return 15f;
+                return GridCellSize * 2;  // ★ v3.8.63: 에러 시에도 근접 폴백 (15f보다 안전)
             }
         }
 
@@ -2638,11 +2626,12 @@ namespace CompanionAI_v3.GameInterface
                     float abilityRange = GetAbilityRange(ability);
                     if (abilityRange <= 0) return false;  // Personal 능력
 
-                    // 가상 위치에서 타겟까지 거리 계산
-                    float distanceToTarget = Vector3.Distance(fromPosition, target.Position);
-
-                    // 거리를 타일로 변환 (게임 그리드 기준)
-                    distanceInTiles = distanceToTarget / GridCellSize;
+                    // ★ v3.8.66: 캐스터+타겟 SizeRect 반영 (대형 유닛 대응)
+                    var casterEntity = ability.Caster as BaseUnitEntity;
+                    IntRect casterSize = casterEntity?.SizeRect ?? new IntRect(0, 0, 0, 0);
+                    distanceInTiles = (float)WarhammerGeometryUtils.DistanceToInCells(
+                        fromPosition, casterSize,
+                        target.Position, target.SizeRect);
 
                     // 사거리 여유 (1타일)
                     bool inRange = distanceInTiles <= abilityRange + 1f;
@@ -2665,9 +2654,11 @@ namespace CompanionAI_v3.GameInterface
                     return true;  // 노드 찾기 실패 시 허용
                 }
 
-                // LosCalculations.HasLos 사용
+                // ★ v3.8.66: 캐스터 실제 SizeRect 사용 (기존 IntRect(0,0,1,1)은 2x2였음 — 버그)
+                var casterForLos = ability.Caster as BaseUnitEntity;
+                IntRect casterSizeForLos = casterForLos?.SizeRect ?? new IntRect(0, 0, 0, 0);
                 bool hasLos = Kingmaker.View.Covers.LosCalculations.HasLos(
-                    fromNode, new IntRect(0, 0, 1, 1),  // 1x1 유닛 가정
+                    fromNode, casterSizeForLos,
                     targetNode, target.SizeRect);
 
                 if (!hasLos)
@@ -2758,7 +2749,8 @@ namespace CompanionAI_v3.GameInterface
             try
             {
                 // AbilityEffectRunAction 컴포넌트에서 Actions 확인
-                var runAction = ability.Blueprint.GetComponent<AbilityEffectRunAction>();
+                // ★ v3.8.62: BlueprintCache 캐시 사용 (GetComponent O(n) → O(1))
+                var runAction = BlueprintCache.GetCachedRunAction(ability.Blueprint);
                 if (runAction?.Actions?.Actions == null) return 0f;
 
                 foreach (var action in runAction.Actions.Actions)
@@ -2809,7 +2801,8 @@ namespace CompanionAI_v3.GameInterface
 
             try
             {
-                var runAction = ability.Blueprint.GetComponent<AbilityEffectRunAction>();
+                // ★ v3.8.62: BlueprintCache 캐시 사용 (GetComponent O(n) → O(1))
+                var runAction = BlueprintCache.GetCachedRunAction(ability.Blueprint);
                 if (runAction?.Actions?.Actions == null) return 0f;
 
                 foreach (var action in runAction.Actions.Actions)
@@ -3632,10 +3625,10 @@ namespace CompanionAI_v3.GameInterface
         {
             if (unit == null) return false;
 
-            // 1. 2D 거리 체크 (타일 단위)
-            float dist2D = MetersToTiles(Vector3.Distance(
-                new Vector3(center.x, 0, center.z),
-                new Vector3(unit.Position.x, 0, unit.Position.z)));
+            // ★ v3.8.66: 대형 유닛은 가장 가까운 경계 셀 기준 (SizeRect 반영)
+            float dist2D = (float)WarhammerGeometryUtils.DistanceToInCells(
+                center, new IntRect(0, 0, 0, 0),  // AoE 중심은 점
+                unit.Position, unit.SizeRect);
             if (dist2D > aoERadius) return false;
 
             // 2. 높이 차이 체크
@@ -3685,7 +3678,14 @@ namespace CompanionAI_v3.GameInterface
             switch (patternType)
             {
                 case Kingmaker.Blueprints.PatternType.Ray:
-                    return unitAngle <= 15f;  // Ray는 매우 좁음
+                    // ★ v3.8.65: 게임 검증 — Ray = Bresenham 1-cell 직선 (AoEPattern.Angle=0)
+                    // 각도가 아닌 수직 거리 1타일 이내로 판정
+                    {
+                        Vector3 dirNorm2D = direction2D.normalized;
+                        float perpMeters = Vector3.Cross(dirNorm2D, toUnit2D).magnitude;
+                        float perpTiles = MetersToTiles(perpMeters);
+                        return perpTiles <= 1f;
+                    }
 
                 case Kingmaker.Blueprints.PatternType.Cone:
                 case Kingmaker.Blueprints.PatternType.Sector:
@@ -4253,6 +4253,7 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// ★ v3.5.98: 두 유닛 간 거리를 타일 단위로 반환
+        /// ★ v3.8.66: 게임 API 사용 — SizeRect 경계 간 최단 셀 거리 (대형 유닛 대응)
         /// 모든 거리 비교에 이 함수 사용
         /// </summary>
         public static float GetDistanceInTiles(BaseUnitEntity a, BaseUnitEntity b)
@@ -4260,22 +4261,26 @@ namespace CompanionAI_v3.GameInterface
             if (a == null || b == null) return float.MaxValue;
             try
             {
-                float meters = Vector3.Distance(a.Position, b.Position);
-                return meters / GridCellSize;
+                // ★ v3.8.66: 게임 API — WarhammerGeometryUtils.DistanceToInCells (Chebyshev 변형)
+                // 대형 유닛(2x2+)에서 center-to-center 대비 1~2타일 차이 보정
+                return (float)a.DistanceToInCells(b);
             }
             catch { return float.MaxValue; }
         }
 
         /// <summary>
         /// ★ v3.5.98: 위치와 유닛 간 거리를 타일 단위로 반환
+        /// ★ v3.8.66: 타겟 SizeRect 반영 (대형 유닛 대응)
         /// </summary>
         public static float GetDistanceInTiles(Vector3 position, BaseUnitEntity unit)
         {
             if (unit == null) return float.MaxValue;
             try
             {
-                float meters = Vector3.Distance(position, unit.Position);
-                return meters / GridCellSize;
+                // ★ v3.8.66: 타겟 SizeRect 반영 — 위치는 1x1 점(IntRect(0,0,0,0))
+                return (float)WarhammerGeometryUtils.DistanceToInCells(
+                    position, new IntRect(0, 0, 0, 0),
+                    unit.Position, unit.SizeRect);
             }
             catch { return float.MaxValue; }
         }

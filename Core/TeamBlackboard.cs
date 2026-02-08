@@ -359,7 +359,7 @@ namespace CompanionAI_v3.Core
             // 가장 많이 선택된 타겟 (동률 시 HP 낮은 적 우선)
             SharedTarget = targetCounts
                 .OrderByDescending(kvp => kvp.Value)
-                .ThenBy(kvp => CombatAPI.GetHPPercent(kvp.Key))
+                .ThenBy(kvp => CombatCache.GetHPPercent(kvp.Key))
                 .First().Key;
         }
 
@@ -443,7 +443,7 @@ namespace CompanionAI_v3.Core
                 .ToList();
 
             if (enemies.Count == 0) return 50f;
-            return enemies.Average(e => CombatAPI.GetHPPercent(e));
+            return enemies.Average(e => CombatCache.GetHPPercent(e));
         }
 
         private int GetTotalEnemyCount()

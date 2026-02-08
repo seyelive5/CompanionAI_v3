@@ -127,7 +127,7 @@ namespace CompanionAI_v3.Analysis
             try
             {
                 // 1. HP% 점수 (낮을수록 높음)
-                float hpPercent = CombatAPI.GetHPPercent(target);
+                float hpPercent = CombatCache.GetHPPercent(target);
                 float hpScore = (100f - hpPercent) * 0.5f;  // 0~50
                 score += hpScore * weights.HPPercent;
 
@@ -443,7 +443,7 @@ namespace CompanionAI_v3.Analysis
                 var healThresholds = t.HealPriorityThresholds;
 
                 // 1. HP% (낮을수록 힐 우선) - ★ v3.5.00: 다단계 임계값
-                float hpPercent = CombatAPI.GetHPPercent(ally);
+                float hpPercent = CombatCache.GetHPPercent(ally);
                 if (hpPercent < healThresholds[0]) score += 80f * weights.HPPercent;       // 최우선 (기본 25%)
                 else if (hpPercent < healThresholds[1]) score += 50f * weights.HPPercent;  // 높음 (기본 50%)
                 else if (hpPercent < healThresholds[2]) score += 20f * weights.HPPercent;  // 보통 (기본 75%)
@@ -505,7 +505,7 @@ namespace CompanionAI_v3.Analysis
                 float bestScore;
                 var best = CollectionHelper.MaxByWhere(allies,
                     a => {
-                        try { return a.LifeState?.IsDead != true && CombatAPI.GetHPPercent(a) < hpThreshold; }
+                        try { return a.LifeState?.IsDead != true && CombatCache.GetHPPercent(a) < hpThreshold; }
                         catch { return false; }
                     },
                     a => ScoreAllyForHealing(a, situation),
@@ -587,8 +587,8 @@ namespace CompanionAI_v3.Analysis
                 var t = AIConfig.GetThresholds();
 
                 // 1. Lethality (HP 기반) - Response Curve 적용
-                // API: CombatAPI.GetHPPercent() ✅ 검증됨
-                float hpPercent = CombatAPI.GetHPPercent(target);
+                // API: CombatCache.GetHPPercent() ✅ 검증됨
+                float hpPercent = CombatCache.GetHPPercent(target);
                 float hpNormalized = hpPercent / 100f;  // 0~1 (0=빈사, 1=만피)
                 float lethalityScore = CurvePresets.EnemyLethality.Evaluate(hpNormalized);
                 threat += lethalityScore * t.LethalityWeight;
@@ -761,7 +761,7 @@ namespace CompanionAI_v3.Analysis
                     priority -= 5f;
 
                 // 낮은 HP = 높은 우선순위 (보호 필요) - ★ v3.5.00: ThresholdConfig
-                float hpPercent = CombatAPI.GetHPPercent(ally);
+                float hpPercent = CombatCache.GetHPPercent(ally);
                 if (hpPercent < t.PreAttackBuffMinHP)
                     priority += 15f;
             }

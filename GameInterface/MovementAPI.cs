@@ -21,6 +21,15 @@ namespace CompanionAI_v3.GameInterface
     /// </summary>
     public static class MovementAPI
     {
+        #region Path Threat Weights
+
+        /// <summary>★ v3.8.59: 경로 위협 가중치 — 중복 제거, 단일 정의</summary>
+        private const float WEIGHT_AOO = 20f;           // 기회공격 유발
+        private const float WEIGHT_AOE_ENTRY = 15f;     // AoE 진입
+        private const float WEIGHT_DAMAGING_AOE_STEP = 10f;  // 데미지 AoE 내 이동
+
+        #endregion
+
         #region ★ v3.8.15: AI Pathfinding Cache (스터터링 방지)
 
         /// <summary>
@@ -691,7 +700,7 @@ namespace CompanionAI_v3.GameInterface
                     break;
             }
 
-            score.ThreatScore = cell.ProvokedAttacks * 20f + cell.EnteredAoE * 15f;
+            score.ThreatScore = cell.ProvokedAttacks * WEIGHT_AOO + cell.EnteredAoE * WEIGHT_AOE_ENTRY;
 
             if (hasAnyLos && nearestEnemyDist <= targetDistance)
                 score.AttackScore = 20f;
@@ -930,7 +939,7 @@ namespace CompanionAI_v3.GameInterface
                 // 3. ★ v3.8.13: AI 셀의 경로 위협 데이터 활용 (목적지 위협 + 경로 위협)
                 // CalculateThreatScore(목적지)에 추가로 경로 위협도 반영
                 float destThreatScore = CalculateThreatScore(unit, node);
-                float pathThreatScore = aiCell.ProvokedAttacks * 20f + aiCell.EnteredAoE * 15f + aiCell.StepsInsideDamagingAoE * 10f;
+                float pathThreatScore = aiCell.ProvokedAttacks * WEIGHT_AOO + aiCell.EnteredAoE * WEIGHT_AOE_ENTRY + aiCell.StepsInsideDamagingAoE * WEIGHT_DAMAGING_AOE_STEP;
                 float threatScore = destThreatScore + pathThreatScore;
                 score -= threatScore;
 
@@ -1131,7 +1140,7 @@ namespace CompanionAI_v3.GameInterface
 
                 // ★ v3.8.13: AI 셀의 경로 위협 데이터 활용 (목적지 위협 + 경로 위협)
                 float destThreatScore = CalculateThreatScore(unit, node);
-                float pathThreatScore = aiCell.ProvokedAttacks * 20f + aiCell.EnteredAoE * 15f + aiCell.StepsInsideDamagingAoE * 10f;
+                float pathThreatScore = aiCell.ProvokedAttacks * WEIGHT_AOO + aiCell.EnteredAoE * WEIGHT_AOE_ENTRY + aiCell.StepsInsideDamagingAoE * WEIGHT_DAMAGING_AOE_STEP;
 
                 var score = new PositionScore
                 {
@@ -1280,7 +1289,7 @@ namespace CompanionAI_v3.GameInterface
                 float distToTarget = Vector3.Distance(pos, targetPos);
 
                 // ★ v3.8.13: 경로 위협도 계산 (접근 시에도 안전한 경로 선호)
-                float pathRisk = aiCell.ProvokedAttacks * 20f + aiCell.EnteredAoE * 15f + aiCell.StepsInsideDamagingAoE * 10f;
+                float pathRisk = aiCell.ProvokedAttacks * WEIGHT_AOO + aiCell.EnteredAoE * WEIGHT_AOE_ENTRY + aiCell.StepsInsideDamagingAoE * WEIGHT_DAMAGING_AOE_STEP;
 
                 // 현재 위치보다 가깝고, 지금까지 찾은 것보다 가까우면 갱신
                 // 같은 거리면 더 안전한 경로 선택

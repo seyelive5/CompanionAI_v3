@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Kingmaker.Blueprints;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.RuleSystem;
 using Kingmaker.UnitLogic.Abilities;
+using Kingmaker.UnitLogic.Abilities.Components;
+using Kingmaker.UnitLogic.Mechanics.Actions;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Data;
 using CompanionAI_v3.GameInterface;
@@ -44,7 +48,7 @@ namespace CompanionAI_v3.Analysis
             {
                 allyAvgHP = situation.Allies
                     .Where(a => a != null && a.LifeState != null && !a.LifeState.IsDead)
-                    .Select(a => CombatAPI.GetHPPercent(a))
+                    .Select(a => CombatCache.GetHPPercent(a))
                     .DefaultIfEmpty(100f)
                     .Average();
             }
@@ -289,7 +293,7 @@ namespace CompanionAI_v3.Analysis
             // HP 낮은 아군 수
             int lowHPAllies = situation.Allies?.Count(a =>
                 a != null && a.IsConscious && a != situation.Unit &&
-                CombatAPI.GetHPPercent(a) < 50f) ?? 0;
+                CombatCache.GetHPPercent(a) < 50f) ?? 0;
 
             Main.LogDebug($"[UtilityScorer] Ultimate {ultimate.Name}: TargetType={info.TargetType}, " +
                 $"HeroicAct={info.IsHeroicAct}, HP={hpPercent:F0}%, Danger={isInDanger}, " +
@@ -585,13 +589,13 @@ namespace CompanionAI_v3.Analysis
                     }
                 }
             }
-            catch { /* 버프 접근 실패 시 무시 */ }
+            catch (Exception ex) { Main.LogDebug($"[UtilityScorer] {ex.Message}"); }
 
             // ★ 특수 타이밍 고려
             // ★ v3.5.00: ThresholdConfig 적용
             var attackThresholds = AIConfig.GetThresholds();
             var timing = AbilityDatabase.GetTiming(attack);
-            float targetHPPercent = CombatAPI.GetHPPercent(target);
+            float targetHPPercent = CombatCache.GetHPPercent(target);
 
             if (timing == AbilityTiming.Finisher)
             {
@@ -724,7 +728,7 @@ namespace CompanionAI_v3.Analysis
             float score = 50f;  // 기본 점수
 
             // ★ v3.1.30: HP → 마무리 우선순위 Response Curve (낮은 HP 우선)
-            float hpPercent = CombatAPI.GetHPPercent(target);
+            float hpPercent = CombatCache.GetHPPercent(target);
             score += CurvePresets.HPPriority.Evaluate(hpPercent);
 
             // ★ v3.1.30: 1타 킬 가능성 → OneHitKillBonus Curve
@@ -759,7 +763,7 @@ namespace CompanionAI_v3.Analysis
                 // 힐러 우선 제거 (아군 치료 방지)
                 score += 20f;
                 // 부상 아군이 있으면 더 급함
-                if (situation.MostWoundedAlly != null && CombatAPI.GetHPPercent(situation.MostWoundedAlly) < 50f)
+                if (situation.MostWoundedAlly != null && CombatCache.GetHPPercent(situation.MostWoundedAlly) < 50f)
                     score += 15f;
             }
 
@@ -801,7 +805,7 @@ namespace CompanionAI_v3.Analysis
             if (distance <= t.ThreatProximity) threat += 0.2f;
 
             // HP 낮은 적은 덜 위협적 (곧 죽음)
-            float hpPercent = CombatAPI.GetHPPercent(target);
+            float hpPercent = CombatCache.GetHPPercent(target);
             if (hpPercent < t.LowThreatHP) threat -= 0.2f;
 
             return Math.Max(0f, Math.Min(1f, threat));
@@ -855,7 +859,7 @@ namespace CompanionAI_v3.Analysis
             float score = 0f;
 
             // ★ v3.1.30: HP → 힐 긴급도 Response Curve (Sigmoid)
-            float targetHP = CombatAPI.GetHPPercent(target);
+            float targetHP = CombatCache.GetHPPercent(target);
             score += CurvePresets.HealUrgency.Evaluate(targetHP);
 
             // ★ v3.1.30: 자기 힐 보너스 Response Curve
@@ -877,7 +881,7 @@ namespace CompanionAI_v3.Analysis
 
             // ★ 힐 효율: 현재 손실 HP 대비
             float missingHP = 100f - targetHP;
-            float expectedHeal = EstimateHealAmount(heal);
+            float expectedHeal = EstimateHealAmount(heal, target);
             float efficiency = Math.Min(expectedHeal / Math.Max(missingHP, 1f), 1f);
             score += efficiency * 20f;
 
@@ -885,13 +889,147 @@ namespace CompanionAI_v3.Analysis
         }
 
         /// <summary>
-        /// 예상 힐량 추정
+        /// ★ v3.8.59: 예상 힐량 추정 (Blueprint 데이터 기반)
+        /// ContextActionHealTarget의 DiceFormula 또는 MinMax 값에서 평균 힐량 계산
+        /// 타겟 MaxHP 대비 비율로 반환 (missingHP와 동일한 0-100 스케일)
         /// </summary>
-        private static float EstimateHealAmount(AbilityData heal)
+        private static float EstimateHealAmount(AbilityData heal, BaseUnitEntity target)
         {
-            // 힐량 추정 (게임 데이터 없으면 기본값)
-            // TODO: 실제 힐량 계산 가능하면 개선
-            return 30f;  // 기본 추정치
+            if (heal?.Blueprint == null || target == null) return 30f;
+
+            try
+            {
+                // ★ v3.8.62: BlueprintCache 캐시 사용 (GetComponent O(n) → O(1))
+                var runAction = BlueprintCache.GetCachedRunAction(heal.Blueprint);
+                if (runAction?.Actions?.Actions == null) return 30f;
+
+                float rawHeal = FindHealAmountInActions(runAction.Actions.Actions);
+                if (rawHeal > 0f)
+                {
+                    int maxHP = CombatAPI.GetActualMaxHP(target);
+                    if (maxHP > 0)
+                    {
+                        float healPercent = (rawHeal / maxHP) * 100f;
+                        Main.LogDebug($"[UtilityScorer] EstimateHealAmount: {heal.Name} → avg {rawHeal:F0} HP ({healPercent:F1}% of {maxHP} maxHP)");
+                        return healPercent;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[UtilityScorer] EstimateHealAmount error: {ex.Message}");
+            }
+
+            return 30f;  // 폴백: MaxHP의 30% 추정
+        }
+
+        /// <summary>
+        /// ★ v3.8.59: Actions 배열에서 ContextActionHealTarget을 찾아 평균 힐량 반환 (재귀)
+        /// SavingThrow, Conditional 등 중첩 액션도 검색
+        /// </summary>
+        private static float FindHealAmountInActions(Kingmaker.ElementsSystem.GameAction[] actions)
+        {
+            if (actions == null) return 0f;
+
+            foreach (var action in actions)
+            {
+                if (action == null) continue;
+
+                if (action is ContextActionHealTarget healAction)
+                {
+                    return CalculateAverageHeal(healAction);
+                }
+
+                // 중첩된 Actions 검색 (SavingThrow, Conditional 등)
+                try
+                {
+                    var actionType = action.GetType();
+
+                    // Actions 필드 (ContextActionSavingThrow 등)
+                    var actionsField = actionType.GetField("Actions");
+                    if (actionsField != null)
+                    {
+                        var nestedActionList = actionsField.GetValue(action);
+                        if (nestedActionList != null)
+                        {
+                            var nestedActionsField = nestedActionList.GetType().GetField("Actions");
+                            if (nestedActionsField != null)
+                            {
+                                var nestedActions = nestedActionsField.GetValue(nestedActionList) as Kingmaker.ElementsSystem.GameAction[];
+                                float nested = FindHealAmountInActions(nestedActions);
+                                if (nested > 0f) return nested;
+                            }
+                        }
+                    }
+
+                    // Succeed/Failed 필드 (ContextActionConditionalSaved 등)
+                    foreach (var fieldName in new[] { "Succeed", "Failed" })
+                    {
+                        var field = actionType.GetField(fieldName);
+                        if (field == null) continue;
+
+                        var actionList = field.GetValue(action);
+                        if (actionList == null) continue;
+
+                        var listActionsField = actionList.GetType().GetField("Actions");
+                        if (listActionsField == null) continue;
+
+                        var subActions = listActionsField.GetValue(actionList) as Kingmaker.ElementsSystem.GameAction[];
+                        float nested = FindHealAmountInActions(subActions);
+                        if (nested > 0f) return nested;
+                    }
+                }
+                catch { /* Reflection 실패 무시 */ }
+            }
+
+            return 0f;
+        }
+
+        /// <summary>
+        /// ★ v3.8.59: ContextActionHealTarget에서 평균 힐량 계산 (raw HP)
+        /// Dice 기반: (MinValue + MaxValue) / 2, MinMax 기반: (Min + Max) / 2 + Bonus
+        /// </summary>
+        private static float CalculateAverageHeal(ContextActionHealTarget healAction)
+        {
+            try
+            {
+                if (!healAction.UseMinMaxValues)
+                {
+                    // Dice 기반: NdM + bonus
+                    var diceValue = healAction.Value;
+                    if (diceValue == null) return 0f;
+
+                    // ContextValue.Value: Simple이면 정적 값, 비Simple이면 0 또는 배수
+                    int diceCount = diceValue.DiceCountValue?.Value ?? 0;
+                    int bonus = diceValue.BonusValue?.Value ?? 0;
+                    var diceType = diceValue.DiceType;
+
+                    if (diceCount <= 0 && bonus <= 0)
+                        return 0f;  // 런타임 의존 값 — 파싱 불가
+
+                    // DiceFormula: min = rolls + bonus, max = diceType × rolls + bonus
+                    var formula = new DiceFormula(diceCount, diceType);
+                    float avg = (formula.MinValue(bonus) + formula.MaxValue(bonus)) / 2f;
+                    return Math.Max(avg, 1f);
+                }
+                else
+                {
+                    // MinMax 기반
+                    int min = healAction.MinHealing?.Value ?? 0;
+                    int max = healAction.MaxHealing?.Value ?? 0;
+                    int bonus = healAction.Bonus?.Value ?? 0;
+
+                    if (min <= 0 && max <= 0 && bonus <= 0)
+                        return 0f;  // 런타임 의존 값
+
+                    return (min + max) / 2f + bonus;
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[UtilityScorer] CalculateAverageHeal error: {ex.Message}");
+                return 0f;
+            }
         }
 
         #endregion

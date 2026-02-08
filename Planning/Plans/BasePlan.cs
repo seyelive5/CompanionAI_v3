@@ -7,6 +7,7 @@ using Kingmaker.Pathfinding;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Utility;
 using Kingmaker.View.Covers;
+using Kingmaker.Designers.Mechanics.Facts;
 using Pathfinding;
 using UnityEngine;
 using CompanionAI_v3.Core;
@@ -262,11 +263,11 @@ namespace CompanionAI_v3.Planning.Plans
             // 부상 아군 필터링 (HP < 80%)
             var woundedAllies = situation.Allies
                 .Where(a => a != null && a.IsConscious)
-                .Where(a => CombatAPI.GetHPPercent(a) < 80f)
+                .Where(a => CombatCache.GetHPPercent(a) < 80f)
                 .ToList();
 
             // 캐스터도 부상이면 추가
-            if (CombatAPI.GetHPPercent(situation.Unit) < 80f)
+            if (CombatCache.GetHPPercent(situation.Unit) < 80f)
                 woundedAllies.Add(situation.Unit);
 
             if (woundedAllies.Count < 2) return null;  // AOE 힐은 2명 이상 필요
@@ -450,7 +451,7 @@ namespace CompanionAI_v3.Planning.Plans
                 foreach (var ally in situation.Allies.Where(a => a != null && !a.LifeState.IsDead))
                 {
                     var settings = ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
-                    if (settings?.Role == AIRole.DPS && CombatAPI.GetHPPercent(ally) > 50f)
+                    if (settings?.Role == AIRole.DPS && CombatCache.GetHPPercent(ally) > 50f)
                     {
                         prioritizedTargets.Add(ally);
                     }
@@ -1428,7 +1429,7 @@ namespace CompanionAI_v3.Planning.Plans
                 // HP%가 낮은 순으로 정렬 (마무리 타겟)
                 var bestHittable = CollectionHelper.MinByWhere(situation.HittableEnemies,
                     e => e.IsConscious,
-                    e => CombatAPI.GetHPPercent(e));
+                    e => CombatCache.GetHPPercent(e));
 
                 if (bestHittable != null)
                 {
@@ -1611,7 +1612,7 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     int nearbyEnemyCount = CollectionHelper.CountWhere(situation.Enemies,
                         e => e.IsConscious && CombatCache.GetDistanceInTiles(a, e) <= 3f);
-                    return CombatAPI.GetHPPercent(a) * 100f - nearbyEnemyCount;
+                    return CombatCache.GetHPPercent(a) * 100f - nearbyEnemyCount;
                 });
 
             if (allyToProtect == null)
@@ -1621,7 +1622,7 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // HP가 70% 이상이고 주변 적이 없으면 스킵
-            float allyHP = CombatAPI.GetHPPercent(allyToProtect);
+            float allyHP = CombatCache.GetHPPercent(allyToProtect);
             // ★ v3.8.48: LINQ → CollectionHelper (0 할당)
             int nearbyEnemies = CollectionHelper.CountWhere(situation.Enemies, e =>
                 e.IsConscious &&
@@ -1750,9 +1751,10 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     foreach (var comp in components)
                     {
-                        if (comp.GetType().Name.Contains("MultiTarget"))
+                        // ★ v3.8.61: string 매칭 → is 연산자
+                        if (comp is Kingmaker.UnitLogic.Abilities.Components.AbilityTargetsAround)
                         {
-                            Main.LogDebug($"[{RoleName}] Aerial Rush: Has {comp.GetType().Name} component");
+                            Main.LogDebug($"[{RoleName}] Aerial Rush: Has AbilityTargetsAround component");
                         }
                     }
                 }
@@ -1797,8 +1799,9 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     foreach (var comp in components)
                     {
-                        if (comp.GetType().Name.Contains("OverrideCasterPositionByPet") ||
-                            comp.GetType().Name.Contains("OverrideAbilityCasterPosition"))
+                        // ★ v3.8.59: 타입 안전 체크 (string 매칭 제거)
+                        if (comp is WarhammerOverrideAbilityCasterPositionByPet ||
+                            comp is WarhammerOverrideAbilityCasterPositionContextual)
                         {
                             hasOverrideCasterByPet = true;
                             Main.LogDebug($"[{RoleName}] Aerial Rush: Found {comp.GetType().Name} - distance calc uses Pet position");
@@ -1818,7 +1821,7 @@ namespace CompanionAI_v3.Planning.Plans
             foreach (var enemy in situation.Enemies)
             {
                 if (enemy == null || !enemy.IsConscious) continue;
-                float dist = Vector3.Distance(situation.Unit.Position, enemy.Position) / 1.35f;  // 미터 → 타일
+                float dist = CombatCache.GetDistanceInTiles(situation.Unit, enemy);  // 캐시 기반 타일 거리
                 if (dist > maxEnemyDist) maxEnemyDist = dist;
             }
 
@@ -2001,7 +2004,7 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     var e = enemies[i];
                     if (!CombatAPI.HasRangedWeapon(e)) continue;
-                    float hp = CombatAPI.GetHPPercent(e);
+                    float hp = CombatCache.GetHPPercent(e);
                     if (hp > bestHP)
                     {
                         var tw = new TargetWrapper(e);
@@ -2021,7 +2024,7 @@ namespace CompanionAI_v3.Planning.Plans
                 for (int i = 0; i < enemies.Count; i++)
                 {
                     var e = enemies[i];
-                    float hp = CombatAPI.GetHPPercent(e);
+                    float hp = CombatCache.GetHPPercent(e);
                     if (hp > bestHP)
                     {
                         var tw = new TargetWrapper(e);
@@ -2040,7 +2043,7 @@ namespace CompanionAI_v3.Planning.Plans
             remainingAP -= apCost;
             bool isRanged = CombatAPI.HasRangedWeapon(targetEnemy);
 
-            Main.Log($"[{RoleName}] ★ Eagle Blinding Dive: {targetEnemy.CharacterName} ({(isRanged ? "Ranged" : "Melee")}, HP={CombatAPI.GetHPPercent(targetEnemy):F0}%)");
+            Main.Log($"[{RoleName}] ★ Eagle Blinding Dive: {targetEnemy.CharacterName} ({(isRanged ? "Ranged" : "Melee")}, HP={CombatCache.GetHPPercent(targetEnemy):F0}%)");
 
             return PlannedAction.Attack(
                 blindingDive,
@@ -2092,12 +2095,12 @@ namespace CompanionAI_v3.Planning.Plans
                     for (int j = 0; j < enemies.Count; j++)
                     {
                         var other = enemies[j];
-                        if (other != e && UnityEngine.Vector3.Distance(e.Position, other.Position) <= 4f)
+                        if (other != e && CombatCache.GetDistance(e, other) <= 4f)
                             nearbyCount++;
                     }
                     if (nearbyCount < 1) continue;
                     // nearbyCount * 10000 - HP% (클러스터 우선, 같으면 저HP 우선)
-                    float score = nearbyCount * 10000f - CombatAPI.GetHPPercent(e);
+                    float score = nearbyCount * 10000f - CombatCache.GetHPPercent(e);
                     if (score > bestClusterScore)
                     {
                         var tw = new TargetWrapper(e);
@@ -2118,7 +2121,7 @@ namespace CompanionAI_v3.Planning.Plans
                 for (int i = 0; i < enemies.Count; i++)
                 {
                     var e = enemies[i];
-                    float hp = CombatAPI.GetHPPercent(e);
+                    float hp = CombatCache.GetHPPercent(e);
                     if (hp < bestHP)
                     {
                         var tw = new TargetWrapper(e);
@@ -2138,7 +2141,7 @@ namespace CompanionAI_v3.Planning.Plans
                 for (int i = 0; i < enemies.Count; i++)
                 {
                     var e = enemies[i];
-                    float dist = UnityEngine.Vector3.Distance(situation.Unit.Position, e.Position);
+                    float dist = CombatCache.GetDistance(situation.Unit, e);
                     if (dist < bestDist)
                     {
                         var tw = new TargetWrapper(e);
@@ -2156,7 +2159,7 @@ namespace CompanionAI_v3.Planning.Plans
 
             remainingAP -= apCost;
 
-            Main.Log($"[{RoleName}] ★ Mastiff Jump Claws: {targetEnemy.CharacterName} (HP={CombatAPI.GetHPPercent(targetEnemy):F0}%)");
+            Main.Log($"[{RoleName}] ★ Mastiff Jump Claws: {targetEnemy.CharacterName} (HP={CombatCache.GetHPPercent(targetEnemy):F0}%)");
 
             return PlannedAction.Attack(
                 jumpClaws,
@@ -2204,7 +2207,7 @@ namespace CompanionAI_v3.Planning.Plans
                 for (int i = 0; i < enemies.Count; i++)
                 {
                     var e = enemies[i];
-                    float hp = CombatAPI.GetHPPercent(e);
+                    float hp = CombatCache.GetHPPercent(e);
                     if (hp < bestHP)
                     {
                         var tw = new TargetWrapper(e);
@@ -2224,7 +2227,7 @@ namespace CompanionAI_v3.Planning.Plans
                 for (int i = 0; i < enemies.Count; i++)
                 {
                     var e = enemies[i];
-                    float dist = UnityEngine.Vector3.Distance(situation.Unit.Position, e.Position);
+                    float dist = CombatCache.GetDistance(situation.Unit, e);
                     if (dist < bestDist)
                     {
                         var tw = new TargetWrapper(e);
@@ -2243,7 +2246,7 @@ namespace CompanionAI_v3.Planning.Plans
             remainingAP -= apCost;
             string familiarName = situation.FamiliarType == PetType.Eagle ? "Eagle" : "Mastiff";
 
-            Main.Log($"[{RoleName}] ★ {familiarName} Claws: {targetEnemy.CharacterName} (HP={CombatAPI.GetHPPercent(targetEnemy):F0}%)");
+            Main.Log($"[{RoleName}] ★ {familiarName} Claws: {targetEnemy.CharacterName} (HP={CombatCache.GetHPPercent(targetEnemy):F0}%)");
 
             return PlannedAction.Attack(
                 claws,
@@ -2278,13 +2281,13 @@ namespace CompanionAI_v3.Planning.Plans
             // 보호할 아군 찾기 (HP 낮거나 위협받는 아군)
             var allyToScreen = CollectionHelper.MinByWhere(situation.Allies,
                 a => a.IsConscious && !FamiliarAPI.IsFamiliar(a) && a != situation.Unit,
-                a => CombatAPI.GetHPPercent(a));
+                a => CombatCache.GetHPPercent(a));
 
             if (allyToScreen == null)
                 return null;
 
             // HP가 60% 이상이면 스킵
-            float allyHP = CombatAPI.GetHPPercent(allyToScreen);
+            float allyHP = CombatCache.GetHPPercent(allyToScreen);
             if (allyHP > 60f)
                 return null;
 
@@ -2397,7 +2400,7 @@ namespace CompanionAI_v3.Planning.Plans
             // 범위 내 부상 아군 수 계산 (4타일 = 약 5.4m)
             int woundedInRange = situation.Familiar != null
                 ? CollectionHelper.CountWhere(situation.Allies, a =>
-                    a.IsConscious && CombatAPI.GetHPPercent(a) < 70f &&
+                    a.IsConscious && CombatCache.GetHPPercent(a) < 70f &&
                     CombatCache.GetDistanceInTiles(situation.Familiar, a) <= 4f)
                 : 0;
 
@@ -2458,7 +2461,7 @@ namespace CompanionAI_v3.Planning.Plans
                 var enemy = situation.Enemies[i];
                 if (!enemy.IsConscious) continue;
 
-                float distToRaven = UnityEngine.Vector3.Distance(raven.Position, enemy.Position);
+                float distToRaven = CombatCache.GetDistance(raven, enemy);
                 if (distToRaven > maxHexRange) continue;
 
                 float hp = (float)(enemy.Health?.MaxHitPoints ?? 0);
