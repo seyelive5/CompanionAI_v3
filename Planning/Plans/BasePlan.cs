@@ -25,6 +25,17 @@ namespace CompanionAI_v3.Planning.Plans
     /// </summary>
     public abstract class BasePlan
     {
+        #region ★ v3.8.78: Zero-alloc temp lists (static 재사용, GC 0)
+
+        /// <summary>LINQ .Where().ToList() 대체용 - 능력 필터링</summary>
+        private static readonly List<AbilityData> _tempAbilities = new List<AbilityData>(16);
+        /// <summary>LINQ .Where().ToList() 대체용 - 유닛 필터링</summary>
+        private static readonly List<BaseUnitEntity> _tempUnits = new List<BaseUnitEntity>(8);
+        /// <summary>LINQ .Where().ToList() 대체용 - 액션 필터링</summary>
+        private static readonly List<PlannedAction> _tempActions = new List<PlannedAction>(8);
+
+        #endregion
+
         #region Constants
 
         protected const float HP_COST_THRESHOLD = 40f;
@@ -140,6 +151,10 @@ namespace CompanionAI_v3.Planning.Plans
         protected PlannedAction PlanPostActionSafeRetreat(Situation situation)
             => MovementPlanner.PlanPostActionSafeRetreat(situation);
 
+        // ★ v3.8.74: Tactical Reposition delegate
+        protected PlannedAction PlanTacticalReposition(Situation situation, float remainingMP)
+            => MovementPlanner.PlanTacticalReposition(situation, remainingMP);
+
         protected bool ShouldRetreat(Situation situation)
             => MovementPlanner.ShouldRetreat(situation);
 
@@ -199,24 +214,23 @@ namespace CompanionAI_v3.Planning.Plans
         // ★ v3.1.29: Self-Targeted AOE 계획 (BladeDance 등)
         protected PlannedAction PlanSelfTargetedAoE(Situation situation, ref float remainingAP)
         {
+            // ★ v3.8.78: LINQ → CollectionHelper (0 할당)
             // DangerousAoE 중 Self-Target 능력 찾기
-            var selfAoEAbilities = situation.AvailableAttacks
-                .Where(a => CombatAPI.IsSelfTargetedAoEAttack(a))
-                .ToList();
+            CollectionHelper.FillWhere(situation.AvailableAttacks, _tempAbilities,
+                a => CombatAPI.IsSelfTargetedAoEAttack(a));
 
             // AvailableAttacks에서 필터링되었을 수 있으니 전체에서 다시 찾기
-            if (selfAoEAbilities.Count == 0)
+            if (_tempAbilities.Count == 0)
             {
-                selfAoEAbilities = CombatAPI.GetAvailableAbilities(situation.Unit)
-                    .Where(a => CombatAPI.IsSelfTargetedAoEAttack(a))
-                    .ToList();
+                CollectionHelper.FillWhere(CombatAPI.GetAvailableAbilities(situation.Unit), _tempAbilities,
+                    a => CombatAPI.IsSelfTargetedAoEAttack(a));
             }
 
-            if (selfAoEAbilities.Count == 0) return null;
+            if (_tempAbilities.Count == 0) return null;
 
-            foreach (var ability in selfAoEAbilities)
+            for (int i = 0; i < _tempAbilities.Count; i++)
             {
-                var result = AttackPlanner.PlanSelfTargetedAoEAttack(situation, ability, ref remainingAP, RoleName);
+                var result = AttackPlanner.PlanSelfTargetedAoEAttack(situation, _tempAbilities[i], ref remainingAP, RoleName);
                 if (result != null) return result;
             }
 
@@ -226,20 +240,19 @@ namespace CompanionAI_v3.Planning.Plans
         /// ★ v3.8.50: 근접 AOE 계획 (유닛 타겟 근접 스플래시)
         protected PlannedAction PlanMeleeAoE(Situation situation, ref float remainingAP)
         {
+            // ★ v3.8.78: LINQ → CollectionHelper (0 할당)
             // AvailableAttacks에서 근접 AOE 검색
-            var meleeAoEAbilities = situation.AvailableAttacks
-                .Where(a => CombatAPI.IsMeleeAoEAbility(a))
-                .ToList();
+            CollectionHelper.FillWhere(situation.AvailableAttacks, _tempAbilities,
+                a => CombatAPI.IsMeleeAoEAbility(a));
 
             // DangerousAoE 필터로 제외되었을 수 있으니 전체에서 다시 찾기
-            if (meleeAoEAbilities.Count == 0)
+            if (_tempAbilities.Count == 0)
             {
-                meleeAoEAbilities = CombatAPI.GetAvailableAbilities(situation.Unit)
-                    .Where(a => CombatAPI.IsMeleeAoEAbility(a))
-                    .ToList();
+                CollectionHelper.FillWhere(CombatAPI.GetAvailableAbilities(situation.Unit), _tempAbilities,
+                    a => CombatAPI.IsMeleeAoEAbility(a));
             }
 
-            if (meleeAoEAbilities.Count == 0) return null;
+            if (_tempAbilities.Count == 0) return null;
 
             return AttackPlanner.PlanMeleeAoEAttack(situation, ref remainingAP, RoleName);
         }
@@ -253,34 +266,33 @@ namespace CompanionAI_v3.Planning.Plans
         /// </summary>
         protected PlannedAction PlanAoEHeal(Situation situation, ref float remainingAP)
         {
+            // ★ v3.8.78: LINQ → CollectionHelper (0 할당)
             // Point 타겟 힐 능력 찾기
-            var aoeHeals = situation.AvailableHeals
-                .Where(a => CombatAPI.IsPointTargetAbility(a))
-                .ToList();
+            CollectionHelper.FillWhere(situation.AvailableHeals, _tempAbilities,
+                a => CombatAPI.IsPointTargetAbility(a));
 
-            if (aoeHeals.Count == 0) return null;
+            if (_tempAbilities.Count == 0) return null;
 
             // 부상 아군 필터링 (HP < 80%)
-            var woundedAllies = situation.Allies
-                .Where(a => a != null && a.IsConscious)
-                .Where(a => CombatCache.GetHPPercent(a) < 80f)
-                .ToList();
+            CollectionHelper.FillWhere(situation.Allies, _tempUnits,
+                a => a.IsConscious && CombatCache.GetHPPercent(a) < 80f);
 
             // 캐스터도 부상이면 추가
             if (CombatCache.GetHPPercent(situation.Unit) < 80f)
-                woundedAllies.Add(situation.Unit);
+                _tempUnits.Add(situation.Unit);
 
-            if (woundedAllies.Count < 2) return null;  // AOE 힐은 2명 이상 필요
+            if (_tempUnits.Count < 2) return null;  // AOE 힐은 2명 이상 필요
 
-            foreach (var ability in aoeHeals)
+            for (int i = 0; i < _tempAbilities.Count; i++)
             {
+                var ability = _tempAbilities[i];
                 float cost = CombatAPI.GetAbilityAPCost(ability);
                 if (cost > remainingAP) continue;
 
                 var bestPosition = AoESafetyChecker.FindBestAllyAoEPosition(
                     ability,
                     situation.Unit,
-                    woundedAllies,
+                    _tempUnits,
                     minAlliesRequired: 2,
                     requiresWounded: true);
 
@@ -289,7 +301,7 @@ namespace CompanionAI_v3.Planning.Plans
                 string reason;
                 if (!CombatAPI.CanUseAbilityOnPoint(ability, bestPosition.Position, out reason))
                 {
-                    Main.LogDebug($"[{RoleName}] AOE Heal blocked: {ability.Name} - {reason}");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] AOE Heal blocked: {ability.Name} - {reason}");
                     continue;
                 }
 
@@ -312,25 +324,23 @@ namespace CompanionAI_v3.Planning.Plans
         /// </summary>
         protected PlannedAction PlanAoEBuff(Situation situation, ref float remainingAP)
         {
+            // ★ v3.8.78: LINQ → CollectionHelper (0 할당)
             // Point 타겟 버프 능력 찾기 (힐, 도발 제외)
-            var aoeBuffs = situation.AvailableBuffs
-                .Where(a => CombatAPI.IsPointTargetAbility(a))
-                .Where(a => !AbilityDatabase.IsTaunt(a))
-                .Where(a => !AbilityDatabase.IsHealing(a))
-                .ToList();
+            CollectionHelper.FillWhere(situation.AvailableBuffs, _tempAbilities,
+                a => CombatAPI.IsPointTargetAbility(a) && !AbilityDatabase.IsTaunt(a) && !AbilityDatabase.IsHealing(a));
 
-            if (aoeBuffs.Count == 0) return null;
+            if (_tempAbilities.Count == 0) return null;
 
             // 모든 살아있는 아군 (자신 포함)
-            var allAllies = situation.Allies
-                .Where(a => a != null && a.IsConscious)
-                .ToList();
-            allAllies.Add(situation.Unit);
+            CollectionHelper.FillWhere(situation.Allies, _tempUnits,
+                a => a.IsConscious);
+            _tempUnits.Add(situation.Unit);
 
-            if (allAllies.Count < 2) return null;  // AOE 버프는 2명 이상 필요
+            if (_tempUnits.Count < 2) return null;  // AOE 버프는 2명 이상 필요
 
-            foreach (var ability in aoeBuffs)
+            for (int i = 0; i < _tempAbilities.Count; i++)
             {
+                var ability = _tempAbilities[i];
                 float cost = CombatAPI.GetAbilityAPCost(ability);
                 if (cost > remainingAP) continue;
 
@@ -340,7 +350,7 @@ namespace CompanionAI_v3.Planning.Plans
                 var bestPosition = AoESafetyChecker.FindBestAllyAoEPosition(
                     ability,
                     situation.Unit,
-                    allAllies,
+                    _tempUnits,
                     minAlliesRequired: 2,
                     requiresWounded: false);
 
@@ -349,7 +359,7 @@ namespace CompanionAI_v3.Planning.Plans
                 string reason;
                 if (!CombatAPI.CanUseAbilityOnPoint(ability, bestPosition.Position, out reason))
                 {
-                    Main.LogDebug($"[{RoleName}] AOE Buff blocked: {ability.Name} - {reason}");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] AOE Buff blocked: {ability.Name} - {reason}");
                     continue;
                 }
 
@@ -442,14 +452,16 @@ namespace CompanionAI_v3.Planning.Plans
                 if (mostWounded != null)
                 {
                     prioritizedTargets.Add(mostWounded);
-                    Main.LogDebug($"[{RoleName}] AllyBuff: Retreat tactic - buff wounded ally {mostWounded.CharacterName}");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] AllyBuff: Retreat tactic - buff wounded ally {mostWounded.CharacterName}");
                 }
             }
             else if (tactic == TacticalSignal.Attack)
             {
+                // ★ v3.8.78: .Where() LINQ 제거 → inline 가드
                 // 공격: DPS 우선 버프 (HP 50% 이상인 DPS)
-                foreach (var ally in situation.Allies.Where(a => a != null && !a.LifeState.IsDead))
+                foreach (var ally in situation.Allies)
                 {
+                    if (ally == null || ally.LifeState.IsDead) continue;
                     var settings = ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
                     if (settings?.Role == AIRole.DPS && CombatCache.GetHPPercent(ally) > 50f)
                     {
@@ -458,22 +470,24 @@ namespace CompanionAI_v3.Planning.Plans
                 }
                 if (prioritizedTargets.Count > 0)
                 {
-                    Main.LogDebug($"[{RoleName}] AllyBuff: Attack tactic - buff DPS first");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] AllyBuff: Attack tactic - buff DPS first");
                 }
             }
 
             // 기본 우선순위 (Defend 또는 위에서 대상 없을 때): Tank > DPS > 본인 > 기타
             // 1. Tank 역할 먼저
-            foreach (var ally in situation.Allies.Where(a => a != null && !a.LifeState.IsDead))
+            foreach (var ally in situation.Allies)
             {
+                if (ally == null || ally.LifeState.IsDead) continue;
                 var settings = ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
                 if (settings?.Role == AIRole.Tank && !prioritizedTargets.Contains(ally))
                     prioritizedTargets.Add(ally);
             }
 
             // 2. DPS 역할
-            foreach (var ally in situation.Allies.Where(a => a != null && !a.LifeState.IsDead))
+            foreach (var ally in situation.Allies)
             {
+                if (ally == null || ally.LifeState.IsDead) continue;
                 var settings = ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
                 if (settings?.Role == AIRole.DPS && !prioritizedTargets.Contains(ally))
                     prioritizedTargets.Add(ally);
@@ -484,8 +498,9 @@ namespace CompanionAI_v3.Planning.Plans
                 prioritizedTargets.Add(situation.Unit);
 
             // 4. 나머지 아군
-            foreach (var ally in situation.Allies.Where(a => a != null && !a.LifeState.IsDead))
+            foreach (var ally in situation.Allies)
             {
+                if (ally == null || ally.LifeState.IsDead) continue;
                 if (!prioritizedTargets.Contains(ally))
                     prioritizedTargets.Add(ally);
             }
@@ -498,7 +513,7 @@ namespace CompanionAI_v3.Planning.Plans
                 string buffGuid = buff.Blueprint?.AssetGuid?.ToString();
                 if (!string.IsNullOrEmpty(buffGuid) && usedKeystoneGuids != null && usedKeystoneGuids.Contains(buffGuid))
                 {
-                    Main.LogDebug($"[{RoleName}] Skip {buff.Name} - successfully used on familiar in Keystone phase");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Skip {buff.Name} - successfully used on familiar in Keystone phase");
                     continue;
                 }
 
@@ -526,14 +541,14 @@ namespace CompanionAI_v3.Planning.Plans
                     {
                         int remaining = CombatAPI.GetBuffRemainingRounds(target, buff);
                         string durStr = remaining == -1 ? "영구" : $"{remaining}R";
-                        Main.LogDebug($"[{RoleName}] Skip {buff.Name} -> {target.CharacterName}: buff active ({durStr} remaining)");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Skip {buff.Name} -> {target.CharacterName}: buff active ({durStr} remaining)");
                         continue;
                     }
 
                     // ★ v3.7.87: 턴 전달 능력은 이미 행동한 유닛에게 쓰면 낭비
                     if (isTurnGrant && TeamBlackboard.Instance.HasActedThisRound(target))
                     {
-                        Main.LogDebug($"[{RoleName}] Skip {buff.Name} -> {target.CharacterName}: already acted this round");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Skip {buff.Name} -> {target.CharacterName}: already acted this round");
                         continue;
                     }
 
@@ -541,7 +556,7 @@ namespace CompanionAI_v3.Planning.Plans
                     // 같은 계획 단계에서 같은 대상에게 여러 번 쳐부숴라 계획 방지
                     if (isTurnGrant && plannedTurnGrantTargetIds != null && plannedTurnGrantTargetIds.Contains(targetId))
                     {
-                        Main.LogDebug($"[{RoleName}] Skip {buff.Name} -> {target.CharacterName}: turn grant already planned for this target");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Skip {buff.Name} -> {target.CharacterName}: turn grant already planned for this target");
                         continue;
                     }
 
@@ -564,6 +579,235 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             return null;
+        }
+
+        #endregion
+
+        #region Post-Plan Validation (v3.8.68)
+
+        /// <summary>
+        /// ★ v3.8.68: Post-plan 공격 도달 가능 여부 검증 + 복구
+        /// 1. 이동 목적지(또는 현재 위치)에서 모든 공격의 도달 가능 여부 검증
+        /// 2. 도달 불가 공격 제거 (AP 복구)
+        /// 3. 모든 공격 제거 시 공격 전 버프도 제거 (AP 복구)
+        /// 4. didPlanAttack 업데이트
+        /// </summary>
+        /// <returns>제거된 공격 수</returns>
+        protected int ValidateAndRemoveUnreachableAttacks(
+            List<PlannedAction> actions,
+            Situation situation,
+            ref bool didPlanAttack,
+            ref float remainingAP)
+        {
+            var firstMoveAction = CollectionHelper.FirstOrDefault(actions, a => a.Type == ActionType.Move);
+            UnityEngine.Vector3 validationPosition;
+            bool hasMoveForValidation = firstMoveAction?.MoveDestination != null;
+
+            if (hasMoveForValidation)
+                validationPosition = firstMoveAction.MoveDestination.Value;
+            else
+                validationPosition = situation.Unit.Position;
+
+            // 도달 불가 공격 탐지
+            var invalidAttacks = new List<PlannedAction>();
+            foreach (var action in actions)
+            {
+                if (action.Type != ActionType.Attack && action.Type != ActionType.Debuff) continue;
+                if (action.Ability == null) continue;
+
+                var targetEntity = action.Target?.Entity as BaseUnitEntity;
+                if (targetEntity == null) continue;  // Point 타겟은 스킵
+
+                if (!CombatAPI.CanReachTargetFromPosition(action.Ability, validationPosition, targetEntity))
+                {
+                    invalidAttacks.Add(action);
+                    Main.LogWarning($"[{RoleName}] Attack validation FAILED: {action.Ability.Name} -> {targetEntity.CharacterName} " +
+                        $"(unreachable from {(hasMoveForValidation ? "move destination" : "current position")})");
+                }
+            }
+
+            if (invalidAttacks.Count == 0) return 0;
+
+            // 도달 불가 공격 제거 + AP 복구
+            foreach (var invalid in invalidAttacks)
+            {
+                actions.Remove(invalid);
+                remainingAP += invalid.APCost;
+                Main.Log($"[{RoleName}] ★ Removed unreachable attack: {invalid.Ability?.Name} -> {invalid.Target?.Entity?.ToString() ?? "?"}");
+            }
+
+            // didPlanAttack 업데이트
+            didPlanAttack = CollectionHelper.Any(actions, a => a.Type == ActionType.Attack);
+
+            // 모든 공격이 제거됐으면 공격 전 버프도 제거 (낭비 방지)
+            if (!didPlanAttack)
+            {
+                // ★ v3.8.78: LINQ → CollectionHelper (0 할당)
+                CollectionHelper.FillWhere(actions, _tempActions,
+                    a => a.Type == ActionType.Buff && a.Ability != null && IsPreAttackBuff(a.Ability));
+
+                for (int bi = 0; bi < _tempActions.Count; bi++)
+                {
+                    var buff = _tempActions[bi];
+                    actions.Remove(buff);
+                    remainingAP += buff.APCost;
+                    Main.Log($"[{RoleName}] ★ Removed orphaned pre-attack buff: {buff.Ability?.Name} (no attacks remaining)");
+                }
+            }
+
+            return invalidAttacks.Count;
+        }
+
+        /// <summary>
+        /// ★ v3.8.68: 공격 전 버프 여부 판별
+        /// </summary>
+        private static bool IsPreAttackBuff(AbilityData ability)
+        {
+            var timing = AbilityDatabase.GetTiming(ability);
+            return timing == AbilityTiming.PreAttackBuff || timing == AbilityTiming.RighteousFury;
+        }
+
+        /// <summary>
+        /// ★ v3.8.76: 전략 옵션 평가 (공격-이동 조합 선택)
+        /// Emergency/Reload Phase 이후, 공격/이동 Phase 전에 호출
+        /// </summary>
+        protected TacticalEvaluation EvaluateTacticalOptions(Situation situation)
+        {
+            if (!TacticalOptionEvaluator.ShouldEvaluate(situation))
+                return null;
+
+            bool needsRetreat = ShouldRetreat(situation);
+            return TacticalOptionEvaluator.Evaluate(situation, needsRetreat, RoleName);
+        }
+
+        /// <summary>
+        /// ★ v3.8.76: 전략 평가 결과를 Plan 실행에 적용
+        /// MoveToAttack → 이동 액션 생성 + HittableEnemies 재계산
+        /// AttackThenRetreat → deferRetreat=true
+        /// </summary>
+        protected PlannedAction ApplyTacticalStrategy(
+            TacticalEvaluation eval,
+            Situation situation,
+            out bool shouldMoveBeforeAttack,
+            out bool shouldDeferRetreat)
+        {
+            shouldMoveBeforeAttack = false;
+            shouldDeferRetreat = false;
+
+            if (eval == null || !eval.WasEvaluated)
+                return null;
+
+            switch (eval.ChosenStrategy)
+            {
+                case TacticalStrategy.AttackFromCurrent:
+                    // 이동 불필요 - 현재 위치에서 공격 진행
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] TacticalStrategy: AttackFromCurrent (hittable={eval.ExpectedHittableCount})");
+                    break;
+
+                case TacticalStrategy.MoveToAttack:
+                    // 공격 전 이동 필요
+                    shouldMoveBeforeAttack = true;
+                    if (eval.MoveDestination.HasValue)
+                    {
+                        // HittableEnemies 재계산
+                        RecalculateHittableFromDestination(situation, eval.MoveDestination.Value);
+                        Main.Log($"[{RoleName}] TacticalStrategy: MoveToAttack → ({eval.MoveDestination.Value.x:F1},{eval.MoveDestination.Value.z:F1}), hittable={eval.ExpectedHittableCount}");
+                        return PlannedAction.Move(eval.MoveDestination.Value,
+                            $"Tactical pre-attack move (hittable: {eval.ExpectedHittableCount})");
+                    }
+                    break;
+
+                case TacticalStrategy.AttackThenRetreat:
+                    // 공격 먼저, 후퇴는 나중에
+                    shouldDeferRetreat = true;
+                    Main.Log($"[{RoleName}] TacticalStrategy: AttackThenRetreat (attack first, retreat after)");
+                    break;
+
+                case TacticalStrategy.MoveOnly:
+                    // 공격 불가 - Phase 8에서 이동 처리
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] TacticalStrategy: MoveOnly (no attack possible)");
+                    break;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// ★ v3.8.76: 이동 후 위치에서 HittableEnemies 재계산
+        ///
+        /// 핵심 문제: SituationAnalyzer는 턴 시작 위치에서 HittableEnemies를 판정하지만,
+        /// Phase 1.6 후퇴/Phase 8 이동 후에는 새 위치에서 LOS/사거리가 달라짐.
+        /// 이동이 계획된 후 공격 Phase 전에 호출하여 정확한 공격 대상 목록 유지.
+        ///
+        /// 이것이 없으면: 이동 후 도달 불가 공격 계획 → ValidateAndRemoveUnreachableAttacks에서 사후 제거 → AP 낭비
+        /// 이것이 있으면: 이동 목적지에서 실제 공격 가능한 적만 대상으로 공격 계획
+        /// </summary>
+        protected void RecalculateHittableFromDestination(Situation situation, Vector3 destination)
+        {
+            var destNode = destination.GetNearestNodeXZ() as CustomGridNodeBase;
+            if (destNode == null)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] RecalculateHittable: destination node not found");
+                return;
+            }
+
+            var unit = situation.Unit;
+            int oldCount = situation.HittableEnemies.Count;
+            var oldHittable = new List<BaseUnitEntity>(situation.HittableEnemies);
+
+            // 이동 후 위치에서 각 적의 도달 가능성 재검사
+            // AvailableAttacks 중 하나라도 해당 적을 타겟 가능하면 Hittable
+            var newHittable = new List<BaseUnitEntity>();
+
+            foreach (var enemy in situation.Enemies)
+            {
+                if (enemy == null || enemy.LifeState.IsDead) continue;
+
+                bool canHit = false;
+                foreach (var attack in situation.AvailableAttacks)
+                {
+                    if (CombatHelpers.ShouldExcludeFromAttack(attack, false)) continue;
+
+                    string reason;
+                    if (CombatAPI.CanTargetFromPosition(attack, destNode, enemy, out reason))
+                    {
+                        canHit = true;
+                        break;
+                    }
+                }
+
+                if (canHit)
+                    newHittable.Add(enemy);
+            }
+
+            // Situation 업데이트
+            situation.HittableEnemies.Clear();
+            for (int i = 0; i < newHittable.Count; i++)
+                situation.HittableEnemies.Add(newHittable[i]);
+
+            // BestTarget이 더 이상 Hittable이 아니면 새 BestTarget 선택
+            if (situation.BestTarget != null && !newHittable.Contains(situation.BestTarget))
+            {
+                var oldBest = situation.BestTarget;
+                situation.BestTarget = newHittable.Count > 0 ? newHittable[0] : null;
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] BestTarget changed after move: {oldBest.CharacterName} → {situation.BestTarget?.CharacterName ?? "null"}");
+            }
+
+            Main.Log($"[{RoleName}] ★ RecalculateHittable from ({destination.x:F1},{destination.z:F1}): {oldCount} → {newHittable.Count} hittable");
+
+            // 소실된 타겟 로깅 (디버그)
+            if (newHittable.Count < oldCount)
+            {
+                int logged = 0;
+                foreach (var enemy in oldHittable)
+                {
+                    if (!newHittable.Contains(enemy))
+                    {
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Lost target after move: {enemy.CharacterName}");
+                        if (++logged >= 3) break;
+                    }
+                }
+            }
         }
 
         #endregion
@@ -655,7 +899,7 @@ namespace CompanionAI_v3.Planning.Plans
                     string usageKey = $"{abilityId}:{targetId}";
                     if (AbilityUsageTracker.WasUsedRecently(unitId, usageKey, 5000))
                     {
-                        Main.LogDebug($"[{RoleName}] Phase 9: Skipping {marker.Name} - already used on {situation.NearestEnemy.CharacterName}");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Phase 9: Skipping {marker.Name} - already used on {situation.NearestEnemy.CharacterName}");
                         continue;
                     }
 
@@ -687,8 +931,8 @@ namespace CompanionAI_v3.Planning.Plans
                 return null;
 
             // ClearMPAfterUse 능력이 있는지 확인
-            var clearMPAbility = situation.AvailableAttacks
-                .FirstOrDefault(a => CombatAPI.AbilityClearsMPAfterUse(a));
+            var clearMPAbility = CollectionHelper.FirstOrDefault(situation.AvailableAttacks,
+                a => CombatAPI.AbilityClearsMPAfterUse(a));
 
             if (clearMPAbility == null) return null;
 
@@ -713,8 +957,8 @@ namespace CompanionAI_v3.Planning.Plans
         protected bool ShouldPrioritizeSafetyForClearMPAbility(Situation situation)
         {
             // ClearMPAfterUse 능력 존재 확인
-            bool hasClearMPAbility = situation.AvailableAttacks
-                .Any(a => CombatAPI.AbilityClearsMPAfterUse(a));
+            bool hasClearMPAbility = CollectionHelper.Any(situation.AvailableAttacks,
+                a => CombatAPI.AbilityClearsMPAfterUse(a));
 
             if (!hasClearMPAbility) return false;
 
@@ -764,6 +1008,42 @@ namespace CompanionAI_v3.Planning.Plans
         }
 
         /// <summary>
+        /// ★ v3.8.72: Hittable Mismatch 사후 보정
+        /// Analyzer가 Hittable이라 판정했지만 AttackPlanner가 모든 타겟에서 실패한 경우
+        /// Situation 플래그를 보정하여 이동 Phase가 올바르게 작동하도록 함
+        ///
+        /// 보정 내용:
+        /// 1. HittableEnemies 클리어 → HasHittableEnemies=false
+        /// 2. NeedsReposition=true (원거리: 새 위치에서 LoS 확보)
+        /// 3. AllowPostAttackMove=true (이미 이동+공격했으면 추가 이동 허용)
+        /// 4. AttackPhaseContext.HittableMismatch=true (forceMove 판단용)
+        /// </summary>
+        protected void HandleHittableMismatch(Situation situation, bool didPlanAttack, AttackPhaseContext attackContext)
+        {
+            if (didPlanAttack || !situation.HasHittableEnemies) return;
+
+            int mismatchCount = situation.HittableEnemies.Count;
+            Main.Log($"[{RoleName}] ★ Hittable mismatch: {mismatchCount} marked hittable but no attack possible - correcting");
+
+            // 1. 거짓 Hittable 클리어
+            situation.HittableEnemies.Clear();
+
+            // 2. 원거리: 재배치 필요 (새 위치에서 LoS 확보 가능)
+            if (situation.PrefersRanged)
+                situation.NeedsReposition = true;
+
+            // 3. 이미 이동+공격했으면 추가 이동 허용 (AllowPostAttackMove 재계산)
+            //    원래: turnState.AllowPostAttackMove && !HasHittableEnemies
+            //    이제: HasHittableEnemies=false이므로, HasMovedThisTurn && HasAttackedThisTurn이면 true
+            if (situation.HasMovedThisTurn && situation.HasAttackedThisTurn)
+                situation.AllowPostAttackMove = true;
+
+            // 4. AttackPhaseContext에 기록 → ShouldForceMove에 반영
+            if (attackContext != null)
+                attackContext.HittableMismatch = true;
+        }
+
+        /// <summary>
         /// 이동 후 공격에 필요한 AP 예약량 계산
         /// </summary>
         protected float CalculateReservedAPForPostMoveAttack(Situation situation)
@@ -791,17 +1071,19 @@ namespace CompanionAI_v3.Planning.Plans
             }
             else if (situation.AvailableAttacks.Count > 0)
             {
-                var preferredAttacks = situation.AvailableAttacks
-                    .Where(a => !AbilityDatabase.IsReload(a) && !AbilityDatabase.IsTurnEnding(a))
-                    .Where(a => situation.PrefersRanged ? !a.IsMelee : a.IsMelee)
-                    .Select(a => CombatAPI.GetAbilityAPCost(a))
-                    .Where(cost => cost >= 1f)
-                    .ToList();
-
-                if (preferredAttacks.Count > 0)
+                // ★ v3.8.78: LINQ → for 루프 (0 할당)
+                float maxCost = 0f;
+                bool prefersRanged = situation.PrefersRanged;
+                for (int i = 0; i < situation.AvailableAttacks.Count; i++)
                 {
-                    attackCost = preferredAttacks.Max();
+                    var a = situation.AvailableAttacks[i];
+                    if (a == null) continue;
+                    if (AbilityDatabase.IsReload(a) || AbilityDatabase.IsTurnEnding(a)) continue;
+                    if (prefersRanged ? a.IsMelee : !a.IsMelee) continue;
+                    float cost = CombatAPI.GetAbilityAPCost(a);
+                    if (cost >= 1f && cost > maxCost) maxCost = cost;
                 }
+                if (maxCost > 0f) attackCost = maxCost;
             }
 
             return Math.Max(attackCost, defaultAttackCost);
@@ -852,8 +1134,19 @@ namespace CompanionAI_v3.Planning.Plans
         {
             if (actions.Count == 0) return "No actions available";
 
-            var types = actions.Select(a => a.Type.ToString()).Distinct();
-            return string.Join(" -> ", types);
+            // ★ v3.8.78: LINQ → for 루프 (0 할당 - Distinct 대체)
+            var sb = new System.Text.StringBuilder(64);
+            ActionType lastType = (ActionType)(-1);
+            for (int i = 0; i < actions.Count; i++)
+            {
+                if (actions[i].Type != lastType)
+                {
+                    if (sb.Length > 0) sb.Append(" -> ");
+                    sb.Append(actions[i].Type.ToString());
+                    lastType = actions[i].Type;
+                }
+            }
+            return sb.ToString();
         }
 
         /// <summary>
@@ -897,13 +1190,13 @@ namespace CompanionAI_v3.Planning.Plans
             var optimalPos = situation.OptimalFamiliarPosition;
             if (optimalPos == null)
             {
-                Main.LogDebug($"[{RoleName}] Keystone Loop: No optimal position");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Keystone Loop: No optimal position");
                 return actions;
             }
 
-            // 키스톤 대상 버프 필터링
+            // ★ v3.8.78: .ToList() 불필요 복사 제거 (AvailableBuffs는 이미 List<AbilityData>)
             var keystoneBuffs = FamiliarAbilities.FilterAbilitiesForFamiliarSpread(
-                situation.AvailableBuffs.ToList(),
+                situation.AvailableBuffs,
                 situation.FamiliarType.Value);
 
             // ★ v3.7.09: Raven의 경우 디버프도 추가 (Warp Relay로 적에게 확산)
@@ -915,8 +1208,9 @@ namespace CompanionAI_v3.Planning.Plans
                 // 1. AvailableDebuffs에서 검색
                 if (situation.AvailableDebuffs != null)
                 {
+                    // ★ v3.8.78: .ToList() 불필요 복사 제거
                     var debuffCandidates = FamiliarAbilities.FilterAbilitiesForFamiliarSpread(
-                        situation.AvailableDebuffs.ToList(),
+                        situation.AvailableDebuffs,
                         PetType.Raven);
                     keystoneDebuffs.AddRange(debuffCandidates);
                 }
@@ -929,7 +1223,7 @@ namespace CompanionAI_v3.Planning.Plans
                     {
                         // 이미 추가된 건 스킵
                         string guid = attack.Blueprint?.AssetGuid?.ToString();
-                        if (keystoneDebuffs.Any(d => d.Blueprint?.AssetGuid?.ToString() == guid))
+                        if (CollectionHelper.Any(keystoneDebuffs, d => d.Blueprint?.AssetGuid?.ToString() == guid))
                             continue;
 
                         // Warp Relay 대상인지 확인 (비피해 사이킹, 적 타겟)
@@ -937,21 +1231,21 @@ namespace CompanionAI_v3.Planning.Plans
                             attack.Blueprint?.CanTargetEnemies == true)
                         {
                             keystoneDebuffs.Add(attack);
-                            Main.LogDebug($"[{RoleName}] Keystone Loop: Found {attack.Name} in AvailableAttacks for Warp Relay");
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Keystone Loop: Found {attack.Name} in AvailableAttacks for Warp Relay");
                         }
                     }
                 }
 
                 if (keystoneDebuffs.Count > 0)
                 {
-                    Main.LogDebug($"[{RoleName}] Keystone Loop: {keystoneDebuffs.Count} debuffs eligible for Warp Relay");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Keystone Loop: {keystoneDebuffs.Count} debuffs eligible for Warp Relay");
                 }
             }
 
             // 버프/디버프 모두 없으면 종료
             if (keystoneBuffs.Count == 0 && keystoneDebuffs.Count == 0)
             {
-                Main.LogDebug($"[{RoleName}] Keystone Loop: No keystone-eligible abilities found");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Keystone Loop: No keystone-eligible abilities found");
                 return actions;
             }
 
@@ -961,12 +1255,13 @@ namespace CompanionAI_v3.Planning.Plans
             var typeName = FamiliarAPI.GetFamiliarTypeName(situation.FamiliarType);
 
             // ★ v3.7.22: 범위 내 실제 아군 목록 (버프 중복 체크용)
-            var validAllies = situation.Allies?.Where(a => a != null && a.IsConscious && !FamiliarAPI.IsFamiliar(a)).ToList()
-                ?? new List<BaseUnitEntity>();
+            // ★ v3.8.78: LINQ → CollectionHelper (0 할당)
+            CollectionHelper.FillWhere(situation.Allies, _tempUnits,
+                a => a.IsConscious && !FamiliarAPI.IsFamiliar(a));
             var alliesInRange = FamiliarAPI.GetAlliesInRadius(
                 optimalPos.Position,
                 FamiliarPositioner.EFFECT_RADIUS_TILES,
-                validAllies);
+                _tempUnits);
 
             // ★ v3.8.57: 아군 1명이라도 있으면 Raven Warp Relay 경유 (직접 시전과 동일 AP + 추가 확산 가능성)
             if (keystoneBuffs.Count > 0 && optimalPos.AlliesInRange >= 1)
@@ -996,7 +1291,7 @@ namespace CompanionAI_v3.Planning.Plans
                     // ★ v3.8.57: 1명이라도 필요하면 Raven 경유 (직접 시전 대비 손해 없고 추가 확산 가능)
                     if (alliesNeedingBuff < 1)
                     {
-                        Main.LogDebug($"[{RoleName}] Keystone Loop: {buff.Name} skipped - no allies need it (all {alliesInRange.Count} already have it)");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Keystone Loop: {buff.Name} skipped - no allies need it (all {alliesInRange.Count} already have it)");
                         continue;
                     }
 
@@ -1010,7 +1305,7 @@ namespace CompanionAI_v3.Planning.Plans
                         // Point AOE는 위치로 시전 가능한지 확인
                         if (!CombatAPI.CanUseAbilityOnPoint(buff, familiarPos, out reason))
                         {
-                            Main.LogDebug($"[{RoleName}] Keystone Loop: {buff.Name} blocked (point target) - {reason}");
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Keystone Loop: {buff.Name} blocked (point target) - {reason}");
                             continue;
                         }
                     }
@@ -1019,7 +1314,7 @@ namespace CompanionAI_v3.Planning.Plans
                         // 유닛 타겟은 사역마에게 시전 가능한지 확인
                         if (!CombatAPI.CanUseAbilityOn(buff, familiarTarget, out reason))
                         {
-                            Main.LogDebug($"[{RoleName}] Keystone Loop: {buff.Name} blocked - {reason}");
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Keystone Loop: {buff.Name} blocked - {reason}");
                             continue;
                         }
                     }
@@ -1043,7 +1338,7 @@ namespace CompanionAI_v3.Planning.Plans
                             $"Keystone spread: {buff.Name} ({alliesNeedingBuff} allies need it)",
                             cost);
                         // IsFamiliarTarget = false (PositionalBuff는 기본값 false)
-                        Main.LogDebug($"[{RoleName}] Keystone Point AOE: {buff.Name} at ({familiarPos.x:F1}, {familiarPos.z:F1})");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Keystone Point AOE: {buff.Name} at ({familiarPos.x:F1}, {familiarPos.z:F1})");
                     }
                     else
                     {
@@ -1070,7 +1365,7 @@ namespace CompanionAI_v3.Planning.Plans
 
             if (situation.FamiliarType == PetType.Raven)
             {
-                Main.LogDebug($"[{RoleName}] Keystone: Momentum check - heroicActPlanned={heroicActPlanned}, buffActive={buffActive}, hasMomentum={hasMomentum}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Keystone: Momentum check - heroicActPlanned={heroicActPlanned}, buffActive={buffActive}, hasMomentum={hasMomentum}");
             }
 
             // ★ v3.8.52: 턴 단위 페이즈 기반 디버프 제어
@@ -1092,10 +1387,11 @@ namespace CompanionAI_v3.Planning.Plans
             if (!isRavenBuffPhase && keystoneDebuffs.Count > 0 && situation.Familiar != null)
             {
                 var ravenCurrentPos = situation.Familiar.Position;
-                var validEnemiesForDebuff = situation.Enemies?.Where(e => e != null && e.IsConscious).ToList()
-                    ?? new List<BaseUnitEntity>();
+                // ★ v3.8.78: LINQ → CollectionHelper (0 할당)
+                CollectionHelper.FillWhere(situation.Enemies, _tempUnits,
+                    e => e.IsConscious);
                 actualEnemiesNearRaven = FamiliarAPI.CountEnemiesInRadius(
-                    ravenCurrentPos, FamiliarPositioner.EFFECT_RADIUS_TILES, validEnemiesForDebuff);
+                    ravenCurrentPos, FamiliarPositioner.EFFECT_RADIUS_TILES, _tempUnits);
 
                 // ★ v3.8.53: 재배치 예정 여부에 따라 적 수 판단
                 // NeedsFamiliarRelocate=true → Phase 3.3에서 최적 위치로 이동 예정 → optimalPos 기준 사용 가능
@@ -1105,14 +1401,14 @@ namespace CompanionAI_v3.Planning.Plans
                     ? Math.Max(actualEnemiesNearRaven, optimalPos.EnemiesInRange)
                     : actualEnemiesNearRaven;
 
-                Main.LogDebug($"[{RoleName}] Keystone Debuff: Enemies near Raven current={actualEnemiesNearRaven}, " +
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Keystone Debuff: Enemies near Raven current={actualEnemiesNearRaven}, " +
                     $"optimal={optimalPos.EnemiesInRange}, willRelocate={willRelocate}, effective={effectiveEnemyEstimate}");
                 // ★ v3.8.56: 적 1명이라도 있으면 디버프 허용 (사람처럼 일단 뭐라도 하기)
                 hasEnoughEnemiesForDebuff = effectiveEnemyEstimate >= 1;
             }
             else if (isRavenBuffPhase && keystoneDebuffs.Count > 0)
             {
-                Main.LogDebug($"[{RoleName}] Keystone Debuff: Skipped (Raven in BUFF phase - prioritizing ally buff distribution)");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Keystone Debuff: Skipped (Raven in BUFF phase - prioritizing ally buff distribution)");
             }
 
             if (keystoneDebuffs.Count > 0 && hasEnoughEnemiesForDebuff)
@@ -1133,7 +1429,7 @@ namespace CompanionAI_v3.Planning.Plans
                     string reason;
                     if (!CombatAPI.CanUseAbilityOn(debuff, familiarTarget, out reason))
                     {
-                        Main.LogDebug($"[{RoleName}] Keystone Debuff: {debuff.Name} can't target Raven - {reason}");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Keystone Debuff: {debuff.Name} can't target Raven - {reason}");
                         continue;
                     }
 
@@ -1155,7 +1451,7 @@ namespace CompanionAI_v3.Planning.Plans
             }
             else if (keystoneDebuffs.Count > 0 && !isRavenBuffPhase)
             {
-                Main.LogDebug($"[{RoleName}] Keystone Debuff: Not enough enemies near Raven (current={actualEnemiesNearRaven}, optimal={optimalPos.EnemiesInRange})");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Keystone Debuff: Not enough enemies near Raven (current={actualEnemiesNearRaven}, optimal={optimalPos.EnemiesInRange})");
             }
 
             // ★ v3.7.96: 피해 사이킥 공격 처리 (Momentum 필요!) ★ v3.8.56: 적 1명+ 허용
@@ -1191,7 +1487,7 @@ namespace CompanionAI_v3.Planning.Plans
                     string reason;
                     if (!CombatAPI.CanUseAbilityOn(attack, familiarTarget, out reason))
                     {
-                        Main.LogDebug($"[{RoleName}] Warp Relay Attack: {attack.Name} can't target Raven - {reason}");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Warp Relay Attack: {attack.Name} can't target Raven - {reason}");
                         continue;
                     }
 
@@ -1214,17 +1510,17 @@ namespace CompanionAI_v3.Planning.Plans
             else if (hasMomentum && isRavenBuffPhase)
             {
                 // ★ v3.8.57: Warp Relay 불가 → Phase 5에서 직접 적 공격으로 폴백
-                Main.LogDebug($"[{RoleName}] Warp Relay Attack: Momentum active but in BUFF phase - psychic attacks available as direct cast in Phase 5");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Warp Relay Attack: Momentum active but in BUFF phase - psychic attacks available as direct cast in Phase 5");
             }
             else if (hasMomentum && !hasEnoughEnemiesForDebuff)
             {
                 // ★ v3.8.57: Warp Relay 불가 → Phase 5에서 직접 적 공격으로 폴백
-                Main.LogDebug($"[{RoleName}] Warp Relay Attack: Momentum active but no enemies near Raven - psychic attacks available as direct cast in Phase 5");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Warp Relay Attack: Momentum active but no enemies near Raven - psychic attacks available as direct cast in Phase 5");
             }
             else if (!hasMomentum && situation.FamiliarType == PetType.Raven)
             {
                 // ★ v3.8.57: Momentum 없어도 사이킹 공격은 Phase 5에서 직접 캐스팅 가능
-                Main.LogDebug($"[{RoleName}] No Momentum: psychic attacks available as direct cast in Phase 5 (no Warp Relay AOE spread)");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] No Momentum: psychic attacks available as direct cast in Phase 5 (no Warp Relay AOE spread)");
             }
 
             if (actions.Count > 0)
@@ -1248,17 +1544,17 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.7.02: Mastiff는 Relocate 능력이 없음
             if (situation.FamiliarType == PetType.Mastiff)
             {
-                Main.LogDebug($"[{RoleName}] Familiar Relocate: Mastiff has no Relocate ability");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Familiar Relocate: Mastiff has no Relocate ability");
                 return null;
             }
 
             // Relocate 능력 찾기
-            var relocate = situation.FamiliarAbilities?
-                .FirstOrDefault(a => FamiliarAbilities.IsRelocateAbility(a));
+            var relocate = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                a => FamiliarAbilities.IsRelocateAbility(a));
 
             if (relocate == null)
             {
-                Main.LogDebug($"[{RoleName}] Familiar Relocate: No relocate ability found");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Familiar Relocate: No relocate ability found");
                 return null;
             }
 
@@ -1266,7 +1562,7 @@ namespace CompanionAI_v3.Planning.Plans
             float apCost = CombatAPI.GetAbilityAPCost(relocate);
             if (remainingAP < apCost)
             {
-                Main.LogDebug($"[{RoleName}] Familiar Relocate: Not enough AP ({remainingAP:F1} < {apCost:F1})");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Familiar Relocate: Not enough AP ({remainingAP:F1} < {apCost:F1})");
                 return null;
             }
 
@@ -1274,7 +1570,7 @@ namespace CompanionAI_v3.Planning.Plans
             var optimalPos = situation.OptimalFamiliarPosition;
             if (optimalPos == null)
             {
-                Main.LogDebug($"[{RoleName}] Familiar Relocate: No optimal position");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Familiar Relocate: No optimal position");
                 return null;
             }
 
@@ -1282,7 +1578,7 @@ namespace CompanionAI_v3.Planning.Plans
             string reason;
             if (!CombatAPI.CanUseAbilityOnPoint(relocate, optimalPos.Position, out reason))
             {
-                Main.LogDebug($"[{RoleName}] Familiar Relocate blocked: {reason}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Familiar Relocate blocked: {reason}");
                 return null;
             }
 
@@ -1331,7 +1627,7 @@ namespace CompanionAI_v3.Planning.Plans
             var optimalPos = situation.OptimalFamiliarPosition;
             if (optimalPos == null || optimalPos.AlliesInRange < 2)
             {
-                Main.LogDebug($"[{RoleName}] Familiar Keystone: Not enough allies in range ({optimalPos?.AlliesInRange ?? 0})");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Familiar Keystone: Not enough allies in range ({optimalPos?.AlliesInRange ?? 0})");
                 return null;
             }
 
@@ -1350,7 +1646,7 @@ namespace CompanionAI_v3.Planning.Plans
             {
                 if (!CombatAPI.CanUseAbilityOnPoint(buffAbility, familiarPos, out reason))
                 {
-                    Main.LogDebug($"[{RoleName}] Familiar Keystone blocked (point): {buffAbility.Name} -> {reason}");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Familiar Keystone blocked (point): {buffAbility.Name} -> {reason}");
                     return null;
                 }
             }
@@ -1359,7 +1655,7 @@ namespace CompanionAI_v3.Planning.Plans
                 var familiarTarget = new TargetWrapper(situation.Familiar);
                 if (!CombatAPI.CanUseAbilityOn(buffAbility, familiarTarget, out reason))
                 {
-                    Main.LogDebug($"[{RoleName}] Familiar Keystone blocked: {buffAbility.Name} -> {reason}");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Familiar Keystone blocked: {buffAbility.Name} -> {reason}");
                     return null;
                 }
             }
@@ -1405,8 +1701,8 @@ namespace CompanionAI_v3.Planning.Plans
                 return null;
 
             // Apprehend 능력 찾기
-            var apprehend = situation.FamiliarAbilities?
-                .FirstOrDefault(a => FamiliarAbilities.IsApprehendAbility(a));
+            var apprehend = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                a => FamiliarAbilities.IsApprehendAbility(a));
 
             if (apprehend == null)
                 return null;
@@ -1443,7 +1739,7 @@ namespace CompanionAI_v3.Planning.Plans
                     }
                     else
                     {
-                        Main.LogDebug($"[{RoleName}] Mastiff Apprehend: Hittable enemy blocked - {bestReason}");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Mastiff Apprehend: Hittable enemy blocked - {bestReason}");
                     }
                 }
             }
@@ -1481,7 +1777,7 @@ namespace CompanionAI_v3.Planning.Plans
 
             if (targetEnemy == null)
             {
-                Main.LogDebug($"[{RoleName}] Mastiff Apprehend: No valid target found");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Mastiff Apprehend: No valid target found");
                 return null;
             }
 
@@ -1492,7 +1788,7 @@ namespace CompanionAI_v3.Planning.Plans
                 string reason;
                 if (!CombatAPI.CanUseAbilityOn(apprehend, targetWrapper, out reason))
                 {
-                    Main.LogDebug($"[{RoleName}] Mastiff Apprehend blocked: {reason}");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Mastiff Apprehend blocked: {reason}");
                     return null;
                 }
             }
@@ -1521,15 +1817,15 @@ namespace CompanionAI_v3.Planning.Plans
 
             // ★ v3.7.31: 단일 타겟 능력만 처리 (MultiTarget 활공 버전은 PlanFamiliarAerialRush에서 처리)
             // Obstruct Vision 능력 찾기
-            var obstruct = situation.FamiliarAbilities?
-                .FirstOrDefault(a => FamiliarAbilities.IsObstructVisionAbility(a) &&
+            var obstruct = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                a => FamiliarAbilities.IsObstructVisionAbility(a) &&
                                      !FamiliarAbilities.IsMultiTargetFamiliarAbility(a));
 
             if (obstruct == null)
             {
                 // Blinding Strike 폴백 (단일 타겟만)
-                obstruct = situation.FamiliarAbilities?
-                    .FirstOrDefault(a => FamiliarAbilities.IsBlindingStrikeAbility(a) &&
+                obstruct = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                    a => FamiliarAbilities.IsBlindingStrikeAbility(a) &&
                                         !FamiliarAbilities.IsMultiTargetFamiliarAbility(a));
             }
 
@@ -1556,7 +1852,7 @@ namespace CompanionAI_v3.Planning.Plans
 
             if (targetEnemy == null)
             {
-                Main.LogDebug($"[{RoleName}] Eagle Obstruct: No suitable target found");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Eagle Obstruct: No suitable target found");
                 return null;
             }
 
@@ -1565,7 +1861,7 @@ namespace CompanionAI_v3.Planning.Plans
             string reason;
             if (!CombatAPI.CanUseAbilityOn(obstruct, targetWrapper, out reason))
             {
-                Main.LogDebug($"[{RoleName}] Eagle Obstruct blocked: {reason}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Eagle Obstruct blocked: {reason}");
                 return null;
             }
 
@@ -1591,8 +1887,8 @@ namespace CompanionAI_v3.Planning.Plans
                 return null;
 
             // Protect! 능력 찾기
-            var protect = situation.FamiliarAbilities?
-                .FirstOrDefault(a => FamiliarAbilities.IsProtectAbility(a));
+            var protect = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                a => FamiliarAbilities.IsProtectAbility(a));
 
             if (protect == null)
                 return null;
@@ -1617,7 +1913,7 @@ namespace CompanionAI_v3.Planning.Plans
 
             if (allyToProtect == null)
             {
-                Main.LogDebug($"[{RoleName}] Mastiff Protect: No ally to protect");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Mastiff Protect: No ally to protect");
                 return null;
             }
 
@@ -1630,7 +1926,7 @@ namespace CompanionAI_v3.Planning.Plans
 
             if (allyHP > 70f && nearbyEnemies == 0)
             {
-                Main.LogDebug($"[{RoleName}] Mastiff Protect: {allyToProtect.CharacterName} doesn't need protection (HP={allyHP:F0}%, enemies nearby=0)");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Mastiff Protect: {allyToProtect.CharacterName} doesn't need protection (HP={allyHP:F0}%, enemies nearby=0)");
                 return null;
             }
 
@@ -1639,7 +1935,7 @@ namespace CompanionAI_v3.Planning.Plans
             string reason;
             if (!CombatAPI.CanUseAbilityOn(protect, targetWrapper, out reason))
             {
-                Main.LogDebug($"[{RoleName}] Mastiff Protect blocked: {reason}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Mastiff Protect blocked: {reason}");
                 return null;
             }
 
@@ -1668,13 +1964,13 @@ namespace CompanionAI_v3.Planning.Plans
         protected PlannedAction PlanFamiliarAerialRush(Situation situation, ref float remainingAP)
         {
             // ★ v3.7.43: 디버그 로그 추가
-            Main.LogDebug($"[{RoleName}] Aerial Rush: Entry - FamiliarType={situation.FamiliarType}, " +
+            if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: Entry - FamiliarType={situation.FamiliarType}, " +
                 $"FamiliarAbilities={situation.FamiliarAbilities?.Count ?? 0}, AP={remainingAP:F1}");
 
             // Cyber-Eagle만 해당
             if (situation.FamiliarType != PetType.Eagle)
             {
-                Main.LogDebug($"[{RoleName}] Aerial Rush: Skip - Not Eagle (type={situation.FamiliarType})");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: Skip - Not Eagle (type={situation.FamiliarType})");
                 return null;
             }
 
@@ -1683,42 +1979,42 @@ namespace CompanionAI_v3.Planning.Plans
             AbilityData aerialRush = null;
 
             // 1. AerialRush (데미지 우선)
-            aerialRush = situation.FamiliarAbilities?
-                .FirstOrDefault(a => FamiliarAbilities.IsAerialRushAbility(a));
+            aerialRush = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                a => FamiliarAbilities.IsAerialRushAbility(a));
 
             // 2. AerialRush Support (실명 공격 — 활공)
             if (aerialRush == null)
             {
-                aerialRush = situation.FamiliarAbilities?
-                    .FirstOrDefault(a => FamiliarAbilities.IsAerialRushSupportAbility(a));
+                aerialRush = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                    a => FamiliarAbilities.IsAerialRushSupportAbility(a));
             }
 
             // 3. ObstructVision Glide 버전 (시야 방해 — 활공)
             if (aerialRush == null)
             {
-                aerialRush = situation.FamiliarAbilities?
-                    .FirstOrDefault(a => FamiliarAbilities.IsObstructVisionAbility(a) &&
+                aerialRush = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                    a => FamiliarAbilities.IsObstructVisionAbility(a) &&
                                          FamiliarAbilities.IsMultiTargetFamiliarAbility(a));
             }
 
             // 4. 기타 모든 Eagle MultiTarget 능력 (폴백)
             if (aerialRush == null)
             {
-                aerialRush = situation.FamiliarAbilities?
-                    .FirstOrDefault(a => FamiliarAbilities.IsMultiTargetFamiliarAbility(a));
+                aerialRush = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                    a => FamiliarAbilities.IsMultiTargetFamiliarAbility(a));
             }
 
             if (aerialRush == null)
             {
                 // ★ v3.7.43: 모든 능력 GUID 로그
-                Main.LogDebug($"[{RoleName}] Aerial Rush: No MultiTarget ability found. Available abilities:");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: No MultiTarget ability found. Available abilities:");
                 if (situation.FamiliarAbilities != null)
                 {
                     foreach (var ab in situation.FamiliarAbilities)
                     {
                         bool isMulti = FamiliarAbilities.IsMultiTargetFamiliarAbility(ab);
                         bool isAerial = FamiliarAbilities.IsAerialRushAbility(ab);
-                        Main.LogDebug($"  - {ab.Name} [{ab.Blueprint?.AssetGuid}] MultiTarget={isMulti}, AerialRush={isAerial}");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"  - {ab.Name} [{ab.Blueprint?.AssetGuid}] MultiTarget={isMulti}, AerialRush={isAerial}");
                     }
                 }
                 return null;
@@ -1726,7 +2022,7 @@ namespace CompanionAI_v3.Planning.Plans
 
             // AP 비용 확인
             float apCost = CombatAPI.GetAbilityAPCost(aerialRush);
-            Main.LogDebug($"[{RoleName}] Aerial Rush: Found ability={aerialRush.Name}, APCost={apCost:F1}, RemainingAP={remainingAP:F1}");
+            if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: Found ability={aerialRush.Name}, APCost={apCost:F1}, RemainingAP={remainingAP:F1}");
 
             // ★ v3.7.46: 디버그 - TargetRestrictions 덤프
             try
@@ -1734,15 +2030,15 @@ namespace CompanionAI_v3.Planning.Plans
                 var restrictions = aerialRush.Blueprint?.TargetRestrictions;
                 if (restrictions != null && restrictions.Length > 0)
                 {
-                    Main.LogDebug($"[{RoleName}] Aerial Rush: TargetRestrictions ({restrictions.Length} total):");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: TargetRestrictions ({restrictions.Length} total):");
                     foreach (var restriction in restrictions)
                     {
-                        Main.LogDebug($"  - {restriction.GetType().Name}");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"  - {restriction.GetType().Name}");
                     }
                 }
                 else
                 {
-                    Main.LogDebug($"[{RoleName}] Aerial Rush: No TargetRestrictions");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: No TargetRestrictions");
                 }
 
                 // MultiTarget 컴포넌트 정보
@@ -1754,26 +2050,26 @@ namespace CompanionAI_v3.Planning.Plans
                         // ★ v3.8.61: string 매칭 → is 연산자
                         if (comp is Kingmaker.UnitLogic.Abilities.Components.AbilityTargetsAround)
                         {
-                            Main.LogDebug($"[{RoleName}] Aerial Rush: Has AbilityTargetsAround component");
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: Has AbilityTargetsAround component");
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                Main.LogDebug($"[{RoleName}] Aerial Rush: Error dumping restrictions: {ex.Message}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: Error dumping restrictions: {ex.Message}");
             }
 
             if (remainingAP < apCost)
             {
-                Main.LogDebug($"[{RoleName}] Aerial Rush: Insufficient AP ({remainingAP:F1} < {apCost:F1})");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: Insufficient AP ({remainingAP:F1} < {apCost:F1})");
                 return null;
             }
 
             var masterNode = situation.Unit.Position.GetNearestNodeXZ() as CustomGridNodeBase;
             if (masterNode == null)
             {
-                Main.LogDebug($"[{RoleName}] Aerial Rush: Master node is null");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: Master node is null");
                 return null;
             }
 
@@ -1804,7 +2100,7 @@ namespace CompanionAI_v3.Planning.Plans
                             comp is WarhammerOverrideAbilityCasterPositionContextual)
                         {
                             hasOverrideCasterByPet = true;
-                            Main.LogDebug($"[{RoleName}] Aerial Rush: Found {comp.GetType().Name} - distance calc uses Pet position");
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: Found {comp.GetType().Name} - distance calc uses Pet position");
                             break;
                         }
                     }
@@ -1834,7 +2130,7 @@ namespace CompanionAI_v3.Planning.Plans
             // → 두 값이 다르면 TargetRestrictionNotPassed 발생
             int point2RangeTiles = CombatAPI.GetMultiTargetPoint2RangeInTiles(aerialRush);
 
-            Main.LogDebug($"[{RoleName}] Aerial Rush: Point1={point1RangeTiles} tiles (maxEnemy={maxEnemyDist:F0}), " +
+            if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: Point1={point1RangeTiles} tiles (maxEnemy={maxEnemyDist:F0}), " +
                 $"Point2={point2RangeTiles} tiles (from Support ability RangeCells), EagleMP={familiarMP:F0}, OverrideCaster={hasOverrideCasterByPet}");
 
             // ★ v3.7.48: Eagle 위치 기반 경로 탐색
@@ -1844,7 +2140,7 @@ namespace CompanionAI_v3.Planning.Plans
             if (familiar != null)
             {
                 eagleNode = situation.FamiliarPosition.GetNearestNodeXZ() as CustomGridNodeBase;
-                Main.LogDebug($"[{RoleName}] Aerial Rush: Using Eagle position ({situation.FamiliarPosition.x:F1},{situation.FamiliarPosition.z:F1})");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: Using Eagle position ({situation.FamiliarPosition.x:F1},{situation.FamiliarPosition.z:F1})");
             }
 
             CustomGridNodeBase bestPoint1Node, bestPoint2Node;
@@ -1863,7 +2159,7 @@ namespace CompanionAI_v3.Planning.Plans
             CustomGridNodeBase masterMoveNode = null;
             if (!foundPath)
             {
-                Main.LogDebug($"[{RoleName}] Aerial Rush: No path from current position, checking Master movement...");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: No path from current position, checking Master movement...");
 
                 float masterMP = CombatAPI.GetCurrentMP(situation.Unit);
                 int masterMPTiles = (int)masterMP;
@@ -1886,14 +2182,14 @@ namespace CompanionAI_v3.Planning.Plans
                     if (foundPath && masterMoveNode != null)
                     {
                         Vector3 movePos = (Vector3)masterMoveNode.Vector3Position;
-                        Main.LogDebug($"[{RoleName}] Aerial Rush: Found path after Master moves to ({movePos.x:F1},{movePos.z:F1})");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: Found path after Master moves to ({movePos.x:F1},{movePos.z:F1})");
                     }
                 }
             }
 
             if (!foundPath || bestPoint1Node == null || bestPoint2Node == null)
             {
-                Main.LogDebug($"[{RoleName}] Aerial Rush: No valid path found (even with movement)");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: No valid path found (even with movement)");
                 return null;
             }
 
@@ -1975,8 +2271,8 @@ namespace CompanionAI_v3.Planning.Plans
                 return null;
 
             // Blinding Dive 능력 찾기 (BlindingStrike와 동일 GUID)
-            var blindingDive = situation.FamiliarAbilities?
-                .FirstOrDefault(a => FamiliarAbilities.IsBlindingDiveAbility(a));
+            var blindingDive = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                a => FamiliarAbilities.IsBlindingDiveAbility(a));
 
             if (blindingDive == null)
                 return null;
@@ -1987,9 +2283,10 @@ namespace CompanionAI_v3.Planning.Plans
                 return null;
 
             // 타겟 선정: 원거리 적 > 고HP 적 > 아무 적
-            var enemies = situation.Enemies
-                .Where(e => e != null && e.IsConscious)
-                .ToList();
+            // ★ v3.8.78: LINQ → CollectionHelper (0 할당)
+            CollectionHelper.FillWhere(situation.Enemies, _tempUnits,
+                e => e.IsConscious);
+            var enemies = _tempUnits;
 
             if (enemies.Count == 0)
                 return null;
@@ -2063,8 +2360,8 @@ namespace CompanionAI_v3.Planning.Plans
                 return null;
 
             // Jump Claws 능력 찾기
-            var jumpClaws = situation.FamiliarAbilities?
-                .FirstOrDefault(a => FamiliarAbilities.IsJumpClawsAbility(a));
+            var jumpClaws = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                a => FamiliarAbilities.IsJumpClawsAbility(a));
 
             if (jumpClaws == null)
                 return null;
@@ -2075,9 +2372,10 @@ namespace CompanionAI_v3.Planning.Plans
                 return null;
 
             // 타겟 선정: 클러스터 중심 > 저HP 적 > 가장 가까운 적
-            var enemies = situation.Enemies
-                .Where(e => e != null && e.IsConscious)
-                .ToList();
+            // ★ v3.8.78: LINQ → CollectionHelper (0 할당)
+            CollectionHelper.FillWhere(situation.Enemies, _tempUnits,
+                e => e.IsConscious);
+            var enemies = _tempUnits;
 
             if (enemies.Count == 0)
                 return null;
@@ -2108,7 +2406,7 @@ namespace CompanionAI_v3.Planning.Plans
                         {
                             targetEnemy = e;
                             bestClusterScore = score;
-                            Main.LogDebug($"[{RoleName}] Jump Claws cluster target: {nearbyCount} nearby");
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Jump Claws cluster target: {nearbyCount} nearby");
                         }
                     }
                 }
@@ -2179,8 +2477,8 @@ namespace CompanionAI_v3.Planning.Plans
                 return null;
 
             // Claws 능력 찾기 (타입별로 다른 GUID)
-            var claws = situation.FamiliarAbilities?
-                .FirstOrDefault(a => FamiliarAbilities.IsClawsAbility(a, situation.FamiliarType));
+            var claws = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                a => FamiliarAbilities.IsClawsAbility(a, situation.FamiliarType));
 
             if (claws == null)
                 return null;
@@ -2191,9 +2489,10 @@ namespace CompanionAI_v3.Planning.Plans
                 return null;
 
             // 타겟 선정: 저HP 적 > 가장 가까운 적
-            var enemies = situation.Enemies
-                .Where(e => e != null && e.IsConscious)
-                .ToList();
+            // ★ v3.8.78: LINQ → CollectionHelper (0 할당)
+            CollectionHelper.FillWhere(situation.Enemies, _tempUnits,
+                e => e.IsConscious);
+            var enemies = _tempUnits;
 
             if (enemies.Count == 0)
                 return null;
@@ -2266,8 +2565,8 @@ namespace CompanionAI_v3.Planning.Plans
                 return null;
 
             // Screen 능력 찾기
-            var screen = situation.FamiliarAbilities?
-                .FirstOrDefault(a => FamiliarAbilities.IsScreenAbility(a));
+            var screen = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                a => FamiliarAbilities.IsScreenAbility(a));
 
             if (screen == null)
                 return null;
@@ -2296,7 +2595,7 @@ namespace CompanionAI_v3.Planning.Plans
             string reason;
             if (!CombatAPI.CanUseAbilityOn(screen, targetWrapper, out reason))
             {
-                Main.LogDebug($"[{RoleName}] Eagle Screen blocked: {reason}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Eagle Screen blocked: {reason}");
                 return null;
             }
 
@@ -2352,8 +2651,8 @@ namespace CompanionAI_v3.Planning.Plans
             if (situation.FamiliarType != PetType.ServoskullSwarm)
                 return null;
 
-            var signal = situation.FamiliarAbilities?
-                .FirstOrDefault(a => FamiliarAbilities.IsPrioritySignal(a));
+            var signal = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                a => FamiliarAbilities.IsPrioritySignal(a));
 
             if (signal == null) return null;
 
@@ -2368,7 +2667,7 @@ namespace CompanionAI_v3.Planning.Plans
             string reason;
             if (!CombatAPI.CanUseAbilityOn(signal, selfTarget, out reason))
             {
-                Main.LogDebug($"[{RoleName}] Priority Signal blocked: {reason}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Priority Signal blocked: {reason}");
                 return null;
             }
 
@@ -2388,8 +2687,8 @@ namespace CompanionAI_v3.Planning.Plans
             if (situation.FamiliarType != PetType.ServoskullSwarm)
                 return null;
 
-            var signal = situation.FamiliarAbilities?
-                .FirstOrDefault(a => FamiliarAbilities.IsVitalitySignal(a));
+            var signal = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                a => FamiliarAbilities.IsVitalitySignal(a));
 
             if (signal == null) return null;
 
@@ -2407,7 +2706,7 @@ namespace CompanionAI_v3.Planning.Plans
             // 2명 이상 부상 아군이 범위 내 있어야 의미
             if (woundedInRange < 2)
             {
-                Main.LogDebug($"[{RoleName}] Vitality Signal: Only {woundedInRange} wounded in range (need 2+)");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Vitality Signal: Only {woundedInRange} wounded in range (need 2+)");
                 return null;
             }
 
@@ -2415,7 +2714,7 @@ namespace CompanionAI_v3.Planning.Plans
             string reason;
             if (!CombatAPI.CanUseAbilityOn(signal, selfTarget, out reason))
             {
-                Main.LogDebug($"[{RoleName}] Vitality Signal blocked: {reason}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Vitality Signal blocked: {reason}");
                 return null;
             }
 
@@ -2435,8 +2734,8 @@ namespace CompanionAI_v3.Planning.Plans
             if (situation.FamiliarType != PetType.Raven)
                 return null;
 
-            var hex = situation.FamiliarAbilities?
-                .FirstOrDefault(a => FamiliarAbilities.IsHexAbility(a));
+            var hex = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                a => FamiliarAbilities.IsHexAbility(a));
 
             if (hex == null) return null;
 
@@ -2448,7 +2747,7 @@ namespace CompanionAI_v3.Planning.Plans
             var raven = situation.Familiar;
             if (raven == null)
             {
-                Main.LogDebug($"[{RoleName}] Hex: No raven available");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Hex: No raven available");
                 return null;
             }
 
@@ -2474,7 +2773,7 @@ namespace CompanionAI_v3.Planning.Plans
 
             if (target == null)
             {
-                Main.LogDebug($"[{RoleName}] Hex: No enemies within Raven range ({maxHexRange:F1}m)");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Hex: No enemies within Raven range ({maxHexRange:F1}m)");
                 return null;
             }
 
@@ -2482,7 +2781,7 @@ namespace CompanionAI_v3.Planning.Plans
             string reason;
             if (!CombatAPI.CanUseAbilityOn(hex, targetWrapper, out reason))
             {
-                Main.LogDebug($"[{RoleName}] Hex blocked: {reason}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Hex blocked: {reason}");
                 return null;
             }
 
@@ -2507,8 +2806,8 @@ namespace CompanionAI_v3.Planning.Plans
             if (situation.FamiliarType != PetType.Raven)
                 return null;
 
-            var cycle = situation.FamiliarAbilities?
-                .FirstOrDefault(a => FamiliarAbilities.IsCycleAbility(a));
+            var cycle = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                a => FamiliarAbilities.IsCycleAbility(a));
 
             if (cycle == null) return null;
 
@@ -2519,7 +2818,7 @@ namespace CompanionAI_v3.Planning.Plans
             string reason;
             if (!CombatAPI.CanUseAbilityOn(cycle, selfTarget, out reason))
             {
-                Main.LogDebug($"[{RoleName}] Cycle blocked: {reason}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Cycle blocked: {reason}");
                 return null;
             }
 
@@ -2539,8 +2838,8 @@ namespace CompanionAI_v3.Planning.Plans
             if (situation.FamiliarType != PetType.Mastiff)
                 return null;
 
-            var fast = situation.FamiliarAbilities?
-                .FirstOrDefault(a => FamiliarAbilities.IsFastAbility(a));
+            var fast = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                a => FamiliarAbilities.IsFastAbility(a));
 
             if (fast == null) return null;
 
@@ -2554,7 +2853,7 @@ namespace CompanionAI_v3.Planning.Plans
             string reason;
             if (!CombatAPI.CanUseAbilityOn(fast, selfTarget, out reason))
             {
-                Main.LogDebug($"[{RoleName}] Fast blocked: {reason}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Fast blocked: {reason}");
                 return null;
             }
 
@@ -2574,8 +2873,8 @@ namespace CompanionAI_v3.Planning.Plans
             if (situation.FamiliarType != PetType.Mastiff)
                 return null;
 
-            var roam = situation.FamiliarAbilities?
-                .FirstOrDefault(a => FamiliarAbilities.IsRoamAbility(a));
+            var roam = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                a => FamiliarAbilities.IsRoamAbility(a));
 
             if (roam == null) return null;
 
@@ -2586,7 +2885,7 @@ namespace CompanionAI_v3.Planning.Plans
             string reason;
             if (!CombatAPI.CanUseAbilityOn(roam, selfTarget, out reason))
             {
-                Main.LogDebug($"[{RoleName}] Roam blocked: {reason}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Roam blocked: {reason}");
                 return null;
             }
 

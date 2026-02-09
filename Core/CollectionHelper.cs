@@ -260,5 +260,64 @@ namespace CompanionAI_v3.Core
             }
             return false;
         }
+
+        #region ★ v3.8.78: 추가 유틸리티
+
+        /// <summary>
+        /// 조건을 만족하는 요소로 output 리스트를 채움 (0 할당, output.Clear 후 재사용)
+        /// LINQ: items.Where(pred).ToList() 대체
+        /// output 리스트를 미리 할당해두고 재사용하면 GC 할당 없음
+        /// </summary>
+        public static void FillWhere<T>(IList<T> items, List<T> output, Func<T, bool> predicate)
+        {
+            output.Clear();
+            if (items == null) return;
+            for (int i = 0; i < items.Count; i++)
+            {
+                var item = items[i];
+                if (item != null && predicate(item))
+                    output.Add(item);
+            }
+        }
+
+        /// <summary>
+        /// 조건을 만족하는 요소의 scorer 합계 (0 할당, O(n))
+        /// LINQ: items.Where(pred).Select(scorer).Sum() 대체
+        /// </summary>
+        public static float SumWhere<T>(IList<T> items, Func<T, bool> predicate, Func<T, float> scorer)
+        {
+            if (items == null) return 0f;
+            float sum = 0f;
+            for (int i = 0; i < items.Count; i++)
+            {
+                var item = items[i];
+                if (item != null && predicate(item))
+                    sum += scorer(item);
+            }
+            return sum;
+        }
+
+        /// <summary>
+        /// 조건을 만족하는 요소의 scorer 최소값 (0 할당, O(n))
+        /// LINQ: items.Where(pred).Min(scorer) 대체
+        /// 해당 요소가 없으면 float.MaxValue 반환
+        /// </summary>
+        public static float MinValueWhere<T>(IList<T> items, Func<T, bool> predicate, Func<T, float> scorer)
+        {
+            if (items == null) return float.MaxValue;
+            float min = float.MaxValue;
+            for (int i = 0; i < items.Count; i++)
+            {
+                var item = items[i];
+                if (item != null && predicate(item))
+                {
+                    float val = scorer(item);
+                    if (val < min) min = val;
+                }
+            }
+            return min;
+        }
+
+        #endregion
     }
 }

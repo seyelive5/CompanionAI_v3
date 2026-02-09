@@ -23,12 +23,23 @@ namespace CompanionAI_v3.Analysis
         // ★ v3.8.48: per-unit Situation 풀 — 턴당 0 할당 (기존: 1 Situation + 13 List per turn)
         private readonly Dictionary<string, Situation> _situationPool = new Dictionary<string, Situation>();
 
+        // ★ v3.8.80: continuation 턴 캐시 — 같은 턴 내 InfluenceMap/PredictiveThreatMap 재사용
+        // 적은 이동하지 않았으므로 영향력 맵과 위협 맵은 동일
+        private string _cachedMapUnitId;
+        private int _cachedMapRound;
+        private BattlefieldInfluenceMap _cachedInfluenceMap;
+        private PredictiveThreatMap _cachedPredictiveThreatMap;
+
         /// <summary>
         /// ★ v3.8.48: 전투 종료 시 풀 정리
         /// </summary>
         public void ClearPool()
         {
             _situationPool.Clear();
+            _cachedMapUnitId = null;
+            _cachedMapRound = -1;
+            _cachedInfluenceMap = null;
+            _cachedPredictiveThreatMap = null;
         }
 
         /// <summary>
@@ -72,7 +83,7 @@ namespace CompanionAI_v3.Analysis
                 AnalyzeTargets(situation, unit);
 
                 // 위치 분석
-                AnalyzePosition(situation, unit);
+                AnalyzePosition(situation, unit, turnState);
 
                 // 턴 상태 복사
                 CopyTurnState(situation, turnState);
@@ -221,6 +232,9 @@ namespace CompanionAI_v3.Analysis
                 Main.LogDebug($"[Analyzer] Checking hittable with {attacks.Count} available attacks");
             }
 
+            // ★ v3.8.70: 위협 범위 체크 (CombatHelpers 공통 필터에서 사용)
+            bool isInThreatArea = CombatAPI.IsInThreateningArea(unit);
+
             // 각 적에 대해 어떤 공격이든 사용 가능한지 확인
             foreach (var enemy in situation.Enemies)
             {
@@ -233,24 +247,13 @@ namespace CompanionAI_v3.Analysis
                 foreach (var attack in attacks)
                 {
                     if (attack == null) continue;
-                    // 재장전, 턴 종료 스킬 제외
-                    if (AbilityDatabase.IsReload(attack)) continue;
-                    if (AbilityDatabase.IsTurnEnding(attack)) continue;
-                    // ★ v3.0.83: GapCloser는 현재 위치에서 타격 불가 - 이동 용도만
-                    // 죽음 강림 등은 PlanMoveOrGapCloser에서 사용
+                    // ★ v3.8.70: 공통 필터 (AttackPlanner와 동기화 — CombatHelpers 중앙집중)
+                    if (CombatHelpers.ShouldExcludeFromAttack(attack, isInThreatArea)) continue;
+                    // Analyzer 전용 필터 (Hittable 계산 특화)
                     if (AbilityDatabase.IsGapCloser(attack)) continue;
-                    // ★ v3.0.97: DOTIntensify/ChainEffect는 Hittable 계산에서 제외
-                    // 이유: 이 능력만으로 Hittable=true가 되면 이동이 스킵됨
-                    // 특수 능력은 PlanSpecialAbility()에서 별도로 타겟 검증
                     if (AbilityDatabase.IsDOTIntensify(attack)) continue;
                     if (AbilityDatabase.IsChainEffect(attack)) continue;
-
-                    // ★ v3.5.11: SelectBestAttack과 필터 일관성 유지
-                    // 이 타입들은 SelectBestAttack에서 필터링되므로 Hittable 계산에서도 제외
-                    // 문제: DangerousAoE로 Hittable=true가 되면, 실제 공격 계획 시 필터링되어 공격 불가
                     if (AbilityDatabase.IsDangerousAoE(attack)) continue;
-                    if (AbilityDatabase.IsPostFirstAction(attack)) continue;
-                    if (AbilityDatabase.IsFinisher(attack)) continue;
 
                     // ★ v3.1.19: Point 타겟 AOE 처리 개선
                     if (CombatAPI.IsPointTargetAbility(attack))
@@ -299,10 +302,10 @@ namespace CompanionAI_v3.Analysis
                             continue;
                         }
 
-                        // ★ v3.1.19: AOE 안전성 체크 추가
-                        if (!AoESafetyChecker.IsAoESafe(attack, unit, enemy.Position, situation.Allies))
+                        // ★ v3.8.70: IsAoESafe → IsAttackSafeForTarget (반경+scatter 통합)
+                        if (!CombatHelpers.IsAttackSafeForTarget(attack, unit, enemy, situation.Allies))
                         {
-                            Main.LogDebug($"[Analyzer] AOE unsafe: {attack.Name} -> {enemy.CharacterName}");
+                            Main.LogDebug($"[Analyzer] Attack unsafe: {attack.Name} -> {enemy.CharacterName}");
                             continue;
                         }
 
@@ -336,6 +339,12 @@ namespace CompanionAI_v3.Analysis
                     string reason;
                     if (CombatCache.CanUseAbilityOn(attack, targetWrapper, out reason))
                     {
+                        // ★ v3.8.70: 안전성 체크 (scatter safety 포함)
+                        if (!CombatHelpers.IsAttackSafeForTarget(attack, unit, enemy, situation.Allies))
+                        {
+                            Main.LogDebug($"[Analyzer] Attack unsafe: {attack.Name} -> {enemy.CharacterName}");
+                            continue;
+                        }
                         isHittable = true;
                         hittableBy = attack.Name;
                         break;
@@ -405,11 +414,17 @@ namespace CompanionAI_v3.Analysis
                         foreach (var attack in allAttacks)
                         {
                             if (attack == null) continue;
+                            // ★ v3.8.70: fallback에도 공통 필터 + 안전 체크 적용
+                            if (CombatHelpers.ShouldExcludeFromAttack(attack, isInThreatArea)) continue;
 
                             // ★ v3.5.29: 캐시 사용
                             string reason;
                             if (CombatCache.CanUseAbilityOn(attack, targetWrapper, out reason))
                             {
+                                // ★ v3.8.70: 안전성 체크 (scatter safety 포함)
+                                if (!CombatHelpers.IsAttackSafeForTarget(attack, unit, enemy, situation.Allies))
+                                    continue;
+
                                 situation.HittableEnemies.Add(enemy);
                                 Main.LogDebug($"[Analyzer] {enemy.CharacterName} hittable by {attack.Name} (fallback)");
 
@@ -454,32 +469,58 @@ namespace CompanionAI_v3.Analysis
             }
         }
 
-        private void AnalyzePosition(Situation situation, BaseUnitEntity unit)
+        private void AnalyzePosition(Situation situation, BaseUnitEntity unit, TurnState turnState)
         {
-            // ★ v3.2.00: 영향력 맵 계산 (위치 평가에 사용)
-            situation.InfluenceMap = BattlefieldInfluenceMap.Compute(
-                situation.Enemies,
-                situation.Allies);
-            if (situation.InfluenceMap.IsValid)
+            // ★ v3.8.80: continuation 턴 캐시 - 같은 유닛/라운드에서 이미 계산한 맵 재사용
+            // 적은 아군 턴 도중 이동하지 않으므로 영향력/위협 맵은 동일
+            string unitId = unit.UniqueId;
+            int currentRound = turnState?.CombatRound ?? -1;
+            bool isContinuation = turnState != null && turnState.ActionCount > 0
+                                  && unitId == _cachedMapUnitId
+                                  && currentRound == _cachedMapRound
+                                  && _cachedInfluenceMap != null;
+
+            if (isContinuation)
             {
-                Main.LogDebug($"[Analyzer] {situation.InfluenceMap}");
+                // 캐시된 맵 재사용
+                situation.InfluenceMap = _cachedInfluenceMap;
+                situation.PredictiveThreatMap = _cachedPredictiveThreatMap;
+                if (Main.IsDebugEnabled)
+                    Main.LogDebug($"[Analyzer] Continuation turn — reusing cached InfluenceMap/PredictiveThreatMap");
             }
-
-            // ★ v3.4.00: 예측적 위협 맵 계산 (적 이동 예측)
-            bool usePredictiveMovement = situation.CharacterSettings?.UsePredictiveMovement ?? true;
-            if (usePredictiveMovement && situation.Enemies.Count >= 2)
+            else
             {
-                var mobilities = EnemyMobilityAnalyzer.AnalyzeAllEnemies(situation.Enemies);
-                situation.PredictiveThreatMap = PredictiveThreatMap.Compute(
+                // ★ v3.2.00: 영향력 맵 계산 (위치 평가에 사용)
+                situation.InfluenceMap = BattlefieldInfluenceMap.Compute(
                     situation.Enemies,
-                    mobilities,
-                    situation.InfluenceMap);
-
-                if (situation.PredictiveThreatMap.IsValid)
+                    situation.Allies);
+                if (Main.IsDebugEnabled && situation.InfluenceMap.IsValid)
                 {
-                    Main.LogDebug($"[Analyzer] PredictiveThreat: {situation.PredictiveThreatMap.EnemyCount} enemies analyzed, " +
-                                  $"{situation.PredictiveThreatMap.PredictedSafeZones.Count} safe zones");
+                    Main.LogDebug($"[Analyzer] {situation.InfluenceMap}");
                 }
+
+                // ★ v3.4.00: 예측적 위협 맵 계산 (적 이동 예측)
+                bool usePredictiveMovement = situation.CharacterSettings?.UsePredictiveMovement ?? true;
+                if (usePredictiveMovement && situation.Enemies.Count >= 2)
+                {
+                    var mobilities = EnemyMobilityAnalyzer.AnalyzeAllEnemies(situation.Enemies);
+                    situation.PredictiveThreatMap = PredictiveThreatMap.Compute(
+                        situation.Enemies,
+                        mobilities,
+                        situation.InfluenceMap);
+
+                    if (Main.IsDebugEnabled && situation.PredictiveThreatMap.IsValid)
+                    {
+                        Main.LogDebug($"[Analyzer] PredictiveThreat: {situation.PredictiveThreatMap.EnemyCount} enemies analyzed, " +
+                                      $"{situation.PredictiveThreatMap.PredictedSafeZones.Count} safe zones");
+                    }
+                }
+
+                // 캐시 저장
+                _cachedMapUnitId = unitId;
+                _cachedMapRound = currentRound;
+                _cachedInfluenceMap = situation.InfluenceMap;
+                _cachedPredictiveThreatMap = situation.PredictiveThreatMap;
             }
 
             // ★ CombatAPI.ShouldRetreat 사용

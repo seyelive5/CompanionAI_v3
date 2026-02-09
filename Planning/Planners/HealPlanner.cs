@@ -54,7 +54,7 @@ namespace CompanionAI_v3.Planning.Planners
             // ★ v3.5.10: 이미 다른 Support가 힐 예약한 대상은 스킵
             if (TeamBlackboard.Instance.IsHealReserved(ally))
             {
-                Main.LogDebug($"[{roleName}] Heal skip - {ally.CharacterName} already reserved for heal");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] Heal skip - {ally.CharacterName} already reserved for heal");
                 return null;
             }
 
@@ -125,7 +125,7 @@ namespace CompanionAI_v3.Planning.Planners
 
             if (allTargets.Count == 0)
             {
-                Main.LogDebug($"[HealPlanner] No heal targets available (all reserved or healthy)");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[HealPlanner] No heal targets available (all reserved or healthy)");
                 return null;
             }
 

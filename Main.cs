@@ -110,6 +110,14 @@ namespace CompanionAI_v3
 
         #region Logging
 
+        /// <summary>
+        /// ★ v3.8.78: 디버그 로깅 활성화 여부 (호출자 측 가드용)
+        /// Main.LogDebug($"...") 호출 전에 이 프로퍼티로 가드하면
+        /// 디버그 모드 OFF 시 $"..." 문자열 할당 자체를 방지
+        /// </summary>
+        public static bool IsDebugEnabled =>
+            ModSettings.Instance?.EnableDebugLogging ?? false;
+
         public static void Log(string message)
         {
             ModEntry?.Logger?.Log($"[CompanionAI] {message}");

@@ -167,12 +167,12 @@ namespace CompanionAI_v3.Planning.Plans
                 if (defenseAction != null)
                 {
                     actions.Add(defenseAction);
-                    Main.LogDebug($"[Tank] Phase 2: Defense stance (confidence={confidence:F2} < 0.5)");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 2: Defense stance (confidence={confidence:F2} < 0.5)");
                 }
             }
             else if (!needDefense && !situation.HasPerformedFirstAction)
             {
-                Main.LogDebug($"[Tank] Phase 2: Skipping defense stance (confidence={confidence:F2} >= 0.5)");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 2: Skipping defense stance (confidence={confidence:F2} >= 0.5)");
             }
 
             // Phase 3: 기타 선제적 버프
@@ -212,7 +212,7 @@ namespace CompanionAI_v3.Planning.Plans
                     {
                         if (TeamBlackboard.Instance.IsTauntReserved(primaryTauntTarget))
                         {
-                            Main.LogDebug($"[Tank] SmartTaunt: Skip - {primaryTauntTarget.CharacterName} already reserved for taunt");
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] SmartTaunt: Skip - {primaryTauntTarget.CharacterName} already reserved for taunt");
                             canReserveTaunt = false;
                         }
                     }
@@ -272,7 +272,7 @@ namespace CompanionAI_v3.Planning.Plans
                 else if (situation.EnemiesTargetingAllies > 0)
                 {
                     // 도발 옵션이 없지만 아군이 위협받는 상황 → 로그만 남김
-                    Main.LogDebug($"[Tank] SmartTaunt: {situation.EnemiesTargetingAllies} enemies targeting allies, but no worthwhile taunt option");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] SmartTaunt: {situation.EnemiesTargetingAllies} enemies targeting allies, but no worthwhile taunt option");
                 }
             }
 
@@ -378,6 +378,25 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ══════════════════════════════════════════════════════════════
+            // Phase 4.9: 전략 옵션 평가 (공격 전 이동 필요 여부 결정)
+            // ★ v3.8.76: TacticalOptionEvaluator
+            // ══════════════════════════════════════════════════════════════
+            TacticalEvaluation tacticalEval = EvaluateTacticalOptions(situation);
+            if (tacticalEval != null && tacticalEval.WasEvaluated)
+            {
+                bool shouldMoveBeforeAttack;
+                bool shouldDeferRetreat;
+                var tacticalMoveAction = ApplyTacticalStrategy(tacticalEval, situation,
+                    out shouldMoveBeforeAttack, out shouldDeferRetreat);
+
+                if (tacticalMoveAction != null)
+                {
+                    actions.Add(tacticalMoveAction);
+                    Main.Log($"[Tank] Phase 4.9: Tactical pre-attack move");
+                }
+            }
+
             // Phase 5: 공격 - ★ v3.1.21: Tank 가중치로 최적 타겟 선택
             int attacksPlanned = 0;
             var plannedTargetIds = new HashSet<string>();
@@ -404,7 +423,7 @@ namespace CompanionAI_v3.Planning.Plans
                 if (threateningEnemy != null)
                 {
                     bestTarget = threateningEnemy;
-                    Main.LogDebug($"[Tank] Phase 5: Priority target {threateningEnemy.CharacterName} (threatening allies)");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 5: Priority target {threateningEnemy.CharacterName} (threatening allies)");
                 }
 
                 // ★ v3.8.44: attackContext 전달 - 실패 이유 기록
@@ -435,7 +454,7 @@ namespace CompanionAI_v3.Planning.Plans
                     }
                     else
                     {
-                        Main.LogDebug($"[Tank] Phase 4: Allow re-attack on {targetEntity.CharacterName} (only 1 hittable enemy)");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 4: Allow re-attack on {targetEntity.CharacterName} (only 1 hittable enemy)");
                     }
                 }
 
@@ -447,6 +466,9 @@ namespace CompanionAI_v3.Planning.Plans
                         plannedAbilityGuids.Add(guid);
                 }
             }
+
+            // ★ v3.8.72: Hittable mismatch 사후 보정
+            HandleHittableMismatch(situation, didPlanAttack, attackContext);
 
             // Phase 6: PostFirstAction
             // ★ v3.5.80: didPlanAttack 전달
@@ -487,14 +509,14 @@ namespace CompanionAI_v3.Planning.Plans
                         timing == AbilityTiming.RighteousFury ||
                         timing == AbilityTiming.TurnEnding)
                     {
-                        Main.LogDebug($"[Tank] Phase 6.5: Skip {buff.Name} (timing={timing} not suitable for fallback)");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 6.5: Skip {buff.Name} (timing={timing} not suitable for fallback)");
                         continue;
                     }
 
                     // ★ v3.5.22: SpringAttack 능력은 조건 충족 시에만 TurnEnding에서 사용
                     if (AbilityDatabase.IsSpringAttackAbility(buff))
                     {
-                        Main.LogDebug($"[Tank] Phase 6.5: Skip {buff.Name} (SpringAttack - use in TurnEnding only)");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 6.5: Skip {buff.Name} (SpringAttack - use in TurnEnding only)");
                         continue;
                     }
 
@@ -550,7 +572,7 @@ namespace CompanionAI_v3.Planning.Plans
                 if (frontlineDist < -5f)
                 {
                     shouldAdvanceToFrontline = true;
-                    Main.LogDebug($"[Tank] Phase 8: Behind frontline ({frontlineDist:F1}m) - should advance");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 8: Behind frontline ({frontlineDist:F1}m) - should advance");
                 }
             }
 
@@ -575,7 +597,7 @@ namespace CompanionAI_v3.Planning.Plans
                 bool forceMove = (!didPlanAttack && attackContext.ShouldForceMove) ||
                                  shouldAdvanceToFrontline ||
                                  shouldEngageMelee;
-                Main.LogDebug($"[Tank] Phase 8: {attackContext}, forceMove={forceMove}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 8: {attackContext}, forceMove={forceMove}");
                 // ★ v3.1.00: MP 회복 예측 후 situation.CanMove=False여도 이동 가능
                 bool bypassCanMoveCheck = !situation.CanMove && remainingMP > 0;
                 // ★ v3.1.01: remainingMP를 MovementAPI에 전달
@@ -635,6 +657,18 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.8.74: Phase 8.7 - Tactical Reposition (공격 쿨다운 시 다음 턴 최적 위치)
+            if (!hasMoveInPlan && noAttackNoApproach && remainingMP > 0 && situation.HasLivingEnemies)
+            {
+                var tacticalRepos = PlanTacticalReposition(situation, remainingMP);
+                if (tacticalRepos != null)
+                {
+                    actions.Add(tacticalRepos);
+                    hasMoveInPlan = true;
+                    Main.Log($"[Tank] Phase 8.7: Tactical reposition (all attacks on cooldown, MP={remainingMP:F1})");
+                }
+            }
+
             // Post-attack phase
             if ((situation.HasAttackedThisTurn || didPlanAttack) && remainingAP >= 1f)
             {
@@ -650,6 +684,27 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     actions.Add(finalAction);
                     Main.Log($"[Tank] Phase 9: Final AP utilization - {finalAction.Ability?.Name}");
+                }
+            }
+
+            // ★ v3.8.68: Post-plan 공격 검증 + 복구 (TurnEnding 전에 실행)
+            int removedAttacks = ValidateAndRemoveUnreachableAttacks(actions, situation, ref didPlanAttack, ref remainingAP);
+
+            if (removedAttacks > 0 && !didPlanAttack)
+            {
+                // 모든 공격이 제거됨 → 복구 이동 시도
+                bool hasRecoveryMove = actions.Any(a => a.Type == ActionType.Move);
+                if (!hasRecoveryMove && situation.HasLivingEnemies && remainingMP > 0)
+                {
+                    Main.Log($"[Tank] ★ Post-validation recovery: attempting movement (AP={remainingAP:F1}, MP={remainingMP:F1})");
+                    var recoveryCtx = new AttackPhaseContext { RangeWasIssue = true };
+                    bool bypassCanMoveCheck = !situation.CanMove && remainingMP > 0;
+                    var recoveryMove = PlanMoveOrGapCloser(situation, ref remainingAP, true, bypassCanMoveCheck, remainingMP, recoveryCtx);
+                    if (recoveryMove != null)
+                    {
+                        actions.Add(recoveryMove);
+                        Main.Log($"[Tank] ★ Post-validation recovery: movement planned");
+                    }
                 }
             }
 
@@ -671,7 +726,7 @@ namespace CompanionAI_v3.Planning.Plans
             var reasoning = $"Tank: {DetermineReasoning(actions, situation)}";
 
             // ★ v3.0.55: MP 추적 로깅
-            Main.LogDebug($"[Tank] Plan complete: AP={remainingAP:F1}, MP={remainingMP:F1} (started with {situation.CurrentMP:F1})");
+            if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Plan complete: AP={remainingAP:F1}, MP={remainingMP:F1} (started with {situation.CurrentMP:F1})");
 
             // ★ v3.1.09: InitialAP/InitialMP 전달 (리플랜 감지용)
             // ★ v3.5.88: 0 AP 공격 수 전달 (Break Through → Slash 감지용)
@@ -710,7 +765,7 @@ namespace CompanionAI_v3.Planning.Plans
                 string factReason;
                 if (!CombatAPI.MeetsCasterFactRequirements(ability, out factReason))
                 {
-                    Main.LogDebug($"[Tank] DefensiveStance skipped - {factReason}");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] DefensiveStance skipped - {factReason}");
                     continue;
                 }
 

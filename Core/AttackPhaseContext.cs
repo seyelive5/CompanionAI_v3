@@ -37,10 +37,17 @@ namespace CompanionAI_v3.Core
         public bool AllAbilitiesFiltered;
 
         /// <summary>
-        /// 이동으로 공격 문제를 해결할 수 있는지 판단
-        /// 사거리 문제이고 + 높이 문제가 아니고 + 능력이 존재할 때만 true
+        /// ★ v3.8.72: Analyzer는 Hittable이라 했지만 AttackPlanner가 실패
+        /// LoS, 캐시 stale, 게임 상태 변화 등 다양한 원인
+        /// true면 이동으로 해결 시도 (새 위치에서 LoS 확보)
         /// </summary>
-        public bool ShouldForceMove => RangeWasIssue && !HeightCheckFailed && !AllAbilitiesFiltered;
+        public bool HittableMismatch;
+
+        /// <summary>
+        /// 이동으로 공격 문제를 해결할 수 있는지 판단
+        /// ★ v3.8.72: HittableMismatch도 이동 후보 (새 위치에서 LoS 확보 가능)
+        /// </summary>
+        public bool ShouldForceMove => (RangeWasIssue || HittableMismatch) && !HeightCheckFailed && !AllAbilitiesFiltered;
 
         /// <summary>
         /// 유효한 능력 사거리가 있는지 (MovementPlanner용)
@@ -51,7 +58,7 @@ namespace CompanionAI_v3.Core
         {
             return $"AttackCtx[range={BestAbilityRange:F1}, rangeIssue={RangeWasIssue}, " +
                    $"heightFail={HeightCheckFailed}, allFiltered={AllAbilitiesFiltered}, " +
-                   $"shouldMove={ShouldForceMove}]";
+                   $"hittableMismatch={HittableMismatch}, shouldMove={ShouldForceMove}]";
         }
     }
 }

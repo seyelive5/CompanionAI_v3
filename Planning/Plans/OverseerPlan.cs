@@ -37,10 +37,10 @@ namespace CompanionAI_v3.Planning.Plans
             // 사역마가 없으면 DPS 폴백 (하지만 이 Plan이 선택되었다면 사역마가 있어야 함)
             if (!situation.HasFamiliar)
             {
-                Main.LogDebug($"[Overseer] Warning: No familiar detected, unexpected state");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] Warning: No familiar detected, unexpected state");
             }
 
-            Main.LogDebug($"[Overseer] CreatePlan: AP={remainingAP:F1}, MP={remainingMP:F1}, " +
+            if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] CreatePlan: AP={remainingAP:F1}, MP={remainingMP:F1}, " +
                 $"FamiliarType={situation.FamiliarType}, HasFamiliar={situation.HasFamiliar}");
 
             // ★ v3.8.13: AP 예약 (다른 Role처럼 무기 공격용 AP 확보)
@@ -209,7 +209,7 @@ namespace CompanionAI_v3.Planning.Plans
                 }
                 else if (usedWarpRelay && situation.FamiliarType == PetType.Raven && isRavenBuffPhase)
                 {
-                    Main.LogDebug($"[Overseer] Phase 3.5.5: Skipped - Raven in BUFF MODE (stay near allies)");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] Phase 3.5.5: Skipped - Raven in BUFF MODE (stay near allies)");
                 }
 
                 // ────────────────────────────────────────────────────────────
@@ -430,6 +430,25 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // ══════════════════════════════════════════════════════════════
+            // Phase 4.9: 전략 옵션 평가 (마스터 공격 전 이동 필요 여부 결정)
+            // ★ v3.8.76: TacticalOptionEvaluator - 사역마 Phase는 영향 없음
+            // ══════════════════════════════════════════════════════════════
+            TacticalEvaluation tacticalEval = EvaluateTacticalOptions(situation);
+            if (tacticalEval != null && tacticalEval.WasEvaluated)
+            {
+                bool shouldMoveBeforeAttack;
+                bool shouldDeferRetreat;
+                var tacticalMoveAction = ApplyTacticalStrategy(tacticalEval, situation,
+                    out shouldMoveBeforeAttack, out shouldDeferRetreat);
+
+                if (tacticalMoveAction != null)
+                {
+                    actions.Add(tacticalMoveAction);
+                    Main.Log($"[Overseer] Phase 4.9: Tactical pre-attack move");
+                }
+            }
+
+            // ══════════════════════════════════════════════════════════════
             // Phase 5: Safe Ranged Attack (SECONDARY)
             // 사역마가 주력이므로 마스터는 안전한 원거리 공격만
             // ══════════════════════════════════════════════════════════════
@@ -480,6 +499,9 @@ namespace CompanionAI_v3.Planning.Plans
             {
                 Main.Log($"[Overseer] Phase 5: {attacksPlanned} attacks planned");
             }
+
+            // ★ v3.8.72: Hittable mismatch 사후 보정
+            HandleHittableMismatch(situation, didPlanAttack, attackContext);
 
             // ══════════════════════════════════════════════════════════════
             // Phase 6: PostAction (Run and Gun 등)
@@ -624,6 +646,18 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.8.74: Phase 8.7 - Tactical Reposition (공격 쿨다운 시 다음 턴 최적 위치)
+            if (!hasMoveAfterPhase8 && noAttackNoApproach && remainingMP > 0 && situation.HasLivingEnemies)
+            {
+                var tacticalRepos = PlanTacticalReposition(situation, remainingMP);
+                if (tacticalRepos != null)
+                {
+                    actions.Add(tacticalRepos);
+                    hasMoveAfterPhase8 = true;
+                    Main.Log($"[Overseer] Phase 8.7: Tactical reposition (all attacks on cooldown, MP={remainingMP:F1})");
+                }
+            }
+
             // ══════════════════════════════════════════════════════════════
             // Phase 9: Final AP Utilization
             // ══════════════════════════════════════════════════════════════
@@ -634,6 +668,25 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     actions.Add(finalAction);
                     Main.Log($"[Overseer] Phase 9: Final AP utilization");
+                }
+            }
+
+            // ★ v3.8.68: Post-plan 공격 검증 + 복구 (TurnEnding 전에 실행)
+            int removedAttacks = ValidateAndRemoveUnreachableAttacks(actions, situation, ref didPlanAttack, ref remainingAP);
+
+            if (removedAttacks > 0 && !didPlanAttack)
+            {
+                bool hasRecoveryMove = actions.Any(a => a.Type == ActionType.Move);
+                if (!hasRecoveryMove && situation.HasLivingEnemies && remainingMP > 0)
+                {
+                    Main.Log($"[Overseer] ★ Post-validation recovery: attempting movement (AP={remainingAP:F1}, MP={remainingMP:F1})");
+                    var recoveryCtx = new AttackPhaseContext { RangeWasIssue = true };
+                    var recoveryMove = PlanOverseerMovement(situation, remainingMP, true);
+                    if (recoveryMove != null)
+                    {
+                        actions.Add(recoveryMove);
+                        Main.Log($"[Overseer] ★ Post-validation recovery: movement planned");
+                    }
                 }
             }
 
@@ -655,7 +708,7 @@ namespace CompanionAI_v3.Planning.Plans
             var priority = DeterminePriority(actions, situation);
             var reasoning = $"Overseer: {DetermineReasoning(actions, situation)}";
 
-            Main.LogDebug($"[Overseer] Plan complete: {actions.Count} actions, AP={remainingAP:F1}, MP={remainingMP:F1}");
+            if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] Plan complete: {actions.Count} actions, AP={remainingAP:F1}, MP={remainingMP:F1}");
 
             int zeroAPAttackCount = CombatAPI.GetZeroAPAttacks(situation.Unit).Count;
             return new TurnPlan(actions, priority, reasoning, situation.HPPercent, situation.NearestEnemyDistance,
@@ -675,13 +728,13 @@ namespace CompanionAI_v3.Planning.Plans
             float maxFamiliarRange = FamiliarAPI.GetMaxFamiliarAbilityRange(situation.Unit);
             float currentDistToFamiliar = Vector3.Distance(situation.Unit.Position, situation.FamiliarPosition);
             Vector3 currentPos = situation.Unit.Position;
-            Main.LogDebug($"[Overseer] PlanOverseerRetreat: maxFamiliarRange={maxFamiliarRange:F1}m, currentDist={currentDistToFamiliar:F1}m");
+            if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] PlanOverseerRetreat: maxFamiliarRange={maxFamiliarRange:F1}m, currentDist={currentDistToFamiliar:F1}m");
 
             // 도달 가능한 타일 조회
             var tiles = MovementAPI.FindAllReachableTilesSync(situation.Unit, remainingMP);
             if (tiles == null || tiles.Count == 0)
             {
-                Main.LogDebug($"[Overseer] PlanOverseerRetreat: No reachable tiles, using standard retreat");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] PlanOverseerRetreat: No reachable tiles, using standard retreat");
                 return PlanRetreat(situation);
             }
 
@@ -790,7 +843,7 @@ namespace CompanionAI_v3.Planning.Plans
                 // 후퇴 효과 검증: 적과 2m 이상 멀어지거나, 현재보다 5m 이상 이동해야 함
                 if (distImprovement < 2f && distFromCurrent < 5f)
                 {
-                    Main.LogDebug($"[Overseer] PlanOverseerRetreat: Not worth it (enemy dist improvement={distImprovement:F1}m, move dist={distFromCurrent:F1}m)");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] PlanOverseerRetreat: Not worth it (enemy dist improvement={distImprovement:F1}m, move dist={distFromCurrent:F1}m)");
                     return null;
                 }
 
@@ -806,7 +859,7 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // 사역마 쪽으로도 이동 불가면 표준 후퇴
-            Main.LogDebug($"[Overseer] PlanOverseerRetreat: Cannot reach familiar, using standard retreat");
+            if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] PlanOverseerRetreat: Cannot reach familiar, using standard retreat");
             return PlanRetreat(situation);
         }
 
@@ -820,13 +873,13 @@ namespace CompanionAI_v3.Planning.Plans
             // 사역마 스킬 최대 사거리 조회
             float maxFamiliarRange = FamiliarAPI.GetMaxFamiliarAbilityRange(situation.Unit);
             float currentDistToFamiliar = Vector3.Distance(situation.Unit.Position, situation.FamiliarPosition);
-            Main.LogDebug($"[Overseer] PlanOverseerMovement: maxFamiliarRange={maxFamiliarRange:F1}m, currentDist={currentDistToFamiliar:F1}m, needsAttackPosition={needsAttackPosition}");
+            if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] PlanOverseerMovement: maxFamiliarRange={maxFamiliarRange:F1}m, currentDist={currentDistToFamiliar:F1}m, needsAttackPosition={needsAttackPosition}");
 
             // 도달 가능한 타일 조회
             var tiles = MovementAPI.FindAllReachableTilesSync(situation.Unit, remainingMP);
             if (tiles == null || tiles.Count == 0)
             {
-                Main.LogDebug($"[Overseer] PlanOverseerMovement: No reachable tiles");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] PlanOverseerMovement: No reachable tiles");
                 return null;
             }
 
@@ -948,7 +1001,7 @@ namespace CompanionAI_v3.Planning.Plans
                 // 이동 거리가 짧거나 점수 개선이 미미하면 이동 안 함
                 if (distFromCurrent < 4f && scoreImprovement < MIN_SCORE_IMPROVEMENT)
                 {
-                    Main.LogDebug($"[Overseer] PlanOverseerMovement: Not worth moving (dist={distFromCurrent:F1}m, improvement={scoreImprovement:F1})");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] PlanOverseerMovement: Not worth moving (dist={distFromCurrent:F1}m, improvement={scoreImprovement:F1})");
                     return null;
                 }
 
@@ -965,7 +1018,7 @@ namespace CompanionAI_v3.Planning.Plans
                 return PlannedAction.Move(closestToFamiliarPos.Value, $"Move toward familiar ({closestToFamiliarDist:F1}m)");
             }
 
-            Main.LogDebug($"[Overseer] PlanOverseerMovement: No valid position (familiar too far: {currentDistToFamiliar:F1}m)");
+            if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] PlanOverseerMovement: No valid position (familiar too far: {currentDistToFamiliar:F1}m)");
             return null;
         }
 
@@ -983,7 +1036,7 @@ namespace CompanionAI_v3.Planning.Plans
 
             if (relocate == null)
             {
-                Main.LogDebug($"[Overseer] RavenAggressiveRelocate: No relocate ability");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] RavenAggressiveRelocate: No relocate ability");
                 return null;
             }
 
@@ -991,7 +1044,7 @@ namespace CompanionAI_v3.Planning.Plans
             float apCost = CombatAPI.GetAbilityAPCost(relocate);
             if (remainingAP < apCost)
             {
-                Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Not enough AP ({remainingAP:F1} < {apCost:F1})");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Not enough AP ({remainingAP:F1} < {apCost:F1})");
                 return null;
             }
 
@@ -1018,13 +1071,13 @@ namespace CompanionAI_v3.Planning.Plans
                 // 버프 커버리지가 충분하지 않으면 공격 모드 진입 안 함
                 if (buffCoverage < 0.5f || alliesInRavenRange < 2)
                 {
-                    Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Buff coverage too low ({buffCoverage:P0}, {alliesInRavenRange} allies)");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Buff coverage too low ({buffCoverage:P0}, {alliesInRavenRange} allies)");
                     return null;
                 }
             }
             else
             {
-                Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Coverage check skipped (post-buff phase)");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Coverage check skipped (post-buff phase)");
             }
 
             // 적 밀집 지역 중심 찾기
@@ -1035,7 +1088,7 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.8.56: 적 1명이라도 있으면 재배치 시도 (사람처럼 일단 뭐라도 하기)
             if (validEnemies.Count < 1)
             {
-                Main.LogDebug($"[Overseer] RavenAggressiveRelocate: No conscious enemies");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] RavenAggressiveRelocate: No conscious enemies");
                 return null;
             }
 
@@ -1049,7 +1102,7 @@ namespace CompanionAI_v3.Planning.Plans
             float distToEnemyCluster = Vector3.Distance(raven.Position, enemyCenter);
             if (distToEnemyCluster < 5f)
             {
-                Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Already near enemy cluster ({distToEnemyCluster:F1}m)");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Already near enemy cluster ({distToEnemyCluster:F1}m)");
                 return null;
             }
 
@@ -1058,7 +1111,7 @@ namespace CompanionAI_v3.Planning.Plans
             // 노드 검색에서 사거리 제한이 적용되므로, 도달 가능한 가장 적에 가까운 위치를 자동 선택
             if (distToEnemyCluster > MAX_RAVEN_RELOCATE_METERS)
             {
-                Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Enemy cluster beyond support range ({distToEnemyCluster:F1}m > {MAX_RAVEN_RELOCATE_METERS:F1}m) - will find closest reachable position");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Enemy cluster beyond support range ({distToEnemyCluster:F1}m > {MAX_RAVEN_RELOCATE_METERS:F1}m) - will find closest reachable position");
             }
 
             // 적 클러스터 근처에서 최적 위치 찾기 (Relocate 사거리 내)
@@ -1111,7 +1164,7 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.8.56: 적 1명이라도 커버 가능하면 재배치 진행
             if (!bestPos.HasValue || bestEnemies < 1)
             {
-                Main.LogDebug($"[Overseer] RavenAggressiveRelocate: No good position found (bestEnemies={bestEnemies})");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] RavenAggressiveRelocate: No good position found (bestEnemies={bestEnemies})");
                 return null;
             }
 
@@ -1129,7 +1182,7 @@ namespace CompanionAI_v3.Planning.Plans
                     apCost);
             }
 
-            Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Best position blocked ({reason})");
+            if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Best position blocked ({reason})");
             return null;
         }
 

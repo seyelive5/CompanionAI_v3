@@ -16,8 +16,8 @@ namespace CompanionAI_v3.Planning.Plans
 {
     /// <summary>
     /// ★ v3.0.47: Support 전략
-    /// ★ v3.0.57: SequenceOptimizer 기반 행동 조합 점수화 적용
-    /// 힐 → 버프 → 디버프 → 안전 공격(최적화) → 후퇴
+    /// ★ v3.8.67: SequenceOptimizer 제거 → Phase 순서 + UtilityScorer 감점으로 대체
+    /// 힐 → 버프 → 디버프 → ClearMP 선제후퇴 → 안전 공격 → 후퇴
     /// </summary>
     public class SupportPlan : BasePlan
     {
@@ -181,9 +181,8 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // ★ v3.0.57: Phase 1.6 제거 - 이동은 Phase 6에서 SequenceOptimizer가 결정
-            // 기존: 무조건 후퇴 → 공격
-            // 신규: "현재 위치 공격" vs "후퇴 → 공격" 비교 후 최적 선택
+            // ★ v3.8.67: ClearMP 선제 후퇴는 Phase 5.8에서 처리
+            // 일반 후퇴는 Phase 8.5에서 처리
 
             // Phase 2: 아군 힐 (Confidence 기반 임계값 조정)
             // ★ v3.2.15: TeamBlackboard 기반 힐 대상 선택 (팀 전체 최적화)
@@ -368,8 +367,57 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // ★ v3.0.57: Phase 6 - SequenceOptimizer 기반 최적 공격 시퀀스 선택
-            // "현재 위치에서 공격" vs "후퇴 → 공격" 조합을 점수화하여 비교
+            // ★ v3.8.67: Phase 5.8 - ClearMP 능력 사용 전 선제적 후퇴
+            // ClearMP 능력 사용 후 MP=0이 되면 Phase 8.5 후퇴도 불가능하므로
+            // 공격 전에 안전 위치로 이동해야 함 (BasePlan.PlanPreemptiveRetreatForClearMPAbility 활성화)
+            if (!actions.Any(a => a.Type == ActionType.Move))
+            {
+                var clearMPRetreat = PlanPreemptiveRetreatForClearMPAbility(situation, ref remainingMP);
+                if (clearMPRetreat != null)
+                {
+                    actions.Add(clearMPRetreat);
+                    Main.Log($"[Support] Phase 5.8: Preemptive retreat before ClearMP ability");
+
+                    // ★ v3.8.76: 후퇴 후 HittableEnemies 재계산 (Phase 6 공격 전)
+                    var retreatDest = clearMPRetreat.MoveDestination ?? clearMPRetreat.Target?.Point;
+                    if (retreatDest.HasValue)
+                    {
+                        RecalculateHittableFromDestination(situation, retreatDest.Value);
+                    }
+                }
+            }
+
+            // ══════════════════════════════════════════════════════════════
+            // Phase 5.9: 전략 옵션 평가 (공격 전 이동 필요 여부 결정)
+            // ★ v3.8.76: TacticalOptionEvaluator - Phase 5.8 ClearMP 후퇴와 협력
+            // Phase 5.8이 이미 이동했으면 MoveToAttack은 자동 스킵됨
+            // ══════════════════════════════════════════════════════════════
+            // ★ v3.8.76: Phase 5.8에서 이미 이동했으면 전략 평가 자체를 스킵
+            // ApplyTacticalStrategy 내부에서 RecalculateHittable이 실행되므로,
+            // 이동을 추가하지 않을 건데 RecalculateHittable만 실행되면 HittableEnemies가 잘못됨
+            bool alreadyMoved = actions.Any(a => a.Type == ActionType.Move);
+            TacticalEvaluation tacticalEval = null;
+            if (!alreadyMoved)
+            {
+                tacticalEval = EvaluateTacticalOptions(situation);
+                if (tacticalEval != null && tacticalEval.WasEvaluated)
+                {
+                    bool shouldMoveBeforeAttack;
+                    bool shouldDeferRetreat;
+                    var tacticalMoveAction = ApplyTacticalStrategy(tacticalEval, situation,
+                        out shouldMoveBeforeAttack, out shouldDeferRetreat);
+
+                    if (tacticalMoveAction != null)
+                    {
+                        actions.Add(tacticalMoveAction);
+                        Main.Log($"[Support] Phase 5.9: Tactical pre-attack move");
+                    }
+                }
+            }
+
+            // ★ v3.8.67: Phase 6 - 원거리 공격 계획
+            // 기존 SequenceOptimizer 제거 → PlanSafeRangedAttack 직접 사용
+            // ClearMP 안전/후퇴 판단은 UtilityScorer + Phase 5.8이 담당
             int attacksPlanned = 0;
             var plannedTargetIds = new HashSet<string>();
             var plannedAbilityGuids = new HashSet<string>();
@@ -377,123 +425,50 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.6.14: AP >= 0 으로 완화 (bonus usage 공격은 0 AP로 사용 가능)
             while (remainingAP >= 0f && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
             {
-                // 사용 가능한 원거리 공격 필터링
-                var rangedAttacks = situation.AvailableAttacks
-                    .Where(a => !a.IsMelee)
-                    .Where(a => !AbilityDatabase.IsDangerousAoE(a))
-                    .Where(a => !IsAbilityExcluded(a, plannedAbilityGuids))
-                    .Where(a => CombatAPI.GetAbilityAPCost(a) <= remainingAP)
-                    .ToList();
+                var attackAction = PlanSafeRangedAttackFallback(situation, ref remainingAP, ref remainingMP,
+                    excludeTargetIds: plannedTargetIds, excludeAbilityGuids: plannedAbilityGuids);
+                if (attackAction == null) break;
 
-                if (rangedAttacks.Count == 0) break;
+                actions.Add(attackAction);
+                didPlanAttack = true;
+                attacksPlanned++;
 
-                // 타겟 후보 목록
-                var candidateTargets = new List<BaseUnitEntity>();
-                if (situation.BestTarget != null && !IsExcluded(situation.BestTarget, plannedTargetIds))
-                    candidateTargets.Add(situation.BestTarget);
-
-                foreach (var hittable in situation.HittableEnemies)
+                var targetEntity = attackAction.Target?.Entity as BaseUnitEntity;
+                // ★ v3.6.22: Hittable 적이 2명 이상일 때만 타겟 제외
+                if (targetEntity != null)
                 {
-                    if (hittable != null && !candidateTargets.Contains(hittable) && !IsExcluded(hittable, plannedTargetIds))
-                        candidateTargets.Add(hittable);
-                }
-
-                if (candidateTargets.Count == 0) break;
-
-                // ★ SequenceOptimizer로 최적 시퀀스 선택
-                var optimalActions = SequenceOptimizer.GetOptimalAttackActions(
-                    situation,
-                    rangedAttacks,
-                    candidateTargets.First(),  // 첫 번째 타겟으로 최적화
-                    ref remainingAP,
-                    ref remainingMP,
-                    "Support-Seq"
-                );
-
-                // ★ v3.0.59: null vs 빈 리스트 구분
-                // - null: 최적화 실패 → 폴백 실행
-                // - 빈 리스트: "Skip attack" 결정 → 폴백 금지
-                if (optimalActions == null)
-                {
-                    // 최적화 실패 시 폴백: 기존 로직
-                    var fallbackAction = PlanSafeRangedAttackFallback(situation, ref remainingAP, ref remainingMP,
-                        excludeTargetIds: plannedTargetIds, excludeAbilityGuids: plannedAbilityGuids);
-                    if (fallbackAction == null) break;
-
-                    actions.Add(fallbackAction);
-                    didPlanAttack = true;
-                    attacksPlanned++;
-
-                    var targetEntity = fallbackAction.Target?.Entity as BaseUnitEntity;
-                    // ★ v3.6.22: Hittable 적이 2명 이상일 때만 타겟 제외
-                    if (targetEntity != null)
+                    if (situation.HittableEnemies.Count > 1)
                     {
-                        if (situation.HittableEnemies.Count > 1)
-                        {
-                            plannedTargetIds.Add(targetEntity.UniqueId);
-                        }
-                        else
-                        {
-                            Main.LogDebug($"[Support] Phase 4: Allow re-attack on {targetEntity.CharacterName} (only 1 hittable enemy)");
-                        }
+                        plannedTargetIds.Add(targetEntity.UniqueId);
                     }
-
-                    // ★ v3.8.30: 적이 1명일 때는 능력도 제외하지 않음 (동일 능력으로 재공격 허용)
-                    if (fallbackAction.Ability != null && situation.HittableEnemies.Count > 1)
+                    else
                     {
-                        var guid = fallbackAction.Ability.Blueprint?.AssetGuid?.ToString();
-                        if (!string.IsNullOrEmpty(guid))
-                            plannedAbilityGuids.Add(guid);
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[Support] Phase 6: Allow re-attack on {targetEntity.CharacterName} (only 1 hittable enemy)");
                     }
                 }
-                else if (optimalActions.Count == 0)
+
+                // ★ v3.8.30: 적이 1명일 때는 능력도 제외하지 않음 (동일 능력으로 재공격 허용)
+                if (attackAction.Ability != null && situation.HittableEnemies.Count > 1)
                 {
-                    // ★ v3.0.59: "Skip attack" 결정 - 공격 루프 종료
-                    Main.Log("[Support] Skipping attack (optimizer safety decision)");
-                    break;
-                }
-                else
-                {
-                    // 최적화 성공 - 시퀀스의 모든 행동 추가
-                    actions.AddRange(optimalActions);
-                    didPlanAttack = true;
-                    attacksPlanned++;
-
-                    // 사용된 타겟/능력 기록
-                    foreach (var action in optimalActions)
-                    {
-                        var targetEntity = action.Target?.Entity as BaseUnitEntity;
-                        // ★ v3.6.22: Hittable 적이 2명 이상일 때만 타겟 제외
-                        if (targetEntity != null && situation.HittableEnemies.Count > 1)
-                            plannedTargetIds.Add(targetEntity.UniqueId);
-
-                        // ★ v3.8.30: 적이 1명일 때는 능력도 제외하지 않음 (동일 능력으로 재공격 허용)
-                        if (action.Ability != null && situation.HittableEnemies.Count > 1)
-                        {
-                            var guid = action.Ability.Blueprint?.AssetGuid?.ToString();
-                            if (!string.IsNullOrEmpty(guid))
-                                plannedAbilityGuids.Add(guid);
-                        }
-                    }
-
-                    // 시퀀스가 이동을 포함했으면 추가 공격 루프 종료
-                    if (optimalActions.Any(a => a.Type == ActionType.Move))
-                        break;
+                    var guid = attackAction.Ability.Blueprint?.AssetGuid?.ToString();
+                    if (!string.IsNullOrEmpty(guid))
+                        plannedAbilityGuids.Add(guid);
                 }
             }
 
             // ★ v3.8.44: 공격 실패 시 context 수집 (이동 Phase에서 활용)
-            // SupportPlan은 SequenceOptimizer/PlanSafeRangedAttack 경로를 사용하므로
-            // context가 자동 수집되지 않음 → SelectBestAttack probe로 수집
             if (!didPlanAttack)
             {
                 var probeTarget = situation.BestTarget ?? situation.HittableEnemies?.FirstOrDefault();
                 if (probeTarget != null)
                 {
                     SelectBestAttack(situation, probeTarget, null, attackContext);
-                    Main.LogDebug($"[Support] AttackContext probe: {attackContext}");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[Support] AttackContext probe: {attackContext}");
                 }
             }
+
+            // ★ v3.8.72: Hittable mismatch 사후 보정
+            HandleHittableMismatch(situation, didPlanAttack, attackContext);
 
             // Phase 7: PostFirstAction
             // ★ v3.5.80: didPlanAttack 전달
@@ -532,14 +507,14 @@ namespace CompanionAI_v3.Planning.Plans
                         timing == AbilityTiming.RighteousFury ||
                         timing == AbilityTiming.TurnEnding)
                     {
-                        Main.LogDebug($"[Support] Phase 7.5: Skip {buff.Name} (timing={timing} not suitable for fallback)");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[Support] Phase 7.5: Skip {buff.Name} (timing={timing} not suitable for fallback)");
                         continue;
                     }
 
                     // ★ v3.5.22: SpringAttack 능력은 조건 충족 시에만 TurnEnding에서 사용
                     if (AbilityDatabase.IsSpringAttackAbility(buff))
                     {
-                        Main.LogDebug($"[Support] Phase 7.5: Skip {buff.Name} (SpringAttack - use in TurnEnding only)");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[Support] Phase 7.5: Skip {buff.Name} (SpringAttack - use in TurnEnding only)");
                         continue;
                     }
 
@@ -574,7 +549,7 @@ namespace CompanionAI_v3.Planning.Plans
             // 화염 수류탄 등 ClearMPAfterUse 능력은 이미 remainingMP=0으로 설정됨
             if (remainingMP <= 0)
             {
-                Main.LogDebug($"[Support] Skip safe retreat - no remaining MP after planned abilities");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Support] Skip safe retreat - no remaining MP after planned abilities");
             }
 
             if (!alreadyHasMoveAction && remainingMP > 0 && situation.CanMove && situation.PrefersRanged)
@@ -661,7 +636,7 @@ namespace CompanionAI_v3.Planning.Plans
                 // ★ v3.0.90: 공격 실패 시 forceMove=true로 이동 강제
                 // ★ v3.8.44: HasHittableEnemies → attackContext.ShouldForceMove (실패 이유 기반)
                 bool forceMove = !didPlanAttack && attackContext.ShouldForceMove;
-                Main.LogDebug($"[Support] Phase 9: {attackContext}, forceMove={forceMove}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Support] Phase 9: {attackContext}, forceMove={forceMove}");
                 // ★ v3.1.00: MP 회복 예측 후 situation.CanMove=False여도 이동 가능
                 bool bypassCanMoveCheck = !situation.CanMove && remainingMP > 0;
                 // ★ v3.1.01: remainingMP를 MovementAPI에 전달
@@ -686,6 +661,18 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.8.74: Phase 8.7 - Tactical Reposition (공격 쿨다운 시 다음 턴 최적 위치)
+            if (!hasMoveInPlan && noAttackNoApproach && remainingMP > 0 && situation.HasLivingEnemies)
+            {
+                var tacticalRepos = PlanTacticalReposition(situation, remainingMP);
+                if (tacticalRepos != null)
+                {
+                    actions.Add(tacticalRepos);
+                    hasMoveInPlan = true;
+                    Main.Log($"[Support] Phase 8.7: Tactical reposition (all attacks on cooldown, MP={remainingMP:F1})");
+                }
+            }
+
             // Post-attack phase
             if ((situation.HasAttackedThisTurn || didPlanAttack) && remainingAP >= 1f)
             {
@@ -701,6 +688,27 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     actions.Add(finalAction);
                     Main.Log($"[Support] Phase 10: Final AP utilization - {finalAction.Ability?.Name}");
+                }
+            }
+
+            // ★ v3.8.68: Post-plan 공격 검증 + 복구 (TurnEnding 전에 실행)
+            int removedAttacks = ValidateAndRemoveUnreachableAttacks(actions, situation, ref didPlanAttack, ref remainingAP);
+
+            if (removedAttacks > 0 && !didPlanAttack)
+            {
+                // 모든 공격이 제거됨 → 복구 이동 시도
+                bool hasRecoveryMove = actions.Any(a => a.Type == ActionType.Move);
+                if (!hasRecoveryMove && situation.HasLivingEnemies && remainingMP > 0)
+                {
+                    Main.Log($"[Support] ★ Post-validation recovery: attempting movement (AP={remainingAP:F1}, MP={remainingMP:F1})");
+                    var recoveryCtx = new AttackPhaseContext { RangeWasIssue = true };
+                    bool bypassCanMoveCheck = !situation.CanMove && remainingMP > 0;
+                    var recoveryMove = PlanMoveOrGapCloser(situation, ref remainingAP, true, bypassCanMoveCheck, remainingMP, recoveryCtx);
+                    if (recoveryMove != null)
+                    {
+                        actions.Add(recoveryMove);
+                        Main.Log($"[Support] ★ Post-validation recovery: movement planned");
+                    }
                 }
             }
 
@@ -722,7 +730,7 @@ namespace CompanionAI_v3.Planning.Plans
             var reasoning = $"Support: {DetermineReasoning(actions, situation)}";
 
             // ★ v3.0.55: MP 추적 로깅
-            Main.LogDebug($"[Support] Plan complete: AP={remainingAP:F1}, MP={remainingMP:F1} (started with {situation.CurrentMP:F1})");
+            if (Main.IsDebugEnabled) Main.LogDebug($"[Support] Plan complete: AP={remainingAP:F1}, MP={remainingMP:F1} (started with {situation.CurrentMP:F1})");
 
             // ★ v3.1.09: InitialAP/InitialMP 전달 (리플랜 감지용)
             // ★ v3.5.88: 0 AP 공격 수 전달 (Break Through → Slash 감지용)
@@ -760,7 +768,7 @@ namespace CompanionAI_v3.Planning.Plans
         // SupportPlan에서 BasePlan.PlanAllyBuff(situation, ref remainingAP, usedKeystoneGuids) 호출
 
         /// <summary>
-        /// ★ v3.0.57: SequenceOptimizer 실패 시 폴백용
+        /// ★ v3.8.67: Phase 6 공격 계획 (기존 폴백 → 메인 경로로 승격)
         /// ★ v3.0.49: Weapon != null 조건 제거 - 사이킥/수류탄 능력 허용
         /// ★ v3.0.50: AoE 아군 피해 체크 추가
         /// </summary>
@@ -806,7 +814,7 @@ namespace CompanionAI_v3.Planning.Plans
                     {
                         if (!AoESafetyChecker.IsAoESafeForUnitTarget(attack, situation.Unit, target, situation.Allies))
                         {
-                            Main.LogDebug($"[Support] Fallback: Skipping {attack.Name} - ally in scatter zone");
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[Support] Fallback: Skipping {attack.Name} - ally in scatter zone");
                             continue;
                         }
                     }
@@ -870,7 +878,7 @@ namespace CompanionAI_v3.Planning.Plans
             float currentDist = UnityEngine.Vector3.Distance(unit.Position, targetPos);
             if (currentDist <= 10f)  // 이미 충분히 가까움
             {
-                Main.LogDebug($"[Support] Already close to target position ({currentDist:F1}m)");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Support] Already close to target position ({currentDist:F1}m)");
                 return null;
             }
 
@@ -878,7 +886,7 @@ namespace CompanionAI_v3.Planning.Plans
             var tiles = MovementAPI.FindAllReachableTilesSync(unit, remainingMP);
             if (tiles == null || tiles.Count == 0)
             {
-                Main.LogDebug($"[Support] No reachable tiles for ally approach");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Support] No reachable tiles for ally approach");
                 return null;
             }
 
@@ -912,7 +920,7 @@ namespace CompanionAI_v3.Planning.Plans
                 return PlannedAction.Move(bestPos.Value, moveReason);
             }
 
-            Main.LogDebug($"[Support] No better position toward allies found");
+            if (Main.IsDebugEnabled) Main.LogDebug($"[Support] No better position toward allies found");
             return null;
         }
 

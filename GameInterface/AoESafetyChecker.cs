@@ -4,6 +4,7 @@ using System.Linq;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Abilities;
 using UnityEngine;
+using CompanionAI_v3.Data;
 using CompanionAI_v3.Settings;
 
 namespace CompanionAI_v3.GameInterface
@@ -246,10 +247,7 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// ★ v3.8.45: 유닛 타겟 능력의 아군 안전 체크
-        /// AOE point-target 능력 + CanTargetFriends 능력(점사 사격 등) 모두 처리
-        /// - AOE 반경 있음: 반경 내 아군 체크
-        /// - CanTargetFriends=true (AOE 반경 0): 5-레이 스캐터 패턴 기반 체크
-        /// ★ v3.8.64: 게임 검증 — GridPatterns.CalcScatterShot 기반으로 재작성
+        /// ★ v3.8.70: 위치 기반 오버로드로 위임
         /// </summary>
         public static bool IsAoESafeForUnitTarget(
             AbilityData ability,
@@ -257,10 +255,26 @@ namespace CompanionAI_v3.GameInterface
             BaseUnitEntity target,
             List<BaseUnitEntity> allies)
         {
+            // ★ v3.8.70: 위치 기반 오버로드로 위임
+            return IsAoESafeForUnitTargetFromPosition(ability, caster.Position, caster, target, allies);
+        }
+
+        /// <summary>
+        /// ★ v3.8.70: 지정된 위치에서 타겟 공격 시 아군 scatter/AOE 안전 체크
+        /// 이동 후보 위치 평가에 사용 (CountHittableEnemiesFromPosition 등)
+        /// ★ v3.8.64: 게임 검증 — GridPatterns.CalcScatterShot 기반
+        /// </summary>
+        public static bool IsAoESafeForUnitTargetFromPosition(
+            AbilityData ability,
+            Vector3 fromPosition,
+            BaseUnitEntity casterEntity,
+            BaseUnitEntity target,
+            List<BaseUnitEntity> allies)
+        {
             // ★ v3.8.64: AvoidFriendlyFire 설정 반영
             try
             {
-                var settings = ModSettings.Instance?.GetOrCreateSettings(caster.UniqueId);
+                var settings = ModSettings.Instance?.GetOrCreateSettings(casterEntity.UniqueId);
                 if (settings != null && !settings.AvoidFriendlyFire)
                     return true;  // 사용자가 아군 피격 방지 비활성화
             }
@@ -275,15 +289,16 @@ namespace CompanionAI_v3.GameInterface
                     aoERadius = patternInfo.Radius;
             }
 
-            // ★ v3.8.45: CanTargetFriends 체크 - AOE 반경이 0이어도 아군 피격 가능
-            bool canTargetFriends = ability?.Blueprint?.CanTargetFriends == true;
+            // ★ v3.8.82: BlueprintCache에서 캐시된 속성 사용
+            // IsScatter를 직접 확인 — CanTargetFriends 프록시 불필요
+            var bpInfo = BlueprintCache.GetOrCache(ability);
+            bool hasScatterDanger = bpInfo?.IsScatter ?? ability?.IsScatter ?? false;
 
-            // AOE 효과도 없고 아군 타겟 불가능하면 안전
-            if (aoERadius <= 0 && !canTargetFriends) return true;
+            // AOE 효과도 없고 scatter 위험도 없으면 안전
+            if (aoERadius <= 0 && !hasScatterDanger) return true;
 
             // ★ v3.8.65: 게임 검증 — 스캐터 레이 사거리 제한
-            // 게임: CalcScatterShot → m_FromNode.CellDistanceTo(cell) <= m_Range
-            int scatterRange = canTargetFriends ? CombatAPI.GetAbilityRangeInTiles(ability) : 0;
+            int scatterRange = hasScatterDanger ? CombatAPI.GetAbilityRangeInTiles(ability) : 0;
             if (allies == null) return true;
 
             var aoeConfig = AIConfig.GetAoEConfig();
@@ -292,24 +307,23 @@ namespace CompanionAI_v3.GameInterface
             foreach (var ally in allies)
             {
                 if (ally == null || !ally.IsConscious) continue;
-                if (ally == target) continue;  // 타겟 자체는 제외
-                if (ally == caster) continue;   // 캐스터 자신은 제외
+                if (ally == target) continue;        // 타겟 자체는 제외
+                if (ally == casterEntity) continue;  // 캐스터 자신은 제외
 
                 bool isInDanger = false;
 
                 if (aoERadius > 0)
                 {
-                    // AOE 반경 기반 체크 (기존 로직)
+                    // AOE 반경 기반 체크
                     if (CombatAPI.IsUnitInAoERange(ability, target.Position, ally, aoERadius))
                         isInDanger = true;
                 }
-                else if (canTargetFriends)
+                else if (hasScatterDanger)
                 {
-                    // ★ v3.8.64~65: 게임 검증 — 5-레이 스캐터 패턴 기반 체크
-                    // 게임: GridPatterns.CalcScatterShot → 5개 레이 (중심±2셀)
-                    // 레이는 캐스터에서 ability.RangeCells까지 (CellDistanceTo <= m_Range)
-                    Vector3 casterToTarget = target.Position - caster.Position;
-                    Vector3 casterToAlly = ally.Position - caster.Position;
+                    // ★ v3.8.64~65: 5-레이 스캐터 패턴 기반 체크 (원거리 산탄 무기만)
+                    // ★ v3.8.70: caster.Position → fromPosition (이동 후보 위치 지원)
+                    Vector3 casterToTarget = target.Position - fromPosition;
+                    Vector3 casterToAlly = ally.Position - fromPosition;
                     float casterToTargetMag = casterToTarget.magnitude;
 
                     if (casterToTargetMag > 0.1f)
@@ -320,7 +334,7 @@ namespace CompanionAI_v3.GameInterface
                         float projection = Vector3.Dot(casterToAlly, dirNorm);
                         if (projection > 0)
                         {
-                            // ★ v3.8.65: 사거리 제한 — 게임은 CellDistanceTo <= RangeCells로 제한
+                            // ★ v3.8.65: 사거리 제한
                             float projectionTiles = CombatAPI.MetersToTiles(projection);
                             if (projectionTiles > scatterRange) continue;
 
@@ -341,16 +355,16 @@ namespace CompanionAI_v3.GameInterface
 
                 try
                 {
-                    if (!caster.IsPlayerEnemy && ally.IsInPlayerParty)
+                    if (!casterEntity.IsPlayerEnemy && ally.IsInPlayerParty)
                     {
                         playerPartyAlliesInRange++;
 
-                        // ★ v3.8.54: CanTargetFriends 직격은 0 허용 — 스캐터 레이 직격은 AOE 스플래시보다 위험
-                        int effectiveMaxAllies = (aoERadius <= 0 && canTargetFriends) ? 0 : aoeConfig.MaxPlayerAlliesHit;
+                        // ★ v3.8.54: scatter 직격은 0 허용
+                        int effectiveMaxAllies = (aoERadius <= 0 && hasScatterDanger) ? 0 : aoeConfig.MaxPlayerAlliesHit;
                         if (playerPartyAlliesInRange > effectiveMaxAllies)
                         {
-                            string checkType = aoERadius > 0 ? $"radius={aoERadius:F1}" : "CanTargetFriends(scatter)";
-                            CompanionAI_v3.Main.LogDebug($"[AOE] Unit-target safety: {ability.Name} -> {target.CharacterName} blocked ({checkType}, allies={playerPartyAlliesInRange} > max={effectiveMaxAllies})");
+                            string checkType = aoERadius > 0 ? $"radius={aoERadius:F1}" : "scatter";
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[AOE] Unit-target safety: {ability.Name} -> {target.CharacterName} blocked ({checkType}, allies={playerPartyAlliesInRange} > max={effectiveMaxAllies})");
                             return false;
                         }
                     }

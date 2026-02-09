@@ -64,6 +64,10 @@ namespace CompanionAI_v3.Data
             public bool NotOffensive { get; set; }
             public bool HasMultiTarget { get; set; }
 
+            // ★ v3.8.82: AbilityData 인스턴스 속성 (무기 의존)
+            public bool IsMelee { get; set; }
+            public bool IsScatter { get; set; }
+
             // 타겟팅
             public bool CanTargetPoint { get; set; }
             public bool CanTargetSelf { get; set; }
@@ -163,6 +167,10 @@ namespace CompanionAI_v3.Data
                     IsGrenade = bp.IsGrenade,
                     NotOffensive = bp.NotOffensive,
                     HasMultiTarget = bp.GetComponent<AbilityMultiTarget>() != null,
+
+                    // ★ v3.8.82: AbilityData 인스턴스 속성 (무기 의존)
+                    IsMelee = ability.IsMelee,
+                    IsScatter = ability.IsScatter,
 
                     // 타겟팅
                     CanTargetPoint = bp.CanTargetPoint,
@@ -308,6 +316,22 @@ namespace CompanionAI_v3.Data
             {
                 return _nameToGuidCache.TryGetValue(blueprintName, out var guid) ? guid : null;
             }
+        }
+
+        /// <summary>
+        /// ★ v3.8.82: AbilityData에서 캐시된 정보를 조회 (미캐시 시 자동 캐시)
+        /// AoESafetyChecker, AttackPlanner 등 핫패스에서 Blueprint 직접 접근 대신 사용
+        /// </summary>
+        public static AbilityBlueprintInfo GetOrCache(AbilityData ability)
+        {
+            if (ability?.Blueprint == null) return null;
+            string guid = ability.Blueprint.AssetGuid?.ToString();
+            if (string.IsNullOrEmpty(guid)) return null;
+
+            var info = GetByGuid(guid);
+            if (info != null) return info;
+
+            return CacheAbility(ability);
         }
 
         public static bool IsMultiTarget(string guidOrName)
@@ -461,8 +485,8 @@ namespace CompanionAI_v3.Data
             sb.AppendLine($"  Target: Point={info.CanTargetPoint}, Self={info.CanTargetSelf}, " +
                 $"Friends={info.CanTargetFriends}, Enemies={info.CanTargetEnemies}");
             sb.AppendLine($"  Effects: OnAlly={info.EffectOnAlly}, OnEnemy={info.EffectOnEnemy}, AoETargets={info.AoETargets}");
-            sb.AppendLine($"  Flags: AoE={info.IsAoE}, Burst={info.IsBurst}, Move={info.IsMoveUnit}, " +
-                $"Charge={info.IsCharge}, Heroic={info.IsHeroicAct}, Offensive={!info.NotOffensive}");
+            sb.AppendLine($"  Flags: AoE={info.IsAoE}, Burst={info.IsBurst}, Melee={info.IsMelee}, Scatter={info.IsScatter}, " +
+                $"Move={info.IsMoveUnit}, Charge={info.IsCharge}, Heroic={info.IsHeroicAct}, Offensive={!info.NotOffensive}");
             sb.AppendLine($"  Stats: Range={info.Range}, AoERadius={info.AoERadius}, AP={info.ActionPointCost}, CD={info.CooldownRounds}");
             sb.AppendLine();
         }

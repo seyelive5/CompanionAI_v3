@@ -33,22 +33,42 @@ namespace CompanionAI_v3.GameInterface
         #region ★ v3.8.15: AI Pathfinding Cache (스터터링 방지)
 
         /// <summary>
-        /// AI 패스파인딩 캐시 - 한 턴에 한 번만 계산
+        /// ★ v3.8.78: 2-슬롯 LRU AI 패스파인딩 캐시
         /// 문제: FindAllReachableTilesWithThreatsSync가 한 턴에 4번까지 호출됨
-        /// 해결: 첫 호출에서 캐싱하고 이후 호출에서 재사용
+        ///   같은 유닛이 다른 AP(full AP vs predictedMP)로 호출 → 단일 캐시에서 미스 발생
+        /// 해결: 2-슬롯 LRU 캐시로 2개 AP 값 동시 보관
         /// </summary>
-        private static string _cachedUnitId;
-        private static float _cachedAP;
-        private static Dictionary<GraphNode, WarhammerPathAiCell> _cachedAiTiles;
-        private static int _cachedTurnNumber = -1;
+        private static string _cachedUnitId1, _cachedUnitId2;
+        private static float _cachedAP1, _cachedAP2;
+        private static Dictionary<GraphNode, WarhammerPathAiCell> _cachedAiTiles1, _cachedAiTiles2;
+        private static int _cachedTurnNumber1 = -1, _cachedTurnNumber2 = -1;
+        private static int _lastUsedSlot;  // LRU: 마지막 사용 슬롯 (1 or 2)
 
         /// <summary>AI 패스파인딩 캐시 무효화</summary>
         public static void InvalidateAiPathCache()
         {
-            _cachedUnitId = null;
-            _cachedAP = 0;
-            _cachedAiTiles = null;
-            Main.LogDebug("[MovementAPI] AI pathfinding cache invalidated");
+            _cachedUnitId1 = null; _cachedAP1 = 0; _cachedAiTiles1 = null; _cachedTurnNumber1 = -1;
+            _cachedUnitId2 = null; _cachedAP2 = 0; _cachedAiTiles2 = null; _cachedTurnNumber2 = -1;
+            _lastUsedSlot = 0;
+            if (Main.IsDebugEnabled) Main.LogDebug("[MovementAPI] AI pathfinding cache invalidated (2-slot)");
+        }
+
+        /// <summary>★ v3.8.78: 2-슬롯 LRU 캐시 저장</summary>
+        private static void CacheAiTiles(string unitId, float ap, int turnNumber, Dictionary<GraphNode, WarhammerPathAiCell> tiles)
+        {
+            // LRU: 마지막 사용 슬롯이 아닌 슬롯에 저장 (가장 최근 히트한 슬롯 보존)
+            if (_lastUsedSlot != 1)
+            {
+                _cachedUnitId1 = unitId; _cachedAP1 = ap;
+                _cachedAiTiles1 = tiles; _cachedTurnNumber1 = turnNumber;
+                _lastUsedSlot = 1;
+            }
+            else
+            {
+                _cachedUnitId2 = unitId; _cachedAP2 = ap;
+                _cachedAiTiles2 = tiles; _cachedTurnNumber2 = turnNumber;
+                _lastUsedSlot = 2;
+            }
         }
 
         #endregion
@@ -146,12 +166,12 @@ namespace CompanionAI_v3.GameInterface
                     ignoreThreateningAreaCost: false
                 );
 
-                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Found {tiles?.Count ?? 0} reachable tiles");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Found {tiles?.Count ?? 0} reachable tiles");
                 return tiles ?? new Dictionary<GraphNode, WarhammerPathPlayerCell>();
             }
             catch (Exception ex)
             {
-                Main.LogDebug($"[MovementAPI] FindAllReachableTilesSync error: {ex.Message}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] FindAllReachableTilesSync error: {ex.Message}");
                 return new Dictionary<GraphNode, WarhammerPathPlayerCell>();
             }
         }
@@ -180,14 +200,20 @@ namespace CompanionAI_v3.GameInterface
                 string unitId = unit.UniqueId;
                 int currentTurn = Game.Instance?.TurnController?.CombatRound ?? -1;
 
-                // ★ v3.8.15: 캐시 체크 - 같은 유닛, 같은 턴, 같은 AP면 캐시된 결과 반환
-                if (_cachedAiTiles != null &&
-                    _cachedUnitId == unitId &&
-                    _cachedTurnNumber == currentTurn &&
-                    Math.Abs(_cachedAP - ap) < 0.1f)
+                // ★ v3.8.78: 2-슬롯 LRU 캐시 체크
+                if (_cachedAiTiles1 != null && _cachedUnitId1 == unitId &&
+                    _cachedTurnNumber1 == currentTurn && Math.Abs(_cachedAP1 - ap) < 0.1f)
                 {
-                    Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Using cached AI pathfinding ({_cachedAiTiles.Count} tiles)");
-                    return _cachedAiTiles;
+                    _lastUsedSlot = 1;
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Cache HIT slot1 (AP={ap:F1}, {_cachedAiTiles1.Count} tiles)");
+                    return _cachedAiTiles1;
+                }
+                if (_cachedAiTiles2 != null && _cachedUnitId2 == unitId &&
+                    _cachedTurnNumber2 == currentTurn && Math.Abs(_cachedAP2 - ap) < 0.1f)
+                {
+                    _lastUsedSlot = 2;
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Cache HIT slot2 (AP={ap:F1}, {_cachedAiTiles2.Count} tiles)");
+                    return _cachedAiTiles2;
                 }
 
                 var agent = unit.View?.MovementAgent;
@@ -205,36 +231,28 @@ namespace CompanionAI_v3.GameInterface
                     threatsDict
                 );
 
-                // ★ v3.8.15: 타임아웃 200ms로 축소 (기존 1000ms → 끊김 원인)
-                if (!task.Wait(200))
+                // ★ v3.8.80: 타임아웃 100ms로 축소 (기존 200ms)
+                // 대규모 맵에서 AI 패스파인더가 거의 항상 타임아웃 → Player 폴백 사용
+                // 100ms로도 소-중규모 맵 성공 여지 유지, 대규모 맵 100ms 절약
+                if (!task.Wait(100))
                 {
-                    Main.LogDebug($"[MovementAPI] {unit.CharacterName}: AI pathfinding timeout, falling back to player version");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: AI pathfinding timeout, falling back to player version");
                     var fallback = ConvertToAiCells(FindAllReachableTilesSync(unit, maxAP));
-                    // 폴백 결과도 캐싱
-                    _cachedUnitId = unitId;
-                    _cachedAP = ap;
-                    _cachedAiTiles = fallback;
-                    _cachedTurnNumber = currentTurn;
+                    CacheAiTiles(unitId, ap, currentTurn, fallback);
                     return fallback;
                 }
 
                 var tiles = task.Result;
                 if (tiles == null || tiles.Count == 0)
                 {
-                    Main.LogDebug($"[MovementAPI] {unit.CharacterName}: AI pathfinding returned null/empty, falling back");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: AI pathfinding returned null/empty, falling back");
                     var fallback = ConvertToAiCells(FindAllReachableTilesSync(unit, maxAP));
-                    _cachedUnitId = unitId;
-                    _cachedAP = ap;
-                    _cachedAiTiles = fallback;
-                    _cachedTurnNumber = currentTurn;
+                    CacheAiTiles(unitId, ap, currentTurn, fallback);
                     return fallback;
                 }
 
-                // ★ v3.8.15: 결과 캐싱
-                _cachedUnitId = unitId;
-                _cachedAP = ap;
-                _cachedAiTiles = tiles;
-                _cachedTurnNumber = currentTurn;
+                // ★ v3.8.78: 2-슬롯 LRU 캐시 저장
+                CacheAiTiles(unitId, ap, currentTurn, tiles);
 
                 // ★ 디버그: 경로 위협 데이터 샘플 출력 (첫 호출에서만)
                 int threatsFound = 0;
@@ -246,7 +264,7 @@ namespace CompanionAI_v3.GameInterface
                         threatsFound++;
                         if (threatsFound <= 3)  // 최대 3개만 로깅
                         {
-                            Main.LogDebug($"[MovementAPI] ThreatData: Node({cell.Position.x:F1},{cell.Position.z:F1}) AoO={cell.ProvokedAttacks}, AoE={cell.EnteredAoE}, DmgAoE={cell.StepsInsideDamagingAoE}");
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] ThreatData: Node({cell.Position.x:F1},{cell.Position.z:F1}) AoO={cell.ProvokedAttacks}, AoE={cell.EnteredAoE}, DmgAoE={cell.StepsInsideDamagingAoE}");
                         }
                     }
                 }
@@ -256,7 +274,7 @@ namespace CompanionAI_v3.GameInterface
             }
             catch (Exception ex)
             {
-                Main.LogDebug($"[MovementAPI] FindAllReachableTilesWithThreatsSync error: {ex.Message}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] FindAllReachableTilesWithThreatsSync error: {ex.Message}");
                 return ConvertToAiCells(FindAllReachableTilesSync(unit, maxAP));
             }
         }
@@ -315,33 +333,33 @@ namespace CompanionAI_v3.GameInterface
                 if (threats.aooUnits != null && threats.aooUnits.Count > 0)
                 {
                     threatScore += threats.aooUnits.Count * 20f;
-                    Main.LogDebug($"[MovementAPI] Node has {threats.aooUnits.Count} AoO threats");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] Node has {threats.aooUnits.Count} AoO threats");
                 }
 
                 // Overwatch 위협 (경계사격)
                 if (threats.overwatchUnits != null && threats.overwatchUnits.Count > 0)
                 {
                     threatScore += threats.overwatchUnits.Count * 25f;
-                    Main.LogDebug($"[MovementAPI] Node has {threats.overwatchUnits.Count} Overwatch threats");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] Node has {threats.overwatchUnits.Count} Overwatch threats");
                 }
 
                 // AoE 위협 (화염, 독가스 등)
                 if (threats.aes != null && threats.aes.Count > 0)
                 {
                     threatScore += threats.aes.Count * 30f;
-                    Main.LogDebug($"[MovementAPI] Node has {threats.aes.Count} AoE threats");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] Node has {threats.aes.Count} AoE threats");
                 }
 
                 // 이동 시 데미지 AoE (화염 지대 등)
                 if (threats.dmgOnMoveAes != null && threats.dmgOnMoveAes.Count > 0)
                 {
                     threatScore += threats.dmgOnMoveAes.Count * 50f;
-                    Main.LogDebug($"[MovementAPI] Node has {threats.dmgOnMoveAes.Count} damage-on-move AoE");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] Node has {threats.dmgOnMoveAes.Count} damage-on-move AoE");
                 }
             }
             catch (Exception ex)
             {
-                Main.LogDebug($"[MovementAPI] CalculateThreatScore error: {ex.Message}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] CalculateThreatScore error: {ex.Message}");
             }
 
             return threatScore;
@@ -421,7 +439,7 @@ namespace CompanionAI_v3.GameInterface
                 // ★ 디버그: 실제 경로 위협 데이터 로깅
                 if (totalRisk > 0)
                 {
-                    Main.LogDebug($"[MovementAPI] PathRiskAi: AoO={pathProvokedAttacks}, AoE={pathEnteredAoE}, DmgAoE={pathDamagingAoESteps} -> Risk={totalRisk:F1}");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] PathRiskAi: AoO={pathProvokedAttacks}, AoE={pathEnteredAoE}, DmgAoE={pathDamagingAoESteps} -> Risk={totalRisk:F1}");
                 }
 
                 // 추가: 영향력 맵 기반 위협 (적 밀집도) - 목적지에서만 평가
@@ -433,7 +451,7 @@ namespace CompanionAI_v3.GameInterface
             }
             catch (Exception ex)
             {
-                Main.LogDebug($"[MovementAPI] EvaluatePathRiskAi error: {ex.Message}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] EvaluatePathRiskAi error: {ex.Message}");
                 return 0f;
             }
 
@@ -473,7 +491,7 @@ namespace CompanionAI_v3.GameInterface
             }
             catch (Exception ex)
             {
-                Main.LogDebug($"[MovementAPI] EvaluatePathRiskSimple error: {ex.Message}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] EvaluatePathRiskSimple error: {ex.Message}");
                 return 0f;
             }
 
@@ -548,7 +566,7 @@ namespace CompanionAI_v3.GameInterface
             }
             catch (Exception ex)
             {
-                Main.LogDebug($"[MovementAPI] CalculateHitChanceBonus error: {ex.Message}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] CalculateHitChanceBonus error: {ex.Message}");
                 return 0f;
             }
 
@@ -611,6 +629,7 @@ namespace CompanionAI_v3.GameInterface
             float totalCoverScore = 0f;
             float nearestEnemyDist = float.MaxValue;
             bool hasAnyLos = false;
+            int hittableFromLos = 0;  // ★ v3.8.78: LOS 기반 hittable count (CountHittable 중복 제거)
 
             foreach (var enemy in enemies)
             {
@@ -628,7 +647,11 @@ namespace CompanionAI_v3.GameInterface
                     var los = LosCalculations.GetWarhammerLos(enemyNode, enemy.SizeRect, node, unit.SizeRect);
                     var coverType = los.CoverType;
 
-                    if (coverType != LosCalculations.CoverType.Invisible) hasAnyLos = true;
+                    if (coverType != LosCalculations.CoverType.Invisible)
+                    {
+                        hasAnyLos = true;
+                        hittableFromLos++;  // ★ v3.8.78: LOS 있으면 hittable 카운트
+                    }
 
                     switch (coverType)
                     {
@@ -651,6 +674,7 @@ namespace CompanionAI_v3.GameInterface
 
             score.CoverScore = totalCoverScore / Math.Max(1, enemies.Count);
             score.HasLosToEnemy = hasAnyLos;
+            score.HittableEnemyCount = hittableFromLos;  // ★ v3.8.78: LOS 기반 hittable count
 
             switch (goal)
             {
@@ -735,7 +759,7 @@ namespace CompanionAI_v3.GameInterface
                 : FindAllReachableTilesWithThreatsSync(unit);
             if (tiles == null || tiles.Count == 0)
             {
-                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles (predictedMP={predictedMP:F1})");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles (predictedMP={predictedMP:F1})");
                 return null;
             }
 
@@ -762,6 +786,11 @@ namespace CompanionAI_v3.GameInterface
             var primaryAttack = CombatAPI.FindAnyAttackAbility(unit, Settings.RangePreference.PreferRanged);
             bool isScatter = CombatAPI.IsScatterAttack(primaryAttack);
             bool isMelee = primaryAttack?.IsMelee ?? false;
+
+            // ★ v3.8.70: 안전 체크용 아군 목록 (CanTargetFriends 무기만)
+            List<BaseUnitEntity> allies = null;
+            if (primaryAttack?.Blueprint?.CanTargetFriends == true)
+                allies = CombatAPI.GetAllies(unit);
 
             // ★ v3.0.62: 위협 점수 추가 (AoE, AoO, Overwatch)
             // ★ v3.2.00: 영향력 맵 기반 위협/통제 점수 추가
@@ -801,10 +830,15 @@ namespace CompanionAI_v3.GameInterface
                 // 최적 사거리 내 위치에 높은 보너스, 멀수록 패널티
                 score.HitChanceBonus = CalculateHitChanceBonus(score.Position, enemies, weaponRange, isScatter, isMelee);
 
-                // ★ v3.6.18: 실제 공격 가능 적 수 계산 (CanTargetFromNode 검증)
-                // 기본 LOS 체크만으로는 불충분 - 실제 능력 사용 가능 여부 확인 필요
-                score.HittableEnemyCount = CombatAPI.CountHittableEnemiesFromPosition(
-                    unit, score.Node, enemies, primaryAttack);
+                // ★ v3.8.78: LOS 기반 hittable count가 0이면 정밀 체크 생략
+                // EvaluatePosition에서 LOS로 사전 계산한 HittableEnemyCount 활용
+                // LOS 0이면 CanTargetFromNode도 실패 → 500+ 불필요 호출 제거
+                if (score.HittableEnemyCount > 0)
+                {
+                    // allies가 있으면 scatter safety 반영한 정밀 카운트로 덮어쓰기
+                    score.HittableEnemyCount = CombatAPI.CountHittableEnemiesFromPosition(
+                        unit, score.Node, enemies, primaryAttack, allies);
+                }
             }
 
             // ★ v3.8.48: O(n log n) 정렬 제거 → O(n) MaxByWhere 사용 (100+ 요소 최적화)
@@ -834,7 +868,7 @@ namespace CompanionAI_v3.GameInterface
             // ★ v3.6.18: 공격 가능 위치 없으면 기존 LOS 기반 폴백 (접근 이동용)
             if (best == null)
             {
-                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No hittable position found, fallback to LOS-based");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No hittable position found, fallback to LOS-based");
                 best = CollectionHelper.MaxByWhere(scores,
                     s => s.CanStand && s.HasLosToEnemy && s.DistanceScore >= 20f,
                     s => s.TotalScore);
@@ -854,7 +888,7 @@ namespace CompanionAI_v3.GameInterface
             }
             else
             {
-                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No better position found for ranged character with MP={predictedMP:F1}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No better position found for ranged character with MP={predictedMP:F1}");
             }
 
             return best;
@@ -887,7 +921,7 @@ namespace CompanionAI_v3.GameInterface
                 : FindAllReachableTilesWithThreatsSync(unit);
             if (tiles == null || tiles.Count == 0)
             {
-                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles for melee approach (predictedMP={predictedMP:F1})");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles for melee approach (predictedMP={predictedMP:F1})");
                 return null;
             }
 
@@ -990,7 +1024,7 @@ namespace CompanionAI_v3.GameInterface
 
             if (candidates.Count == 0)
             {
-                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No melee attack positions within range");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No melee attack positions within range");
                 return null;
             }
 
@@ -1054,7 +1088,7 @@ namespace CompanionAI_v3.GameInterface
                 : FindAllReachableTilesWithThreatsSync(unit);
             if (tiles == null || tiles.Count == 0)
             {
-                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles for retreat (predictedMP={predictedMP:F1})");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles for retreat (predictedMP={predictedMP:F1})");
                 return null;
             }
 
@@ -1073,6 +1107,9 @@ namespace CompanionAI_v3.GameInterface
             // 후퇴 방향 (적 반대)
             var retreatDir = (unit.Position - enemyCenter).normalized;
 
+            // ★ v3.8.70: 현재 위치 제외 — "Already at destination" 루프 방지
+            var currentNode = unit.Position.GetNearestNodeXZ();
+
             var candidates = new List<PositionScore>();
 
             foreach (var kvp in tiles)
@@ -1080,6 +1117,7 @@ namespace CompanionAI_v3.GameInterface
                 var aiCell = kvp.Value;
                 var node = aiCell.Node as CustomGridNodeBase;
                 if (node == null || !aiCell.IsCanStand) continue;
+                if (node == currentNode) continue;  // ★ v3.8.70
 
                 // ★ v3.7.62: BattlefieldGrid 검증 - Walkable/점유 체크
                 if (!BattlefieldGrid.Instance.ValidateNode(unit, node))
@@ -1088,12 +1126,27 @@ namespace CompanionAI_v3.GameInterface
                 var pos = node.Vector3Position;
 
                 // ★ v3.6.1: 모든 적과의 최소 거리 계산 (타일 단위)
+                // ★ v3.8.78: LOS 기반 hittable count 동시 계산 (CountHittableEnemiesFromPosition 제거)
                 float nearestEnemyDist = float.MaxValue;
+                int hittableFromLos = 0;
                 foreach (var enemy in enemies)
                 {
                     if (enemy == null || enemy.LifeState.IsDead) continue;
                     float d = CombatAPI.MetersToTiles(Vector3.Distance(pos, enemy.Position));
                     if (d < nearestEnemyDist) nearestEnemyDist = d;
+
+                    // LOS 체크: 적이 이 위치를 볼 수 있으면 공격도 가능
+                    try
+                    {
+                        var enemyNode = enemy.Position.GetNearestNodeXZ() as CustomGridNodeBase;
+                        if (enemyNode != null)
+                        {
+                            var los = LosCalculations.GetWarhammerLos(enemyNode, enemy.SizeRect, node, unit.SizeRect);
+                            if (los.CoverType != LosCalculations.CoverType.Invisible)
+                                hittableFromLos++;
+                        }
+                    }
+                    catch { }
                 }
 
                 // 안전 거리 미달이면 스킵 (minSafeDistance는 타일 단위)
@@ -1108,7 +1161,7 @@ namespace CompanionAI_v3.GameInterface
                     {
                         // 사역마와 너무 멀면 큰 패널티 (하지만 완전히 제외하진 않음)
                         familiarDistPenalty = (distToFamiliar - maxFamiliarDistanceMeters) * 5f;
-                        Main.LogDebug($"[MovementAPI] Retreat pos ({pos.x:F1},{pos.z:F1}) too far from familiar: {distToFamiliar:F1}m > {maxFamiliarDistanceMeters:F1}m, penalty={familiarDistPenalty:F1}");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] Retreat pos ({pos.x:F1},{pos.z:F1}) too far from familiar: {distToFamiliar:F1}m > {maxFamiliarDistanceMeters:F1}m, penalty={familiarDistPenalty:F1}");
                     }
                 }
 
@@ -1120,7 +1173,7 @@ namespace CompanionAI_v3.GameInterface
                     // 초과한 거리의 제곱에 비례하여 패널티 (급격히 증가)
                     float excess = nearestEnemyDist - maxSafeDistance;
                     weaponRangePenalty = excess * excess * 10f;
-                    Main.LogDebug($"[MovementAPI] Retreat pos ({pos.x:F1},{pos.z:F1}) exceeds weapon range: {nearestEnemyDist:F1} > {maxSafeDistance:F1}, penalty={weaponRangePenalty:F1}");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] Retreat pos ({pos.x:F1},{pos.z:F1}) exceeds weapon range: {nearestEnemyDist:F1} > {maxSafeDistance:F1}, penalty={weaponRangePenalty:F1}");
                 }
 
                 // 점수 계산: 적에게서 멀수록 + 후퇴 방향 보너스
@@ -1193,6 +1246,20 @@ namespace CompanionAI_v3.GameInterface
                 }
                 catch { }
 
+                // ★ v3.8.78: LOS 기반 hittable count (기존 CountHittableEnemiesFromPosition 호출 제거)
+                // 위 enemy 루프에서 GetWarhammerLos로 동시 계산 → CanTargetFromNode 호출 제거
+                score.HittableEnemyCount = hittableFromLos;
+                if (score.HittableEnemyCount > 0)
+                {
+                    // 공격 가능한 위치에 큰 보너스 (적 수 비례)
+                    score.AttackScore = score.HittableEnemyCount * 15f;
+                }
+                else if (nearestEnemyDist <= (maxSafeDistance > 0 ? maxSafeDistance : float.MaxValue))
+                {
+                    // 무기 사거리 내인데 LOS 없음 → 실질적으로 무가치한 위치
+                    score.AttackScore = -25f;
+                }
+
                 candidates.Add(score);
             }
 
@@ -1210,6 +1277,7 @@ namespace CompanionAI_v3.GameInterface
                     var aiCell = kvp.Value;
                     var node = aiCell.Node as CustomGridNodeBase;
                     if (node == null || !aiCell.IsCanStand) continue;
+                    if (node == currentNode) continue;  // ★ v3.8.70
 
                     var pos = node.Vector3Position;
 
@@ -1242,13 +1310,24 @@ namespace CompanionAI_v3.GameInterface
                     return farthestCandidate;
                 }
 
-                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No retreat positions at all");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No retreat positions at all");
                 return null;
             }
 
-            // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
-            var best = CollectionHelper.MaxBy(candidates, c => c.TotalScore);
-            Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Retreat to ({best.Position.x:F1},{best.Position.z:F1}) score={best.TotalScore:F1}");
+            // ★ v3.8.76: 공격 가능 위치 우선 선택 (hittable > 0)
+            // 1차: 공격 가능한 위치 중 최고 점수
+            var best = CollectionHelper.MaxByWhere(candidates,
+                c => c.HittableEnemyCount > 0,
+                c => c.TotalScore);
+
+            // 2차: 공격 가능 위치 없으면 전체 중 최고 점수 (안전 최우선)
+            if (best == null)
+            {
+                best = CollectionHelper.MaxBy(candidates, c => c.TotalScore);
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No hittable retreat positions, using best overall");
+            }
+
+            if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Retreat to ({best.Position.x:F1},{best.Position.z:F1}) score={best.TotalScore:F1}, hittable={best.HittableEnemyCount}");
 
             return best;
         }
@@ -1270,7 +1349,7 @@ namespace CompanionAI_v3.GameInterface
                 : FindAllReachableTilesWithThreatsSync(unit);
             if (tiles == null || tiles.Count == 0)
             {
-                Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles for approach");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable tiles for approach");
                 return null;
             }
 
@@ -1472,10 +1551,12 @@ namespace CompanionAI_v3.GameInterface
                     break;
             }
 
-            // ★ v3.5.19: Blackboard 적용 결과 로깅 (비-0 값만)
-            if (score.SharedTargetBonus != 0 || score.TacticalAdjustment != 0)
+            // ★ v3.8.80: Blackboard 적용 결과 로깅 (SharedTarget 보너스가 실제 적용된 경우만)
+            // 기존: || 조건 → TacticalAdjustment가 Attack 전술에서 항상 비-0 → 모든 타일 로깅 (1,400+줄)
+            // 수정: && 조건 → SharedTarget 보너스가 있는 의미 있는 타일만 로깅 (~50줄)
+            if (score.SharedTargetBonus != 0 && score.TacticalAdjustment != 0)
             {
-                Main.LogDebug($"[MovementAPI] Blackboard: ST={score.SharedTargetBonus:F1}, Tac={score.TacticalAdjustment:F1}, Tactic={tactic}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] Blackboard: ST={score.SharedTargetBonus:F1}, Tac={score.TacticalAdjustment:F1}, Tactic={tactic}");
             }
         }
 

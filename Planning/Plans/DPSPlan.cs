@@ -65,28 +65,61 @@ namespace CompanionAI_v3.Planning.Plans
                 actions.Add(reloadAction);
             }
 
-            // Phase 1.6: 원거리 캐릭터 후퇴
-            // ★ v3.5.80: 공격 가능 + MP 회복 PostAction 있으면 후퇴를 Phase 8로 미룸
-            // 공격 → 런앤건(MP회복) → 후퇴 순서가 더 효율적
+            // ══════════════════════════════════════════════════════════════
+            // Phase 1.6: 전략 옵션 평가 (공격-이동 조합 선택)
+            // ★ v3.8.76: TacticalOptionEvaluator로 4가지 전략 비교
+            // A. 현재 위치에서 공격 (이동 없음)
+            // B. 이동 후 공격 (더 많은 적 공격 가능한 위치로)
+            // C. 공격 후 후퇴 (공격→런앤건→후퇴)
+            // D. 이동만 (공격 불가)
+            // ══════════════════════════════════════════════════════════════
             bool deferRetreat = false;
-            if (ShouldRetreat(situation))
-            {
-                // 공격 가능하고 MP 회복 PostAction이 있으면 후퇴를 뒤로 미룸
-                bool hasPostActionMPRecovery = situation.AvailableBuffs
-                    .Any(a => AbilityDatabase.GetTiming(a) == AbilityTiming.PostFirstAction &&
-                              AbilityDatabase.GetExpectedMPRecovery(a) > 0);
+            TacticalEvaluation tacticalEval = EvaluateTacticalOptions(situation);
 
-                if (situation.HasHittableEnemies && hasPostActionMPRecovery)
+            if (tacticalEval != null && tacticalEval.WasEvaluated)
+            {
+                bool shouldMoveBeforeAttack;
+                bool shouldDeferRetreat;
+                var tacticalMoveAction = ApplyTacticalStrategy(tacticalEval, situation,
+                    out shouldMoveBeforeAttack, out shouldDeferRetreat);
+
+                deferRetreat = shouldDeferRetreat;
+
+                if (tacticalMoveAction != null)
                 {
-                    deferRetreat = true;
-                    Main.LogDebug($"[DPS] Phase 1.6: Deferring retreat - will attack + use MP recovery first");
+                    // MoveToAttack: 공격 전 이동 액션 추가
+                    actions.Add(tacticalMoveAction);
                 }
-                else
+
+                // AttackFromCurrent + 후퇴 필요: 즉시 후퇴 (기존 로직 유지)
+                if (tacticalEval.ChosenStrategy == TacticalStrategy.AttackFromCurrent && ShouldRetreat(situation))
                 {
                     var retreatAction = PlanRetreat(situation);
                     if (retreatAction != null)
                     {
                         actions.Add(retreatAction);
+                        var retreatDest = retreatAction.MoveDestination ?? retreatAction.Target?.Point;
+                        if (retreatDest.HasValue)
+                        {
+                            RecalculateHittableFromDestination(situation, retreatDest.Value);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // 평가 스킵 시 기존 로직 (Emergency/No enemies/No attacks)
+                if (ShouldRetreat(situation))
+                {
+                    var retreatAction = PlanRetreat(situation);
+                    if (retreatAction != null)
+                    {
+                        actions.Add(retreatAction);
+                        var retreatDest = retreatAction.MoveDestination ?? retreatAction.Target?.Point;
+                        if (retreatDest.HasValue)
+                        {
+                            RecalculateHittableFromDestination(situation, retreatDest.Value);
+                        }
                     }
                 }
             }
@@ -216,7 +249,7 @@ namespace CompanionAI_v3.Planning.Plans
                         List<string> unavailReasons;
                         if (!CombatAPI.IsAbilityAvailable(ability, out unavailReasons))
                         {
-                            Main.LogDebug($"[DPS] Kill sequence ability no longer available: {ability.Name} ({string.Join(", ", unavailReasons)})");
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Kill sequence ability no longer available: {ability.Name} ({string.Join(", ", unavailReasons)})");
                             break;  // 시퀀스 중단
                         }
 
@@ -259,7 +292,7 @@ namespace CompanionAI_v3.Planning.Plans
                         if (killSequenceTarget != null)
                         {
                             plannedTargetIds.Add(killSequenceTarget.UniqueId);
-                            Main.LogDebug($"[DPS] Phase 3: Kill sequence target {killSequenceTarget.CharacterName} added to plannedTargetIds");
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 3: Kill sequence target {killSequenceTarget.CharacterName} added to plannedTargetIds");
                         }
                     }
                 }
@@ -297,7 +330,7 @@ namespace CompanionAI_v3.Planning.Plans
             }
             else if (veryConfident && !situation.HasPerformedFirstAction)
             {
-                Main.LogDebug($"[DPS] Phase 4: Skipping buff (confidence={confidence:F2} > 0.75)");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 4: Skipping buff (confidence={confidence:F2} > 0.75)");
             }
 
             // ★ v3.1.16: didPlanAttack 변수를 여기서 미리 선언 (Phase 4.4 AOE용)
@@ -354,7 +387,7 @@ namespace CompanionAI_v3.Planning.Plans
                         if (clusters.Any(c => c.Count >= minEnemies))
                         {
                             hasAoEOpportunity = true;
-                            Main.LogDebug($"[DPS] Phase 4.4: Cluster found for {aoeAbility.Name} (radius={aoERadius:F1}m)");
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 4.4: Cluster found for {aoeAbility.Name} (radius={aoERadius:F1}m)");
                             break;
                         }
                     }
@@ -428,7 +461,7 @@ namespace CompanionAI_v3.Planning.Plans
             bool usedComboPrereq = false;
 
             // ★ v3.0.87: Phase 5 진입 상태 로깅
-            Main.LogDebug($"[DPS] Phase 5 entry: AP={remainingAP:F1}, HasHittable={situation.HasHittableEnemies}, " +
+            if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 5 entry: AP={remainingAP:F1}, HasHittable={situation.HasHittableEnemies}, " +
                 $"HittableCount={situation.HittableEnemies?.Count ?? 0}, AvailableAttacks={situation.AvailableAttacks?.Count ?? 0}");
 
             // ★ v3.1.22: 콤보 선행 능력 로깅
@@ -458,11 +491,11 @@ namespace CompanionAI_v3.Planning.Plans
                     if (sharedScore >= bestScore * 0.9f)
                     {
                         preferTarget = sharedTarget;
-                        Main.LogDebug($"[DPS] Phase 5: Using SharedTarget {sharedTarget.CharacterName} (score={sharedScore:F0} vs best={bestScore:F0})");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 5: Using SharedTarget {sharedTarget.CharacterName} (score={sharedScore:F0} vs best={bestScore:F0})");
                     }
                     else
                     {
-                        Main.LogDebug($"[DPS] Phase 5: Keeping BestTarget {preferTarget?.CharacterName} (SharedTarget {sharedTarget.CharacterName} score={sharedScore:F0} < {bestScore * 0.9f:F0})");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 5: Keeping BestTarget {preferTarget?.CharacterName} (SharedTarget {sharedTarget.CharacterName} score={sharedScore:F0} < {bestScore * 0.9f:F0})");
                     }
                 }
 
@@ -513,7 +546,7 @@ namespace CompanionAI_v3.Planning.Plans
                     }
                     else
                     {
-                        Main.LogDebug($"[DPS] Phase 5: Allow re-attack on {targetEntity.CharacterName} (only 1 hittable enemy)");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 5: Allow re-attack on {targetEntity.CharacterName} (only 1 hittable enemy)");
                     }
                 }
 
@@ -530,12 +563,15 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.0.87: Phase 5 종료 후 상태 로깅
             if (!didPlanAttack)
             {
-                Main.LogDebug($"[DPS] Phase 5 exit: No attacks planned. AP={remainingAP:F1}, HasHittable={situation.HasHittableEnemies}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 5 exit: No attacks planned. AP={remainingAP:F1}, HasHittable={situation.HasHittableEnemies}");
             }
             else
             {
-                Main.LogDebug($"[DPS] Phase 5 exit: {attacksPlanned} attacks planned. AP={remainingAP:F1}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 5 exit: {attacksPlanned} attacks planned. AP={remainingAP:F1}");
             }
+
+            // ★ v3.8.72: Hittable mismatch 사후 보정 (GapCloser/콤보 시도 전에 실행)
+            HandleHittableMismatch(situation, didPlanAttack, attackContext);
 
             // ★ v3.1.22: Phase 5.5: 콤보 후속 능력 (DOT 적용 후 DOT 강화)
             // Phase 5에서 콤보 선행 능력(예: Inferno)을 사용했으면, 이제 후속 능력(예: Shape Flames) 사용
@@ -574,7 +610,7 @@ namespace CompanionAI_v3.Planning.Plans
             // 수정: 공격 계획 실패 시 무조건 GapCloser 시도 (GapCloser 자체가 유효성 검사)
 
             // ★ v3.1.22: Phase 5.6 진입 전 상태 로깅 (기존 Phase 5.5)
-            Main.LogDebug($"[DPS] Phase 5.6 check: didPlanAttack={didPlanAttack}, HasHittableEnemies={situation.HasHittableEnemies}, " +
+            if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 5.6 check: didPlanAttack={didPlanAttack}, HasHittableEnemies={situation.HasHittableEnemies}, " +
                 $"NearestEnemy={situation.NearestEnemy?.CharacterName ?? "null"}, Distance={situation.NearestEnemyDistance:F1}m, AP={remainingAP:F1}");
 
             if (!didPlanAttack && situation.NearestEnemy != null)
@@ -590,16 +626,16 @@ namespace CompanionAI_v3.Planning.Plans
                 }
                 else
                 {
-                    Main.LogDebug($"[DPS] Phase 5.6: GapCloser returned null");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 5.6: GapCloser returned null");
                 }
             }
             else if (didPlanAttack)
             {
-                Main.LogDebug($"[DPS] Phase 5.6: Skipped - already planned attack");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 5.6: Skipped - already planned attack");
             }
             else
             {
-                Main.LogDebug($"[DPS] Phase 5.6: Skipped - NearestEnemy is null");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 5.6: Skipped - NearestEnemy is null");
             }
 
             // Phase 6: PostFirstAction
@@ -641,14 +677,14 @@ namespace CompanionAI_v3.Planning.Plans
                         timing == AbilityTiming.RighteousFury ||
                         timing == AbilityTiming.TurnEnding)
                     {
-                        Main.LogDebug($"[DPS] Phase 6.5: Skip {buff.Name} (timing={timing} not suitable for fallback)");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 6.5: Skip {buff.Name} (timing={timing} not suitable for fallback)");
                         continue;
                     }
 
                     // ★ v3.5.22: SpringAttack 능력은 조건 충족 시에만 TurnEnding에서 사용
                     if (AbilityDatabase.IsSpringAttackAbility(buff))
                     {
-                        Main.LogDebug($"[DPS] Phase 6.5: Skip {buff.Name} (SpringAttack - use in TurnEnding only)");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 6.5: Skip {buff.Name} (SpringAttack - use in TurnEnding only)");
                         continue;
                     }
 
@@ -669,6 +705,19 @@ namespace CompanionAI_v3.Planning.Plans
                         actions.Add(PlannedAction.Buff(buff, situation.Unit, "Fallback buff - no attack available", cost));
                         Main.Log($"[DPS] Fallback buff: {buff.Name}");
                     }
+                }
+            }
+
+            // ★ v3.8.84: Phase 6.5 디버프 - 공격 불가 시 유틸리티 디버프 사용
+            // DPS에는 전용 디버프 Phase가 없어서 적 분석(Analyze Enemies) 등이 사용되지 않았음
+            // 공격이 차단되어도 Range=Unlimited 디버프는 팀에 기여할 수 있음
+            if (!didPlanAttack && remainingAP >= 1f && situation.AvailableDebuffs.Count > 0 && situation.NearestEnemy != null)
+            {
+                var debuffAction = PlanDebuff(situation, situation.NearestEnemy, ref remainingAP);
+                if (debuffAction != null)
+                {
+                    actions.Add(debuffAction);
+                    Main.Log($"[DPS] Phase 6.5: Fallback debuff - {debuffAction.Ability?.Name}");
                 }
             }
 
@@ -700,7 +749,7 @@ namespace CompanionAI_v3.Planning.Plans
             if (noAttackNoApproach)
                 Main.Log($"[DPS] Phase 8: Ranged with no available attacks - skipping forward movement");
 
-            Main.LogDebug($"[DPS] Phase 8 check: hasMoveInPlan={hasMoveInPlan}, NeedsReposition={situation.NeedsReposition}, " +
+            if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 8 check: hasMoveInPlan={hasMoveInPlan}, NeedsReposition={situation.NeedsReposition}, " +
                 $"didPlanAttack={didPlanAttack}, needsMovement={needsMovement}, CanMove={canMove}, MP={remainingMP:F1}, IsInDanger={situation.IsInDanger}");
 
             if (!hasMoveInPlan && needsMovement && canMove && remainingMP > 0)
@@ -727,7 +776,7 @@ namespace CompanionAI_v3.Planning.Plans
                     // ★ v3.1.29: 원거리가 위험하면 공격 가능해도 후퇴 이동 강제
                     // ★ v3.8.44: HasHittableEnemies → attackContext.ShouldForceMove (실패 이유 기반)
                     bool forceMove = (!didPlanAttack && attackContext.ShouldForceMove) || isRangedInDanger;
-                    Main.LogDebug($"[DPS] Phase 8: {attackContext}, forceMove={forceMove}");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 8: {attackContext}, forceMove={forceMove}");
                     // ★ v3.1.00: MP 회복 예측 후 situation.CanMove=False여도 이동 가능
                     // PlanMoveToEnemy 내부의 CanMove 체크를 우회
                     bool bypassCanMoveCheck = !situation.CanMove && remainingMP > 0;
@@ -789,6 +838,20 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.8.74: Phase 8.7 - Tactical Reposition (공격 쿨다운 시 다음 턴 최적 위치)
+            // 조건: 이동 없음 + 원거리 + 모든 공격 쿨다운 + MP 있음
+            // Phase 8 (접근 이동)과 Phase 8.5 (안전 후퇴) 모두 실행되지 않은 경우의 안전망
+            if (!hasMoveInPlan && noAttackNoApproach && remainingMP > 0 && situation.HasLivingEnemies)
+            {
+                var tacticalRepos = PlanTacticalReposition(situation, remainingMP);
+                if (tacticalRepos != null)
+                {
+                    actions.Add(tacticalRepos);
+                    hasMoveInPlan = true;
+                    Main.Log($"[DPS] Phase 8.7: Tactical reposition (all attacks on cooldown, MP={remainingMP:F1})");
+                }
+            }
+
             // Post-attack phase
             if ((situation.HasAttackedThisTurn || didPlanAttack) && remainingAP >= 1f)
             {
@@ -796,9 +859,23 @@ namespace CompanionAI_v3.Planning.Plans
                 actions.AddRange(postAttackActions);
             }
 
+            // ★ v3.8.84: 공격 계획 후 디버프 (PlanPostAttackActions의 HasAttackedThisTurn 제한 우회)
+            // PlanPostAttackActions 내부에서 HasAttackedThisTurn=false → 디버프 미반환
+            // 계획 단계에서는 공격이 아직 실행되지 않았으므로 별도 처리 필요
+            if (didPlanAttack && remainingAP >= 1f && situation.AvailableDebuffs.Count > 0 && situation.NearestEnemy != null)
+            {
+                var debuffAction = PlanDebuff(situation, situation.NearestEnemy, ref remainingAP);
+                if (debuffAction != null)
+                {
+                    actions.Add(debuffAction);
+                    Main.Log($"[DPS] Post-attack debuff: {debuffAction.Ability?.Name}");
+                }
+            }
+
             // ★ v3.1.24: Phase 9 - 최종 AP 활용 (모든 시도 실패 후)
             // 공격/이동 모두 실패했지만 AP가 남았을 때 저우선순위 버프/디버프/마커 사용
-            if (remainingAP >= 1f && actions.Count > 0)
+            // ★ v3.8.84: actions.Count > 0 제한 제거 - 디버프/마커는 다른 행동 없이도 팀에 기여
+            if (remainingAP >= 1f)
             {
                 var finalAction = PlanFinalAPUtilization(situation, ref remainingAP);
                 if (finalAction != null)
@@ -808,55 +885,35 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.8.68: Post-plan 공격 검증 + 복구 (TurnEnding 전에 실행)
+            // v3.7.85: 공격 도달 가능 여부 검증 → BasePlan.ValidateAndRemoveUnreachableAttacks로 통합
+            // v3.8.68: 공격 제거 시 didPlanAttack 업데이트 + 공격 전 버프 제거 + 복구 이동
+            int removedAttacks = ValidateAndRemoveUnreachableAttacks(actions, situation, ref didPlanAttack, ref remainingAP);
+
+            if (removedAttacks > 0 && !didPlanAttack)
+            {
+                // 모든 공격이 제거됨 → 복구 이동 시도
+                bool hasRecoveryMove = actions.Any(a => a.Type == ActionType.Move);
+                if (!hasRecoveryMove && situation.HasLivingEnemies && remainingMP > 0)
+                {
+                    Main.Log($"[DPS] ★ Post-validation recovery: attempting movement (AP={remainingAP:F1}, MP={remainingMP:F1})");
+                    var recoveryCtx = new AttackPhaseContext { RangeWasIssue = true };
+                    bool bypassCanMoveCheck = !situation.CanMove && remainingMP > 0;
+                    var recoveryMove = PlanMoveOrGapCloser(situation, ref remainingAP, true, bypassCanMoveCheck, remainingMP, recoveryCtx);
+                    if (recoveryMove != null)
+                    {
+                        actions.Add(recoveryMove);
+                        Main.Log($"[DPS] ★ Post-validation recovery: movement planned");
+                    }
+                }
+            }
+
             // ★ v3.5.35: Phase 10 - 턴 종료 스킬 (항상 마지막!)
             // TurnEnding 능력은 턴을 즉시 종료하므로 반드시 마지막에 배치
             var turnEndAction = PlanTurnEndingAbility(situation, ref remainingAP);
             if (turnEndAction != null)
             {
                 actions.Add(turnEndAction);
-            }
-
-            // ★ v3.7.85: 공격 도달 가능 여부 검증 (이동 유무와 관계없이)
-            // v3.7.81: 이동이 계획되어 있으면 이동 목적지에서 검증
-            // v3.7.85: Replan 시 이동이 없으면 현재 위치에서 검증 (사거리 밖 공격 방지)
-            var firstMoveAction = actions.FirstOrDefault(a => a.Type == ActionType.Move);
-            UnityEngine.Vector3 validationPosition;
-            bool hasMoveForValidation = firstMoveAction?.MoveDestination != null;
-
-            if (hasMoveForValidation)
-            {
-                validationPosition = firstMoveAction.MoveDestination.Value;
-            }
-            else
-            {
-                // 이동이 없으면 현재 유닛 위치에서 검증 (Replan 대응)
-                validationPosition = situation.Unit.Position;
-            }
-
-            var invalidAttacks = new List<PlannedAction>();
-
-            foreach (var action in actions)
-            {
-                if (action.Type != ActionType.Attack && action.Type != ActionType.Debuff) continue;
-                if (action.Ability == null) continue;
-
-                var targetEntity = action.Target?.Entity as BaseUnitEntity;
-                if (targetEntity == null) continue;  // Point 타겟은 스킵
-
-                // 검증 위치에서 타겟 도달 가능 여부 체크
-                if (!CombatAPI.CanReachTargetFromPosition(action.Ability, validationPosition, targetEntity))
-                {
-                    invalidAttacks.Add(action);
-                    Main.LogWarning($"[DPS] Attack validation FAILED: {action.Ability.Name} -> {targetEntity.CharacterName} " +
-                        $"(unreachable from {(hasMoveForValidation ? "move destination" : "current position")})");
-                }
-            }
-
-            // 도달 불가능한 공격 제거
-            foreach (var invalid in invalidAttacks)
-            {
-                actions.Remove(invalid);
-                Main.Log($"[DPS] ★ Removed unreachable attack: {invalid.Ability?.Name} -> {invalid.Target?.Entity?.ToString() ?? "?"}");
             }
 
             // 턴 종료
@@ -869,7 +926,7 @@ namespace CompanionAI_v3.Planning.Plans
             var reasoning = $"DPS: {DetermineReasoning(actions, situation)}";
 
             // ★ v3.0.55: MP 추적 로깅
-            Main.LogDebug($"[DPS] Plan complete: AP={remainingAP:F1}, MP={remainingMP:F1} (started with {situation.CurrentMP:F1})");
+            if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Plan complete: AP={remainingAP:F1}, MP={remainingMP:F1} (started with {situation.CurrentMP:F1})");
 
             // ★ v3.1.09: InitialAP/InitialMP 전달 (리플랜 감지용)
             // ★ v3.5.88: 0 AP 공격 수 전달 (Break Through → Slash 감지용)
@@ -974,6 +1031,13 @@ namespace CompanionAI_v3.Planning.Plans
             if (situation.AvailableAttacks == null || situation.AvailableAttacks.Count == 0)
             {
                 Main.LogDebug("[DPS] PlanAttackBuff skipped: No available attacks");
+                return null;
+            }
+
+            // ★ v3.8.68: 실제 공격 가능한 적이 없으면 공격 버프 사용 금지
+            if (!situation.HasHittableEnemies)
+            {
+                Main.LogDebug("[DPS] PlanAttackBuff skipped: No hittable enemies");
                 return null;
             }
 

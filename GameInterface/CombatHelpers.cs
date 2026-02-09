@@ -439,10 +439,10 @@ namespace CompanionAI_v3.GameInterface
 
                 if (rangedOnly.Count > 0)
                 {
-                    Main.LogDebug($"[CombatHelpers] RangeFilter: {preference} - {rangedOnly.Count} ranged (filtered {abilities.Count - rangedOnly.Count} melee)");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[CombatHelpers] RangeFilter: {preference} - {rangedOnly.Count} ranged (filtered {abilities.Count - rangedOnly.Count} melee)");
                     return rangedOnly;
                 }
-                Main.LogDebug($"[CombatHelpers] No ranged abilities - fallback to all");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatHelpers] No ranged abilities - fallback to all");
             }
             else if (preference == RangePreference.PreferMelee)
             {
@@ -453,13 +453,72 @@ namespace CompanionAI_v3.GameInterface
 
                 if (meleeOnly.Count > 0)
                 {
-                    Main.LogDebug($"[CombatHelpers] RangeFilter: PreferMelee - {meleeOnly.Count} melee (filtered {abilities.Count - meleeOnly.Count} ranged)");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[CombatHelpers] RangeFilter: PreferMelee - {meleeOnly.Count} melee (filtered {abilities.Count - meleeOnly.Count} ranged)");
                     return meleeOnly;
                 }
-                Main.LogDebug($"[CombatHelpers] No melee abilities - fallback to all");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatHelpers] No melee abilities - fallback to all");
             }
 
             return abilities;  // Adaptive: 필터 없음
+        }
+
+        #endregion
+
+        #region Attack Filters (v3.8.70)
+
+        /// <summary>
+        /// ★ v3.8.70: 공격 능력 공통 사전 필터 — Analyzer와 AttackPlanner에서 공유
+        /// 이 필터를 통과하지 못하는 능력은 Hittable 판정에서도 공격 선택에서도 제외
+        ///
+        /// 포함하지 않는 필터 (각 호출부에서 별도 처리):
+        /// - DangerousAoE: AttackPlanner=조건부 허용, Analyzer=무조건 제외
+        /// - GapCloser/DOTIntensify/ChainEffect: Analyzer Hittable 로직 전용
+        /// - ExcludedGUIDs: AttackPlanner 재시도 로직 전용
+        /// </summary>
+        public static bool ShouldExcludeFromAttack(AbilityData ability, bool isInThreatArea)
+        {
+            if (ability == null) return true;
+            // 기본 타입 필터 (기존: Analyzer lines 237-253, AttackPlanner lines 137-140)
+            if (AbilityDatabase.IsReload(ability)) return true;
+            if (AbilityDatabase.IsTurnEnding(ability)) return true;
+            if (AbilityDatabase.IsPostFirstAction(ability)) return true;
+            if (AbilityDatabase.IsFinisher(ability)) return true;
+            // ★ v3.8.70 G1/G2: MultiTarget 필터 (기존: AttackPlanner lines 143-144만)
+            if (BlueprintCache.IsMultiTarget(ability)) return true;
+            if (FamiliarAbilities.IsMultiTargetFamiliarAbility(ability)) return true;
+            // ★ v3.8.70 G3: 위협 범위 내 사용 불가 (기존: AttackPlanner lines 167-170만)
+            if (isInThreatArea && CombatAPI.CannotUseInThreateningArea(ability)) return true;
+            return false;
+        }
+
+        #endregion
+
+        #region Attack Safety (v3.8.70)
+
+        /// <summary>
+        /// ★ v3.8.70: 타겟 공격 안전성 체크 — Analyzer와 AttackPlanner에서 공유
+        /// 모든 능력 타입에 대해 아군 피해 안전 확인:
+        /// - AOE 반경 있음: 반경 내 아군 체크
+        /// - CanTargetFriends=true: 5-ray scatter 패턴 체크
+        /// - 해당 없음: 내부에서 즉시 true 리턴 (조기 종료)
+        /// </summary>
+        public static bool IsAttackSafeForTarget(
+            AbilityData ability, BaseUnitEntity unit, BaseUnitEntity target, List<BaseUnitEntity> allies)
+        {
+            // 게이트 조건 없이 항상 호출 — IsAoESafeForUnitTarget 내부에서
+            // aoERadius <= 0 && !canTargetFriends이면 즉시 true 리턴
+            return AoESafetyChecker.IsAoESafeForUnitTarget(ability, unit, target, allies);
+        }
+
+        /// <summary>
+        /// ★ v3.8.70: 위치 기반 안전 체크 (이동 후보 위치 평가용)
+        /// CountHittableEnemiesFromPosition에서 사용
+        /// </summary>
+        public static bool IsAttackSafeForTargetFromPosition(
+            AbilityData ability, Vector3 fromPosition, BaseUnitEntity unit,
+            BaseUnitEntity target, List<BaseUnitEntity> allies)
+        {
+            return AoESafetyChecker.IsAoESafeForUnitTargetFromPosition(ability, fromPosition, unit, target, allies);
         }
 
         #endregion
