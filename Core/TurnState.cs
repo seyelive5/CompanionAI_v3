@@ -124,8 +124,41 @@ namespace CompanionAI_v3.Core
         /// <summary>★ v3.0.46: 대기 횟수 (무한 대기 방지)</summary>
         public int WaitCount { get; set; }
 
+        /// <summary>★ v3.8.92: 실패 후 폴백 재계획 횟수</summary>
+        public int FallbackReplanCount { get; set; }
+
         /// <summary>최대 액션 도달 여부</summary>
         public bool HasReachedMaxActions => ActionCount >= MaxActionsPerTurn;
+
+        #endregion
+
+        #region Strategic Context (★ v3.8.86: 재계획 시 보존)
+
+        /// <summary>
+        /// 재계획 시에도 유지되는 전략적 맥락 정보
+        /// Plan.Cancel() → 새 CreatePlan()에서 이전 계획의 의도를 파악 가능
+        /// </summary>
+        private Dictionary<string, object> _strategicContext;
+
+        /// <summary>전략 컨텍스트 값 설정</summary>
+        public void SetContext(string key, object value)
+        {
+            if (_strategicContext == null)
+                _strategicContext = new Dictionary<string, object>(4);
+            _strategicContext[key] = value;
+        }
+
+        /// <summary>전략 컨텍스트 값 조회 (없으면 기본값 반환)</summary>
+        public T GetContext<T>(string key, T defaultValue = default(T))
+        {
+            if (_strategicContext != null && _strategicContext.TryGetValue(key, out var value) && value is T typed)
+                return typed;
+            return defaultValue;
+        }
+
+        /// <summary>전략 컨텍스트 키 존재 여부</summary>
+        public bool HasContext(string key)
+            => _strategicContext != null && _strategicContext.ContainsKey(key);
 
         #endregion
 

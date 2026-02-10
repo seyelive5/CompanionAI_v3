@@ -56,6 +56,9 @@ namespace CompanionAI_v3.Core
         /// <summary>★ v3.1.05: 계획에 이동이 포함되어 있는지</summary>
         public bool HasMoveActions { get; private set; }
 
+        /// <summary>★ v3.8.86: 실패한 그룹 태그 (lazy init, 보통 null)</summary>
+        private HashSet<string> _failedGroups;
+
         #endregion
 
         #region Constructor
@@ -294,6 +297,35 @@ namespace CompanionAI_v3.Core
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// ★ v3.8.86: 그룹을 실패로 표시하고 큐에서 해당 그룹 액션 즉시 제거
+        /// GetNextAction/PeekNextAction 수정 불필요 — 실패 시점에 큐 정리
+        /// </summary>
+        public void FailGroup(string groupTag)
+        {
+            if (string.IsNullOrEmpty(groupTag)) return;
+            if (_failedGroups == null) _failedGroups = new HashSet<string>();
+            _failedGroups.Add(groupTag);
+
+            // 큐에서 해당 그룹 액션 즉시 제거
+            int removedCount = 0;
+            int queueSize = _actionQueue.Count;
+            for (int i = 0; i < queueSize; i++)
+            {
+                var action = _actionQueue.Dequeue();
+                if (action.GroupTag == groupTag)
+                {
+                    removedCount++;
+                    Main.LogDebug($"[TurnPlan] Purged: {action} (group '{groupTag}' failed)");
+                }
+                else
+                {
+                    _actionQueue.Enqueue(action);
+                }
+            }
+            Main.Log($"[TurnPlan] Group '{groupTag}' failed — {removedCount} actions purged from queue");
         }
 
         /// <summary>

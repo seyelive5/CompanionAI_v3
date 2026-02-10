@@ -161,9 +161,13 @@ namespace CompanionAI_v3.Planning.Plans
             float confidence = GetTeamConfidence();
             bool needDefense = confidence < 0.5f;
 
+            // ★ v3.8.86: ClearMP 방어 자세는 이동 필요 시 Phase 8.9로 연기
+            bool tankNeedsMovement = situation.NeedsReposition ||
+                (!situation.HasHittableEnemies && situation.HasLivingEnemies && situation.CanMove);
+
             if (!situation.HasPerformedFirstAction && needDefense)
             {
-                var defenseAction = PlanDefensiveStanceWithReservation(situation, ref remainingAP, reservedAP);
+                var defenseAction = PlanDefensiveStanceWithReservation(situation, ref remainingAP, reservedAP, tankNeedsMovement);
                 if (defenseAction != null)
                 {
                     actions.Add(defenseAction);
@@ -331,13 +335,9 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // ★ v3.5.37: Phase 4.8c: Point-AOE (Tank도 DangerousAoE 사용)
-            // ★ v3.8.50: 근접 AOE도 클러스터 탐지에 포함
-            var pointAoEAttacks = situation.AvailableAttacks
-                .Where(a => CombatAPI.IsPointTargetAbility(a) || AbilityDatabase.IsDangerousAoE(a) ||
-                            CombatAPI.IsMeleeAoEAbility(a))
-                .ToList();
-            if (!didPlanAttack && situation.HasLivingEnemies && pointAoEAttacks.Count > 0)
+            // ★ v3.5.37: Phase 4.8c: AOE 공격 (모든 AoE 타입)
+            // ★ v3.8.96: AvailableAoEAttacks 캐시 사용 + Unit-targeted AoE 추가
+            if (!didPlanAttack && situation.HasLivingEnemies && situation.HasAoEAttacks)
             {
                 bool useAoEOptimization = situation.CharacterSettings?.UseAoEOptimization ?? true;
                 int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
@@ -345,14 +345,16 @@ namespace CompanionAI_v3.Planning.Plans
 
                 if (useAoEOptimization)
                 {
-                    // 클러스터 기반 AOE 기회 탐지
-                    foreach (var aoEAbility in pointAoEAttacks)
+                    // ★ v3.8.96: 캐시된 AvailableAoEAttacks 사용 (인라인 LINQ 제거)
+                    foreach (var aoEAbility in situation.AvailableAoEAttacks)
                     {
                         float aoERadius = CombatAPI.GetAoERadius(aoEAbility);
+                        if (aoERadius <= 0) aoERadius = 5f;
                         var clusters = ClusterDetector.FindClusters(situation.Enemies, aoERadius);
                         if (clusters.Any(c => c.Count >= minEnemies))
                         {
                             hasAoEOpportunity = true;
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 4.8c: Cluster found for {aoEAbility.Name} (category={CombatAPI.GetAttackCategory(aoEAbility)})");
                             break;
                         }
                     }
@@ -368,12 +370,25 @@ namespace CompanionAI_v3.Planning.Plans
 
                 if (hasAoEOpportunity)
                 {
+                    // Point-target AoE 시도
                     var aoE = PlanAoEAttack(situation, ref remainingAP);
                     if (aoE != null)
                     {
                         actions.Add(aoE);
                         didPlanAttack = true;
-                        Main.Log($"[Tank] Phase 4.8c: Point-AOE attack planned");
+                        Main.Log($"[Tank] Phase 4.8c: Point-target AOE planned");
+                    }
+
+                    // ★ v3.8.96: Unit-targeted AoE 시도 (Burst, Scatter, 기타 모든 유닛 타겟 AoE)
+                    if (!didPlanAttack)
+                    {
+                        var unitAoE = PlanUnitTargetedAoE(situation, ref remainingAP);
+                        if (unitAoE != null)
+                        {
+                            actions.Add(unitAoE);
+                            didPlanAttack = true;
+                            Main.Log($"[Tank] Phase 4.8c: Unit-targeted AOE planned");
+                        }
                     }
                 }
             }
@@ -493,7 +508,16 @@ namespace CompanionAI_v3.Planning.Plans
             // 이전 버그: 점화 후 Hittable=0이면 강철 팔 등 버프 사용 못함
             // HasPerformedFirstAction=true여도 남은 AP로 버프 사용
             // ★ v3.1.10: PreAttackBuff, HeroicAct, RighteousFury 제외 (공격 없으면 무의미)
-            if (!didPlanAttack && remainingAP >= 1f && situation.AvailableBuffs.Count > 0)
+            // ★ v3.8.98: 근접 MoveOnly 전략 시 fallback 버프 스킵
+            bool skipFallbackForMelee = !situation.PrefersRanged &&
+                tacticalEval?.ChosenStrategy == TacticalStrategy.MoveOnly &&
+                situation.HasLivingEnemies;
+
+            if (skipFallbackForMelee)
+            {
+                Main.Log($"[Tank] Phase 6.5: Skipping fallback buffs (melee MoveOnly — save for post-move attack)");
+            }
+            else if (!didPlanAttack && remainingAP >= 1f && situation.AvailableBuffs.Count > 0)
             {
                 Main.Log($"[Tank] Phase 6.5: No attack possible, using remaining buffs (AP={remainingAP:F1})");
 
@@ -676,6 +700,18 @@ namespace CompanionAI_v3.Planning.Plans
                 actions.AddRange(postAttackActions);
             }
 
+            // ★ v3.8.86: Phase 8.9 - 이동 완료 후 ClearMP 방어 자세
+            // Phase 2에서 ClearMPAfterUse로 연기된 방어 능력을 이동 완료 후 사용
+            if (tankNeedsMovement && !situation.HasPerformedFirstAction && remainingAP >= 1f)
+            {
+                var deferredDefense = PlanDefensiveStanceWithReservation(situation, ref remainingAP, reservedAP, movementStillNeeded: false);
+                if (deferredDefense != null)
+                {
+                    actions.Add(deferredDefense);
+                    Main.Log($"[Tank] Phase 8.9: Deferred ClearMP defensive stance - {deferredDefense.Ability?.Name}");
+                }
+            }
+
             // ★ v3.1.24: Phase 9 - 최종 AP 활용 (모든 시도 실패 후)
             if (remainingAP >= 1f && actions.Count > 0)
             {
@@ -737,7 +773,11 @@ namespace CompanionAI_v3.Planning.Plans
 
         #region Tank-Specific Methods
 
-        private new PlannedAction PlanDefensiveStanceWithReservation(Situation situation, ref float remainingAP, float reservedAP)
+        /// <summary>
+        /// ★ v3.8.86: movementStillNeeded 파라미터 추가
+        /// ClearMPAfterUse 방어 자세는 이동 필요 시 연기 (Phase 8.9에서 재시도)
+        /// </summary>
+        private PlannedAction PlanDefensiveStanceWithReservation(Situation situation, ref float remainingAP, float reservedAP, bool movementStillNeeded)
         {
             var target = new TargetWrapper(situation.Unit);
 
@@ -750,6 +790,13 @@ namespace CompanionAI_v3.Planning.Plans
                 // ★ v3.5.75: 통합 API 사용
                 if (!AbilityDatabase.IsDefensiveStance(ability))
                     continue;
+
+                // ★ v3.8.86: ClearMP + 이동 필요 시 연기 (Phase 8.9에서 재시도)
+                if (movementStillNeeded && CombatAPI.AbilityClearsMPAfterUse(ability, situation.Unit))  // ★ v3.8.88
+                {
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 2: Deferred {ability.Name} (ClearMP, movement needed)");
+                    continue;
+                }
 
                 float cost = CombatAPI.GetAbilityAPCost(ability);
 

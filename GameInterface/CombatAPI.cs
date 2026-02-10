@@ -1278,11 +1278,11 @@ namespace CompanionAI_v3.GameInterface
                                    IsOffensiveAbility(ability);
                     if (!isAttack) continue;
 
-                    // 0 AP 비용인지 확인
-                    float cost = GetAbilityAPCost(ability);
+                    // ★ v3.8.86: GetEffectiveAPCost 사용 - bonus usage 공격도 감지
+                    float cost = GetEffectiveAPCost(ability);
                     if (cost <= 0.01f)  // 0 AP (부동소수점 오차 허용)
                     {
-                        if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Found 0 AP attack: {ability.Name}");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Found 0 AP attack: {ability.Name} (bonus={HasBonusUsage(ability)})");
                         return true;
                     }
                 }
@@ -1315,8 +1315,8 @@ namespace CompanionAI_v3.GameInterface
                                    IsOffensiveAbility(ability);
                     if (!isAttack) continue;
 
-                    // 0 AP 비용인지 확인
-                    float cost = GetAbilityAPCost(ability);
+                    // ★ v3.8.86: GetEffectiveAPCost 사용 - bonus usage 공격도 감지
+                    float cost = GetEffectiveAPCost(ability);
                     if (cost <= 0.01f)
                     {
                         result.Add(ability);
@@ -1355,15 +1355,35 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// ★ v3.0.55: 능력이 MP를 전부 클리어하는지 확인
+        /// ★ v3.8.86: BlueprintCache 우선 사용 (O(1) 조회)
         /// </summary>
         public static bool AbilityClearsMPAfterUse(AbilityData ability)
         {
             if (ability == null) return false;
             try
             {
+                // ★ v3.8.86: 캐시 우선 조회
+                var cached = BlueprintCache.GetOrCache(ability);
+                if (cached != null) return cached.ClearMPAfterUse;
                 return ability.ClearMPAfterUse;
             }
             catch { return false; }
+        }
+
+        /// <summary>
+        /// ★ v3.8.88: 유닛의 DoNotResetMovementPointsOnAttacks 특성 고려
+        /// Run&Gun 등이 활성화되면 WarhammerEndTurn.OnCast()가 MP를 실제로 안 지움
+        /// </summary>
+        public static bool AbilityClearsMPAfterUse(AbilityData ability, BaseUnitEntity caster)
+        {
+            if (!AbilityClearsMPAfterUse(ability)) return false;
+            try
+            {
+                if (caster?.Features?.DoNotResetMovementPointsOnAttacks ?? false)
+                    return false;
+            }
+            catch { }
+            return true;
         }
 
         /// <summary>

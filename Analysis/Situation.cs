@@ -110,6 +110,12 @@ namespace CompanionAI_v3.Analysis
         /// <summary>★ v3.1.25: 아군(자신 제외)을 타겟팅 중인 적 수</summary>
         public int EnemiesTargetingAllies { get; set; }
 
+        /// <summary>★ v3.8.90: 적 오버워치 구역 안에 있는지</summary>
+        public bool IsInEnemyOverwatchZone { get; set; }
+
+        /// <summary>★ v3.8.90: 현재 위치를 커버하는 적 오버워치 수</summary>
+        public int EnemyOverwatchCount { get; set; }
+
         #endregion
 
         #region Position Analysis
@@ -206,6 +212,12 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>★ v3.0.33: 마킹 스킬 (공격 전 적 지정 - 보너스 획득)</summary>
         public List<AbilityData> AvailableMarkers { get; set; } = new List<AbilityData>();
+
+        /// <summary>★ v3.8.96: AoE 가능 공격 (모든 타입 — Point, Burst, Scatter, Self, Melee)</summary>
+        public List<AbilityData> AvailableAoEAttacks { get; set; } = new List<AbilityData>();
+
+        /// <summary>★ v3.8.96: AoE 가능 공격이 있는가?</summary>
+        public bool HasAoEAttacks => AvailableAoEAttacks?.Count > 0;
 
         /// <summary>재장전 능력</summary>
         public AbilityData ReloadAbility { get; set; }
@@ -352,6 +364,8 @@ namespace CompanionAI_v3.Analysis
             // Threat Analysis
             AlliesUnderThreat = 0;
             EnemiesTargetingAllies = 0;
+            IsInEnemyOverwatchZone = false;
+            EnemyOverwatchCount = 0;
 
             // Position Analysis
             IsInDanger = false;
@@ -370,6 +384,7 @@ namespace CompanionAI_v3.Analysis
             AvailablePositionalBuffs.Clear();
             AvailableStratagems.Clear();
             AvailableMarkers.Clear();
+            AvailableAoEAttacks.Clear();
             ReloadAbility = null;
             PrimaryAttack = null;
             BestBuff = null;
@@ -402,6 +417,7 @@ namespace CompanionAI_v3.Analysis
             // ★ v3.0.52: MP 추가 (이동 디버깅용)
             return $"[Situation] {Unit?.CharacterName}: HP={HPPercent:F0}%, AP={CurrentAP:F1}, MP={CurrentMP:F1}, " +
                    $"Enemies={Enemies?.Count ?? 0}, Hittable={HittableEnemies?.Count ?? 0}, " +
+                   $"AoE={AvailableAoEAttacks?.Count ?? 0}, " +
                    $"InDanger={IsInDanger}, NeedsReload={NeedsReload}";
         }
     }

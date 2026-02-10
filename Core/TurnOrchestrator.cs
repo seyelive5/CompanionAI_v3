@@ -4,6 +4,7 @@ using System.Diagnostics;  // ★ v3.8.48: Stopwatch 프로파일링
 using System.Linq;
 using Kingmaker;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.AI;  // ★ v3.9.02: AiBrainController.SecondsAiTimeout
 using CompanionAI_v3.Analysis;
 using CompanionAI_v3.Planning;
 using CompanionAI_v3.Execution;
@@ -62,6 +63,11 @@ namespace CompanionAI_v3.Core
 
         // ★ v3.0.72: _allowedCoverSeekOnce 제거
         // IsFinishedTurn = true + Status.Success 방식으로 전환하여 불필요해짐
+
+        /// <summary>
+        /// ★ v3.9.02: 게임 기본 AI 타임아웃 백업 (턴 종료 시 복원)
+        /// </summary>
+        private static float _originalAiTimeout = -1f;
 
         #endregion
 
@@ -214,8 +220,21 @@ namespace CompanionAI_v3.Core
             // 안전 체크: 연속 실패 횟수
             if (turnState.ConsecutiveFailures >= GameConstants.MAX_CONSECUTIVE_FAILURES)
             {
-                Main.LogWarning($"[Orchestrator] {unitName}: Too many consecutive failures ({GameConstants.MAX_CONSECUTIVE_FAILURES})");
-                return ExecutionResult.EndTurn("Too many failures");
+                // ★ v3.8.92: AP 남아있고 폴백 재계획 여유 있으면 리셋 후 재시도
+                float currentAPForReset = CombatAPI.GetCurrentAP(unit);
+                if (currentAPForReset > 0 && turnState.FallbackReplanCount < GameConstants.MAX_FALLBACK_REPLANS)
+                {
+                    turnState.FallbackReplanCount++;
+                    turnState.ConsecutiveFailures = 0;
+                    turnState.Plan?.Cancel($"Consecutive failure reset #{turnState.FallbackReplanCount}");
+                    Main.Log($"[Orchestrator] {unitName}: Consecutive failures reset - fallback replan #{turnState.FallbackReplanCount} (AP={currentAPForReset:F1})");
+                    // null 반환 = 검증 통과 → CreateOrUpdatePlan에서 IsComplete=true → 새 계획
+                }
+                else
+                {
+                    Main.LogWarning($"[Orchestrator] {unitName}: Too many consecutive failures, no recovery left (FallbackReplans={turnState.FallbackReplanCount})");
+                    return ExecutionResult.EndTurn("Too many failures");
+                }
             }
 
             return null;  // 검증 통과
@@ -300,6 +319,9 @@ namespace CompanionAI_v3.Core
             // 계획 재수립 필요 여부 확인
             if (turnState.Plan.NeedsReplan(situation))
             {
+                // ★ v3.8.86: 재계획 전 전략 컨텍스트 캡처
+                CaptureStrategicContextOnReplan(turnState);
+
                 Main.Log($"[Orchestrator] {unitName}: Replanning due to situation change");
                 turnState.Plan = _planner.CreatePlan(situation, turnState);
                 TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
@@ -352,6 +374,23 @@ namespace CompanionAI_v3.Core
             // 능력 사용 추적
             TrackAbilityUsage(unit, nextAction, success);
 
+            // ★ v3.8.86: 그룹 실패 처리 (기존 HandleExecutionFailure 호출 전)
+            if (result.Type == ResultType.Failure && nextAction.GroupTag != null)
+            {
+                if (nextAction.FailurePolicy == GroupFailurePolicy.SkipRemainingInGroup)
+                {
+                    turnState.Plan.FailGroup(nextAction.GroupTag);
+                    Main.Log($"[Orchestrator] {unitName}: Group '{nextAction.GroupTag}' failed — remaining actions purged");
+                }
+                // ContinueGroup은 아무것도 안 함 (그룹 내 다른 액션 계속 실행)
+            }
+
+            // ★ v3.8.86: 성공 시 전략 컨텍스트 캡처 (재계획 대비)
+            if (success && nextAction.GroupTag != null)
+            {
+                CaptureStrategicContext(turnState, nextAction);
+            }
+
             // 실패 처리
             if (result.Type == ResultType.Failure)
             {
@@ -386,20 +425,92 @@ namespace CompanionAI_v3.Core
         }
 
         /// <summary>
-        /// ★ v3.5.36: 실행 실패 처리
+        /// ★ v3.8.86: 성공한 그룹 액션의 전략 컨텍스트 저장
+        /// 재계획 시 이전 계획의 의도를 새 계획에 전달
+        /// </summary>
+        private void CaptureStrategicContext(TurnState turnState, PlannedAction action)
+        {
+            // 킬 시퀀스 진행 추적
+            if (action.GroupTag.StartsWith("KillSeq_"))
+            {
+                string targetId = action.GroupTag.Substring("KillSeq_".Length);
+                turnState.SetContext(StrategicContextKeys.KillSequenceTargetId, targetId);
+            }
+
+            // 콤보 전제 추적
+            if (action.GroupTag.StartsWith("Combo_"))
+            {
+                turnState.SetContext(StrategicContextKeys.ComboPrereqApplied, true);
+                // 콤보 후속 GUID 저장 (GroupTag에서 추출)
+                string abilityGuid = action.GroupTag.Substring("Combo_".Length);
+                turnState.SetContext(StrategicContextKeys.ComboFollowUpGuid, abilityGuid);
+                var targetEntity = action.Target?.Entity as BaseUnitEntity;
+                if (targetEntity != null)
+                    turnState.SetContext(StrategicContextKeys.ComboTargetId, targetEntity.UniqueId);
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.8.86: 재계획 전 실행 이력에서 전략 컨텍스트 추출
+        /// NeedsReplan/FallbackReplan에 의한 재계획 직전에 호출
+        /// </summary>
+        private void CaptureStrategicContextOnReplan(TurnState turnState)
+        {
+            if (turnState?.ExecutedActions == null) return;
+
+            // 공격 성공 이력이 있으면 DeferredRetreat 힌트
+            foreach (var action in turnState.ExecutedActions)
+            {
+                if (action.WasSuccessful == true && action.Type == ActionType.Attack)
+                {
+                    turnState.SetContext(StrategicContextKeys.DeferredRetreat, true);
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.8.92: 실행 실패 처리 — 3-tier 에러 분류 활성화 + 폴백 재계획
+        /// 기존: Recoverable + 큐 남음 → Continue, 그 외 → EndTurn
+        /// 변경: RequiresReplan 티어 활성화, 큐 비었어도 AP 남으면 재계획 시도
         /// </summary>
         private ExecutionResult HandleExecutionFailure(string unitName, TurnState turnState, ExecutionResult result)
         {
-            bool isRecoverable = IsRecoverableFailure(result.Reason);
+            var errorType = ExecutionErrorTypeExtensions.ParseFromReason(result.Reason);
 
-            if (isRecoverable && turnState.Plan?.RemainingActionCount > 0)
+            // Tier 3 (300+): 턴 종료 필수 (AP 없음 등)
+            if (errorType.RequiresEndTurn())
             {
-                Main.LogWarning($"[Orchestrator] {unitName}: Recoverable failure ({result.Reason}) - skipping action and continuing");
+                Main.Log($"[Orchestrator] {unitName}: EndTurn-class failure ({errorType}: {result.Reason})");
+                turnState.Plan?.Cancel("EndTurn failure");
+                return ExecutionResult.EndTurn($"Execution failed: {result.Reason}");
+            }
+
+            // Tier 1 (100-199): 회복 가능 — 큐에 남은 액션 있으면 스킵
+            if (errorType.IsRecoverable() && turnState.Plan?.RemainingActionCount > 0)
+            {
+                Main.LogWarning($"[Orchestrator] {unitName}: Recoverable failure ({errorType}: {result.Reason}) - skipping to next action");
                 return ExecutionResult.Continue();
             }
 
-            Main.LogWarning($"[Orchestrator] {unitName}: Execution failed ({result.Reason}) - ending turn instead of delegating to game AI");
-            turnState.Plan?.Cancel("Execution failed");
+            // Tier 2 (200-299) 또는 Tier 1이지만 큐 비었음: 폴백 재계획 시도
+            // 조건: AP > 0 AND 재계획 횟수 제한 이내
+            float currentAP = CombatAPI.GetCurrentAP(turnState.Unit);
+            if (currentAP > 0 && turnState.FallbackReplanCount < GameConstants.MAX_FALLBACK_REPLANS)
+            {
+                turnState.FallbackReplanCount++;
+                turnState.ConsecutiveFailures = 0;  // 재계획 시 실패 카운터 리셋
+                // ★ v3.8.86: 재계획 전 전략 컨텍스트 캡처
+                CaptureStrategicContextOnReplan(turnState);
+                turnState.Plan?.Cancel($"Fallback replan #{turnState.FallbackReplanCount} ({errorType}: {result.Reason})");
+
+                Main.Log($"[Orchestrator] {unitName}: Fallback replan #{turnState.FallbackReplanCount} triggered ({errorType}: {result.Reason}) - AP={currentAP:F1}");
+                return ExecutionResult.Continue();  // → 다음 ProcessTurn에서 IsComplete=true → 새 계획 생성
+            }
+
+            // 모든 복구 경로 소진 → 턴 종료
+            Main.LogWarning($"[Orchestrator] {unitName}: All recovery paths exhausted ({errorType}: {result.Reason}, FallbackReplans={turnState.FallbackReplanCount}) - ending turn");
+            turnState.Plan?.Cancel("All recovery exhausted");
             return ExecutionResult.EndTurn($"Execution failed: {result.Reason}");
         }
 
@@ -570,6 +681,21 @@ namespace CompanionAI_v3.Core
                 Main.LogDebug($"[Orchestrator] BattlefieldGrid expand check failed: {ex.Message}");
             }
 
+            // ★ v3.9.02: 우리 유닛 턴에서 게임 AI 타임아웃 확장
+            // 기본 40초는 다수 액션(버프+공격+이동 반복) 시 부족할 수 있음
+            // 모드 자체 안전장치(ConsecutiveFailures, MaxActions, FallbackReplans)로 무한루프 방지
+            try
+            {
+                float currentTimeout = AiBrainController.SecondsAiTimeout;
+                if (currentTimeout < 300f)
+                {
+                    _originalAiTimeout = currentTimeout;
+                    AiBrainController.SecondsAiTimeout = 300f;
+                    Main.LogDebug($"[Orchestrator] AI timeout extended: {currentTimeout}s → 300s");
+                }
+            }
+            catch (Exception) { /* AiBrainController 접근 실패 시 무시 */ }
+
             Main.Log($"[Orchestrator] Turn started for {unit.CharacterName} (via event)");
         }
 
@@ -598,6 +724,9 @@ namespace CompanionAI_v3.Core
             // ★ 턴 종료 상태 정리
             _pendingEndTurn.Remove(unitId);
             _pendingMoveDestinations.Remove(unitId);
+
+            // ★ v3.9.02: 게임 AI 타임아웃 복원
+            RestoreAiTimeout();
         }
 
         /// <summary>
@@ -627,6 +756,9 @@ namespace CompanionAI_v3.Core
 
             // ★ v3.8.48: Situation 풀 정리
             _analyzer.ClearPool();
+
+            // ★ v3.9.02: AI 타임아웃 복원
+            RestoreAiTimeout();
         }
 
         #endregion
@@ -667,6 +799,23 @@ namespace CompanionAI_v3.Core
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// ★ v3.9.02: 게임 AI 타임아웃 원래 값으로 복원
+        /// </summary>
+        private void RestoreAiTimeout()
+        {
+            if (_originalAiTimeout > 0)
+            {
+                try
+                {
+                    AiBrainController.SecondsAiTimeout = _originalAiTimeout;
+                    Main.LogDebug($"[Orchestrator] AI timeout restored to {_originalAiTimeout}s");
+                    _originalAiTimeout = -1f;
+                }
+                catch (Exception) { }
+            }
         }
 
         /// <summary>

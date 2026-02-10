@@ -237,6 +237,11 @@ namespace CompanionAI_v3.Planning.Plans
             return null;
         }
 
+        /// <summary>★ v3.8.96: 유닛 타겟 AoE 공격 계획 (Burst/Scatter/기타 모든 유닛 타겟 AoE)
+        /// Phase 4.3(Self), 4.3b(Melee), 4.4(Point)에서 처리하지 않는 나머지 모든 AoE</summary>
+        protected PlannedAction PlanUnitTargetedAoE(Situation situation, ref float remainingAP)
+            => AttackPlanner.PlanUnitTargetedAoEAttack(situation, ref remainingAP, RoleName);
+
         /// ★ v3.8.50: 근접 AOE 계획 (유닛 타겟 근접 스플래시)
         protected PlannedAction PlanMeleeAoE(Situation situation, ref float remainingAP)
         {
@@ -932,7 +937,7 @@ namespace CompanionAI_v3.Planning.Plans
 
             // ClearMPAfterUse 능력이 있는지 확인
             var clearMPAbility = CollectionHelper.FirstOrDefault(situation.AvailableAttacks,
-                a => CombatAPI.AbilityClearsMPAfterUse(a));
+                a => CombatAPI.AbilityClearsMPAfterUse(a, situation.Unit));  // ★ v3.8.88
 
             if (clearMPAbility == null) return null;
 
@@ -958,7 +963,7 @@ namespace CompanionAI_v3.Planning.Plans
         {
             // ClearMPAfterUse 능력 존재 확인
             bool hasClearMPAbility = CollectionHelper.Any(situation.AvailableAttacks,
-                a => CombatAPI.AbilityClearsMPAfterUse(a));
+                a => CombatAPI.AbilityClearsMPAfterUse(a, situation.Unit));  // ★ v3.8.88
 
             if (!hasClearMPAbility) return false;
 

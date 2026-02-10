@@ -130,27 +130,9 @@ namespace CompanionAI_v3.Planning.Planners
                 if (Main.IsDebugEnabled) Main.LogDebug($"[AttackPlanner] Unit is in threatening area - applying AOO filters");
             }
 
-            // ★ v3.5.76: DangerousAoE 조건부 허용
-            var aoeConfig = AIConfig.GetAoEConfig();
-
+            // ★ v3.8.94: DangerousAoE 필터 제거 — 모든 AoE는 아군 안전 체크(UtilityScorer + AoESafetyChecker)에서 통합 관리
             var filteredAttacks = situation.AvailableAttacks
-                // ★ v3.8.70: 공통 필터 (Analyzer와 동기화 — CombatHelpers 중앙집중)
                 .Where(a => !CombatHelpers.ShouldExcludeFromAttack(a, isInThreatArea))
-                // AttackPlanner 전용: DangerousAoE 조건부 허용
-                .Where(a => {
-                    if (!AbilityDatabase.IsDangerousAoE(a)) return true;
-                    // ★ v3.8.10: 0 AP = 무료 → 항상 허용
-                    float cost = CombatAPI.GetEffectiveAPCost(a);
-                    if (cost <= 0f)
-                    {
-                        if (Main.IsDebugEnabled) Main.LogDebug($"[AttackPlanner] 0 AP DangerousAoE allowed: {a.Name}");
-                        return true;
-                    }
-                    // ★ v3.8.50: 근접 AOE 허용
-                    if (CombatAPI.IsMeleeAoEAbility(a)) return true;
-                    if (!aoeConfig.AllowDangerousAoEAutoSelect) return false;
-                    return situation.Enemies.Count(e => e != null && e.IsConscious) >= aoeConfig.DangerousAoEMinEnemies;
-                })
                 .Where(a => !IsAbilityExcluded(a, excludeAbilityGuids))
                 .ToList();
 
@@ -863,6 +845,109 @@ namespace CompanionAI_v3.Planning.Planners
             return null;
         }
 
+        /// <summary>
+        /// ★ v3.8.96: 유닛 타겟 AoE 공격 계획
+        /// Phase 4.3 (Self-AoE), 4.3b (Melee-AoE), 4.4 (Point-AoE)에서 처리하지 않는
+        /// 나머지 모든 AoE 타입을 처리 (Burst, Scatter, 기타 유닛 타겟 AoE)
+        /// 예: 점사 사격(Burst Fire), 산탄(Scatter), 유닛 타겟 패턴 공격
+        /// </summary>
+        public static PlannedAction PlanUnitTargetedAoEAttack(
+            Situation situation,
+            ref float remainingAP,
+            string roleName)
+        {
+            if (situation.AvailableAoEAttacks == null || situation.AvailableAoEAttacks.Count == 0)
+                return null;
+
+            // AvailableAoEAttacks에서 다른 Phase에서 이미 처리하는 타입 제외
+            var unitTargetedAoE = new List<AbilityData>();
+            foreach (var attack in situation.AvailableAoEAttacks)
+            {
+                // Phase 4.4에서 처리: Point-target AoE (위치 지정형)
+                if (CombatAPI.IsPointTargetAbility(attack)) continue;
+                // Phase 4.3에서 처리: Self-Targeted AoE (BladeDance 등)
+                if (CombatAPI.IsSelfTargetedAoEAttack(attack)) continue;
+                // Phase 4.3b에서 처리: Melee AoE (근접 스플래시)
+                if (CombatAPI.IsMeleeAoEAbility(attack)) continue;
+
+                // 나머지 = 유닛 타겟 AoE (Burst, Scatter, 기타)
+                unitTargetedAoE.Add(attack);
+            }
+
+            if (unitTargetedAoE.Count == 0) return null;
+
+            int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+
+            // 각 유닛 타겟 AoE 능력에 대해 최적 타겟 탐색
+            PlannedAction bestAction = null;
+            int bestEnemyCount = 0;
+
+            foreach (var ability in unitTargetedAoE)
+            {
+                float cost = CombatAPI.GetEffectiveAPCost(ability);
+                if (cost > remainingAP) continue;
+
+                // 각 Hittable 적에 대해 패턴 내 적 수 계산
+                foreach (var enemy in situation.HittableEnemies)
+                {
+                    if (enemy == null || !enemy.IsConscious) continue;
+
+                    // CanUseAbilityOn 체크
+                    string reason;
+                    if (!CombatAPI.CanUseAbilityOn(ability, new TargetWrapper(enemy), out reason))
+                        continue;
+
+                    int enemiesHit = CombatAPI.CountEnemiesInPattern(
+                        ability,
+                        enemy.Position,
+                        situation.Unit.Position,
+                        situation.Enemies);
+
+                    if (enemiesHit >= minEnemies && enemiesHit > bestEnemyCount)
+                    {
+                        // 아군 안전 체크
+                        int alliesHit = CombatAPI.CountAlliesInPattern(
+                            ability,
+                            enemy.Position,
+                            situation.Unit.Position,
+                            situation.Unit,
+                            situation.Allies);
+
+                        var aoeConfig = Settings.AIConfig.GetAoEConfig();
+                        int maxAlliesAllowed = aoeConfig?.MaxPlayerAlliesHit ?? 1;
+
+                        if (alliesHit > maxAlliesAllowed)
+                        {
+                            if (Main.IsDebugEnabled)
+                                Main.LogDebug($"[{roleName}] Unit AoE {ability.Name} -> {enemy.CharacterName}: " +
+                                    $"{alliesHit} allies > max {maxAlliesAllowed} - BLOCKED");
+                            continue;
+                        }
+
+                        bestEnemyCount = enemiesHit;
+                        bestAction = PlannedAction.Attack(
+                            ability,
+                            enemy,
+                            $"Unit-targeted AoE ({CombatAPI.GetAttackCategory(ability)}) on {enemiesHit} enemies",
+                            cost);
+
+                        if (Main.IsDebugEnabled)
+                            Main.LogDebug($"[{roleName}] Unit AoE candidate: {ability.Name} -> {enemy.CharacterName} " +
+                                $"({enemiesHit} enemies, {alliesHit} allies)");
+                    }
+                }
+            }
+
+            if (bestAction != null)
+            {
+                remainingAP -= bestAction.APCost;
+                Main.Log($"[{roleName}] Unit-targeted AoE: {bestAction.Ability.Name} -> {(bestAction.Target.Entity as BaseUnitEntity)?.CharacterName} " +
+                    $"({bestEnemyCount} enemies)");
+            }
+
+            return bestAction;
+        }
+
         #endregion
 
         #region AOE Taunt (v3.1.17)
@@ -966,10 +1051,10 @@ namespace CompanionAI_v3.Planning.Planners
                 caster,
                 situation.Allies);
 
-            // 안전성 체크: 설정된 허용 수 초과 시 거부
-            if (adjacentAllies > aoeConfig.SelfAoeMaxAdjacentAllies)
+            // ★ v3.8.94: MaxPlayerAlliesHit로 통합 — 모든 AoE 동일 기준
+            if (adjacentAllies > aoeConfig.MaxPlayerAlliesHit)
             {
-                if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] Self-AoE {attack.Name} skipped: {adjacentAllies} > {aoeConfig.SelfAoeMaxAdjacentAllies} allies in pattern");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] Self-AoE {attack.Name} skipped: {adjacentAllies} > {aoeConfig.MaxPlayerAlliesHit} allies in pattern");
                 return null;
             }
 
@@ -1061,8 +1146,8 @@ namespace CompanionAI_v3.Planning.Planners
                     int allies = CombatAPI.CountAlliesInPattern(
                         ability, enemy.Position, caster.Position, caster, situation.Allies);
 
-                    // 아군 안전 체크
-                    if (allies > aoeConfig.MeleeAoeMaxAdjacentAllies) continue;
+                    // ★ v3.8.94: MaxPlayerAlliesHit로 통합
+                    if (allies > aoeConfig.MaxPlayerAlliesHit) continue;
 
                     if (enemies > bestEnemyCount)
                     {

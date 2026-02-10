@@ -5,6 +5,7 @@ using Kingmaker.Blueprints;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.RuleSystem;
 using Kingmaker.UnitLogic.Abilities;
+using Kingmaker.UnitLogic.Abilities.Blueprints;  // ★ v3.8.90: UsingInOverwatchAreaType
 using Kingmaker.UnitLogic.Abilities.Components;
 using Kingmaker.UnitLogic.Mechanics.Actions;
 using CompanionAI_v3.Core;
@@ -471,7 +472,7 @@ namespace CompanionAI_v3.Analysis
             // 이 능력 사용 후 이동 불가 → 위험 상황에서 사용하면 위험
             var scAtk = AIConfig.GetScoringConfig();
 
-            bool clearsMPAfterUse = CombatAPI.AbilityClearsMPAfterUse(attack);
+            bool clearsMPAfterUse = CombatAPI.AbilityClearsMPAfterUse(attack, situation.Unit);  // ★ v3.8.88: 유닛 특성 고려
             if (clearsMPAfterUse)
             {
                 // 역할별 안전 가중치 적용
@@ -491,6 +492,33 @@ namespace CompanionAI_v3.Analysis
                     float proximityPenalty = (situation.MinSafeDistance - situation.NearestEnemyDistance) * 5f * safetyWeight;
                     score -= proximityPenalty;
                 }
+            }
+
+            // ★ v3.8.90: 적 오버워치 구역 내 WillCauseAttack 능력 사용 페널티
+            // 게임: OverwatchController.IsTriggersOverwatch()가 WillCauseAttack 체크 → 적 오버워치 공격 유발
+            if (situation.IsInEnemyOverwatchZone)
+            {
+                try
+                {
+                    bool willTriggerOverwatch = attack.Blueprint?.UsingInOverwatchArea
+                        != BlueprintAbility.UsingInOverwatchAreaType.WillNotCauseAttack;
+                    if (willTriggerOverwatch)
+                    {
+                        // 오버워치 1건당 -20점 페널티 (적 무료 공격 1회 = 상당한 위험)
+                        float overwatchPenalty = situation.EnemyOverwatchCount * 20f;
+                        score -= overwatchPenalty;
+                        if (Main.IsDebugEnabled)
+                            Main.LogDebug($"[UtilityScorer] {attack.Name}: Overwatch trigger penalty={overwatchPenalty:F0} ({situation.EnemyOverwatchCount} overwatchers)");
+                    }
+                    else
+                    {
+                        // WillNotCauseAttack 능력 = 오버워치 안전 → 보너스
+                        score += 15f;
+                        if (Main.IsDebugEnabled)
+                            Main.LogDebug($"[UtilityScorer] {attack.Name}: Overwatch-safe ability bonus=+15");
+                    }
+                }
+                catch { }
             }
 
             // ★ v3.1.30: Response Curves 기반 데미지 점수
@@ -661,52 +689,30 @@ namespace CompanionAI_v3.Analysis
                     foreach (var ally in situation.Allies)
                     {
                         if (ally == null || ally.LifeState.IsDead) continue;
-                        if (ally == situation.Unit) continue;  // 자기 자신 제외
+                        if (ally == situation.Unit) continue;
 
-                        // 실제 패턴 내에 있는지 체크
                         if (CombatAPI.IsUnitInDirectionalAoERange(
                             situation.Unit.Position, direction, ally, checkRadius, angle, patternType.Value))
                         {
                             alliesInDanger++;
                         }
                     }
-
-                    // ★ v3.8.12: 설정된 최대치 초과 시에만 차단
-                    if (alliesInDanger > maxAlliesAllowed)
-                    {
-                        score -= 1000f;
-                        Main.LogDebug($"[Scorer] Directional AOE ally check {attack.Name}: {alliesInDanger} allies > max {maxAlliesAllowed} - BLOCKED");
-                    }
-                    else if (alliesInDanger > 0)
-                    {
-                        // 허용 범위 내 아군 - 페널티만 적용
-                        float penalty = (aoeConfig?.ClusterAllyPenalty ?? 40f) * alliesInDanger;
-                        score -= penalty;
-                        Main.LogDebug($"[Scorer] Directional AOE {attack.Name}: {alliesInDanger} allies (≤{maxAlliesAllowed}) - penalty {penalty:F0}");
-                    }
-                    else
-                    {
-                        Main.LogDebug($"[Scorer] Directional AOE {attack.Name}: No allies in {patternType} pattern direction - OK");
-                    }
                 }
                 else
                 {
-                    // Non-directional (Circle): 기존 반경 체크
                     alliesInDanger = CountAlliesNear(target, situation, checkRadius);
+                }
 
-                    // ★ v3.8.12: 설정된 최대치 초과 시에만 차단
-                    if (alliesInDanger > maxAlliesAllowed)
-                    {
-                        score -= 1000f;
-                        Main.LogDebug($"[Scorer] AOE ally check {attack.Name}: {alliesInDanger} allies > max {maxAlliesAllowed} - BLOCKED");
-                    }
-                    else if (alliesInDanger > 0)
-                    {
-                        // 허용 범위 내 아군 - 페널티만 적용
-                        float penalty = (aoeConfig?.ClusterAllyPenalty ?? 40f) * alliesInDanger;
-                        score -= penalty;
-                        Main.LogDebug($"[Scorer] AOE {attack.Name}: {alliesInDanger} allies (≤{maxAlliesAllowed}) - penalty {penalty:F0}");
-                    }
+                // ★ v3.8.94: "허용이면 진짜 허용" — 초과 시만 차단, 허용 범위 내 감점 없음
+                if (alliesInDanger > maxAlliesAllowed)
+                {
+                    score -= 1000f;
+                    if (Main.IsDebugEnabled)
+                        Main.LogDebug($"[Scorer] AOE {attack.Name}: {alliesInDanger} allies > max {maxAlliesAllowed} - BLOCKED");
+                }
+                else if (alliesInDanger > 0 && Main.IsDebugEnabled)
+                {
+                    Main.LogDebug($"[Scorer] AOE {attack.Name}: {alliesInDanger} allies ≤ max {maxAlliesAllowed} - ALLOWED (no penalty)");
                 }
             }
 
@@ -1246,7 +1252,7 @@ namespace CompanionAI_v3.Analysis
         public static bool ShouldMoveBeforeClearMPAbility(Situation situation, AbilityData ability)
         {
             if (ability == null) return false;
-            if (!CombatAPI.AbilityClearsMPAfterUse(ability)) return false;
+            if (!CombatAPI.AbilityClearsMPAfterUse(ability, situation.Unit)) return false;  // ★ v3.8.88
 
             // 이동 불가면 false
             if (!situation.CanMove || situation.CurrentMP <= 0) return false;

@@ -97,7 +97,8 @@ namespace CompanionAI_v3.Data
 
             // ★ v3.7.65: IsDefensiveStance 플래그 추가
             { "f6a60b4556214528b0ce295c4f69306e", new AbilityInfo("f6a60b4556214528b0ce295c4f69306e", "StalwartDefense", AbilityTiming.TurnEnding, flags: AbilityFlags.IsDefensiveStance) },
-            { "a77c8eee6d684e9587f6be5b10f93bb7", new AbilityInfo("a77c8eee6d684e9587f6be5b10f93bb7", "Overwatch", AbilityTiming.TurnEnding, flags: AbilityFlags.SelfTargetOnly | AbilityFlags.IsDefensiveStance) },
+            // ★ v3.8.88: SelfTargetOnly → PointTarget (오버워치는 방향 지정 필요)
+            { "a77c8eee6d684e9587f6be5b10f93bb7", new AbilityInfo("a77c8eee6d684e9587f6be5b10f93bb7", "Overwatch", AbilityTiming.TurnEnding, flags: AbilityFlags.PointTarget | AbilityFlags.IsDefensiveStance) },
 
             // ========================================
             // Reload - 재장전 (★ v3.7.65: IsReloadAbility 플래그 추가)

@@ -293,6 +293,9 @@ namespace CompanionAI_v3.GameInterface
             // IsScatter를 직접 확인 — CanTargetFriends 프록시 불필요
             var bpInfo = BlueprintCache.GetOrCache(ability);
             bool hasScatterDanger = bpInfo?.IsScatter ?? ability?.IsScatter ?? false;
+            // ★ v3.8.88: ControlledScatter는 아군 자동 회피 보장 (게임 엔진: 아군 만나면 해당 레이 전체 AutoMiss)
+            if (hasScatterDanger && (bpInfo?.ControlledScatter ?? false))
+                hasScatterDanger = false;
 
             // AOE 효과도 없고 scatter 위험도 없으면 안전
             if (aoERadius <= 0 && !hasScatterDanger) return true;

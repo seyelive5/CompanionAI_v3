@@ -94,6 +94,12 @@ namespace CompanionAI_v3.Planning.Plans
             bool heroicActPlanned = heroicAction != null;  // ★ v3.8.01: 계획됨 여부 추적
             if (heroicActPlanned)
             {
+                // ★ v3.8.86: Raven일 때 HeroicAct + WarpRelay 콤보 그룹
+                if (situation.FamiliarType == PetType.Raven)
+                {
+                    heroicAction.GroupTag = "OverseerHeroicWarp";
+                    heroicAction.FailurePolicy = GroupFailurePolicy.SkipRemainingInGroup;
+                }
                 actions.Add(heroicAction);
                 Main.Log($"[Overseer] Phase 2: HeroicAct planned (Momentum will be active for WarpRelay)");
             }
@@ -162,6 +168,13 @@ namespace CompanionAI_v3.Planning.Plans
                 var keystoneActions = PlanAllFamiliarKeystoneBuffs(situation, ref remainingAP, heroicActPlanned);
                 if (keystoneActions.Count > 0)
                 {
+                    // ★ v3.8.86: Raven + HeroicAct → WarpRelay 콤보 그룹 태깅
+                    if (heroicActPlanned && situation.FamiliarType == PetType.Raven)
+                    {
+                        foreach (var ka in keystoneActions)
+                            ka.GroupTag = "OverseerHeroicWarp";
+                    }
+
                     actions.AddRange(keystoneActions);
                     Main.Log($"[Overseer] Phase 3.4: {keystoneActions.Count} keystone abilities planned");
 
@@ -445,6 +458,19 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     actions.Add(tacticalMoveAction);
                     Main.Log($"[Overseer] Phase 4.9: Tactical pre-attack move");
+                }
+            }
+
+            // ★ v3.8.86: Phase 4.95 - ClearMP 공격 전 선제 후퇴
+            // ClearMPAfterUse 능력 사용 시 MP 전부 제거 → 사용 전에 안전 위치로 이동
+            bool hasMoveInPlanOverseer = CollectionHelper.Any(actions, a => a.Type == ActionType.Move);
+            if (!hasMoveInPlanOverseer)
+            {
+                var clearMPRetreat = PlanPreemptiveRetreatForClearMPAbility(situation, ref remainingMP);
+                if (clearMPRetreat != null)
+                {
+                    actions.Add(clearMPRetreat);
+                    Main.Log("[Overseer] Phase 4.95: Preemptive retreat before ClearMP ability");
                 }
             }
 

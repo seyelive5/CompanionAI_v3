@@ -47,6 +47,19 @@ namespace CompanionAI_v3.Core
         /// </summary>
         public List<TargetWrapper> AllTargets { get; set; }
 
+        /// <summary>
+        /// ★ v3.8.86: 액션 그룹 태그 - 논리적 단위를 연결
+        /// null이면 독립 액션 (기존 동작과 동일, 하위 호환)
+        /// 같은 문자열 = 같은 그룹 (예: "KillSeq_적ID", "Combo_능력GUID")
+        /// </summary>
+        public string GroupTag { get; set; }
+
+        /// <summary>
+        /// ★ v3.8.86: 이 액션 실패 시 그룹에 대한 정책
+        /// GroupTag가 설정된 경우에만 의미있음
+        /// </summary>
+        public GroupFailurePolicy FailurePolicy { get; set; }
+
         /// <summary>실행 완료 여부</summary>
         public bool IsExecuted { get; set; }
 
@@ -319,7 +332,8 @@ namespace CompanionAI_v3.Core
             }
 
             string targetName = Target?.Entity is BaseUnitEntity unit ? unit.CharacterName : "point";
-            return $"[{Type}] {Ability?.Name ?? "?"} -> {targetName} ({Reason})";
+            string groupInfo = GroupTag != null ? $" [G:{GroupTag}]" : "";
+            return $"[{Type}] {Ability?.Name ?? "?"} -> {targetName}{groupInfo} ({Reason})";
         }
     }
 
@@ -354,5 +368,17 @@ namespace CompanionAI_v3.Core
 
         /// <summary>턴 종료</summary>
         EndTurn
+    }
+
+    /// <summary>
+    /// ★ v3.8.86: 그룹 내 액션 실패 시 정책
+    /// </summary>
+    public enum GroupFailurePolicy
+    {
+        /// <summary>같은 GroupTag의 나머지 액션 스킵 (기본값)</summary>
+        SkipRemainingInGroup = 0,
+
+        /// <summary>그룹 내 다른 액션은 계속 실행</summary>
+        ContinueGroup = 1
     }
 }

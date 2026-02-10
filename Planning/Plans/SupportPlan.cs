@@ -319,14 +319,12 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // ★ v3.5.37: Phase 5.5 - AOE 공격 기회 (Support도 DangerousAoE 사용)
+            // ★ v3.5.37: Phase 5.5 - AOE 공격 기회 (모든 AoE 타입)
+            // ★ v3.8.96: AvailableAoEAttacks 캐시 사용 + Unit-targeted AoE 추가
             bool didPlanAttack = false;
             // ★ v3.8.44: 공격 실패 이유 추적 (이동 Phase에 전달)
             var attackContext = new AttackPhaseContext();
-            var pointAoEAttacks = situation.AvailableAttacks
-                .Where(a => CombatAPI.IsPointTargetAbility(a) || AbilityDatabase.IsDangerousAoE(a))
-                .ToList();
-            if (situation.HasLivingEnemies && pointAoEAttacks.Count > 0)
+            if (situation.HasLivingEnemies && situation.HasAoEAttacks)
             {
                 bool useAoEOptimization = situation.CharacterSettings?.UseAoEOptimization ?? true;
                 int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
@@ -334,14 +332,16 @@ namespace CompanionAI_v3.Planning.Plans
 
                 if (useAoEOptimization)
                 {
-                    // 클러스터 기반 AOE 기회 탐지
-                    foreach (var aoEAbility in pointAoEAttacks)
+                    // ★ v3.8.96: 캐시된 AvailableAoEAttacks 사용 (인라인 LINQ 제거)
+                    foreach (var aoEAbility in situation.AvailableAoEAttacks)
                     {
                         float aoERadius = CombatAPI.GetAoERadius(aoEAbility);
+                        if (aoERadius <= 0) aoERadius = 5f;
                         var clusters = ClusterDetector.FindClusters(situation.Enemies, aoERadius);
                         if (clusters.Any(c => c.Count >= minEnemies))
                         {
                             hasAoEOpportunity = true;
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[Support] Phase 5.5: Cluster found for {aoEAbility.Name} (category={CombatAPI.GetAttackCategory(aoEAbility)})");
                             break;
                         }
                     }
@@ -357,12 +357,25 @@ namespace CompanionAI_v3.Planning.Plans
 
                 if (hasAoEOpportunity)
                 {
+                    // Point-target AoE 시도
                     var aoE = PlanAoEAttack(situation, ref remainingAP);
                     if (aoE != null)
                     {
                         actions.Add(aoE);
                         didPlanAttack = true;
-                        Main.Log($"[Support] Phase 5.5: AOE attack planned");
+                        Main.Log($"[Support] Phase 5.5: Point-target AOE planned");
+                    }
+
+                    // ★ v3.8.96: Unit-targeted AoE 시도 (Burst, Scatter, 기타 모든 유닛 타겟 AoE)
+                    if (!didPlanAttack)
+                    {
+                        var unitAoE = PlanUnitTargetedAoE(situation, ref remainingAP);
+                        if (unitAoE != null)
+                        {
+                            actions.Add(unitAoE);
+                            didPlanAttack = true;
+                            Main.Log($"[Support] Phase 5.5b: Unit-targeted AOE planned");
+                        }
                     }
                 }
             }
@@ -491,7 +504,16 @@ namespace CompanionAI_v3.Planning.Plans
 
             // ★ v3.0.96: Phase 7.5: 공격 불가 시 남은 버프 사용
             // ★ v3.1.10: PreAttackBuff, HeroicAct, RighteousFury 제외 (공격 없으면 무의미)
-            if (!didPlanAttack && remainingAP >= 1f && situation.AvailableBuffs.Count > 0)
+            // ★ v3.8.98: 근접 MoveOnly 전략 시 fallback 버프 스킵
+            bool skipFallbackForMelee = !situation.PrefersRanged &&
+                tacticalEval?.ChosenStrategy == TacticalStrategy.MoveOnly &&
+                situation.HasLivingEnemies;
+
+            if (skipFallbackForMelee)
+            {
+                Main.Log($"[Support] Phase 7.5: Skipping fallback buffs (melee MoveOnly — save for post-move attack)");
+            }
+            else if (!didPlanAttack && remainingAP >= 1f && situation.AvailableBuffs.Count > 0)
             {
                 Main.Log($"[Support] Phase 7.5: No attack possible, using remaining buffs (AP={remainingAP:F1})");
 

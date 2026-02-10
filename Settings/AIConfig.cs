@@ -258,10 +258,11 @@ namespace CompanionAI_v3.Settings
         public int MaxPlayerAlliesHit { get; set; } = 1;
 
         /// <summary>
-        /// Self-AoE (BladeDance 등) 인접 아군 최대 허용 수
-        /// 기존 0 → 1로 완화
+        /// ★ v3.8.94: MaxPlayerAlliesHit로 통합 — 별도 Self-AoE 제한 불필요
+        /// JSON 하위 호환용으로만 유지
         /// </summary>
         [JsonProperty("selfAoeMaxAdjacentAllies")]
+        [Obsolete("v3.8.94: MaxPlayerAlliesHit로 통합")]
         public int SelfAoeMaxAdjacentAllies { get; set; } = 1;
 
         /// <summary>Self-AoE 사용에 필요한 최소 인접 적 수</summary>
@@ -269,21 +270,27 @@ namespace CompanionAI_v3.Settings
         public int SelfAoeMinAdjacentEnemies { get; set; } = 1;
 
         /// <summary>
-        /// ★ v3.8.50: 근접 AOE 패턴 내 최대 허용 아군 수
-        /// Self-AoE(0~1명)보다 관대 - 근접전에서는 아군이 근처에 있을 확률이 높음
+        /// ★ v3.8.94: MaxPlayerAlliesHit로 통합 — 별도 Melee AoE 제한 불필요
+        /// JSON 하위 호환용으로만 유지
         /// </summary>
         [JsonProperty("meleeAoeMaxAdjacentAllies")]
+        [Obsolete("v3.8.94: MaxPlayerAlliesHit로 통합")]
         public int MeleeAoeMaxAdjacentAllies { get; set; } = 1;
 
         /// <summary>
-        /// DangerousAoE 자동 선택 허용 여부
-        /// true면 SelectBestAttack에서 DangerousAoE도 선택 가능
+        /// ★ v3.8.94: DangerousAoE 필터 제거 — 모든 AoE는 MaxPlayerAlliesHit로 통합 관리
+        /// JSON 하위 호환용으로만 유지
         /// </summary>
         [JsonProperty("allowDangerousAoEAutoSelect")]
+        [Obsolete("v3.8.94: DangerousAoE 필터 제거, MaxPlayerAlliesHit로 통합")]
         public bool AllowDangerousAoEAutoSelect { get; set; } = false;
 
-        /// <summary>DangerousAoE 자동 선택 시 최소 적 수</summary>
+        /// <summary>
+        /// ★ v3.8.94: MinEnemiesForAoE(CharacterSettings)로 통합
+        /// JSON 하위 호환용으로만 유지
+        /// </summary>
         [JsonProperty("dangerousAoEMinEnemies")]
+        [Obsolete("v3.8.94: CharacterSettings.MinEnemiesForAoE로 통합")]
         public int DangerousAoEMinEnemies { get; set; } = 3;
 
         /// <summary>
@@ -295,10 +302,11 @@ namespace CompanionAI_v3.Settings
         public int MinClusterSize { get; set; } = 2;
 
         /// <summary>
-        /// 클러스터 내 플레이어 아군 페널티 점수
-        /// 기존 60 → 40으로 완화
+        /// ★ v3.8.94: 허용 범위 내 감점 제거 — MaxPlayerAlliesHit 초과 시만 차단
+        /// JSON 하위 호환용으로만 유지
         /// </summary>
         [JsonProperty("clusterAllyPenalty")]
+        [Obsolete("v3.8.94: 허용 범위 내 감점 제거, MaxPlayerAlliesHit 초과 시만 차단")]
         public float ClusterAllyPenalty { get; set; } = 40f;
 
         /// <summary>

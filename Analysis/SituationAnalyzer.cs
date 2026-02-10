@@ -6,6 +6,7 @@ using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Enums;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.UnitLogic.Abilities.Components;  // ★ v3.7.29: AbilityMultiTarget
+using Kingmaker.UnitLogic.Parts;  // ★ v3.8.90: PartOverwatch
 using Kingmaker.Utility;
 using UnityEngine;
 using CompanionAI_v3.Core;
@@ -204,6 +205,27 @@ namespace CompanionAI_v3.Analysis
             {
                 Main.LogDebug($"[Analyzer] Threat: {enemiesTargetingAllies} enemies targeting {alliesUnderThreat} allies");
             }
+
+            // ★ v3.8.90: 적 오버워치 구역 감지
+            // PartOverwatch.Contains(unit)는 유닛의 모든 점유 노드를 확인 (대형 유닛 지원)
+            try
+            {
+                int overwatchCount = 0;
+                foreach (var enemy in situation.Enemies)
+                {
+                    if (enemy == null || enemy.LifeState.IsDead) continue;
+                    var ow = enemy.GetOptional<PartOverwatch>();
+                    if (ow != null && !ow.IsStopped && ow.Contains(unit))
+                    {
+                        overwatchCount++;
+                    }
+                }
+                situation.EnemyOverwatchCount = overwatchCount;
+                situation.IsInEnemyOverwatchZone = overwatchCount > 0;
+                if (overwatchCount > 0 && Main.IsDebugEnabled)
+                    Main.LogDebug($"[Analyzer] {unit.CharacterName}: In {overwatchCount} enemy overwatch zone(s)");
+            }
+            catch { }
         }
 
         private void AnalyzeTargets(Situation situation, BaseUnitEntity unit)
@@ -782,21 +804,69 @@ namespace CompanionAI_v3.Analysis
             // situation.PrimaryAttack = SelectPrimaryAttack(situation, unit);  // -> AnalyzeTargets()로 이동
             situation.BestBuff = SelectBestBuff(situation.AvailableBuffs, situation);
 
+            // ★ v3.8.96: AoE 분류 — 모든 AvailableAttacks에서 AoE 타입 추출
+            // CombatAPI.GetAttackCategory() + 기존 감지 API 활용
+            // 8가지 AoE 타입 전부 감지: Point, Cone, Ray, Sector, Burst, Scatter, Self, Melee
+            foreach (var attack in situation.AvailableAttacks)
+            {
+                var category = CombatAPI.GetAttackCategory(attack);
+
+                bool isAoE = false;
+                switch (category)
+                {
+                    case Data.AttackCategory.AoE:      // Point AoE, Pattern, Self-AoE
+                    case Data.AttackCategory.Burst:    // 점사 (Burst Fire)
+                    case Data.AttackCategory.Scatter:  // 산탄 (Scatter)
+                        isAoE = true;
+                        break;
+                }
+
+                // 카테고리 Normal이지만 실제 AoE인 경우 보강
+                if (!isAoE)
+                {
+                    if (CombatAPI.IsPointTargetAbility(attack))
+                        isAoE = true;
+                    else if (AbilityDatabase.IsAoE(attack))
+                        isAoE = true;
+                    else if (CombatAPI.IsSelfTargetedAoEAttack(attack))
+                        isAoE = true;
+                    else if (CombatAPI.IsMeleeAoEAbility(attack))
+                        isAoE = true;
+                }
+
+                if (isAoE)
+                {
+                    situation.AvailableAoEAttacks.Add(attack);
+                }
+            }
+
             // ★ v3.0.20: 분류 결과 요약 로깅
             // ★ v3.0.21: PositionalBuffs 추가
             // ★ v3.0.23: Stratagems 추가
             // ★ v3.0.33: Markers 추가
             // ★ v3.0.87: GapClosers 카운트 추가
+            // ★ v3.8.96: AoE 카운트 추가
             var finalGapClosers = situation.AvailableAttacks.Where(a => AbilityDatabase.IsGapCloser(a)).ToList();
             Main.Log($"[Analyzer] {unit.CharacterName} abilities: " +
                 $"Buffs={situation.AvailableBuffs.Count}, " +
                 $"Heals={situation.AvailableHeals.Count}, " +
                 $"Debuffs={situation.AvailableDebuffs.Count}, " +
                 $"Attacks={situation.AvailableAttacks.Count}, " +
+                $"AoE={situation.AvailableAoEAttacks.Count}, " +
                 $"GapClosers={finalGapClosers.Count}, " +
                 $"PositionalBuffs={situation.AvailablePositionalBuffs.Count}, " +
                 $"Stratagems={situation.AvailableStratagems.Count}, " +
                 $"Markers={situation.AvailableMarkers.Count}");
+
+            // ★ v3.8.96: AoE 능력 상세 로깅
+            if (situation.AvailableAoEAttacks.Count > 0)
+            {
+                foreach (var aoe in situation.AvailableAoEAttacks)
+                {
+                    var cat = CombatAPI.GetAttackCategory(aoe);
+                    Main.LogDebug($"[Analyzer]   AoE: {aoe.Name} (Category={cat})");
+                }
+            }
 
             // ★ v3.0.87: GapClosers 이름 로깅
             if (finalGapClosers.Count > 0)

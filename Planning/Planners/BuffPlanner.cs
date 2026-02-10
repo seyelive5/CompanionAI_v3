@@ -1144,28 +1144,37 @@ namespace CompanionAI_v3.Planning.Planners
                 bool isPointTarget = ability.Blueprint?.CanTargetPoint == true && ability.Blueprint?.CanTargetSelf != true;
                 bool canTargetSelf = ability.Blueprint?.CanTargetSelf ?? true;
 
+                // ★ v3.8.88: AbilityDatabase PointTarget 플래그 (오버워치 등)
+                var dbInfo = AbilityDatabase.GetInfo(ability);
+                if (dbInfo != null && (dbInfo.Flags & AbilityFlags.PointTarget) != 0)
+                    isPointTarget = true;
+
+                // ★ v3.8.88: 오버워치는 원뿔 방향 정의 → 더 먼 타겟 포인트 필요
+                bool isOverwatchStyle = isPointTarget && AbilityDatabase.IsDefensiveStance(ability);
+                float offsetDistance = isOverwatchStyle ? 5f : 1.5f;
+
                 Vector3 targetPoint = situation.Unit.Position;
-                if (isPointTarget && !canTargetSelf)
+                if (isPointTarget && (!canTargetSelf || isOverwatchStyle))
                 {
-                    // ★ v3.1.28: 적 방향으로 1.5m 오프셋 (CannotTargetSelf 회피)
+                    // ★ v3.1.28: 적 방향으로 오프셋 (CannotTargetSelf 회피 / 오버워치 원뿔 방향)
                     var nearestEnemy = situation.NearestEnemy;
                     if (nearestEnemy != null)
                     {
                         var direction = (nearestEnemy.Position - situation.Unit.Position).normalized;
                         if (direction.sqrMagnitude > 0.01f)
                         {
-                            targetPoint = situation.Unit.Position + direction * 1.5f;
+                            targetPoint = situation.Unit.Position + direction * offsetDistance;
                         }
                         else
                         {
-                            targetPoint = situation.Unit.Position + Vector3.forward * 1.5f;
+                            targetPoint = situation.Unit.Position + Vector3.forward * offsetDistance;
                         }
                     }
                     else
                     {
-                        targetPoint = situation.Unit.Position + Vector3.forward * 1.5f;
+                        targetPoint = situation.Unit.Position + Vector3.forward * offsetDistance;
                     }
-                    if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanTurnEnding: {ability.Name} using offset point ({targetPoint.x:F1},{targetPoint.z:F1})");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanTurnEnding: {ability.Name} using offset point ({targetPoint.x:F1},{targetPoint.z:F1}){(isOverwatchStyle ? " [Overwatch cone]" : "")}");
                 }
 
                 TargetWrapper target = isPointTarget ? new TargetWrapper(targetPoint) : new TargetWrapper(situation.Unit);

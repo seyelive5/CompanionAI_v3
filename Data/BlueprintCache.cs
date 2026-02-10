@@ -68,6 +68,12 @@ namespace CompanionAI_v3.Data
             public bool IsMelee { get; set; }
             public bool IsScatter { get; set; }
 
+            // ★ v3.8.86: 이동 제한 감지 (WarhammerEndTurn 컴포넌트)
+            public bool ClearMPAfterUse { get; set; }
+
+            // ★ v3.8.88: ControlledScatter — 산탄 레이가 아군을 자동 회피
+            public bool ControlledScatter { get; set; }
+
             // 타겟팅
             public bool CanTargetPoint { get; set; }
             public bool CanTargetSelf { get; set; }
@@ -171,6 +177,12 @@ namespace CompanionAI_v3.Data
                     // ★ v3.8.82: AbilityData 인스턴스 속성 (무기 의존)
                     IsMelee = ability.IsMelee,
                     IsScatter = ability.IsScatter,
+
+                    // ★ v3.8.86: 이동 제한 캐싱
+                    ClearMPAfterUse = ability.ClearMPAfterUse,
+
+                    // ★ v3.8.88: ControlledScatter 캐싱
+                    ControlledScatter = bp.GetComponent<WarhammerAbilityAttackDelivery>()?.ControlledScatter ?? false,
 
                     // 타겟팅
                     CanTargetPoint = bp.CanTargetPoint,

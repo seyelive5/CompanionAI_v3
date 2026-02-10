@@ -35,6 +35,11 @@ namespace CompanionAI_v3.Planning.Plans
                 Main.Log($"[DPS] Reserving {reservedAP:F1} AP for post-move attack");
             }
 
+            // ★ v3.8.86: 재계획 시 이전 전략 컨텍스트 소비
+            bool comboAlreadyApplied = turnState.GetContext<bool>(StrategicContextKeys.ComboPrereqApplied, false);
+            string comboTargetId = turnState.GetContext<string>(StrategicContextKeys.ComboTargetId, null);
+            bool shouldPrioritizeRetreat = turnState.GetContext<bool>(StrategicContextKeys.DeferredRetreat, false);
+
             // ★ v3.8.41: Phase 0 - 잠재력 초월 궁극기 (최우선)
             if (CombatAPI.HasFreeUltimateBuff(situation.Unit))
             {
@@ -243,6 +248,9 @@ namespace CompanionAI_v3.Planning.Plans
                     float savedAPBeforeKillSeq = remainingAP;
                     int actionsBeforeKillSeq = actions.Count;
 
+                    // ★ v3.8.86: 킬 시퀀스 그룹 태그 (실패 시 나머지 스킵)
+                    string killGroupTag = "KillSeq_" + killSequence.Target.UniqueId;
+
                     foreach (var ability in killSequence.Abilities)
                     {
                         // ★ v3.4.01: P1-1 능력 사용 가능 여부 재확인
@@ -261,7 +269,10 @@ namespace CompanionAI_v3.Planning.Plans
                             if (timing == AbilityTiming.PreAttackBuff || timing == AbilityTiming.PreCombatBuff)
                             {
                                 // ★ v3.4.02: P0 수정 - reason, apCost 파라미터 추가
-                                actions.Add(PlannedAction.Buff(ability, situation.Unit, "Kill sequence buff", apCost));
+                                var buffAction = PlannedAction.Buff(ability, situation.Unit, "Kill sequence buff", apCost);
+                                buffAction.GroupTag = killGroupTag;  // ★ v3.8.86
+                                buffAction.FailurePolicy = GroupFailurePolicy.SkipRemainingInGroup;
+                                actions.Add(buffAction);
                             }
                             else
                             {
@@ -278,7 +289,10 @@ namespace CompanionAI_v3.Planning.Plans
                                         break;
                                     }
                                 }
-                                actions.Add(PlannedAction.Attack(ability, killSequence.Target, "Kill sequence attack", apCost));
+                                var atkAction = PlannedAction.Attack(ability, killSequence.Target, "Kill sequence attack", apCost);
+                                atkAction.GroupTag = killGroupTag;  // ★ v3.8.86
+                                atkAction.FailurePolicy = GroupFailurePolicy.SkipRemainingInGroup;
+                                actions.Add(atkAction);
                             }
                             remainingAP -= apCost;
                         }
@@ -363,31 +377,26 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.1.16: Phase 4.4: AOE 공격 (적 2명 이상 근처일 때)
             // ★ v3.3.00: 클러스터 기반 AOE 기회 탐색
             // ★ v3.5.37: MinEnemiesForAoE 설정 적용
-            // ★ v3.5.74: AttackCategory.AoE 추가 체크 (v3.5.73 API 활용)
+            // ★ v3.8.96: AvailableAoEAttacks 캐시 사용 + Unit-targeted AoE (Burst/Scatter 등) 추가
             int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
-            if (remainingAP >= 1f && situation.Enemies.Count >= minEnemies)
+            if (remainingAP >= 1f && situation.HasAoEAttacks && situation.Enemies.Count >= minEnemies)
             {
                 bool hasAoEOpportunity = false;
                 bool useAoEOptimization = situation.CharacterSettings?.UseAoEOptimization ?? true;
 
                 if (useAoEOptimization)
                 {
-                    // ★ v3.5.74: 클러스터 기반 AOE 기회 탐색 (게임 API + AttackCategory)
-                    // ★ v3.8.50: 근접 AOE도 클러스터 탐지에 포함
-                    foreach (var aoeAbility in situation.AvailableAttacks
-                        .Where(a => CombatAPI.IsPointTargetAbility(a) ||
-                                    CombatAPI.GetAttackCategory(a) == AttackCategory.AoE ||
-                                    CombatAPI.IsMeleeAoEAbility(a)))
+                    // ★ v3.8.96: 캐시된 AvailableAoEAttacks 사용 (인라인 LINQ 제거)
+                    foreach (var aoeAbility in situation.AvailableAoEAttacks)
                     {
-                        float aoERadius = CombatAPI.GetAoERadius(aoeAbility);  // 타일 반환
-                        // ★ v3.6.4: 기본 5타일 ≈ 6.75m
+                        float aoERadius = CombatAPI.GetAoERadius(aoeAbility);
                         if (aoERadius <= 0) aoERadius = 5f;
 
                         var clusters = Analysis.ClusterDetector.FindClusters(situation.Enemies, aoERadius);
                         if (clusters.Any(c => c.Count >= minEnemies))
                         {
                             hasAoEOpportunity = true;
-                            if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 4.4: Cluster found for {aoeAbility.Name} (radius={aoERadius:F1}m)");
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 4.4: Cluster found for {aoeAbility.Name} (radius={aoERadius:F1}m, category={CombatAPI.GetAttackCategory(aoeAbility)})");
                             break;
                         }
                     }
@@ -403,12 +412,25 @@ namespace CompanionAI_v3.Planning.Plans
 
                 if (hasAoEOpportunity)
                 {
+                    // Point-target AoE 시도
                     var aoE = PlanAoEAttack(situation, ref remainingAP);
                     if (aoE != null)
                     {
                         actions.Add(aoE);
                         didPlanAttack = true;
-                        Main.Log($"[DPS] Phase 4.4: AOE attack planned ({(useAoEOptimization ? "cluster-based" : "legacy")})");
+                        Main.Log($"[DPS] Phase 4.4: Point-target AOE planned");
+                    }
+
+                    // ★ v3.8.96: Unit-targeted AoE 시도 (Burst, Scatter, 기타 모든 유닛 타겟 AoE)
+                    if (!didPlanAttack)
+                    {
+                        var unitAoE = PlanUnitTargetedAoE(situation, ref remainingAP);
+                        if (unitAoE != null)
+                        {
+                            actions.Add(unitAoE);
+                            didPlanAttack = true;
+                            Main.Log($"[DPS] Phase 4.4b: Unit-targeted AOE planned");
+                        }
                     }
                 }
             }
@@ -418,11 +440,24 @@ namespace CompanionAI_v3.Planning.Plans
             AbilityData comboPrereqAbility = null;
             AbilityData comboFollowUpAbility = null;
 
-            var specialAction = PlanSpecialAbilityWithCombo(situation, ref remainingAP,
-                out comboPrereqAbility, out comboFollowUpAbility);
-            if (specialAction != null)
+            // ★ v3.8.86: 재계획 시 콤보 전제가 이미 적용되었으면 스킵
+            if (comboAlreadyApplied)
             {
-                actions.Add(specialAction);
+                Main.Log("[DPS] Phase 4.5: Combo prereq already applied (replan) — skipping prereq detection");
+                // comboPrereqAbility = null 유지 → Phase 5에서 전제 시도 안 함
+                // comboFollowUpAbility만 설정하여 Phase 5.5에서 후속 실행
+                var specialAction = PlanSpecialAbilityWithCombo(situation, ref remainingAP,
+                    out comboPrereqAbility, out comboFollowUpAbility);
+                comboPrereqAbility = null;  // 전제 스킵 (이미 적용됨)
+                if (specialAction != null)
+                    actions.Add(specialAction);
+            }
+            else
+            {
+                var specialAction = PlanSpecialAbilityWithCombo(situation, ref remainingAP,
+                    out comboPrereqAbility, out comboFollowUpAbility);
+                if (specialAction != null)
+                    actions.Add(specialAction);
             }
 
             // Phase 4.6: 마킹
@@ -451,6 +486,19 @@ namespace CompanionAI_v3.Planning.Plans
             if (stratagemAction != null)
             {
                 actions.Add(stratagemAction);
+            }
+
+            // ★ v3.8.86: Phase 4.9 - ClearMP 공격 전 선제 후퇴
+            // ClearMPAfterUse 능력 사용 시 MP 전부 제거 → 사용 전에 안전 위치로 이동
+            bool hasMoveBeforeAttack = CollectionHelper.Any(actions, a => a.Type == ActionType.Move);
+            if (!hasMoveBeforeAttack)
+            {
+                var clearMPRetreat = PlanPreemptiveRetreatForClearMPAbility(situation, ref remainingMP);
+                if (clearMPRetreat != null)
+                {
+                    actions.Add(clearMPRetreat);
+                    Main.Log("[DPS] Phase 4.9: Preemptive retreat before ClearMP ability");
+                }
             }
 
             // Phase 5: 공격 - 약한 적 우선
@@ -509,6 +557,9 @@ namespace CompanionAI_v3.Planning.Plans
                     if (attackAction != null)
                     {
                         usedComboPrereq = true;
+                        // ★ v3.8.86: 콤보 그룹 태깅 (전제 실패 시 후속도 스킵)
+                        attackAction.GroupTag = "Combo_" + (comboPrereqAbility.Blueprint?.AssetGuid?.ToString() ?? "prereq");
+                        attackAction.FailurePolicy = GroupFailurePolicy.SkipRemainingInGroup;
                         Main.Log($"[DPS] Phase 5: Used combo prerequisite {comboPrereqAbility.Name}");
                     }
                 }
@@ -595,8 +646,11 @@ namespace CompanionAI_v3.Planning.Plans
                         if (CombatAPI.CanUseAbilityOn(comboFollowUpAbility, targetWrapper, out reason))
                         {
                             remainingAP -= followUpCost;
-                            actions.Add(PlannedAction.Attack(comboFollowUpAbility, enemy,
-                                $"Combo followup: {comboFollowUpAbility.Name}", followUpCost));
+                            var followUpAction = PlannedAction.Attack(comboFollowUpAbility, enemy,
+                                $"Combo followup: {comboFollowUpAbility.Name}", followUpCost);
+                            // ★ v3.8.86: 같은 콤보 그룹 태그 (전제 실패 시 자동 스킵)
+                            followUpAction.GroupTag = "Combo_" + (comboPrereqAbility.Blueprint?.AssetGuid?.ToString() ?? "prereq");
+                            actions.Add(followUpAction);
                             Main.Log($"[DPS] Phase 5.5: Combo followup {comboFollowUpAbility.Name} -> {enemy.CharacterName}");
                             break;
                         }
@@ -661,7 +715,18 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.0.96: Phase 6.5: 공격 불가 시 남은 버프 사용
             // 이전 버그: Hittable=0이면 버프 사용 못함
             // ★ v3.1.10: PreAttackBuff, HeroicAct, RighteousFury 제외 (공격 없으면 무의미)
-            if (!didPlanAttack && remainingAP >= 1f && situation.AvailableBuffs.Count > 0)
+            // ★ v3.8.98: 근접 MoveOnly 전략 시 fallback 버프 스킵
+            // 근접 캐릭터가 적에게 이동 예정이면 버프를 아껴서 이동 후 replan 때 사용
+            // (이동 후 CombatCache 무효화 → Hittable 감지 → replan → PreAttackBuff + 공격)
+            bool skipFallbackForMelee = !situation.PrefersRanged &&
+                tacticalEval?.ChosenStrategy == TacticalStrategy.MoveOnly &&
+                situation.HasLivingEnemies;
+
+            if (skipFallbackForMelee)
+            {
+                Main.Log($"[DPS] Phase 6.5: Skipping fallback buffs (melee MoveOnly — save for post-move attack)");
+            }
+            else if (!didPlanAttack && remainingAP >= 1f && situation.AvailableBuffs.Count > 0)
             {
                 Main.Log($"[DPS] Phase 6.5: No attack possible, using remaining buffs (AP={remainingAP:F1})");
 
@@ -742,6 +807,13 @@ namespace CompanionAI_v3.Planning.Plans
             // 공격할 수단이 전혀 없는데 적에게 다가가는 것은 위험만 증가
             bool noAttackNoApproach = situation.PrefersRanged && situation.AvailableAttacks.Count == 0;
             // NeedsReposition도 noAttackNoApproach 적용 - 공격 수단 없으면 이동도 무의미
+            // ★ v3.8.86: 재계획 시 공격 후 후퇴 전략 계승
+            if (shouldPrioritizeRetreat && situation.HasPerformedFirstAction && situation.PrefersRanged)
+            {
+                deferRetreat = false;  // 이미 공격했으니 즉시 후퇴
+                isRangedInDanger = true;  // 후퇴 필요 플래그 활성화
+                Main.Log("[DPS] Phase 8: Prioritizing retreat (attack-then-retreat strategy from previous plan)");
+            }
             bool needsMovement = ((situation.NeedsReposition || (!didPlanAttack && situation.HasLivingEnemies)) && !noAttackNoApproach) || isRangedInDanger || deferRetreat;
             // ★ v3.0.99: situation.CanMove는 계획 시작 시점 MP 기준, remainingMP는 예측된 MP 포함
             bool canMove = situation.CanMove || remainingMP > 0;

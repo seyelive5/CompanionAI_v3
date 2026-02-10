@@ -222,7 +222,8 @@ namespace CompanionAI_v3.Planning
         #region Option B: MoveToAttack
 
         /// <summary>
-        /// 이동 후 공격 - FindRangedAttackPositionSync 재사용
+        /// 이동 후 공격 - FindRangedAttackPositionSync / FindMeleeAttackPositionSync 사용
+        /// ★ v3.8.98: 근접 유닛은 FindMeleeAttackPositionSync로 적 인접 위치 탐색
         /// Viable: 이동 가능 + 목적지에서 공격 가능한 적 > 0
         /// </summary>
         private static TacticalOption EvaluateMoveToAttack(
@@ -250,21 +251,55 @@ namespace CompanionAI_v3.Planning
                 return option;
             }
 
-            // ★ FindRangedAttackPositionSync 재사용 (이미 HittableEnemyCount 계산)
             var unit = situation.Unit;
-            float weaponRange = GetWeaponRange(unit);
             AIRole role = situation.CharacterSettings?.Role ?? AIRole.Auto;
+            MovementAPI.PositionScore bestPosition = null;
 
-            var bestPosition = MovementAPI.FindRangedAttackPositionSync(
-                unit,
-                situation.Enemies,
-                weaponRange,
-                situation.MinSafeDistance,
-                0f,  // predictedMP=0 (현재 MP 기반)
-                situation.InfluenceMap,
-                role,
-                situation.PredictiveThreatMap
-            );
+            // ★ v3.8.98: 근접 유닛은 FindMeleeAttackPositionSync 사용
+            if (!situation.PrefersRanged && situation.NearestEnemy != null)
+            {
+                float meleeRange = GetMeleeRange(unit);
+
+                bestPosition = MovementAPI.FindMeleeAttackPositionSync(
+                    unit,
+                    situation.NearestEnemy,
+                    meleeRange,
+                    0f,  // predictedMP=0 (현재 MP 기반)
+                    situation.InfluenceMap,
+                    role,
+                    situation.PredictiveThreatMap,
+                    null,  // meleeAoEAbility
+                    situation.Enemies
+                );
+
+                // FindMeleeAttackPositionSync는 HittableEnemyCount를 설정하지 않음
+                // 위치가 적의 근접 사거리 내이므로 최소 1명 공격 가능
+                if (bestPosition != null && bestPosition.HittableEnemyCount == 0)
+                {
+                    bestPosition.HittableEnemyCount = 1;
+                }
+
+                if (Main.IsDebugEnabled)
+                    Main.LogDebug($"[TacticalEval] Melee MoveToAttack: " +
+                        $"target={situation.NearestEnemy.CharacterName}, meleeRange={meleeRange:F1}, " +
+                        $"result={(bestPosition != null ? $"pos=({bestPosition.Position.x:F1},{bestPosition.Position.z:F1})" : "null")}");
+            }
+            else
+            {
+                // 원거리 유닛: 기존 FindRangedAttackPositionSync 사용
+                float weaponRange = GetWeaponRange(unit);
+
+                bestPosition = MovementAPI.FindRangedAttackPositionSync(
+                    unit,
+                    situation.Enemies,
+                    weaponRange,
+                    situation.MinSafeDistance,
+                    0f,  // predictedMP=0 (현재 MP 기반)
+                    situation.InfluenceMap,
+                    role,
+                    situation.PredictiveThreatMap
+                );
+            }
 
             if (bestPosition == null || bestPosition.HittableEnemyCount == 0)
             {
@@ -422,7 +457,7 @@ namespace CompanionAI_v3.Planning
         #region Helpers
 
         /// <summary>
-        /// 무기 사거리 조회 (MovementPlanner.GetWeaponRange와 동일 로직)
+        /// 원거리 무기 사거리 조회 (MovementPlanner.GetWeaponRange와 동일 로직)
         /// ★ v3.8.76 fix: AttackRange 폴백 추가 (OptimalRange=0인 무기 대응)
         /// </summary>
         private static float GetWeaponRange(BaseUnitEntity unit)
@@ -446,6 +481,26 @@ namespace CompanionAI_v3.Planning
             }
             catch { }
             return weaponRange;
+        }
+
+        /// <summary>
+        /// ★ v3.8.98: 근접 무기 사거리 조회 (타일 단위)
+        /// 기본 근접 사거리 = 2 타일 (대부분의 근접 무기)
+        /// </summary>
+        private static float GetMeleeRange(BaseUnitEntity unit)
+        {
+            try
+            {
+                var primaryHand = unit.Body?.PrimaryHand;
+                if (primaryHand?.HasWeapon == true && primaryHand.Weapon.Blueprint.IsMelee)
+                {
+                    int attackRange = primaryHand.Weapon.AttackRange;
+                    if (attackRange > 0 && attackRange < 100)
+                        return attackRange;
+                }
+            }
+            catch { }
+            return 2f;  // 기본 근접 사거리
         }
 
         #endregion

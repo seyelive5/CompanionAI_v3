@@ -226,33 +226,10 @@ namespace CompanionAI_v3.Settings
                 { Language.English, "Max Allies in AOE" },
                 { Language.Korean, "AOE 최대 허용 아군 수" }
             },
+            // ★ v3.8.94: 설명 업데이트 — 모든 AoE 타입 통합, 허용 범위 내 감점 없음
             ["MaxPlayerAlliesHitDesc"] = new() {
-                { Language.English, "Maximum number of allies allowed in AOE area.\n0 = Never hit allies, 1 = Allow 1 ally, etc." },
-                { Language.Korean, "AOE 범위 내 허용되는 최대 아군 수.\n0 = 아군 절대 안 맞춤, 1 = 아군 1명 허용, 등" }
-            },
-            ["AllowDangerousAoE"] = new() {
-                { Language.English, "Allow Dangerous AOE" },
-                { Language.Korean, "위험한 AOE 허용" }
-            },
-            ["AllowDangerousAoEDesc"] = new() {
-                { Language.English, "Allow AI to auto-select high-damage AOE abilities (grenades, etc.)" },
-                { Language.Korean, "AI가 고위력 AOE 능력(수류탄 등)을 자동 선택하도록 허용" }
-            },
-            ["DangerousAoEMinEnemies"] = new() {
-                { Language.English, "Min Enemies for Dangerous AOE" },
-                { Language.Korean, "위험한 AOE 최소 적 수" }
-            },
-            ["DangerousAoEMinEnemiesDesc"] = new() {
-                { Language.English, "Minimum enemies required to use dangerous AOE abilities" },
-                { Language.Korean, "위험한 AOE 능력 사용에 필요한 최소 적 수" }
-            },
-            ["ClusterAllyPenalty"] = new() {
-                { Language.English, "Ally in AOE Penalty" },
-                { Language.Korean, "AOE 아군 페널티" }
-            },
-            ["ClusterAllyPenaltyDesc"] = new() {
-                { Language.English, "Score penalty per ally in AOE area (higher = more ally protection)" },
-                { Language.Korean, "AOE 범위 내 아군 1명당 점수 페널티 (높을수록 아군 보호)" }
+                { Language.English, "Maximum number of allies allowed in ALL AOE areas (self-AoE, melee AoE, ranged AoE).\n0 = Never hit allies, 1 = Allow 1 ally, 2 = Allow 2, 3 = Allow 3.\nWithin limit = fully allowed (no penalty)." },
+                { Language.Korean, "모든 AOE 범위(자체 AOE, 근접 AOE, 원거리 AOE) 내 허용 최대 아군 수.\n0 = 아군 절대 안 맞춤, 1 = 1명 허용, 2 = 2명 허용, 3 = 3명 허용.\n허용 범위 내 = 감점 없이 완전 허용." }
             },
             ["ResetAoEToDefault"] = new() {
                 { Language.English, "Reset AOE to Default" },

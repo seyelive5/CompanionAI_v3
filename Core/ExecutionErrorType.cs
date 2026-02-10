@@ -89,12 +89,22 @@ namespace CompanionAI_v3.Core
                 return ExecutionErrorType.HasNoLosToTarget;
             if (reason.Contains("unreachable") || reason.Contains("Unreachable"))
                 return ExecutionErrorType.TargetUnreachable;
+            // ★ v3.8.92: 누락된 ActionExecutor 에러 패턴 보강 (회복 가능)
+            if (reason.Contains("cooldown") || reason.Contains("Cooldown"))
+                return ExecutionErrorType.AlreadyHasBuff;  // 쿨다운 = 이 능력 스킵, 다른 능력 시도
+            if (reason.Contains("is null"))
+                return ExecutionErrorType.TargetUnreachable;  // null 참조 = 스킵
 
             // 재계획 필요
             if (reason.Contains("TargetDead") || reason.Contains("target is dead"))
                 return ExecutionErrorType.TargetDead;
             if (reason.Contains("AbilityUnavailable") || reason.Contains("not available"))
                 return ExecutionErrorType.AbilityUnavailable;
+            // ★ v3.8.92: 누락된 ActionExecutor 에러 패턴 보강 (재계획 필요)
+            if (reason.Contains("unavailable") || reason.Contains("Unavailable"))
+                return ExecutionErrorType.AbilityUnavailable;
+            if (reason.Contains("unconscious") || reason.Contains("Unconscious"))
+                return ExecutionErrorType.TargetDead;  // 의식불명 ≈ 사망 (타겟 교체 필요)
 
             // 턴 종료
             if (reason.Contains("NoAP") || reason.Contains("no AP"))

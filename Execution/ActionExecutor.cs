@@ -6,6 +6,7 @@ using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Utility;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
+using CompanionAI_v3.Data;
 using CompanionAI_v3.GameInterface;
 
 namespace CompanionAI_v3.Execution
@@ -54,7 +55,17 @@ namespace CompanionAI_v3.Execution
                         return ExecuteAbility(action, situation);
 
                     case ActionType.Move:
-                        return ExecuteMove(action);
+                        var moveResult = ExecuteMove(action);
+                        // ★ v3.8.98: Move 후 CombatCache 무효화
+                        // 유닛이 이동하면 모든 거리/LOS/타겟팅 결과가 변함
+                        // InvalidateCaster()가 존재하지만 호출되지 않던 버그 수정
+                        // 이 수정 없이는 이동 후에도 구 위치 기준 거리가 캐시에 남아
+                        // Hittable=0으로 판정 → 공격 불가 → EndTurn 발생
+                        if (situation?.Unit != null)
+                        {
+                            CombatCache.InvalidateCaster(situation.Unit);
+                        }
+                        return moveResult;
 
                     case ActionType.EndTurn:
                         return ExecutionResult.EndTurn(action.Reason);
@@ -238,6 +249,17 @@ namespace CompanionAI_v3.Execution
                 if (cacheTarget != null)
                 {
                     CombatCache.InvalidateTarget(cacheTarget);
+                }
+            }
+
+            // ★ v3.8.98: GapCloser 캐시 무효화 - 시전자가 이동하므로
+            // GapCloser(돌진/텔레포트)는 시전자 위치가 변함 → 모든 거리/타겟팅 재계산 필요
+            if (action.Ability != null && AbilityDatabase.IsGapCloser(action.Ability))
+            {
+                var caster = action.Ability.Caster as BaseUnitEntity;
+                if (caster != null)
+                {
+                    CombatCache.InvalidateCaster(caster);
                 }
             }
 

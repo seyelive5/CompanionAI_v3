@@ -471,7 +471,7 @@ namespace CompanionAI_v3.Analysis
 
             var aoeConfig = AIConfig.GetAoEConfig();
             int maxPlayerAlliesHit = aoeConfig?.MaxPlayerAlliesHit ?? 1;
-            float playerAllyPenalty = aoeConfig?.ClusterAllyPenalty ?? 40f;
+            // ★ v3.8.94: playerAllyPenalty 제거 — 허용 범위 내 감점 없음, 초과 시만 차단
             float npcAllyPenalty = aoeConfig?.ClusterNpcAllyPenalty ?? 20f;
 
             int playerPartyAlliesInRange = 0;
@@ -492,16 +492,14 @@ namespace CompanionAI_v3.Analysis
                     {
                         playerPartyAlliesInRange++;
 
-                        // ★ v3.5.76: 설정의 MaxPlayerAlliesHit 초과 시 무효화
+                        // ★ v3.8.94: 초과 시만 차단, 허용 범위 내 감점 없음
                         if (playerPartyAlliesInRange > maxPlayerAlliesHit)
                         {
                             cluster.QualityScore = -1000f;
                             Main.LogDebug($"[ClusterDetector] Cluster invalidated: {playerPartyAlliesInRange} player allies > max {maxPlayerAlliesHit}");
                             return;
                         }
-
-                        // 아군 피격 페널티 (설정 기반)
-                        cluster.QualityScore -= playerAllyPenalty;
+                        // 허용 범위 내 → 감점 없음 (기존 ClusterAllyPenalty 제거)
                     }
                     else
                     {
@@ -511,7 +509,6 @@ namespace CompanionAI_v3.Analysis
                 }
                 catch (Exception ex)
                 {
-                    // ★ v3.4.01: P1-3 예외 상세 로깅
                     Main.LogDebug($"[ClusterDetector] ApplyAllyPenalty error for {ally?.CharacterName}: {ex.Message}");
                 }
             }

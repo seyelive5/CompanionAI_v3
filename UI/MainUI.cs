@@ -249,14 +249,11 @@ namespace CompanionAI_v3.UI
             if (GUILayout.Button($"<size=18><color=#FFFF00>{L("ResetAoEToDefault")}</color></size>", GUILayout.Width(350), GUILayout.Height(45)))
             {
                 aoeConfig.MaxPlayerAlliesHit = 1;
-                aoeConfig.AllowDangerousAoEAutoSelect = false;
-                aoeConfig.DangerousAoEMinEnemies = 3;
-                aoeConfig.ClusterAllyPenalty = 40f;
                 AIConfig.Save();
             }
             GUILayout.Space(20);
 
-            // MaxPlayerAlliesHit 슬라이더
+            // ★ v3.8.94: MaxPlayerAlliesHit 슬라이더만 유지 — 모든 AoE 타입에 통합 적용
             int newMaxAllies = DrawSliderSettingIntLarge(
                 L("MaxPlayerAlliesHit"),
                 L("MaxPlayerAlliesHitDesc"),
@@ -265,51 +262,6 @@ namespace CompanionAI_v3.UI
             if (newMaxAllies != aoeConfig.MaxPlayerAlliesHit)
             {
                 aoeConfig.MaxPlayerAlliesHit = newMaxAllies;
-                AIConfig.Save();
-            }
-
-            // AllowDangerousAoEAutoSelect 체크박스
-            GUILayout.BeginHorizontal();
-            string dangerCheckIcon = aoeConfig.AllowDangerousAoEAutoSelect
-                ? "<size=22><b><color=green>☑</color></b></size>"
-                : "<size=22><b>☐</b></size>";
-            if (GUILayout.Button(dangerCheckIcon, GUI.skin.box, GUILayout.Width(50), GUILayout.Height(50)))
-            {
-                aoeConfig.AllowDangerousAoEAutoSelect = !aoeConfig.AllowDangerousAoEAutoSelect;
-                AIConfig.Save();
-            }
-            GUILayout.Space(10);
-            GUILayout.BeginVertical();
-            GUILayout.Label($"<size=18><b>{L("AllowDangerousAoE")}</b></size>", _boldLabelStyle);
-            GUILayout.Label($"<size=16><color=#888888>{L("AllowDangerousAoEDesc")}</color></size>", _descriptionStyle);
-            GUILayout.EndVertical();
-            GUILayout.EndHorizontal();
-            GUILayout.Space(15);
-
-            // DangerousAoEMinEnemies 슬라이더 (AllowDangerousAoE가 true일 때만)
-            if (aoeConfig.AllowDangerousAoEAutoSelect)
-            {
-                int newMinEnemies = DrawSliderSettingIntLarge(
-                    L("DangerousAoEMinEnemies"),
-                    L("DangerousAoEMinEnemiesDesc"),
-                    aoeConfig.DangerousAoEMinEnemies,
-                    1, 5);
-                if (newMinEnemies != aoeConfig.DangerousAoEMinEnemies)
-                {
-                    aoeConfig.DangerousAoEMinEnemies = newMinEnemies;
-                    AIConfig.Save();
-                }
-            }
-
-            // ClusterAllyPenalty 슬라이더
-            float newPenalty = DrawSliderSettingFloatLarge(
-                L("ClusterAllyPenalty"),
-                L("ClusterAllyPenaltyDesc"),
-                aoeConfig.ClusterAllyPenalty,
-                0f, 100f);
-            if (Math.Abs(newPenalty - aoeConfig.ClusterAllyPenalty) > 0.5f)
-            {
-                aoeConfig.ClusterAllyPenalty = newPenalty;
                 AIConfig.Save();
             }
 

@@ -7,6 +7,7 @@ using Kingmaker.AI.AreaScanning;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Pathfinding;
 using Kingmaker.UnitLogic.Abilities;
+using Kingmaker.UnitLogic.Parts;
 using Kingmaker.View.Covers;
 using Pathfinding;
 using UnityEngine;
@@ -110,10 +111,14 @@ namespace CompanionAI_v3.GameInterface
             /// <summary>★ v3.8.50: 근접 AOE 스플래시 보너스 (패턴 내 추가 적 수 기반)</summary>
             public float MeleeAoESplashBonus { get; set; }
 
+            /// <summary>★ v3.9.02: 아군 밀집 패널티 (AoE 취약성 방지 + 아군 AoE 방해 방지)</summary>
+            public float AllyClusterPenalty { get; set; }
+
             public float TotalScore => CoverScore + DistanceScore - ThreatScore + AttackScore
                                        - InfluenceThreatScore + InfluenceControlBonus
                                        + SharedTargetBonus + TacticalAdjustment
-                                       - PathRiskScore + HitChanceBonus + MeleeAoESplashBonus;
+                                       - PathRiskScore + HitChanceBonus + MeleeAoESplashBonus
+                                       - AllyClusterPenalty;
 
             public bool CanStand { get; set; }
             public bool HasLosToEnemy { get; set; }
@@ -128,7 +133,8 @@ namespace CompanionAI_v3.GameInterface
                 (TacticalAdjustment != 0 ? $" [Tac:{TacticalAdjustment:F1}]" : "") +
                 (PathRiskScore > 0 ? $" [Path:{PathRiskScore:F1}]" : "") +
                 (HitChanceBonus != 0 ? $" [Hit:{HitChanceBonus:F1}]" : "") +
-                (MeleeAoESplashBonus > 0 ? $" [Splash:{MeleeAoESplashBonus:F1}]" : "");
+                (MeleeAoESplashBonus > 0 ? $" [Splash:{MeleeAoESplashBonus:F1}]" : "") +
+                (AllyClusterPenalty > 0 ? $" [AllyCluster:-{AllyClusterPenalty:F1}]" : "");
         }
 
         public enum MovementGoal
@@ -139,6 +145,42 @@ namespace CompanionAI_v3.GameInterface
             AttackPosition,
             Retreat,
             RangedAttackPosition
+        }
+
+        /// <summary>
+        /// ★ v3.9.02: 아군 밀집 패널티 계산
+        /// 후퇴/이동 위치 선택 시 아군 간 분산을 유도
+        /// - 3타일 이내 아군: 거리 비례 패널티 (가까울수록 큼)
+        /// - 적 AoE 피해 분산 + 아군 AoE 사용 공간 확보
+        /// </summary>
+        private static float CalculateAllyClusterPenalty(Vector3 position, BaseUnitEntity self)
+        {
+            const float CLUSTER_RADIUS_TILES = 3f;
+            const float PENALTY_PER_TILE_UNIT = 10f;
+
+            float penalty = 0f;
+            try
+            {
+                var allUnits = Game.Instance?.TurnController?.AllUnits;
+                if (allUnits == null) return 0f;
+
+                foreach (var entity in allUnits)
+                {
+                    var ally = entity as BaseUnitEntity;
+                    if (ally == null || ally == self) continue;
+                    if (!ally.IsPlayerFaction || ally.LifeState.IsDead) continue;
+
+                    float distTiles = CombatAPI.MetersToTiles(Vector3.Distance(position, ally.Position));
+                    if (distTiles < CLUSTER_RADIUS_TILES)
+                    {
+                        // 가까울수록 큰 패널티 (역선형: 0타일=30, 1타일=20, 2타일=10)
+                        penalty += (CLUSTER_RADIUS_TILES - distTiles) * PENALTY_PER_TILE_UNIT;
+                    }
+                }
+            }
+            catch (Exception) { }
+
+            return penalty;
         }
 
         #endregion
@@ -336,12 +378,28 @@ namespace CompanionAI_v3.GameInterface
                     if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] Node has {threats.aooUnits.Count} AoO threats");
                 }
 
-                // Overwatch 위협 (경계사격)
-                if (threats.overwatchUnits != null && threats.overwatchUnits.Count > 0)
+                // ★ v3.8.88: TryFindThreats는 overwatchUnits를 안 채움 - PartOverwatch 직접 체크
+                try
                 {
-                    threatScore += threats.overwatchUnits.Count * 25f;
-                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] Node has {threats.overwatchUnits.Count} Overwatch threats");
+                    int overwatchCount = 0;
+                    foreach (var enemyInfo in unit.CombatGroup.Memory.Enemies)
+                    {
+                        var ow = enemyInfo.Unit?.GetOptional<PartOverwatch>();
+                        if (ow != null && !ow.IsStopped && ow.OverwatchArea != null)
+                        {
+                            foreach (var owNode in ow.OverwatchArea)
+                            {
+                                if (owNode == node) { overwatchCount++; break; }
+                            }
+                        }
+                    }
+                    if (overwatchCount > 0)
+                    {
+                        threatScore += overwatchCount * 25f;
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] Node has {overwatchCount} Overwatch threats (direct check)");
+                    }
                 }
+                catch { }
 
                 // AoE 위협 (화염, 독가스 등)
                 if (threats.aes != null && threats.aes.Count > 0)
@@ -1195,6 +1253,9 @@ namespace CompanionAI_v3.GameInterface
                 float destThreatScore = CalculateThreatScore(unit, node);
                 float pathThreatScore = aiCell.ProvokedAttacks * WEIGHT_AOO + aiCell.EnteredAoE * WEIGHT_AOE_ENTRY + aiCell.StepsInsideDamagingAoE * WEIGHT_DAMAGING_AOE_STEP;
 
+                // ★ v3.9.02: 아군 밀집 패널티 — 적 AoE 분산 + 아군 AoE 공간 확보
+                float allyClusterPenalty = CalculateAllyClusterPenalty(pos, unit);
+
                 var score = new PositionScore
                 {
                     Node = node,
@@ -1204,7 +1265,9 @@ namespace CompanionAI_v3.GameInterface
                     // ★ v3.7.11: 무기 사거리 초과 패널티 적용
                     DistanceScore = distScore + directionBonus - moveDistPenalty - familiarDistPenalty - weaponRangePenalty,
                     // ★ v3.8.13: 경로 위협도 반영
-                    ThreatScore = destThreatScore + pathThreatScore
+                    ThreatScore = destThreatScore + pathThreatScore,
+                    // ★ v3.9.02: 아군 분산 유도
+                    AllyClusterPenalty = allyClusterPenalty
                 };
 
                 // ★ v3.2.25: 영향력 맵 + Role별 Frontline 점수 적용

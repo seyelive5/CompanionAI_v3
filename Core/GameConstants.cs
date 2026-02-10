@@ -21,6 +21,12 @@ namespace CompanionAI_v3.Core
         /// </summary>
         public const int MAX_CONSECUTIVE_FAILURES = 3;
 
+        /// <summary>
+        /// ★ v3.8.92: 턴당 최대 폴백 재계획 횟수
+        /// 실행 실패 후 새 계획으로 복구 시도하는 최대 횟수
+        /// </summary>
+        public const int MAX_FALLBACK_REPLANS = 2;
+
         #endregion
 
         #region Thresholds
