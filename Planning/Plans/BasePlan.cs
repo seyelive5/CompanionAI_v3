@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Enums;
 using Kingmaker.Pathfinding;
@@ -33,6 +32,11 @@ namespace CompanionAI_v3.Planning.Plans
         private static readonly List<BaseUnitEntity> _tempUnits = new List<BaseUnitEntity>(8);
         /// <summary>LINQ .Where().ToList() 대체용 - 액션 필터링</summary>
         private static readonly List<PlannedAction> _tempActions = new List<PlannedAction>(8);
+
+        /// <summary>★ v3.9.10: RecalculateHittable 이전 목록 백업용</summary>
+        private static readonly List<BaseUnitEntity> _sharedOldHittable = new List<BaseUnitEntity>(16);
+        /// <summary>★ v3.9.10: RecalculateHittable 새 목록용</summary>
+        private static readonly List<BaseUnitEntity> _sharedNewHittable = new List<BaseUnitEntity>(16);
 
         #endregion
 
@@ -241,6 +245,11 @@ namespace CompanionAI_v3.Planning.Plans
         /// Phase 4.3(Self), 4.3b(Melee), 4.4(Point)에서 처리하지 않는 나머지 모든 AoE</summary>
         protected PlannedAction PlanUnitTargetedAoE(Situation situation, ref float remainingAP)
             => AttackPlanner.PlanUnitTargetedAoEAttack(situation, ref remainingAP, RoleName);
+
+        /// <summary>★ v3.9.08: AoE 재배치 — 아군 피격으로 AoE 차단 시 이동 후 AoE 시전</summary>
+        protected (PlannedAction move, PlannedAction aoE) PlanAoEWithReposition(
+            Situation situation, ref float remainingAP, ref float remainingMP)
+            => AttackPlanner.PlanAoEWithReposition(situation, ref remainingAP, ref remainingMP, RoleName);
 
         /// ★ v3.8.50: 근접 AOE 계획 (유닛 타겟 근접 스플래시)
         protected PlannedAction PlanMeleeAoE(Situation situation, ref float remainingAP)
@@ -613,8 +622,17 @@ namespace CompanionAI_v3.Planning.Plans
             else
                 validationPosition = situation.Unit.Position;
 
-            // 도달 불가 공격 탐지
+            // ★ v3.9.10: 게임 API (CanTargetFromPosition) 사용 — Analyzer와 동일한 LOS 검증
+            // 기존 CanReachTargetFromPosition은 LosCalculations.HasLos() 사용 → 게임 API와 결과 불일치
+            var validationNode = validationPosition.GetNearestNodeXZ() as CustomGridNodeBase;
             var invalidAttacks = new List<PlannedAction>();
+
+            if (validationNode == null)
+            {
+                Main.LogWarning($"[{RoleName}] Attack validation skipped: validation node not found");
+                return 0;
+            }
+
             foreach (var action in actions)
             {
                 if (action.Type != ActionType.Attack && action.Type != ActionType.Debuff) continue;
@@ -623,11 +641,12 @@ namespace CompanionAI_v3.Planning.Plans
                 var targetEntity = action.Target?.Entity as BaseUnitEntity;
                 if (targetEntity == null) continue;  // Point 타겟은 스킵
 
-                if (!CombatAPI.CanReachTargetFromPosition(action.Ability, validationPosition, targetEntity))
+                string reason;
+                if (!CombatAPI.CanTargetFromPosition(action.Ability, validationNode, targetEntity, out reason))
                 {
                     invalidAttacks.Add(action);
                     Main.LogWarning($"[{RoleName}] Attack validation FAILED: {action.Ability.Name} -> {targetEntity.CharacterName} " +
-                        $"(unreachable from {(hasMoveForValidation ? "move destination" : "current position")})");
+                        $"({reason}, from {(hasMoveForValidation ? "move destination" : "current position")})");
                 }
             }
 
@@ -758,11 +777,13 @@ namespace CompanionAI_v3.Planning.Plans
 
             var unit = situation.Unit;
             int oldCount = situation.HittableEnemies.Count;
-            var oldHittable = new List<BaseUnitEntity>(situation.HittableEnemies);
+            // ★ v3.9.10: new List<> → 정적 리스트 재사용 (GC 할당 제거)
+            _sharedOldHittable.Clear();
+            _sharedOldHittable.AddRange(situation.HittableEnemies);
 
             // 이동 후 위치에서 각 적의 도달 가능성 재검사
             // AvailableAttacks 중 하나라도 해당 적을 타겟 가능하면 Hittable
-            var newHittable = new List<BaseUnitEntity>();
+            _sharedNewHittable.Clear();
 
             foreach (var enemy in situation.Enemies)
             {
@@ -782,31 +803,31 @@ namespace CompanionAI_v3.Planning.Plans
                 }
 
                 if (canHit)
-                    newHittable.Add(enemy);
+                    _sharedNewHittable.Add(enemy);
             }
 
             // Situation 업데이트
             situation.HittableEnemies.Clear();
-            for (int i = 0; i < newHittable.Count; i++)
-                situation.HittableEnemies.Add(newHittable[i]);
+            for (int i = 0; i < _sharedNewHittable.Count; i++)
+                situation.HittableEnemies.Add(_sharedNewHittable[i]);
 
             // BestTarget이 더 이상 Hittable이 아니면 새 BestTarget 선택
-            if (situation.BestTarget != null && !newHittable.Contains(situation.BestTarget))
+            if (situation.BestTarget != null && !_sharedNewHittable.Contains(situation.BestTarget))
             {
                 var oldBest = situation.BestTarget;
-                situation.BestTarget = newHittable.Count > 0 ? newHittable[0] : null;
+                situation.BestTarget = _sharedNewHittable.Count > 0 ? _sharedNewHittable[0] : null;
                 if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] BestTarget changed after move: {oldBest.CharacterName} → {situation.BestTarget?.CharacterName ?? "null"}");
             }
 
-            Main.Log($"[{RoleName}] ★ RecalculateHittable from ({destination.x:F1},{destination.z:F1}): {oldCount} → {newHittable.Count} hittable");
+            Main.Log($"[{RoleName}] ★ RecalculateHittable from ({destination.x:F1},{destination.z:F1}): {oldCount} → {_sharedNewHittable.Count} hittable");
 
             // 소실된 타겟 로깅 (디버그)
-            if (newHittable.Count < oldCount)
+            if (_sharedNewHittable.Count < oldCount)
             {
                 int logged = 0;
-                foreach (var enemy in oldHittable)
+                foreach (var enemy in _sharedOldHittable)
                 {
-                    if (!newHittable.Contains(enemy))
+                    if (!_sharedNewHittable.Contains(enemy))
                     {
                         if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Lost target after move: {enemy.CharacterName}");
                         if (++logged >= 3) break;

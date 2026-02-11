@@ -37,7 +37,15 @@ namespace CompanionAI_v3.Analysis
 
         #region Fields
 
-        // 예측 위협 그리드
+        // ★ v3.9.04: Zero-alloc 정적 그리드 버퍼 (GC 할당 제거)
+        // 150 = 202m 커버리지 (BattlefieldInfluenceMap과 통일)
+        private const int MAX_DIMENSION = 150;
+        private static readonly float[,] _sharedPredictedGrid = new float[MAX_DIMENSION, MAX_DIMENSION];
+
+        // ★ v3.9.04: 인스턴스 재사용
+        private static PredictiveThreatMap _cachedInstance;
+
+        // 예측 위협 그리드 (정적 배열 참조)
         private float[,] _predictedThreatGrid;
 
         // 그리드 메타데이터
@@ -71,19 +79,17 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>
         /// 예측적 위협 맵 계산
+        /// ★ v3.9.04: 인스턴스 재사용 — new 할당 제거
         /// </summary>
-        /// <param name="enemies">적 유닛 목록</param>
-        /// <param name="mobilities">적 이동력 분석 결과</param>
-        /// <param name="currentInfluence">현재 영향력 맵 (경계 참조용)</param>
-        /// <returns>예측 위협 맵</returns>
         public static PredictiveThreatMap Compute(
             List<BaseUnitEntity> enemies,
             List<EnemyMobility> mobilities,
             BattlefieldInfluenceMap currentInfluence)
         {
-            var map = new PredictiveThreatMap();
-            map.ComputeInternal(enemies, mobilities, currentInfluence);
-            return map;
+            if (_cachedInstance == null)
+                _cachedInstance = new PredictiveThreatMap();
+            _cachedInstance.ComputeInternal(enemies, mobilities, currentInfluence);
+            return _cachedInstance;
         }
 
         #endregion
@@ -163,7 +169,12 @@ namespace CompanionAI_v3.Analysis
             _gridWidth = Mathf.Clamp(_gridWidth, 1, 80);
             _gridHeight = Mathf.Clamp(_gridHeight, 1, 80);
 
-            _predictedThreatGrid = new float[_gridWidth, _gridHeight];
+            // ★ v3.9.04: new 할당 제거 — 정적 배열 참조 + 사용 영역만 초기화
+            _predictedThreatGrid = _sharedPredictedGrid;
+
+            for (int x = 0; x < _gridWidth; x++)
+                for (int z = 0; z < _gridHeight; z++)
+                    _predictedThreatGrid[x, z] = 0f;
         }
 
         private void ComputePredictedThreat()

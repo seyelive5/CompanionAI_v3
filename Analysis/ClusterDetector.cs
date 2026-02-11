@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
+// ★ v3.9.04: LINQ 제거 — 모든 LINQ를 수동 루프로 대체 (GC 0)
+// using System.Linq;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Abilities;
 using UnityEngine;
@@ -11,6 +12,7 @@ namespace CompanionAI_v3.Analysis
 {
     /// <summary>
     /// 적 클러스터 데이터
+    /// ★ v3.9.04: Reset() 추가 (오브젝트 풀링 지원)
     /// </summary>
     public class EnemyCluster
     {
@@ -40,11 +42,25 @@ namespace CompanionAI_v3.Analysis
         /// 기본값 2, 설정으로 1까지 완화 가능
         /// </summary>
         public bool IsValid => Count >= ClusterDetector.MIN_CLUSTER_SIZE;
+
+        /// <summary>
+        /// ★ v3.9.04: 풀 반환 전 상태 초기화
+        /// </summary>
+        public void Reset()
+        {
+            Center = Vector3.zero;
+            Enemies.Clear();
+            Radius = 0f;
+            AverageSpread = 0f;
+            Density = 0f;
+            QualityScore = 0f;
+        }
     }
 
     /// <summary>
     /// ★ v3.3.00: 적 클러스터 탐지 알고리즘
     /// AOE 최적화를 위한 밀도 기반 공간 분석
+    /// ★ v3.9.04: Zero-alloc 최적화 — LINQ 전면 제거, 오브젝트 풀링, 정적 버퍼 재사용
     /// </summary>
     public static class ClusterDetector
     {
@@ -80,61 +96,120 @@ namespace CompanionAI_v3.Analysis
 
         #endregion
 
+        #region ★ v3.9.04: Zero-alloc 정적 버퍼 & 오브젝트 풀
+
+        // 클러스터 풀 (Stack = LIFO, 임시 객체에 최적)
+        private static readonly Stack<EnemyCluster> _clusterPool = new Stack<EnemyCluster>(8);
+
+        // 활성 클러스터 리스트 (FindClusters 반환값 — 정적 재사용)
+        private static readonly List<EnemyCluster> _activeClusters = new List<EnemyCluster>(8);
+
+        // GreedyCluster 공유 HashSet
+        private static readonly HashSet<BaseUnitEntity> _sharedAssignedSet = new HashSet<BaseUnitEntity>();
+
+        // ExpandCluster 공유 컬렉션
+        private static readonly Queue<BaseUnitEntity> _sharedQueue = new Queue<BaseUnitEntity>(16);
+        private static readonly HashSet<BaseUnitEntity> _sharedInClusterSet = new HashSet<BaseUnitEntity>();
+
+        // 필터링용 임시 리스트
+        private static readonly List<BaseUnitEntity> _sharedValidEnemies = new List<BaseUnitEntity>(16);
+
+        /// <summary>클러스터 풀에서 대여 (없으면 새로 생성)</summary>
+        private static EnemyCluster RentCluster()
+        {
+            return _clusterPool.Count > 0 ? _clusterPool.Pop() : new EnemyCluster();
+        }
+
+        /// <summary>클러스터 풀에 반환</summary>
+        private static void ReturnCluster(EnemyCluster cluster)
+        {
+            cluster.Reset();
+            _clusterPool.Push(cluster);
+        }
+
+        #endregion
+
         #region Main API
 
         /// <summary>
         /// 적 클러스터 탐색
         /// ★ v3.5.76: minClusterSize가 -1이면 설정값 사용
+        /// ★ v3.9.04: Zero-alloc — 정적 버퍼 재사용, LINQ 전면 제거
         /// </summary>
         /// <param name="enemies">분석할 적 목록</param>
         /// <param name="maxClusterRadius">클러스터 멤버십 최대 거리</param>
         /// <param name="minClusterSize">클러스터 최소 크기 (-1이면 설정값 사용)</param>
-        /// <returns>품질 점수 순으로 정렬된 클러스터 목록</returns>
+        /// <returns>품질 점수 순으로 정렬된 클러스터 목록 (정적 버퍼 — 다음 호출 전까지만 유효)</returns>
         public static List<EnemyCluster> FindClusters(
             List<BaseUnitEntity> enemies,
             float maxClusterRadius = DEFAULT_CLUSTER_RADIUS,
             int minClusterSize = -1)
         {
+            // ★ v3.9.04: 이전 클러스터 풀 반환 + Clear
+            for (int i = 0; i < _activeClusters.Count; i++)
+                ReturnCluster(_activeClusters[i]);
+            _activeClusters.Clear();
+
             // ★ v3.5.76: -1이면 설정값 사용, 아니면 파라미터 값 사용
             int effectiveMinSize = minClusterSize < 0 ? MIN_CLUSTER_SIZE : minClusterSize;
 
             if (enemies == null || enemies.Count < effectiveMinSize)
-                return new List<EnemyCluster>();
+                return _activeClusters;
 
             try
             {
-                var validEnemies = enemies
-                    .Where(e => e != null && e.IsConscious)
-                    .ToList();
-
-                if (validEnemies.Count < effectiveMinSize)
-                    return new List<EnemyCluster>();
-
-                // Greedy 클러스터링: 가장 밀집된 지점 찾기 → 확장 → 반복
-                var clusters = GreedyCluster(validEnemies, maxClusterRadius, effectiveMinSize);
-
-                // 품질 점수 계산 및 정렬
-                foreach (var cluster in clusters)
+                // ★ v3.9.04: LINQ Where().ToList() 제거 → 수동 필터링
+                _sharedValidEnemies.Clear();
+                for (int i = 0; i < enemies.Count; i++)
                 {
-                    CalculateClusterMetrics(cluster);
+                    var e = enemies[i];
+                    if (e != null && e.IsConscious)
+                        _sharedValidEnemies.Add(e);
                 }
 
-                // ★ v3.5.20: 설정에서 최대 클러스터 수 읽음
-                return clusters
-                    .Where(c => c.IsValid)
-                    .OrderByDescending(c => c.QualityScore)
-                    .Take(MaxClusters)
-                    .ToList();
+                if (_sharedValidEnemies.Count < effectiveMinSize)
+                    return _activeClusters;
+
+                // Greedy 클러스터링: _activeClusters에 직접 추가
+                PerformGreedyCluster(_sharedValidEnemies, maxClusterRadius, effectiveMinSize);
+
+                // 품질 점수 계산
+                for (int i = 0; i < _activeClusters.Count; i++)
+                {
+                    CalculateClusterMetrics(_activeClusters[i]);
+                }
+
+                // ★ v3.9.04: LINQ Where().OrderBy().Take().ToList() 제거
+                // QualityScore 내림차순 정렬
+                _activeClusters.Sort((a, b) => b.QualityScore.CompareTo(a.QualityScore));
+
+                // 무효 클러스터 및 MaxClusters 초과분 제거 (뒤에서부터)
+                int maxClusters = MaxClusters;
+                for (int i = _activeClusters.Count - 1; i >= 0; i--)
+                {
+                    var c = _activeClusters[i];
+                    if (!c.IsValid || i >= maxClusters)
+                    {
+                        ReturnCluster(c);
+                        _activeClusters.RemoveAt(i);
+                    }
+                }
+
+                return _activeClusters;
             }
             catch (Exception ex)
             {
                 Main.LogDebug($"[ClusterDetector] Error in FindClusters: {ex.Message}");
-                return new List<EnemyCluster>();
+                for (int i = 0; i < _activeClusters.Count; i++)
+                    ReturnCluster(_activeClusters[i]);
+                _activeClusters.Clear();
+                return _activeClusters;
             }
         }
 
         /// <summary>
         /// 특정 AOE 능력에 최적인 클러스터 탐색
+        /// ★ v3.9.04: LINQ 제거, inline 필터링 + best 추적
         /// </summary>
         /// <param name="ability">AOE 능력</param>
         /// <param name="caster">시전자</param>
@@ -161,25 +236,31 @@ namespace CompanionAI_v3.Analysis
                 // 능력 반경에 맞는 클러스터 탐색
                 var clusters = FindClusters(enemies, aoERadius);
 
-                // ★ v3.5.98: 시전자 사거리 내 클러스터만 필터링 (타일 단위)
-                clusters = clusters
-                    .Where(c => CombatAPI.MetersToTiles(Vector3.Distance(caster.Position, c.Center)) <= abilityRange)
-                    .ToList();
+                // ★ v3.9.04: LINQ 제거 — 사거리 필터 + 아군 페널티 + best 추적을 단일 루프에서
+                EnemyCluster bestCluster = null;
+                float bestScore = 0f;
 
-                if (clusters.Count == 0)
-                    return null;
-
-                // 아군 페널티 적용
-                // ★ v3.6.10: ability 전달하여 패턴별 높이 체크
-                foreach (var cluster in clusters)
+                for (int i = 0; i < clusters.Count; i++)
                 {
-                    ApplyAllyPenalty(cluster, allies, caster, aoERadius, ability);
+                    var c = clusters[i];
+
+                    // ★ v3.5.98: 시전자 사거리 내 클러스터만 (타일 단위)
+                    if (CombatAPI.MetersToTiles(Vector3.Distance(caster.Position, c.Center)) > abilityRange)
+                        continue;
+
+                    // 아군 페널티 적용
+                    // ★ v3.6.10: ability 전달하여 패턴별 높이 체크
+                    ApplyAllyPenalty(c, allies, caster, aoERadius, ability);
+
+                    // 페널티 후 유효한 클러스터 중 최고점 추적
+                    if (c.QualityScore > 0 && c.QualityScore > bestScore)
+                    {
+                        bestScore = c.QualityScore;
+                        bestCluster = c;
+                    }
                 }
 
-                return clusters
-                    .Where(c => c.QualityScore > 0)  // 페널티로 음수가 된 클러스터 제외
-                    .OrderByDescending(c => c.QualityScore)
-                    .FirstOrDefault();
+                return bestCluster;
             }
             catch (Exception ex)
             {
@@ -190,6 +271,7 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>
         /// 클러스터 내 최적 AOE 위치 탐색 (그리드 탐색)
+        /// ★ v3.9.04: early exit 최적화
         /// </summary>
         /// <param name="cluster">대상 클러스터</param>
         /// <param name="ability">AOE 능력</param>
@@ -249,6 +331,10 @@ namespace CompanionAI_v3.Analysis
                         // ★ v3.6.10: ability 전달하여 패턴별 높이 체크
                         int hits = CountEnemiesInRadius(testPos, cluster.Enemies, aoERadius, ability);
 
+                        // ★ v3.9.04: early exit — bestHits보다 적으면 아군 체크 불필요
+                        if (hits < bestHits)
+                            continue;
+
                         // ★ v3.5.76: 아군 안전 체크 (설정 기반)
                         int allyHits = CountAlliesInRadius(testPos, allies, caster, aoERadius, ability);
                         if (allyHits > maxPlayerAlliesHit)
@@ -280,26 +366,27 @@ namespace CompanionAI_v3.Analysis
         /// <summary>
         /// Greedy 클러스터링: 가장 밀집된 시드 찾기 → 확장 → 제거 → 반복
         /// O(n²) 복잡도, 적 10명 기준 < 1ms
+        /// ★ v3.9.04: void 반환, _activeClusters에 직접 추가, 정적 HashSet 재사용
         /// </summary>
-        private static List<EnemyCluster> GreedyCluster(
+        private static void PerformGreedyCluster(
             List<BaseUnitEntity> enemies,
             float maxRadius,
             int minSize)
         {
-            var clusters = new List<EnemyCluster>();
-            var assigned = new HashSet<BaseUnitEntity>();
+            _sharedAssignedSet.Clear();
 
-            while (assigned.Count < enemies.Count)
+            while (_sharedAssignedSet.Count < enemies.Count)
             {
                 // 미할당 적 중 이웃이 가장 많은 적 찾기
                 BaseUnitEntity bestSeed = null;
                 int bestNeighborCount = 0;
 
-                foreach (var enemy in enemies)
+                for (int i = 0; i < enemies.Count; i++)
                 {
-                    if (assigned.Contains(enemy)) continue;
+                    var enemy = enemies[i];
+                    if (_sharedAssignedSet.Contains(enemy)) continue;
 
-                    int neighborCount = CountNeighbors(enemy, enemies, assigned, maxRadius);
+                    int neighborCount = CountNeighbors(enemy, enemies, maxRadius);
                     if (neighborCount > bestNeighborCount)
                     {
                         bestNeighborCount = neighborCount;
@@ -310,71 +397,78 @@ namespace CompanionAI_v3.Analysis
                 if (bestSeed == null || bestNeighborCount < minSize - 1)
                     break;  // 더 이상 유효한 클러스터 없음
 
-                // 시드에서 클러스터 확장
-                var cluster = ExpandCluster(bestSeed, enemies, assigned, maxRadius);
+                // 시드에서 클러스터 확장 (풀에서 대여)
+                var cluster = RentCluster();
+                PerformExpandCluster(bestSeed, enemies, maxRadius, cluster);
 
                 if (cluster.Count >= minSize)
                 {
-                    clusters.Add(cluster);
-                    foreach (var e in cluster.Enemies)
-                        assigned.Add(e);
+                    _activeClusters.Add(cluster);
+                    for (int i = 0; i < cluster.Enemies.Count; i++)
+                        _sharedAssignedSet.Add(cluster.Enemies[i]);
                 }
                 else
                 {
-                    // 클러스터로 인정 안 함, 처리됨으로 표시
-                    assigned.Add(bestSeed);
+                    // 클러스터로 인정 안 함, 풀 반환
+                    ReturnCluster(cluster);
+                    _sharedAssignedSet.Add(bestSeed);
                 }
             }
-
-            return clusters;
         }
 
         /// <summary>
         /// ★ v3.5.98: 반경 내 미할당 이웃 수 계산 (radius는 타일 단위)
         /// ★ v3.6.10: 높이 체크 추가 (Circle 기준 1.6m - 클러스터는 일반 AOE 기준)
+        /// ★ v3.9.04: LINQ Count(predicate) 제거, _sharedAssignedSet 직접 접근
         /// </summary>
         private static int CountNeighbors(
             BaseUnitEntity seed,
             List<BaseUnitEntity> enemies,
-            HashSet<BaseUnitEntity> assigned,
             float radius)  // 타일
         {
-            return enemies.Count(e =>
-                e != seed &&
-                !assigned.Contains(e) &&
-                CombatCache.GetDistanceInTiles(seed, e) <= radius &&
-                Mathf.Abs(seed.Position.y - e.Position.y) <= CombatAPI.AoELevelDiffCircle);  // 높이 체크
+            int count = 0;
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                var e = enemies[i];
+                if (e == seed) continue;
+                if (_sharedAssignedSet.Contains(e)) continue;
+                if (CombatCache.GetDistanceInTiles(seed, e) > radius) continue;
+                if (Mathf.Abs(seed.Position.y - e.Position.y) > CombatAPI.AoELevelDiffCircle) continue;
+                count++;
+            }
+            return count;
         }
 
         /// <summary>
         /// ★ v3.5.98: 시드에서 클러스터 확장 (maxRadius는 타일 단위)
         /// ★ v3.6.10: 높이 체크 추가
+        /// ★ v3.9.04: void 반환, cluster 파라미터로 받음, 정적 Queue/HashSet 재사용
         /// </summary>
-        private static EnemyCluster ExpandCluster(
+        private static void PerformExpandCluster(
             BaseUnitEntity seed,
             List<BaseUnitEntity> enemies,
-            HashSet<BaseUnitEntity> assigned,
-            float maxRadius)  // 타일
+            float maxRadius,  // 타일
+            EnemyCluster cluster)
         {
-            var cluster = new EnemyCluster();
-            var toProcess = new Queue<BaseUnitEntity>();
-            var inCluster = new HashSet<BaseUnitEntity>();
+            _sharedQueue.Clear();
+            _sharedInClusterSet.Clear();
 
-            toProcess.Enqueue(seed);
-            inCluster.Add(seed);
+            _sharedQueue.Enqueue(seed);
+            _sharedInClusterSet.Add(seed);
 
-            while (toProcess.Count > 0)
+            while (_sharedQueue.Count > 0)
             {
-                var current = toProcess.Dequeue();
+                var current = _sharedQueue.Dequeue();
                 cluster.Enemies.Add(current);
 
                 // 현재 클러스터 중심 기준 반경 내 미할당 이웃 찾기
                 Vector3 clusterCenter = CalculateCenter(cluster.Enemies);
 
-                foreach (var enemy in enemies)
+                for (int i = 0; i < enemies.Count; i++)
                 {
-                    if (assigned.Contains(enemy)) continue;
-                    if (inCluster.Contains(enemy)) continue;
+                    var enemy = enemies[i];
+                    if (_sharedAssignedSet.Contains(enemy)) continue;
+                    if (_sharedInClusterSet.Contains(enemy)) continue;
 
                     // ★ v3.5.98: 클러스터 중심에서 거리 체크 (타일 단위)
                     // ★ v3.6.10: 높이 체크 추가 (Circle 기준 1.6m)
@@ -382,14 +476,13 @@ namespace CompanionAI_v3.Analysis
                     float heightDiff = Mathf.Abs(clusterCenter.y - enemy.Position.y);
                     if (dist <= maxRadius && heightDiff <= CombatAPI.AoELevelDiffCircle)
                     {
-                        toProcess.Enqueue(enemy);
-                        inCluster.Add(enemy);
+                        _sharedQueue.Enqueue(enemy);
+                        _sharedInClusterSet.Add(enemy);
                     }
                 }
             }
 
             cluster.Center = CalculateCenter(cluster.Enemies);
-            return cluster;
         }
 
         /// <summary>
@@ -401,8 +494,8 @@ namespace CompanionAI_v3.Analysis
                 return Vector3.zero;
 
             Vector3 sum = Vector3.zero;
-            foreach (var e in enemies)
-                sum += e.Position;
+            for (int i = 0; i < enemies.Count; i++)
+                sum += enemies[i].Position;
 
             return sum / enemies.Count;
         }
@@ -426,10 +519,10 @@ namespace CompanionAI_v3.Analysis
             float maxDist = 0f;
             float totalDist = 0f;
 
-            foreach (var enemy in cluster.Enemies)
+            for (int i = 0; i < cluster.Enemies.Count; i++)
             {
-                float dist = Vector3.Distance(cluster.Center, enemy.Position);
-                maxDist = Mathf.Max(maxDist, dist);
+                float dist = Vector3.Distance(cluster.Center, cluster.Enemies[i].Position);
+                if (dist > maxDist) maxDist = dist;
                 totalDist += dist;
             }
 
@@ -476,8 +569,9 @@ namespace CompanionAI_v3.Analysis
 
             int playerPartyAlliesInRange = 0;
 
-            foreach (var ally in allies)
+            for (int i = 0; i < allies.Count; i++)
             {
+                var ally = allies[i];
                 if (ally == null || !ally.IsConscious) continue;
                 if (ally == caster) continue;
 
@@ -521,17 +615,25 @@ namespace CompanionAI_v3.Analysis
         /// <summary>
         /// ★ v3.5.98: 반경 내 적 수 계산 (radius는 타일 단위)
         /// ★ v3.6.10: 높이 체크 추가 - ability가 있으면 패턴 타입별 임계값 사용
+        /// ★ v3.9.04: LINQ Count(predicate) 제거
         /// </summary>
         private static int CountEnemiesInRadius(Vector3 center, List<BaseUnitEntity> enemies, float radius, AbilityData ability = null)
         {
-            return enemies.Count(e =>
-                e != null && e.IsConscious &&
-                CombatAPI.IsUnitInAoERange(ability, center, e, radius));
+            int count = 0;
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                var e = enemies[i];
+                if (e == null || !e.IsConscious) continue;
+                if (CombatAPI.IsUnitInAoERange(ability, center, e, radius))
+                    count++;
+            }
+            return count;
         }
 
         /// <summary>
         /// ★ v3.5.98: 반경 내 플레이어 파티 아군 수 계산 (radius는 타일 단위)
         /// ★ v3.6.10: 높이 체크 추가
+        /// ★ v3.9.04: LINQ Count(predicate) 제거
         /// </summary>
         private static int CountAlliesInRadius(
             Vector3 center,
@@ -542,10 +644,16 @@ namespace CompanionAI_v3.Analysis
         {
             if (allies == null) return 0;
 
-            return allies.Count(a =>
-                a != null && a.IsConscious && a != caster &&
-                !caster.IsPlayerEnemy && a.IsInPlayerParty &&
-                CombatAPI.IsUnitInAoERange(ability, center, a, radius));
+            int count = 0;
+            for (int i = 0; i < allies.Count; i++)
+            {
+                var a = allies[i];
+                if (a == null || !a.IsConscious || a == caster) continue;
+                if (caster.IsPlayerEnemy || !a.IsInPlayerParty) continue;
+                if (CombatAPI.IsUnitInAoERange(ability, center, a, radius))
+                    count++;
+            }
+            return count;
         }
 
         #endregion

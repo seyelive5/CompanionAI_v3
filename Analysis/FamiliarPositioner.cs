@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Kingmaker.EntitySystem.Entities;
+using CompanionAI_v3.Core;
 using Kingmaker.Enums;
 using Kingmaker.Pathfinding;
 using Kingmaker.UnitLogic;
@@ -37,6 +37,14 @@ namespace CompanionAI_v3.Analysis
         /// ★ v3.7.75: 최대 탐색 반경 (타일) - GetNodesSpiralAround 용
         /// </summary>
         private const int MAX_SEARCH_RADIUS_TILES = 10;
+
+        #endregion
+
+        #region ★ v3.9.10: Zero-alloc 정적 리스트 (LINQ Where().ToList() 제거)
+
+        private static readonly List<BaseUnitEntity> _sharedValidAllies = new List<BaseUnitEntity>(16);
+        private static readonly List<BaseUnitEntity> _sharedValidEnemies = new List<BaseUnitEntity>(16);
+        private static readonly List<BaseUnitEntity> _sharedThreateningEnemies = new List<BaseUnitEntity>(4);
 
         #endregion
 
@@ -178,8 +186,9 @@ namespace CompanionAI_v3.Analysis
             List<BaseUnitEntity> enemies,
             float maxRangeMeters = 0f)
         {
-            var validAllies = allies?.Where(a => a != null && a.IsConscious && !FamiliarAPI.IsFamiliar(a)).ToList()
-                ?? new List<BaseUnitEntity>();
+            // ★ v3.9.10: LINQ → FillWhere (GC 할당 제거)
+            CollectionHelper.FillWhere(allies, _sharedValidAllies, a => a != null && a.IsConscious && !FamiliarAPI.IsFamiliar(a));
+            var validAllies = _sharedValidAllies;
 
             if (validAllies.Count == 0)
                 return CreateDefaultPosition(master.Position);
@@ -212,10 +221,11 @@ namespace CompanionAI_v3.Analysis
             List<BaseUnitEntity> enemies,
             float maxRangeMeters = 0f)
         {
-            var validAllies = allies?.Where(a => a != null && a.IsConscious && !FamiliarAPI.IsFamiliar(a)).ToList()
-                ?? new List<BaseUnitEntity>();
-            var validEnemies = enemies?.Where(e => e != null && e.IsConscious).ToList()
-                ?? new List<BaseUnitEntity>();
+            // ★ v3.9.10: LINQ → FillWhere (GC 할당 제거)
+            CollectionHelper.FillWhere(allies, _sharedValidAllies, a => a != null && a.IsConscious && !FamiliarAPI.IsFamiliar(a));
+            var validAllies = _sharedValidAllies;
+            CollectionHelper.FillWhere(enemies, _sharedValidEnemies, e => e != null && e.IsConscious);
+            var validEnemies = _sharedValidEnemies;
 
             // ★ v3.8.58: AllyStateCache 기반 정확한 커버리지 (모든 사이킨 버프 타입별 개별 확인)
             // 기존: ANY ONE 사이킨 버프 보유 → "buffed" 판정 (조짐만 확산해도 100%)
@@ -290,22 +300,38 @@ namespace CompanionAI_v3.Analysis
             List<BaseUnitEntity> enemies,
             float maxRangeMeters = 0f)
         {
-            var validEnemies = enemies?.Where(e => e != null && e.IsConscious).ToList()
-                ?? new List<BaseUnitEntity>();
+            // ★ v3.9.10: LINQ → FillWhere + 수동 top-3 (GC 할당 제거)
+            CollectionHelper.FillWhere(enemies, _sharedValidEnemies, e => e != null && e.IsConscious);
+            var validEnemies = _sharedValidEnemies;
 
             if (validEnemies.Count == 0)
                 return CreateDefaultPosition(master.Position);
 
-            // 위협적인 원거리 적/시전자 찾기
-            // 근접 적은 이미 Tank가 처리하므로, 원거리 위협 우선
-            var threateningEnemies = validEnemies
-                .Where(e => IsRangedOrCasterEnemy(e))
-                .OrderByDescending(e => EstimateThreat(e))
-                .Take(3)
-                .ToList();
+            // 위협적인 원거리 적/시전자 찾기 (top-3 by threat)
+            // ★ v3.9.10: LINQ OrderByDescending().Take(3) → 수동 top-3 선별
+            _sharedThreateningEnemies.Clear();
+            float t1 = float.MinValue, t2 = float.MinValue, t3 = float.MinValue;
+            BaseUnitEntity e1 = null, e2 = null, e3 = null;
+            for (int i = 0; i < validEnemies.Count; i++)
+            {
+                var e = validEnemies[i];
+                if (!IsRangedOrCasterEnemy(e)) continue;
+                float t = EstimateThreat(e);
+                if (t > t1) { t3 = t2; e3 = e2; t2 = t1; e2 = e1; t1 = t; e1 = e; }
+                else if (t > t2) { t3 = t2; e3 = e2; t2 = t; e2 = e; }
+                else if (t > t3) { t3 = t; e3 = e; }
+            }
+            if (e1 != null) _sharedThreateningEnemies.Add(e1);
+            if (e2 != null) _sharedThreateningEnemies.Add(e2);
+            if (e3 != null) _sharedThreateningEnemies.Add(e3);
 
-            if (threateningEnemies.Count == 0)
-                threateningEnemies = validEnemies.Take(3).ToList();
+            if (_sharedThreateningEnemies.Count == 0)
+            {
+                int takeCount = Math.Min(3, validEnemies.Count);
+                for (int i = 0; i < takeCount; i++)
+                    _sharedThreateningEnemies.Add(validEnemies[i]);
+            }
+            var threateningEnemies = _sharedThreateningEnemies;
 
             // 위협적 적의 중심점
             Vector3 targetCenter = CalculateCentroid(threateningEnemies);
@@ -334,8 +360,9 @@ namespace CompanionAI_v3.Analysis
             List<BaseUnitEntity> enemies,
             float maxRangeMeters = 0f)
         {
-            var validEnemies = enemies?.Where(e => e != null && e.IsConscious).ToList()
-                ?? new List<BaseUnitEntity>();
+            // ★ v3.9.10: LINQ → FillWhere (GC 할당 제거)
+            CollectionHelper.FillWhere(enemies, _sharedValidEnemies, e => e != null && e.IsConscious);
+            var validEnemies = _sharedValidEnemies;
 
             if (validEnemies.Count == 0)
                 return CreateDefaultPosition(master.Position);

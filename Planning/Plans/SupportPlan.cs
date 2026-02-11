@@ -380,6 +380,26 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.9.08: Phase 5.5.5: AoE 재배치 (Phase 5.5/5.5b 실패 시)
+            if (!didPlanAttack && remainingAP >= 1f && remainingMP > 0 && situation.HasAoEAttacks
+                && !actions.Any(a => a.Type == ActionType.Move))
+            {
+                var (aoEMoveAction, aoEAttackAction) = PlanAoEWithReposition(
+                    situation, ref remainingAP, ref remainingMP);
+                if (aoEMoveAction != null && aoEAttackAction != null)
+                {
+                    actions.Add(aoEMoveAction);
+                    actions.Add(aoEAttackAction);
+                    didPlanAttack = true;
+
+                    var moveDest = aoEMoveAction.MoveDestination ?? aoEMoveAction.Target?.Point;
+                    if (moveDest.HasValue)
+                        RecalculateHittableFromDestination(situation, moveDest.Value);
+
+                    Main.Log($"[Support] Phase 5.5.5: AoE reposition planned");
+                }
+            }
+
             // ★ v3.8.67: Phase 5.8 - ClearMP 능력 사용 전 선제적 후퇴
             // ClearMP 능력 사용 후 MP=0이 되면 Phase 8.5 후퇴도 불가능하므로
             // 공격 전에 안전 위치로 이동해야 함 (BasePlan.PlanPreemptiveRetreatForClearMPAbility 활성화)
@@ -703,7 +723,9 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // ★ v3.1.24: Phase 10 - 최종 AP 활용 (모든 시도 실패 후)
-            if (remainingAP >= 1f && actions.Count > 0)
+            // ★ v3.9.06: actions.Count > 0 제한 제거 - DPSPlan v3.8.84와 통일
+            // 디버프/마커는 다른 행동 없이도 팀에 기여
+            if (remainingAP >= 1f)
             {
                 var finalAction = PlanFinalAPUtilization(situation, ref remainingAP);
                 if (finalAction != null)

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Enums;
 using Kingmaker.UnitLogic.Abilities;
@@ -20,6 +19,10 @@ namespace CompanionAI_v3.Planning.Plans
     public class TankPlan : BasePlan
     {
         protected override string RoleName => "Tank";
+
+        // ★ v3.9.10: Zero-alloc 정적 리스트 (LINQ 제거)
+        private static readonly List<AbilityData> _sharedTauntAbilities = new List<AbilityData>(8);
+        private static readonly List<BaseUnitEntity> _sharedCandidates = new List<BaseUnitEntity>(16);
 
         public override TurnPlan CreatePlan(Situation situation, TurnState turnState)
         {
@@ -193,9 +196,15 @@ namespace CompanionAI_v3.Planning.Plans
             // - 아군 타겟팅 적 탐지
             // - 이동 후 도발 타당성 스코어링
             // - AOE 도발 범위 정확 계산
-            var tauntAbilities = situation.AvailableBuffs
-                .Where(a => AbilityDatabase.IsTaunt(a))
-                .ToList();
+            // ★ v3.9.10: LINQ → for loop (GC 할당 제거)
+            _sharedTauntAbilities.Clear();
+            for (int i = 0; i < situation.AvailableBuffs.Count; i++)
+            {
+                var a = situation.AvailableBuffs[i];
+                if (AbilityDatabase.IsTaunt(a))
+                    _sharedTauntAbilities.Add(a);
+            }
+            var tauntAbilities = _sharedTauntAbilities;
 
             if (tauntAbilities.Count > 0 && situation.HasLivingEnemies)
             {
@@ -203,7 +212,7 @@ namespace CompanionAI_v3.Planning.Plans
                 var tauntOptions = TauntScorer.EvaluateAllTauntOptions(
                     situation, tauntAbilities, remainingMP);
 
-                var bestOption = tauntOptions.FirstOrDefault();
+                var bestOption = tauntOptions.Count > 0 ? tauntOptions[0] : null;
 
                 if (TauntScorer.IsTauntWorthwhile(bestOption))
                 {
@@ -351,7 +360,7 @@ namespace CompanionAI_v3.Planning.Plans
                         float aoERadius = CombatAPI.GetAoERadius(aoEAbility);
                         if (aoERadius <= 0) aoERadius = 5f;
                         var clusters = ClusterDetector.FindClusters(situation.Enemies, aoERadius);
-                        if (clusters.Any(c => c.Count >= minEnemies))
+                        if (CollectionHelper.Any(clusters, c => c.Count >= minEnemies))
                         {
                             hasAoEOpportunity = true;
                             if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 4.8c: Cluster found for {aoEAbility.Name} (category={CombatAPI.GetAttackCategory(aoEAbility)})");
@@ -362,7 +371,7 @@ namespace CompanionAI_v3.Planning.Plans
                 else
                 {
                     // ★ v3.6.2: 레거시 경로도 타일 단위로 통일 (6타일 ≈ 8m)
-                    int nearbyEnemies = situation.Enemies.Count(e =>
+                    int nearbyEnemies = CollectionHelper.CountWhere(situation.Enemies, e =>
                         e != null && e.IsConscious &&
                         CombatCache.GetDistanceInTiles(situation.Unit, e) <= 6f);
                     hasAoEOpportunity = nearbyEnemies >= minEnemies;
@@ -390,6 +399,26 @@ namespace CompanionAI_v3.Planning.Plans
                             Main.Log($"[Tank] Phase 4.8c: Unit-targeted AOE planned");
                         }
                     }
+                }
+            }
+
+            // ★ v3.9.08: Phase 4.8c.5: AoE 재배치 (Phase 4.8c 실패 시)
+            if (!didPlanAttack && remainingAP >= 1f && remainingMP > 0 && situation.HasAoEAttacks
+                && !CollectionHelper.Any(actions, a => a.Type == ActionType.Move))
+            {
+                var (aoEMoveAction, aoEAttackAction) = PlanAoEWithReposition(
+                    situation, ref remainingAP, ref remainingMP);
+                if (aoEMoveAction != null && aoEAttackAction != null)
+                {
+                    actions.Add(aoEMoveAction);
+                    actions.Add(aoEAttackAction);
+                    didPlanAttack = true;
+
+                    var moveDest = aoEMoveAction.MoveDestination ?? aoEMoveAction.Target?.Point;
+                    if (moveDest.HasValue)
+                        RecalculateHittableFromDestination(situation, moveDest.Value);
+
+                    Main.Log($"[Tank] Phase 4.8c.5: AoE reposition planned");
                 }
             }
 
@@ -421,19 +450,26 @@ namespace CompanionAI_v3.Planning.Plans
             while (remainingAP >= 0f && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
             {
                 // ★ v3.1.21: Tank 가중치로 최적 타겟 선택 (거리 + 위협도 중시)
-                var candidates = situation.HittableEnemies
-                    .Where(e => e != null && !plannedTargetIds.Contains(e.UniqueId))
-                    .ToList();
+                // ★ v3.9.10: LINQ → for loop (GC 할당 제거)
+                _sharedCandidates.Clear();
+                for (int i = 0; i < situation.HittableEnemies.Count; i++)
+                {
+                    var e = situation.HittableEnemies[i];
+                    if (e != null && !plannedTargetIds.Contains(e.UniqueId))
+                        _sharedCandidates.Add(e);
+                }
+                var candidates = _sharedCandidates;
                 var bestTarget = TargetScorer.SelectBestEnemy(candidates, situation, Settings.AIRole.Tank)
                     ?? situation.NearestEnemy;
 
                 // ★ v3.2.15: 아군을 위협하는 적 우선 공격 (Tank 보호 역할)
-                var threateningEnemy = situation.Enemies
-                    .Where(e => e != null && situation.HittableEnemies.Contains(e) &&
-                                !plannedTargetIds.Contains(e.UniqueId) &&
-                                TeamBlackboard.Instance.CountAlliesTargeting(e) > 0)
-                    .OrderByDescending(e => TeamBlackboard.Instance.CountAlliesTargeting(e))
-                    .FirstOrDefault();
+                // ★ v3.9.10: LINQ → MaxByWhere (O(n log n) → O(n), GC 할당 제거)
+                var threateningEnemy = CollectionHelper.MaxByWhere(
+                    situation.Enemies,
+                    e => e != null && situation.HittableEnemies.Contains(e) &&
+                         !plannedTargetIds.Contains(e.UniqueId) &&
+                         TeamBlackboard.Instance.CountAlliesTargeting(e) > 0,
+                    e => (float)TeamBlackboard.Instance.CountAlliesTargeting(e));
 
                 if (threateningEnemy != null)
                 {
@@ -576,7 +612,7 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.2.25: 전선 유지 로직 - Tank가 전선 뒤에 있으면 전진 필요
             // ★ v3.5.17: Tank 적극적 접근 - 공격 후에도 근접 거리로 이동
             // ★ v3.5.36: GapCloser도 이동으로 취급 (중복 계획 방지)
-            bool hasMoveInPlan = actions.Any(a => a.Type == ActionType.Move ||
+            bool hasMoveInPlan = CollectionHelper.Any(actions, a => a.Type == ActionType.Move ||
                 (a.Type == ActionType.Attack && a.Ability != null && AbilityDatabase.IsGapCloser(a.Ability)));
             bool canMove = situation.CanMove || remainingMP > 0;
 
@@ -713,7 +749,9 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // ★ v3.1.24: Phase 9 - 최종 AP 활용 (모든 시도 실패 후)
-            if (remainingAP >= 1f && actions.Count > 0)
+            // ★ v3.9.06: actions.Count > 0 제한 제거 - DPSPlan v3.8.84와 통일
+            // 디버프/마커는 다른 행동 없이도 팀에 기여
+            if (remainingAP >= 1f)
             {
                 var finalAction = PlanFinalAPUtilization(situation, ref remainingAP);
                 if (finalAction != null)
@@ -729,7 +767,7 @@ namespace CompanionAI_v3.Planning.Plans
             if (removedAttacks > 0 && !didPlanAttack)
             {
                 // 모든 공격이 제거됨 → 복구 이동 시도
-                bool hasRecoveryMove = actions.Any(a => a.Type == ActionType.Move);
+                bool hasRecoveryMove = CollectionHelper.Any(actions, a => a.Type == ActionType.Move);
                 if (!hasRecoveryMove && situation.HasLivingEnemies && remainingMP > 0)
                 {
                     Main.Log($"[Tank] ★ Post-validation recovery: attempting movement (AP={remainingAP:F1}, MP={remainingMP:F1})");

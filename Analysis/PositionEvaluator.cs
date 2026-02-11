@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using System.Linq;
+// using System.Linq; // ★ v3.9.10: LINQ 완전 제거 → CollectionHelper.MaxBy
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.View.Covers;
 using UnityEngine;
@@ -66,7 +66,8 @@ namespace CompanionAI_v3.Analysis
             if (candidates.Count == 0)
                 return null;
 
-            var best = candidates.OrderByDescending(c => c.TotalScore).First();
+            // ★ v3.9.10: O(n log n) sort → O(n) MaxBy
+            var best = Core.CollectionHelper.MaxBy(candidates, c => c.TotalScore);
             Main.LogDebug($"[PositionEval] Best position: {best.Position} (score={best.TotalScore:F1})");
 
             return best.Position;
@@ -241,7 +242,13 @@ namespace CompanionAI_v3.Analysis
             if (candidates.Count == 0)
                 return null;
 
-            var best = candidates.OrderByDescending(c => c.score).First();
+            // ★ v3.9.10: O(n log n) sort → O(n) inline max
+            var best = candidates[0];
+            for (int i = 1; i < candidates.Count; i++)
+            {
+                if (candidates[i].score > best.score)
+                    best = candidates[i];
+            }
             Main.LogDebug($"[PositionEval] Retreat to: {best.pos} (score={best.score:F1})");
 
             return best.pos;

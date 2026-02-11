@@ -20,6 +20,10 @@ namespace CompanionAI_v3.Planning.Planners
     /// </summary>
     public static class AttackPlanner
     {
+        // ★ v3.9.10: Zero-alloc 정적 공유 리스트 (new List<> 제거)
+        private static readonly List<BaseUnitEntity> _sharedCandidateTargets = new List<BaseUnitEntity>(16);
+        private static readonly List<AbilityData> _sharedAbilityList = new List<AbilityData>(8);
+
         /// <summary>
         /// 공격 계획
         /// ★ v3.5.11: 상세 로깅 추가 (공격 실패 원인 진단용)
@@ -30,7 +34,9 @@ namespace CompanionAI_v3.Planning.Planners
             HashSet<string> excludeTargetIds = null, HashSet<string> excludeAbilityGuids = null,
             AttackPhaseContext context = null)
         {
-            var candidateTargets = new List<BaseUnitEntity>();
+            // ★ v3.9.10: new List<> 제거 → 정적 리스트 재사용
+            _sharedCandidateTargets.Clear();
+            var candidateTargets = _sharedCandidateTargets;
 
             if (preferTarget != null && !IsExcluded(preferTarget, excludeTargetIds))
                 candidateTargets.Add(preferTarget);
@@ -860,7 +866,9 @@ namespace CompanionAI_v3.Planning.Planners
                 return null;
 
             // AvailableAoEAttacks에서 다른 Phase에서 이미 처리하는 타입 제외
-            var unitTargetedAoE = new List<AbilityData>();
+            // ★ v3.9.10: new List<> 제거 → 정적 리스트 재사용
+            _sharedAbilityList.Clear();
+            var unitTargetedAoE = _sharedAbilityList;
             foreach (var attack in situation.AvailableAoEAttacks)
             {
                 // Phase 4.4에서 처리: Point-target AoE (위치 지정형)
@@ -897,22 +905,15 @@ namespace CompanionAI_v3.Planning.Planners
                     if (!CombatAPI.CanUseAbilityOn(ability, new TargetWrapper(enemy), out reason))
                         continue;
 
-                    int enemiesHit = CombatAPI.CountEnemiesInPattern(
-                        ability,
-                        enemy.Position,
-                        situation.Unit.Position,
-                        situation.Enemies);
+                    // ★ v3.9.10: 패턴 1회 계산으로 적+아군 동시 카운트 (GetAffectedNodes 중복 제거)
+                    CombatAPI.CountUnitsInPattern(
+                        ability, enemy.Position, situation.Unit.Position,
+                        situation.Unit, situation.Enemies, situation.Allies,
+                        out int enemiesHit, out int alliesHit);
 
                     if (enemiesHit >= minEnemies && enemiesHit > bestEnemyCount)
                     {
-                        // 아군 안전 체크
-                        int alliesHit = CombatAPI.CountAlliesInPattern(
-                            ability,
-                            enemy.Position,
-                            situation.Unit.Position,
-                            situation.Unit,
-                            situation.Allies);
-
+                        // 아군 안전 체크 (alliesHit 이미 계산됨)
                         var aoeConfig = Settings.AIConfig.GetAoEConfig();
                         int maxAlliesAllowed = aoeConfig?.MaxPlayerAlliesHit ?? 1;
 
@@ -950,6 +951,378 @@ namespace CompanionAI_v3.Planning.Planners
 
         #endregion
 
+        #region AoE Reposition (v3.9.08)
+
+        /// <summary>
+        /// ★ v3.9.08: AoE 재배치 후보 타일 정보 (struct — GC 없음)
+        /// </summary>
+        private struct AoERepositionCandidate
+        {
+            public Kingmaker.Pathfinding.CustomGridNodeBase Node;
+            public UnityEngine.Vector3 Position;
+            public float Score;
+        }
+
+        // ★ v3.9.08: 정적 버퍼 (GC 할당 제거)
+        private const int MAX_AOE_REPOSITION_CANDIDATES = 15;
+        private static readonly AoERepositionCandidate[] _repositionBuffer = new AoERepositionCandidate[MAX_AOE_REPOSITION_CANDIDATES];
+
+        /// <summary>
+        /// ★ v3.9.08: AoE 재배치 — Phase 4.4 실패 시, 이동하면 AoE가 가능한 위치 탐색
+        /// 아군 피격으로 AoE가 차단될 때, 다른 위치에서 안전한 AoE를 시전할 수 있는지 확인
+        /// 이동은 MP 소모, AoE는 AP 소모 → MP+AP 예산 모두 필요
+        /// </summary>
+        public static (PlannedAction moveAction, PlannedAction aoEAction) PlanAoEWithReposition(
+            Situation situation,
+            ref float remainingAP,
+            ref float remainingMP,
+            string roleName)
+        {
+            // Guard
+            if (remainingMP <= 0 || remainingAP < 1f)
+                return (null, null);
+            if (!situation.HasAoEAttacks || situation.AvailableAoEAttacks == null || situation.AvailableAoEAttacks.Count == 0)
+                return (null, null);
+            if (!situation.CanMove)
+                return (null, null);
+
+            var unit = situation.Unit;
+            int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+            if (situation.Enemies.Count < minEnemies)
+                return (null, null);
+
+            // Reachable tiles 조회 (LRU 캐시 히트 기대)
+            var reachableTiles = MovementAPI.FindAllReachableTilesWithThreatsSync(unit);
+            if (reachableTiles == null || reachableTiles.Count == 0)
+                return (null, null);
+
+            // 최고 결과 추적
+            PlannedAction bestMoveAction = null;
+            PlannedAction bestAoEAction = null;
+            float bestScore = float.MinValue;
+            int bestEnemiesHit = 0;
+
+            foreach (var aoeAbility in situation.AvailableAoEAttacks)
+            {
+                float abilityCost = CombatAPI.GetEffectiveAPCost(aoeAbility);
+                if (abilityCost > remainingAP) continue;
+
+                // Self-target, Melee AoE는 재배치 의미 없음
+                if (CombatAPI.IsSelfTargetedAoEAttack(aoeAbility)) continue;
+                if (CombatAPI.IsMeleeAoEAbility(aoeAbility)) continue;
+
+                float aoERadius = CombatAPI.GetAoERadius(aoeAbility);
+                if (aoERadius <= 0) aoERadius = 5f;
+
+                // 클러스터 탐색
+                var clusters = ClusterDetector.FindClusters(situation.Enemies, aoERadius);
+                if (clusters == null || clusters.Count == 0) continue;
+
+                // 최고 클러스터 선택
+                EnemyCluster bestCluster = null;
+                foreach (var cluster in clusters)
+                {
+                    if (cluster.Count >= minEnemies)
+                    {
+                        if (bestCluster == null || cluster.QualityScore > bestCluster.QualityScore)
+                            bestCluster = cluster;
+                    }
+                }
+                if (bestCluster == null) continue;
+
+                bool isPointTarget = CombatAPI.IsPointTargetAbility(aoeAbility);
+                bool isDirectional = CombatAPI.GetActualIsDirectional(aoeAbility);
+                float abilityRange = isDirectional
+                    ? aoERadius  // 방향성: 패턴 반경이 유효 사거리
+                    : CombatAPI.GetAbilityRangeInTiles(aoeAbility);
+
+                // 후보 타일 필터링
+                int candidateCount = GetAoERepositionCandidates(
+                    unit, bestCluster.Center, abilityRange,
+                    reachableTiles, situation.PrefersRanged, situation.MinSafeDistance,
+                    situation.Enemies, _repositionBuffer, MAX_AOE_REPOSITION_CANDIDATES);
+
+                if (candidateCount == 0) continue;
+
+                // 각 후보 타일에서 AoE 평가
+                for (int i = 0; i < candidateCount; i++)
+                {
+                    var candidate = _repositionBuffer[i];
+                    AoESafetyChecker.AoEScore aoEResult = null;
+
+                    if (isPointTarget)
+                    {
+                        if (isDirectional)
+                        {
+                            aoEResult = AoESafetyChecker.FindBestDirectionalAoETargetFromPosition(
+                                aoeAbility, unit, candidate.Position,
+                                situation.Enemies, situation.Allies, minEnemies);
+                        }
+                        else
+                        {
+                            aoEResult = AoESafetyChecker.FindBestAoEPositionFromPosition(
+                                aoeAbility, unit, candidate.Position,
+                                situation.Enemies, situation.Allies, minEnemies);
+                        }
+                    }
+                    else
+                    {
+                        // Unit-targeted AoE: 각 적에 대해 안전 체크
+                        int bestUnitTargetHits = 0;
+                        BaseUnitEntity bestUnitTarget = null;
+
+                        foreach (var enemy in situation.Enemies)
+                        {
+                            if (enemy == null || !enemy.IsConscious) continue;
+
+                            // fromPosition에서 사거리 체크
+                            float distToEnemy = CombatAPI.MetersToTiles(
+                                UnityEngine.Vector3.Distance(candidate.Position, enemy.Position));
+                            if (distToEnemy > abilityRange) continue;
+
+                            // 기존 IsAoESafeForUnitTargetFromPosition 활용
+                            if (!AoESafetyChecker.IsAoESafeForUnitTargetFromPosition(
+                                aoeAbility, candidate.Position, unit, enemy, situation.Allies))
+                                continue;
+
+                            // 패턴 내 적 수 계산
+                            CombatAPI.CountUnitsInPattern(
+                                aoeAbility, enemy.Position, candidate.Position,
+                                unit, situation.Enemies, situation.Allies,
+                                out int enemiesHit, out int alliesHit);
+
+                            if (enemiesHit >= minEnemies && enemiesHit > bestUnitTargetHits)
+                            {
+                                var aoeConfig = Settings.AIConfig.GetAoEConfig();
+                                int maxAlliesAllowed = aoeConfig?.MaxPlayerAlliesHit ?? 1;
+                                if (alliesHit > maxAlliesAllowed) continue;
+
+                                bestUnitTargetHits = enemiesHit;
+                                bestUnitTarget = enemy;
+                            }
+                        }
+
+                        if (bestUnitTarget != null && bestUnitTargetHits >= minEnemies)
+                        {
+                            aoEResult = new AoESafetyChecker.AoEScore
+                            {
+                                Position = bestUnitTarget.Position,
+                                EnemiesHit = bestUnitTargetHits,
+                                IsSafe = true,
+                                Score = bestUnitTargetHits * 100f
+                            };
+                        }
+                    }
+
+                    if (aoEResult == null || !aoEResult.IsSafe || aoEResult.EnemiesHit < minEnemies)
+                        continue;
+
+                    // 점수 산정: AoE 적중 가치 + 후보 타일 점수
+                    float totalScore = aoEResult.EnemiesHit * 40f + candidate.Score;
+
+                    if (totalScore > bestScore)
+                    {
+                        bestScore = totalScore;
+                        bestEnemiesHit = aoEResult.EnemiesHit;
+                        bestMoveAction = PlannedAction.Move(candidate.Position,
+                            $"AoE reposition for {aoeAbility.Name}");
+
+                        if (isPointTarget && !isDirectional)
+                        {
+                            bestAoEAction = PlannedAction.PositionalAttack(
+                                aoeAbility, aoEResult.Position,
+                                $"AoE after reposition on {aoEResult.EnemiesHit} enemies",
+                                abilityCost);
+                        }
+                        else if (isDirectional)
+                        {
+                            // 방향성: AffectedUnits에서 적 타겟 선택
+                            var primaryTarget = aoEResult.AffectedUnits?.Find(
+                                u => u != null && unit.CombatGroup.IsEnemy(u));
+                            if (primaryTarget != null)
+                            {
+                                bestAoEAction = PlannedAction.Attack(
+                                    aoeAbility, primaryTarget,
+                                    $"Directional AoE after reposition on {aoEResult.EnemiesHit} enemies",
+                                    abilityCost);
+                            }
+                            else
+                            {
+                                bestAoEAction = null; // 타겟 찾지 못함
+                            }
+                        }
+                        else
+                        {
+                            // Unit-targeted AoE
+                            var targetEntity = aoEResult.AffectedUnits?.Find(
+                                u => u != null && unit.CombatGroup.IsEnemy(u));
+                            if (targetEntity == null)
+                            {
+                                // AoEScore.Position에 저장된 적 위치로 가장 가까운 적 찾기
+                                foreach (var enemy in situation.Enemies)
+                                {
+                                    if (enemy != null && enemy.IsConscious &&
+                                        UnityEngine.Vector3.Distance(enemy.Position, aoEResult.Position) < 0.5f)
+                                    {
+                                        targetEntity = enemy;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (targetEntity != null)
+                            {
+                                bestAoEAction = PlannedAction.Attack(
+                                    aoeAbility, targetEntity,
+                                    $"Unit AoE after reposition on {aoEResult.EnemiesHit} enemies",
+                                    abilityCost);
+                            }
+                            else
+                            {
+                                bestAoEAction = null;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 단일타겟 대비 가치 비교: AoE 적중이 현재 Hittable × 1.2보다 가치 있어야 함
+            int currentHittable = situation.HittableEnemies?.Count ?? 0;
+            float singleTargetValue = currentHittable * 30f * 1.2f;
+            float aoEValue = bestEnemiesHit * 40f;
+
+            if (bestMoveAction != null && bestAoEAction != null && aoEValue > singleTargetValue)
+            {
+                remainingAP -= bestAoEAction.APCost;
+                // 이동은 MP 소모 (AP 비용 없음)
+
+                Main.Log($"[{roleName}] AoE reposition: {bestAoEAction.Ability?.Name} " +
+                    $"({bestEnemiesHit} enemies hit, score={bestScore:F0}, " +
+                    $"vs singleTarget={singleTargetValue:F0})");
+
+                return (bestMoveAction, bestAoEAction);
+            }
+
+            if (bestMoveAction != null && Main.IsDebugEnabled)
+            {
+                Main.LogDebug($"[{roleName}] AoE reposition rejected: " +
+                    $"aoEValue={aoEValue:F0} vs singleTarget={singleTargetValue:F0}");
+            }
+
+            return (null, null);
+        }
+
+        /// <summary>
+        /// ★ v3.9.08: AoE 재배치 후보 타일 필터링
+        /// 모든 reachable 타일이 아닌, 클러스터-사거리 관계를 만족하는 소수만 선택
+        /// 원거리: 안전 거리 유지, 근거리: 클러스터 근접
+        /// </summary>
+        private static int GetAoERepositionCandidates(
+            BaseUnitEntity unit,
+            UnityEngine.Vector3 clusterCenter,
+            float abilityRange,
+            Dictionary<Pathfinding.GraphNode, Kingmaker.Pathfinding.WarhammerPathAiCell> reachableTiles,
+            bool prefersRanged,
+            float minSafeDistance,
+            List<BaseUnitEntity> enemies,
+            AoERepositionCandidate[] buffer,
+            int maxCandidates)
+        {
+            int count = 0;
+            float worstScore = float.MaxValue;
+            int worstIndex = 0;
+
+            foreach (var kvp in reachableTiles)
+            {
+                var node = kvp.Key as Kingmaker.Pathfinding.CustomGridNodeBase;
+                if (node == null) continue;
+
+                var pos = node.Vector3Position;
+
+                // 클러스터 중심까지 거리 체크 (사거리 내여야 AoE 가능)
+                float distToCluster = CombatAPI.MetersToTiles(
+                    UnityEngine.Vector3.Distance(pos, clusterCenter));
+                if (distToCluster > abilityRange) continue;
+
+                // Walkable + 점유 가능 확인
+                if (!Analysis.BattlefieldGrid.Instance.IsValid ||
+                    !Analysis.BattlefieldGrid.Instance.CanUnitStandOn(unit, node))
+                    continue;
+
+                // 현재 위치와 같으면 스킵 (이미 Phase 4.4에서 시도했음)
+                if (UnityEngine.Vector3.Distance(pos, unit.Position) < 0.5f)
+                    continue;
+
+                float tileScore;
+                if (prefersRanged)
+                {
+                    // 원거리: 안전 거리 유지 + 사거리 여유
+                    float nearestEnemyDist = float.MaxValue;
+                    foreach (var enemy in enemies)
+                    {
+                        if (enemy == null || !enemy.IsConscious) continue;
+                        float d = CombatAPI.MetersToTiles(
+                            UnityEngine.Vector3.Distance(pos, enemy.Position));
+                        if (d < nearestEnemyDist) nearestEnemyDist = d;
+                    }
+                    float safetyScore = nearestEnemyDist >= minSafeDistance ? 20f : -30f;
+                    float rangeScore = abilityRange - distToCluster;
+                    tileScore = safetyScore + rangeScore;
+                }
+                else
+                {
+                    // 근거리: 클러스터에 가까울수록 높은 점수
+                    float proximityBonus = UnityEngine.Mathf.Max(0f, 10f - distToCluster) * 5f;
+                    tileScore = proximityBonus;
+                }
+
+                // 경로 위험도 차감
+                var cell = kvp.Value;
+                tileScore -= cell.ProvokedAttacks * 15f;
+
+                // 상위 maxCandidates개만 유지 (삽입 정렬)
+                if (count < maxCandidates)
+                {
+                    buffer[count] = new AoERepositionCandidate
+                    {
+                        Node = node,
+                        Position = pos,
+                        Score = tileScore
+                    };
+                    if (tileScore < worstScore)
+                    {
+                        worstScore = tileScore;
+                        worstIndex = count;
+                    }
+                    count++;
+                }
+                else if (tileScore > worstScore)
+                {
+                    // 최하위 교체
+                    buffer[worstIndex] = new AoERepositionCandidate
+                    {
+                        Node = node,
+                        Position = pos,
+                        Score = tileScore
+                    };
+                    // 새 최하위 찾기
+                    worstScore = float.MaxValue;
+                    for (int i = 0; i < maxCandidates; i++)
+                    {
+                        if (buffer[i].Score < worstScore)
+                        {
+                            worstScore = buffer[i].Score;
+                            worstIndex = i;
+                        }
+                    }
+                }
+            }
+
+            return count;
+        }
+
+        #endregion
+
         #region AOE Taunt (v3.1.17)
 
         /// <summary>
@@ -961,10 +1334,15 @@ namespace CompanionAI_v3.Planning.Planners
             string roleName)
         {
             // Point 타겟 + 도발 능력 찾기
-            var aoeTaunts = situation.AvailableBuffs
-                .Where(a => AbilityDatabase.IsTaunt(a))
-                .Where(a => CombatAPI.IsPointTargetAbility(a))
-                .ToList();
+            // ★ v3.9.10: LINQ 제거 → for 루프 + 정적 리스트
+            _sharedAbilityList.Clear();
+            for (int i = 0; i < situation.AvailableBuffs.Count; i++)
+            {
+                var a = situation.AvailableBuffs[i];
+                if (AbilityDatabase.IsTaunt(a) && CombatAPI.IsPointTargetAbility(a))
+                    _sharedAbilityList.Add(a);
+            }
+            var aoeTaunts = _sharedAbilityList;
 
             if (aoeTaunts.Count == 0) return null;
 
@@ -1100,7 +1478,9 @@ namespace CompanionAI_v3.Planning.Planners
             var caster = situation.Unit;
 
             // 1. 근접 AOE 능력 찾기 (AvailableAttacks에서)
-            var meleeAoEAbilities = new List<AbilityData>();
+            // ★ v3.9.10: new List<> 제거 → 정적 리스트 재사용
+            _sharedAbilityList.Clear();
+            var meleeAoEAbilities = _sharedAbilityList;
             for (int i = 0; i < situation.AvailableAttacks.Count; i++)
             {
                 if (CombatAPI.IsMeleeAoEAbility(situation.AvailableAttacks[i]))
@@ -1141,10 +1521,11 @@ namespace CompanionAI_v3.Planning.Planners
                     if (enemy == null) continue;
                     try { if (enemy.LifeState?.IsDead == true) continue; } catch { }
 
-                    int enemies = CombatAPI.CountEnemiesInPattern(
-                        ability, enemy.Position, caster.Position, situation.Enemies);
-                    int allies = CombatAPI.CountAlliesInPattern(
-                        ability, enemy.Position, caster.Position, caster, situation.Allies);
+                    // ★ v3.9.10: 패턴 1회 계산으로 적+아군 동시 카운트
+                    CombatAPI.CountUnitsInPattern(
+                        ability, enemy.Position, caster.Position,
+                        caster, situation.Enemies, situation.Allies,
+                        out int enemies, out int allies);
 
                     // ★ v3.8.94: MaxPlayerAlliesHit로 통합
                     if (allies > aoeConfig.MaxPlayerAlliesHit) continue;

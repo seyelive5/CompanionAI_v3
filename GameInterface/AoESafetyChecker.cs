@@ -193,6 +193,74 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
+        /// ★ v3.9.08: 가상 위치에서 최적 Circle AoE 타겟 위치 탐색
+        /// AoE 재배치용: 시전자가 fromPosition에 있다고 가정하고 사거리 체크
+        /// 기존 FindBestAoEPosition()과 동일하되 caster.Position → fromPosition
+        /// </summary>
+        public static AoEScore FindBestAoEPositionFromPosition(
+            AbilityData ability,
+            BaseUnitEntity caster,
+            Vector3 fromPosition,
+            List<BaseUnitEntity> enemies,
+            List<BaseUnitEntity> allies,
+            int minEnemiesRequired = 2)
+        {
+            if (enemies == null || enemies.Count < minEnemiesRequired)
+                return null;
+
+            var allUnits = new List<BaseUnitEntity>();
+            allUnits.AddRange(enemies.Where(e => e != null));
+            if (allies != null) allUnits.AddRange(allies.Where(a => a != null));
+            allUnits.Add(caster);
+
+            float aoERadius = CombatAPI.GetAoERadius(ability);
+            float abilityRange = CombatAPI.GetAbilityRangeInTiles(ability);
+
+            var candidates = new List<AoEScore>();
+
+            // 전략 1: 각 적 위치 중심
+            foreach (var enemy in enemies)
+            {
+                if (enemy == null || !enemy.IsConscious) continue;
+
+                // ★ v3.9.08: fromPosition에서 사거리 체크 (caster.Position 대신)
+                float distFromPos = CombatAPI.MetersToTiles(Vector3.Distance(fromPosition, enemy.Position));
+                if (distFromPos > abilityRange) continue;
+
+                var score = EvaluateAoEPosition(ability, caster, enemy.Position, allUnits);
+                if (score.IsSafe && score.EnemiesHit >= minEnemiesRequired)
+                    candidates.Add(score);
+            }
+
+            // 전략 2: 적 2명 중간점
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                for (int j = i + 1; j < enemies.Count; j++)
+                {
+                    var e1 = enemies[i];
+                    var e2 = enemies[j];
+                    if (e1 == null || e2 == null || !e1.IsConscious || !e2.IsConscious) continue;
+
+                    Vector3 center = (e1.Position + e2.Position) / 2f;
+                    // ★ v3.9.08: fromPosition에서 사거리 체크
+                    float distFromPos = CombatAPI.MetersToTiles(Vector3.Distance(fromPosition, center));
+                    if (distFromPos > abilityRange) continue;
+
+                    if (Analysis.BattlefieldGrid.Instance.IsValid && !Analysis.BattlefieldGrid.Instance.IsWalkable(center))
+                        continue;
+
+                    var score = EvaluateAoEPosition(ability, caster, center, allUnits);
+                    if (score.IsSafe && score.EnemiesHit >= minEnemiesRequired)
+                        candidates.Add(score);
+                }
+            }
+
+            return candidates
+                .OrderByDescending(c => c.Score)
+                .FirstOrDefault();
+        }
+
+        /// <summary>
         /// ★ v3.5.76: 간단한 AOE 안전성 체크 - 설정 기반
         /// 아군 피격 허용 수는 설정으로 제어
         /// </summary>
@@ -568,6 +636,54 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
+        /// ★ v3.9.08: 가상 위치에서 최적 방향성 AoE 타겟 탐색
+        /// AoE 재배치용: 시전자가 fromPosition에 있다고 가정
+        /// </summary>
+        public static AoEScore FindBestDirectionalAoETargetFromPosition(
+            Kingmaker.UnitLogic.Abilities.AbilityData ability,
+            BaseUnitEntity caster,
+            Vector3 fromPosition,
+            System.Collections.Generic.List<BaseUnitEntity> enemies,
+            System.Collections.Generic.List<BaseUnitEntity> allies,
+            int minEnemiesRequired = 2)
+        {
+            if (enemies == null || enemies.Count < minEnemiesRequired)
+                return null;
+
+            var patternType = CombatAPI.GetPatternType(ability);
+            if (!patternType.HasValue) return null;
+
+            float radius = CombatAPI.GetAoERadius(ability);
+            float angle = CombatAPI.GetPatternAngle(ability);
+
+            // ★ v3.8.33: 방향성 패턴은 패턴 반경이 실제 유효 사거리
+            float effectiveRange = radius;
+
+            var candidates = new System.Collections.Generic.List<AoEScore>();
+
+            foreach (var primaryTarget in enemies)
+            {
+                if (primaryTarget == null || !primaryTarget.IsConscious) continue;
+
+                // ★ v3.9.08: fromPosition에서 사거리 체크
+                float distFromPos = CombatAPI.MetersToTiles(Vector3.Distance(fromPosition, primaryTarget.Position));
+                if (distFromPos > effectiveRange) continue;
+
+                // ★ v3.9.08: fromPosition에서 방향 벡터 계산
+                Vector3 direction = (primaryTarget.Position - fromPosition).normalized;
+
+                var score = EvaluateDirectionalAoEFromPosition(
+                    ability, caster, fromPosition, direction, primaryTarget,
+                    enemies, allies, patternType.Value, radius, angle);
+
+                if (score.IsSafe && score.EnemiesHit >= minEnemiesRequired)
+                    candidates.Add(score);
+            }
+
+            return candidates.OrderByDescending(c => c.Score).FirstOrDefault();
+        }
+
+        /// <summary>
         /// ★ v3.5.76: 특정 방향의 Cone/Ray/Sector 패턴 평가 - 설정 기반
         /// </summary>
         public static AoEScore EvaluateDirectionalAoE(
@@ -659,6 +775,96 @@ namespace CompanionAI_v3.GameInterface
 
             score.Score = totalScore;
             // ★ v3.5.76: minEnemiesRequired 활용
+            int effectiveMinEnemies = minEnemiesRequired > 0 ? minEnemiesRequired : 2;
+            score.IsSafe = score.IsSafe && totalScore > 0 && score.EnemiesHit >= effectiveMinEnemies;
+
+            return score;
+        }
+
+        /// <summary>
+        /// ★ v3.9.08: 가상 위치에서 방향성 AoE 패턴 평가
+        /// 기존 EvaluateDirectionalAoE와 동일하되 caster.Position → fromPosition
+        /// </summary>
+        public static AoEScore EvaluateDirectionalAoEFromPosition(
+            Kingmaker.UnitLogic.Abilities.AbilityData ability,
+            BaseUnitEntity caster,
+            Vector3 fromPosition,
+            Vector3 direction,
+            BaseUnitEntity primaryTarget,
+            System.Collections.Generic.List<BaseUnitEntity> enemies,
+            System.Collections.Generic.List<BaseUnitEntity> allies,
+            Kingmaker.Blueprints.PatternType patternType,
+            float radius,
+            float angle,
+            int minEnemiesRequired = 0)
+        {
+            var score = new AoEScore
+            {
+                Position = primaryTarget.Position,
+                IsSafe = true
+            };
+
+            var aoeConfig = AIConfig.GetAoEConfig();
+            float HIT_SCORE = aoeConfig.EnemyHitScore;
+            float totalScore = 0f;
+            int playerPartyAlliesHit = 0;
+
+            var allUnits = new System.Collections.Generic.List<BaseUnitEntity>();
+            allUnits.AddRange(enemies.Where(e => e != null));
+            if (allies != null) allUnits.AddRange(allies.Where(a => a != null));
+
+            foreach (var unit in allUnits)
+            {
+                if (unit == null || !unit.IsConscious) continue;
+
+                // ★ v3.9.08: fromPosition에서 패턴 범위 체크
+                if (!CombatAPI.IsUnitInDirectionalAoERange(fromPosition, direction, unit, radius, angle, patternType))
+                    continue;
+
+                // ★ v3.9.08: fromPosition에서 거리 보너스 계산
+                Vector3 toUnit = unit.Position - fromPosition;
+                float dist = CombatAPI.MetersToTiles(toUnit.magnitude);
+
+                score.AffectedUnits.Add(unit);
+                float distanceBonus = HIT_SCORE - dist * dist;
+
+                try
+                {
+                    if (caster.CombatGroup.IsEnemy(unit))
+                    {
+                        score.EnemiesHit++;
+                        totalScore += distanceBonus;
+                    }
+                    else if (caster.CombatGroup.IsAlly(unit))
+                    {
+                        score.AlliesHit++;
+
+                        if (!caster.IsPlayerEnemy && unit.IsInPlayerParty)
+                        {
+                            playerPartyAlliesHit++;
+
+                            if (playerPartyAlliesHit > aoeConfig.MaxPlayerAlliesHit)
+                            {
+                                score.IsSafe = false;
+                                score.Score = float.MinValue;
+                                return score;
+                            }
+
+                            totalScore -= aoeConfig.PlayerAllyPenaltyMultiplier * HIT_SCORE;
+                            continue;
+                        }
+
+                        totalScore -= aoeConfig.NpcAllyPenaltyMultiplier * HIT_SCORE;
+                    }
+                }
+                catch
+                {
+                    score.EnemiesHit++;
+                    totalScore += distanceBonus;
+                }
+            }
+
+            score.Score = totalScore;
             int effectiveMinEnemies = minEnemiesRequired > 0 ? minEnemiesRequired : 2;
             score.IsSafe = score.IsSafe && totalScore > 0 && score.EnemiesHit >= effectiveMinEnemies;
 

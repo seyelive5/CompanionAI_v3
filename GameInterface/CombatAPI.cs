@@ -41,6 +41,10 @@ namespace CompanionAI_v3.GameInterface
         private static int _cachedAbilitiesFrame;
         private static List<AbilityData> _cachedAbilitiesList;
 
+        // ★ v3.9.10: Pattern counting zero-alloc 풀 (new HashSet<> 제거)
+        private static readonly HashSet<BaseUnitEntity> _sharedUnitSet = new HashSet<BaseUnitEntity>();
+        private static readonly HashSet<BaseUnitEntity> _sharedAllySet = new HashSet<BaseUnitEntity>();
+
         #region Ability Checks
 
         /// <summary>
@@ -2655,7 +2659,10 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// ★ v3.7.81: 특정 위치에서 타겟에게 능력 사용 가능한지 확인
-        /// 이동 후 공격 검증에 사용 (사거리 + LOS 기반)
+        /// 이동 후 공격 검증에 사용
+        /// ★ v3.9.04: 게임 API (CanTargetFromNode) 기반으로 전환
+        /// 기존 LosCalculations.HasLos()는 게임의 CanUseAbilityOn()과 결과 불일치 발생
+        /// → Analyzer(hittable)와 Validator(reachable) 판정이 달라 공격 누락
         /// </summary>
         public static bool CanReachTargetFromPosition(AbilityData ability, Vector3 fromPosition, BaseUnitEntity target)
         {
@@ -2663,62 +2670,25 @@ namespace CompanionAI_v3.GameInterface
 
             try
             {
-                // Unlimited 사거리는 LOS만 체크
-                bool isUnlimited = IsUnlimitedRange(ability);
-                float distanceInTiles = 0f;
-
-                if (!isUnlimited)
-                {
-                    float abilityRange = GetAbilityRange(ability);
-                    if (abilityRange <= 0) return false;  // Personal 능력
-
-                    // ★ v3.8.66: 캐스터+타겟 SizeRect 반영 (대형 유닛 대응)
-                    var casterEntity = ability.Caster as BaseUnitEntity;
-                    IntRect casterSize = casterEntity?.SizeRect ?? new IntRect(0, 0, 0, 0);
-                    distanceInTiles = (float)WarhammerGeometryUtils.DistanceToInCells(
-                        fromPosition, casterSize,
-                        target.Position, target.SizeRect);
-
-                    // 사거리 여유 (1타일)
-                    bool inRange = distanceInTiles <= abilityRange + 1f;
-
-                    if (!inRange)
-                    {
-                        if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] CanReachFromPos: {ability.Name} -> {target.CharacterName}, " +
-                            $"Dist={distanceInTiles:F1}tiles, Range={abilityRange:F1}tiles, OUT OF RANGE");
-                        return false;
-                    }
-                }
-
-                // LOS 체크 (게임 API 사용)
-                var fromNode = fromPosition.GetNearestNodeXZ();
-                var targetNode = target.Position.GetNearestNodeXZ();
-
-                if (fromNode == null || targetNode == null)
+                var fromNode = fromPosition.GetNearestNodeXZ() as Kingmaker.Pathfinding.CustomGridNodeBase;
+                if (fromNode == null)
                 {
                     if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] CanReachFromPos: Node lookup failed, allowing");
-                    return true;  // 노드 찾기 실패 시 허용
+                    return true;
                 }
 
-                // ★ v3.8.66: 캐스터 실제 SizeRect 사용 (기존 IntRect(0,0,1,1)은 2x2였음 — 버그)
-                var casterForLos = ability.Caster as BaseUnitEntity;
-                IntRect casterSizeForLos = casterForLos?.SizeRect ?? new IntRect(0, 0, 0, 0);
-                bool hasLos = Kingmaker.View.Covers.LosCalculations.HasLos(
-                    fromNode, casterSizeForLos,
-                    targetNode, target.SizeRect);
+                // ★ v3.9.04: 게임 API 위임 — Analyzer와 동일한 검증 기준 사용
+                bool canTarget = CanTargetFromPosition(ability, fromNode, target, out string reason);
 
-                if (!hasLos)
+                if (Main.IsDebugEnabled)
                 {
-                    if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] CanReachFromPos: {ability.Name} -> {target.CharacterName}, " +
-                        $"Dist={distanceInTiles:F1}tiles, NO LOS");
-                }
-                else
-                {
-                    if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] CanReachFromPos: {ability.Name} -> {target.CharacterName}, " +
-                        $"Dist={distanceInTiles:F1}tiles, OK");
+                    if (!canTarget)
+                        Main.LogDebug($"[CombatAPI] CanReachFromPos: {ability.Name} -> {target.CharacterName}, BLOCKED: {reason}");
+                    else
+                        Main.LogDebug($"[CombatAPI] CanReachFromPos: {ability.Name} -> {target.CharacterName}, OK");
                 }
 
-                return hasLos;
+                return canTarget;
             }
             catch (Exception ex)
             {
@@ -3395,14 +3365,17 @@ namespace CompanionAI_v3.GameInterface
                 var pattern = GetAffectedNodes(ability, targetPosition, casterPosition);
                 if (pattern.IsEmpty) return 0;
 
-                int count = 0;
-                var enemySet = new HashSet<BaseUnitEntity>(enemies);
+                // ★ v3.9.10: new HashSet<> 제거 → 정적 풀 재사용
+                _sharedUnitSet.Clear();
+                for (int i = 0; i < enemies.Count; i++)
+                    _sharedUnitSet.Add(enemies[i]);
 
+                int count = 0;
                 foreach (var node in pattern.Nodes)
                 {
                     if (node.TryGetUnit(out var unit) &&
                         unit is BaseUnitEntity baseUnit &&
-                        enemySet.Contains(baseUnit))
+                        _sharedUnitSet.Contains(baseUnit))
                     {
                         count++;
                     }
@@ -3435,15 +3408,18 @@ namespace CompanionAI_v3.GameInterface
                 var pattern = GetAffectedNodes(ability, targetPosition, casterPosition);
                 if (pattern.IsEmpty) return 0;
 
-                int count = 0;
-                var allySet = new HashSet<BaseUnitEntity>(allies);
+                // ★ v3.9.10: new HashSet<> 제거 → 정적 풀 재사용
+                _sharedAllySet.Clear();
+                for (int i = 0; i < allies.Count; i++)
+                    _sharedAllySet.Add(allies[i]);
 
+                int count = 0;
                 foreach (var node in pattern.Nodes)
                 {
                     if (node.TryGetUnit(out var unit) &&
                         unit is BaseUnitEntity baseUnit &&
                         baseUnit != caster &&
-                        allySet.Contains(baseUnit))
+                        _sharedAllySet.Contains(baseUnit))
                     {
                         count++;
                     }
@@ -3455,6 +3431,57 @@ namespace CompanionAI_v3.GameInterface
             {
                 if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] CountAlliesInPattern error: {ex.Message}");
                 return 0;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.9.10: 패턴 1회 계산으로 적/아군 수 동시 카운트
+        /// GetAffectedNodes 중복 호출 제거 — AttackPlanner 이중 호출 최적화
+        /// </summary>
+        public static void CountUnitsInPattern(
+            AbilityData ability,
+            Vector3 targetPosition,
+            Vector3 casterPosition,
+            BaseUnitEntity caster,
+            List<BaseUnitEntity> enemies,
+            List<BaseUnitEntity> allies,
+            out int enemyCount,
+            out int allyCount)
+        {
+            enemyCount = 0;
+            allyCount = 0;
+
+            try
+            {
+                if (ability == null) return;
+
+                var pattern = GetAffectedNodes(ability, targetPosition, casterPosition);
+                if (pattern.IsEmpty) return;
+
+                _sharedUnitSet.Clear();
+                if (enemies != null)
+                    for (int i = 0; i < enemies.Count; i++)
+                        _sharedUnitSet.Add(enemies[i]);
+
+                _sharedAllySet.Clear();
+                if (allies != null)
+                    for (int i = 0; i < allies.Count; i++)
+                        _sharedAllySet.Add(allies[i]);
+
+                foreach (var node in pattern.Nodes)
+                {
+                    if (node.TryGetUnit(out var unit) && unit is BaseUnitEntity baseUnit)
+                    {
+                        if (_sharedUnitSet.Contains(baseUnit))
+                            enemyCount++;
+                        if (baseUnit != caster && _sharedAllySet.Contains(baseUnit))
+                            allyCount++;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] CountUnitsInPattern error: {ex.Message}");
             }
         }
 

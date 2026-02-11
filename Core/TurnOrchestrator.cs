@@ -88,6 +88,9 @@ namespace CompanionAI_v3.Core
         /// 게임에서 호출되는 메인 진입점
         /// SelectAbilityTargetPatch에서 호출됨
         /// ★ v3.5.36: 서브 메서드로 분해하여 가독성 향상
+        /// ★ v3.9.04: 2-phase 프레임 분산 — Analyze와 Plan+Execute를 별도 프레임에서 실행
+        ///   프레임1: Validate + Analyze → return Waiting (게임이 렌더링)
+        ///   프레임2: Plan + Execute → return 결과
         /// </summary>
         public ExecutionResult ProcessTurn(BaseUnitEntity unit)
         {
@@ -115,15 +118,17 @@ namespace CompanionAI_v3.Core
                 _executor.CheckForKills();
                 NotifyRoundChangeIfNeeded();
 
-                // 4. 계획 생성/업데이트
-                var situation = CreateOrUpdatePlan(unit, unitId, unitName, turnState);
-                if (situation == null)
+                // ★ v3.9.04: Phase 분기 — 스터터링 방지를 위한 프레임 분산
+                if (turnState.CurrentComputePhase == ComputePhase.WaitingForPlan)
                 {
-                    return ExecutionResult.EndTurn("Situation analysis failed");
+                    // Phase 2: Plan + Execute (이전 프레임에서 Analyze 완료)
+                    return PlanAndExecutePhase(unit, unitId, unitName, turnState);
                 }
-
-                // 5. 다음 행동 실행
-                return ExecuteNextAction(unit, unitName, turnState, situation);
+                else
+                {
+                    // Phase 1: Analyze → 다음 프레임으로 넘기기
+                    return AnalyzePhase(unit, unitId, unitName, turnState);
+                }
             }
             catch (Exception ex)
             {
@@ -131,6 +136,79 @@ namespace CompanionAI_v3.Core
                 Main.LogError($"[Orchestrator] Stack: {ex.StackTrace}");
                 return ExecutionResult.EndTurn($"Exception: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// ★ v3.9.04: Phase 1 — 상황 분석 후 다음 프레임으로 양보
+        /// 스터터링 방지: Analyze만 수행하고 Plan+Execute는 다음 프레임에서
+        /// </summary>
+        private ExecutionResult AnalyzePhase(BaseUnitEntity unit, string unitId, string unitName, TurnState turnState)
+        {
+            // 분석 시간 측정
+            _profilerStopwatch.Restart();
+
+            var situation = _analyzer.Analyze(unit, turnState);
+            if (situation == null)
+            {
+                Main.LogWarning($"[Orchestrator] {unitName}: Situation analysis returned null");
+                return ExecutionResult.EndTurn("Situation analysis failed");
+            }
+
+            _profilerStopwatch.Stop();
+            _totalAnalyzeMs += _profilerStopwatch.ElapsedMilliseconds;
+
+            // TeamBlackboard에 상황 등록
+            TeamBlackboard.Instance.RegisterUnitSituation(unitId, situation);
+
+            // 다음 프레임에서 Plan+Execute 수행
+            turnState.PendingSituation = situation;
+            turnState.CurrentComputePhase = ComputePhase.WaitingForPlan;
+
+            Main.LogDebug($"[Orchestrator] {unitName}: Analysis complete ({_profilerStopwatch.ElapsedMilliseconds}ms) — deferring plan to next frame");
+            return ExecutionResult.Waiting("Analysis complete");
+        }
+
+        /// <summary>
+        /// ★ v3.9.04: Phase 2 — 계획 수립 + 행동 실행
+        /// 이전 프레임에서 Analyze 결과(PendingSituation)를 받아 Plan+Execute 수행
+        /// </summary>
+        private ExecutionResult PlanAndExecutePhase(BaseUnitEntity unit, string unitId, string unitName, TurnState turnState)
+        {
+            var situation = turnState.PendingSituation;
+            if (situation == null)
+            {
+                Main.LogWarning($"[Orchestrator] {unitName}: PendingSituation is null in WaitingForPlan phase");
+                turnState.CurrentComputePhase = ComputePhase.Ready;
+                return ExecutionResult.EndTurn("PendingSituation lost");
+            }
+
+            // Phase 완료 — 상태 리셋
+            turnState.CurrentComputePhase = ComputePhase.Ready;
+            turnState.PendingSituation = null;
+
+            // Plan 생성/업데이트
+            _profilerStopwatch.Restart();
+
+            if (turnState.Plan == null || turnState.Plan.IsComplete)
+            {
+                Main.Log($"[Orchestrator] {unitName}: Creating new turn plan (continuation={turnState.Plan?.IsComplete ?? false})");
+                turnState.Plan = _planner.CreatePlan(situation, turnState);
+                TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
+            }
+
+            if (turnState.Plan.NeedsReplan(situation))
+            {
+                CaptureStrategicContextOnReplan(turnState);
+                Main.Log($"[Orchestrator] {unitName}: Replanning due to situation change");
+                turnState.Plan = _planner.CreatePlan(situation, turnState);
+                TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
+            }
+
+            _profilerStopwatch.Stop();
+            _totalPlanMs += _profilerStopwatch.ElapsedMilliseconds;
+
+            // 다음 행동 실행
+            return ExecuteNextAction(unit, unitName, turnState, situation);
         }
 
         #endregion
@@ -280,59 +358,8 @@ namespace CompanionAI_v3.Core
             }
         }
 
-        /// <summary>
-        /// ★ v3.5.36: 계획 생성 또는 업데이트
-        /// </summary>
-        /// <returns>분석된 Situation, null이면 분석 실패</returns>
-        private Situation CreateOrUpdatePlan(BaseUnitEntity unit, string unitId, string unitName, TurnState turnState)
-        {
-            // ★ v3.8.48: 분석 시간 측정
-            _profilerStopwatch.Restart();
-
-            // 상황 분석
-            var situation = _analyzer.Analyze(unit, turnState);
-
-            if (situation == null)
-            {
-                Main.LogWarning($"[Orchestrator] {unitName}: Situation analysis returned null");
-                return null;
-            }
-
-            // ★ v3.8.48: 분석 시간 기록
-            _profilerStopwatch.Stop();
-            _totalAnalyzeMs += _profilerStopwatch.ElapsedMilliseconds;
-
-            // TeamBlackboard에 상황 등록
-            TeamBlackboard.Instance.RegisterUnitSituation(unitId, situation);
-
-            // ★ v3.8.48: 계획 시간 측정
-            _profilerStopwatch.Restart();
-
-            // 계획이 없거나 완료되면 새 계획 생성
-            if (turnState.Plan == null || turnState.Plan.IsComplete)
-            {
-                Main.Log($"[Orchestrator] {unitName}: Creating new turn plan (continuation={turnState.Plan?.IsComplete ?? false})");
-                turnState.Plan = _planner.CreatePlan(situation, turnState);
-                TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
-            }
-
-            // 계획 재수립 필요 여부 확인
-            if (turnState.Plan.NeedsReplan(situation))
-            {
-                // ★ v3.8.86: 재계획 전 전략 컨텍스트 캡처
-                CaptureStrategicContextOnReplan(turnState);
-
-                Main.Log($"[Orchestrator] {unitName}: Replanning due to situation change");
-                turnState.Plan = _planner.CreatePlan(situation, turnState);
-                TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
-            }
-
-            // ★ v3.8.48: 계획 시간 기록
-            _profilerStopwatch.Stop();
-            _totalPlanMs += _profilerStopwatch.ElapsedMilliseconds;
-
-            return situation;
-        }
+        // ★ v3.9.04: CreateOrUpdatePlan() 제거 — AnalyzePhase() + PlanAndExecutePhase()로 분리
+        // 스터터링 방지: Analyze와 Plan+Execute를 별도 프레임에서 실행
 
         /// <summary>
         /// ★ v3.5.36: 다음 행동 실행 및 결과 처리
@@ -344,7 +371,21 @@ namespace CompanionAI_v3.Core
 
             if (nextAction == null)
             {
-                Main.Log($"[Orchestrator] {unitName}: No more actions in plan");
+                // ★ v3.9.06: 빈 큐 EndTurn 안전 검증 — AP 남아있으면 1회 안전 재계획
+                float remainingAP = CombatAPI.GetCurrentAP(unit);
+                if (remainingAP > 0 && turnState.EmptyPlanEndCount == 0)
+                {
+                    turnState.EmptyPlanEndCount++;
+                    turnState.Plan?.Cancel("Safety replan: AP remaining after plan complete");
+                    Main.LogWarning($"[Orchestrator] {unitName}: Plan empty but AP={remainingAP:F1} remaining — safety replan #{turnState.EmptyPlanEndCount}");
+                    return ExecutionResult.Continue();
+                }
+
+                if (remainingAP > 0)
+                    Main.LogWarning($"[Orchestrator] {unitName}: EndTurn with AP={remainingAP:F1} remaining (safety replan exhausted)");
+                else
+                    Main.Log($"[Orchestrator] {unitName}: No more actions in plan");
+
                 return ExecutionResult.EndTurn("Plan complete");
             }
 

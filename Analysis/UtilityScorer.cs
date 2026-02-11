@@ -1257,6 +1257,10 @@ namespace CompanionAI_v3.Analysis
             // 이동 불가면 false
             if (!situation.CanMove || situation.CurrentMP <= 0) return false;
 
+            // ★ v3.9.06: 근접 캐릭터는 ClearMP 전 후퇴 금지
+            // 근접은 적에게 붙어있어야 공격 가능 — 후퇴하면 공격 불가 → GapCloser로 재접근 → MP 낭비
+            if (!situation.PrefersRanged) return false;
+
             // 역할별 안전 가중치
             float safetyWeight = GetRoleSafetyWeight(situation);
             if (safetyWeight < 0.4f) return false;  // Tank는 이동 안 함

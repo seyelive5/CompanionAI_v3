@@ -36,7 +36,18 @@ namespace CompanionAI_v3.Analysis
 
         #region Fields
 
-        // 그리드 데이터
+        // ★ v3.9.04: Zero-alloc 정적 그리드 버퍼 (GC 할당 제거)
+        // 그리드 크기는 MAX_DIMENSION으로 제한되므로 정적 배열로 재사용
+        // 150 = 202m 커버리지 (RT 모든 전투 맵 대응)
+        private const int MAX_DIMENSION = 150;
+        private static readonly float[,] _sharedThreatGrid = new float[MAX_DIMENSION, MAX_DIMENSION];
+        private static readonly float[,] _sharedControlGrid = new float[MAX_DIMENSION, MAX_DIMENSION];
+        private static readonly float[,] _sharedCoverGrid = new float[MAX_DIMENSION, MAX_DIMENSION];
+
+        // ★ v3.9.04: 인스턴스 재사용 (new BattlefieldInfluenceMap() 제거)
+        private static BattlefieldInfluenceMap _cachedInstance;
+
+        // 그리드 데이터 (정적 배열 참조)
         private float[,] _threatGrid;      // 적 위협 밀도
         private float[,] _controlGrid;     // 아군 통제 영역
         private float[,] _coverGrid;       // ★ v3.5.00: 엄폐 품질 (0=None, 0.5=Half, 1.0=Full)
@@ -53,6 +64,9 @@ namespace CompanionAI_v3.Analysis
 
         // ★ v3.5.10: PDF Stamp Cache
         private CoverStampCache _stampCache;
+
+        // ★ v3.9.04: ComputeFrontline 용 재사용 버퍼
+        private List<Vector3> _contactPointsBuffer = new List<Vector3>(16);
 
         #endregion
 
@@ -75,14 +89,32 @@ namespace CompanionAI_v3.Analysis
             /// <summary>적 ID → 스탬프 맵핑</summary>
             private Dictionary<string, float[,]> _stamps = new Dictionary<string, float[,]>();
 
+            // ★ v3.9.04: 스탬프 배열 풀 (new 할당 제거)
+            private List<float[,]> _stampPool = new List<float[,]>();
+
+            private float[,] RentStamp()
+            {
+                if (_stampPool.Count > 0)
+                {
+                    var stamp = _stampPool[_stampPool.Count - 1];
+                    _stampPool.RemoveAt(_stampPool.Count - 1);
+                    return stamp;
+                }
+                return new float[STAMP_SIZE, STAMP_SIZE]; // 풀 비었을 때만 할당
+            }
+
             /// <summary>
             /// 모든 적에 대한 스탬프 사전 계산
+            /// ★ v3.9.04: 스탬프 풀링으로 GC 할당 제거
             /// </summary>
             public void PrecomputeStamps(
                 List<BaseUnitEntity> enemies,
                 Vector3 gridOrigin,
                 float cellSize)
             {
+                // 기존 스탬프를 풀에 반환
+                foreach (var kvp in _stamps)
+                    _stampPool.Add(kvp.Value);
                 _stamps.Clear();
 
                 foreach (var enemy in enemies)
@@ -90,7 +122,7 @@ namespace CompanionAI_v3.Analysis
                     if (enemy == null) continue;
 
                     string enemyId = enemy.UniqueId ?? enemy.CharacterName ?? "unknown";
-                    float[,] stamp = new float[STAMP_SIZE, STAMP_SIZE];
+                    float[,] stamp = RentStamp();
 
                     // 21×21 스탬프 내 각 셀의 엄폐 계산
                     for (int dx = -STAMP_RADIUS; dx <= STAMP_RADIUS; dx++)
@@ -236,14 +268,16 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>
         /// 영향력 맵 계산
+        /// ★ v3.9.04: 인스턴스 재사용 — new 할당 제거
         /// </summary>
         public static BattlefieldInfluenceMap Compute(
             List<BaseUnitEntity> enemies,
             List<BaseUnitEntity> allies)
         {
-            var map = new BattlefieldInfluenceMap();
-            map.ComputeInternal(enemies, allies);
-            return map;
+            if (_cachedInstance == null)
+                _cachedInstance = new BattlefieldInfluenceMap();
+            _cachedInstance.ComputeInternal(enemies, allies);
+            return _cachedInstance;
         }
 
         #endregion
@@ -324,12 +358,21 @@ namespace CompanionAI_v3.Analysis
             _gridHeight = Mathf.CeilToInt((max.z - min.z) / CELL_SIZE) + 1;
 
             // 성능을 위해 최대 크기 제한
-            _gridWidth = Mathf.Min(_gridWidth, 100);
-            _gridHeight = Mathf.Min(_gridHeight, 100);
+            _gridWidth = Mathf.Min(_gridWidth, MAX_DIMENSION);
+            _gridHeight = Mathf.Min(_gridHeight, MAX_DIMENSION);
 
-            _threatGrid = new float[_gridWidth, _gridHeight];
-            _controlGrid = new float[_gridWidth, _gridHeight];
-            _coverGrid = new float[_gridWidth, _gridHeight];  // ★ v3.5.00: CoverMap
+            // ★ v3.9.04: new 할당 제거 — 정적 배열 참조 + 사용 영역만 초기화
+            _threatGrid = _sharedThreatGrid;
+            _controlGrid = _sharedControlGrid;
+            _coverGrid = _sharedCoverGrid;
+
+            for (int x = 0; x < _gridWidth; x++)
+                for (int z = 0; z < _gridHeight; z++)
+                {
+                    _threatGrid[x, z] = 0f;
+                    _controlGrid[x, z] = 0f;
+                    // coverGrid는 ComputeCoverMap()의 ApplyStampsToGrid에서 초기화됨
+                }
         }
 
         private void ComputeInfluence()
@@ -469,7 +512,9 @@ namespace CompanionAI_v3.Analysis
         /// </summary>
         private void ComputeFrontline()
         {
-            var contactPoints = new List<Vector3>();
+            // ★ v3.9.04: new List 제거 → 필드 버퍼 재사용
+            _contactPointsBuffer.Clear();
+            var contactPoints = _contactPointsBuffer;
 
             // 1. 각 아군-최근접 적 쌍의 접촉점 계산
             foreach (var ally in _allies)
@@ -555,7 +600,9 @@ namespace CompanionAI_v3.Analysis
                     float threatB = GetThreatAt(b);
                     return threatA.CompareTo(threatB);
                 });
-                SafeZones = SafeZones.GetRange(0, 10);
+                // ★ v3.9.04: GetRange 제거 (새 List 할당 방지) → 뒤에서부터 제거
+                while (SafeZones.Count > 10)
+                    SafeZones.RemoveAt(SafeZones.Count - 1);
             }
         }
 

@@ -435,6 +435,27 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.9.08: Phase 4.4.5: AoE 재배치 (Phase 4.4/4.4b 실패 시)
+            // 아군 피격으로 AoE 차단 → 이동하면 안전하게 AoE 가능한 위치 탐색
+            if (!didPlanAttack && remainingAP >= 1f && remainingMP > 0 && situation.HasAoEAttacks
+                && !actions.Any(a => a.Type == ActionType.Move))
+            {
+                var (aoEMoveAction, aoEAttackAction) = PlanAoEWithReposition(
+                    situation, ref remainingAP, ref remainingMP);
+                if (aoEMoveAction != null && aoEAttackAction != null)
+                {
+                    actions.Add(aoEMoveAction);
+                    actions.Add(aoEAttackAction);
+                    didPlanAttack = true;
+
+                    var moveDest = aoEMoveAction.MoveDestination ?? aoEMoveAction.Target?.Point;
+                    if (moveDest.HasValue)
+                        RecalculateHittableFromDestination(situation, moveDest.Value);
+
+                    Main.Log($"[DPS] Phase 4.4.5: AoE reposition planned");
+                }
+            }
+
             // ★ v3.1.22: Phase 4.5: 특수 능력 + 콤보 연계 감지
             // GetComboPrerequisite()를 호출하여 DOT 강화 전 DOT 적용 필요 여부 확인
             AbilityData comboPrereqAbility = null;

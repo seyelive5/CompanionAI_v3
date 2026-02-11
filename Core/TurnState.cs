@@ -1,8 +1,22 @@
 using System.Collections.Generic;
 using Kingmaker.EntitySystem.Entities;
+using CompanionAI_v3.Analysis;
 
 namespace CompanionAI_v3.Core
 {
+    /// <summary>
+    /// ★ v3.9.04: AI 계산 프레임 분산 — 계산 단계
+    /// ProcessTurn()에서 Analyze → Plan+Execute를 별도 프레임으로 분리
+    /// </summary>
+    public enum ComputePhase
+    {
+        /// <summary>기본 상태 — Analyze 수행 후 WaitingForPlan으로 전환</summary>
+        Ready,
+
+        /// <summary>Analyze 완료 — 다음 프레임에 Plan+Execute 수행</summary>
+        WaitingForPlan
+    }
+
     /// <summary>
     /// 현재 턴의 상태를 추적
     /// 한 유닛의 턴 동안 유지되는 모든 상태 정보
@@ -127,8 +141,27 @@ namespace CompanionAI_v3.Core
         /// <summary>★ v3.8.92: 실패 후 폴백 재계획 횟수</summary>
         public int FallbackReplanCount { get; set; }
 
+        /// <summary>★ v3.9.06: 빈 큐 EndTurn 시 안전 재계획 횟수 (최대 1회)</summary>
+        public int EmptyPlanEndCount { get; set; }
+
         /// <summary>최대 액션 도달 여부</summary>
         public bool HasReachedMaxActions => ActionCount >= MaxActionsPerTurn;
+
+        #endregion
+
+        #region Frame Spreading (★ v3.9.04)
+
+        /// <summary>
+        /// ★ v3.9.04: 현재 계산 단계 — Analyze와 Plan+Execute를 별도 프레임으로 분리
+        /// 스터터링 방지: 한 프레임에 50~150ms 계산 → 2프레임에 분산
+        /// </summary>
+        public ComputePhase CurrentComputePhase { get; set; } = ComputePhase.Ready;
+
+        /// <summary>
+        /// ★ v3.9.04: Analyze 결과를 다음 프레임의 Plan+Execute로 전달
+        /// Ready→WaitingForPlan 전환 시 설정, Plan 완료 후 null로 클리어
+        /// </summary>
+        public Situation PendingSituation { get; set; }
 
         #endregion
 

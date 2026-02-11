@@ -687,7 +687,9 @@ namespace CompanionAI_v3.Planning.Plans
             // ══════════════════════════════════════════════════════════════
             // Phase 9: Final AP Utilization
             // ══════════════════════════════════════════════════════════════
-            if (remainingAP >= 1f && actions.Count > 0)
+            // ★ v3.9.06: actions.Count > 0 제한 제거 - DPSPlan v3.8.84와 통일
+            // 디버프/마커는 다른 행동 없이도 팀에 기여
+            if (remainingAP >= 1f)
             {
                 var finalAction = PlanFinalAPUtilization(situation, ref remainingAP);
                 if (finalAction != null)
