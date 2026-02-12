@@ -33,6 +33,7 @@ namespace CompanionAI_v3.Analysis
             public float DebuffState { get; set; }    // DOT 등 디버프 상태
             public float SpecialRole { get; set; }    // Healer/Caster 보너스
             public float Difficulty { get; set; }      // ★ v3.8.49: 적 등급 (Boss/Elite 등) 보너스
+            public float TurnUrgency { get; set; }    // ★ v3.9.16: 턴 순서 긴급도 (곧 행동할 적 우선)
         }
 
         /// <summary>
@@ -61,7 +62,8 @@ namespace CompanionAI_v3.Analysis
             Hittable = 0.6f,      // 중간
             DebuffState = 0.7f,   // 높음 - DOT 콤보
             SpecialRole = 0.5f,   // 중간
-            Difficulty = 0.6f     // ★ v3.8.49: 중간 - 보스 공격하되 킬 가능한 졸개 우선
+            Difficulty = 0.6f,    // ★ v3.8.49: 중간 - 보스 공격하되 킬 가능한 졸개 우선
+            TurnUrgency = 0.6f   // ★ v3.9.16: 중간 - 곧 행동할 적 킬 우선
         };
 
         // Tank: 가까운 적 우선, 거리 중시
@@ -74,7 +76,8 @@ namespace CompanionAI_v3.Analysis
             Hittable = 0.8f,      // 높음 - 바로 공격 가능
             DebuffState = 0.2f,   // 낮음
             SpecialRole = 0.3f,   // 낮음
-            Difficulty = 1.0f     // ★ v3.8.49: 매우 높음 - 보스 어그로/교전 최우선
+            Difficulty = 1.0f,    // ★ v3.8.49: 매우 높음 - 보스 어그로/교전 최우선
+            TurnUrgency = 0.3f   // ★ v3.9.16: 낮음 - 탱크는 근접 우선, 턴 순서 덜 중요
         };
 
         // Support: 안전한 공격, 위협 제거
@@ -87,7 +90,8 @@ namespace CompanionAI_v3.Analysis
             Hittable = 1.0f,      // 매우 높음 - 이동 없이 공격
             DebuffState = 0.8f,   // 높음 - 디버프 활용
             SpecialRole = 0.9f,   // 높음 - Healer/Caster 우선
-            Difficulty = 0.8f     // ★ v3.8.49: 높음 - 보스에 디버프/CC 집중
+            Difficulty = 0.8f,    // ★ v3.8.49: 높음 - 보스에 디버프/CC 집중
+            TurnUrgency = 0.8f   // ★ v3.9.16: 높음 - CC 타이밍 중요 (곧 행동할 적 CC 우선)
         };
 
         // Support 아군 타겟 가중치
@@ -355,6 +359,15 @@ namespace CompanionAI_v3.Analysis
                     score += aoeClusterBonus;
                     Main.LogDebug($"[TargetScorer] {target.CharacterName}: +{aoeClusterBonus:F0} AOE cluster bonus");
                 }
+
+                // ★ v3.9.16: 턴 순서 긴급도 — 곧 행동할 적 우선, 이미 행동한 적 후순위
+                float turnUrgency = GetTurnUrgencyScore(target, situation.Unit);
+                if (Math.Abs(turnUrgency) > 0.01f)
+                {
+                    score += turnUrgency * weights.TurnUrgency;
+                    if (Main.IsDebugEnabled)
+                        Main.LogDebug($"[TargetScorer] {target.CharacterName}: {turnUrgency * weights.TurnUrgency:+0;-0} turn urgency");
+                }
             }
             catch (Exception ex)
             {
@@ -564,6 +577,132 @@ namespace CompanionAI_v3.Analysis
 
         #endregion
 
+        #region Turn Order Awareness (★ v3.9.16)
+
+        // 프레임당 1회 캐시 — ScoreEnemy가 적 수만큼 호출되므로 매번 ToList() 방지
+        // ★ v3.9.18: internal — TauntScorer에서도 접근 가능
+        internal static int _turnOrderCacheFrame = -1;
+        internal static List<BaseUnitEntity> _cachedTurnOrder;
+
+        /// <summary>
+        /// ★ v3.9.16: 이번 라운드 남은 턴 순서 캐시 갱신 (프레임당 1회)
+        /// CurrentRoundUnitsOrder에서 현재 유닛 이후의 순서를 추출
+        /// </summary>
+        internal static void RefreshTurnOrderCache(BaseUnitEntity currentUnit)
+        {
+            int frame = UnityEngine.Time.frameCount;
+            if (frame == _turnOrderCacheFrame && _cachedTurnOrder != null)
+                return;
+
+            _turnOrderCacheFrame = frame;
+            _cachedTurnOrder = new List<BaseUnitEntity>(12);
+
+            try
+            {
+                var turnOrder = Kingmaker.Game.Instance?.TurnController?.TurnOrder;
+                if (turnOrder == null) return;
+
+                var remaining = turnOrder.CurrentRoundUnitsOrder;
+                if (remaining == null) return;
+
+                bool pastCurrentUnit = false;
+                foreach (var entity in remaining)
+                {
+                    var unit = entity as BaseUnitEntity;
+                    if (unit == null) continue;
+
+                    // 현재 행동 중인 유닛 스킵 (ActedThisRound=false라 목록에 포함됨)
+                    if (unit == currentUnit)
+                    {
+                        pastCurrentUnit = true;
+                        continue;
+                    }
+
+                    if (pastCurrentUnit)
+                        _cachedTurnOrder.Add(unit);
+                }
+
+                if (Main.IsDebugEnabled && _cachedTurnOrder.Count > 0)
+                {
+                    Main.LogDebug($"[TargetScorer] TurnOrder cache: {_cachedTurnOrder.Count} units remaining after {currentUnit?.CharacterName}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[TargetScorer] TurnOrder cache error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.9.16: 적의 턴 순서 긴급도 점수 계산
+        /// - 곧 행동할 적: +25 (1번째) ~ +0 (6번째 이후)
+        /// - 이미 행동한 적: -10
+        /// - 턴 순서 정보 없음: 0 (중립)
+        /// </summary>
+        private static float GetTurnUrgencyScore(BaseUnitEntity target, BaseUnitEntity currentUnit)
+        {
+            try
+            {
+                RefreshTurnOrderCache(currentUnit);
+
+                if (_cachedTurnOrder == null || _cachedTurnOrder.Count == 0)
+                    return 0f;
+
+                // 이미 행동한 적 = 이번 라운드 위협 낮음
+                if (target.Initiative?.ActedThisRound == true)
+                    return -10f;
+
+                // 남은 턴 순서에서 위치 찾기
+                int position = _cachedTurnOrder.IndexOf(target);
+                if (position < 0) return 0f;  // 목록에 없음 (인터럽트 등 특수 상황)
+
+                // 가까울수록 높은 보너스: 0번째=+25, 1번째=+20, ..., 5번째=+0
+                float bonus = Math.Max(0f, 25f - position * 5f);
+
+                if (bonus > 0f && Main.IsDebugEnabled)
+                {
+                    Main.LogDebug($"[TargetScorer] {target.CharacterName}: TurnUrgency +{bonus:F0} (position {position} in turn order)");
+                }
+
+                return bonus;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.9.16: 아군의 턴 순서 기반 버프 우선순위 보정
+        /// - 곧 행동할 아군: +15 (버프 즉시 활용 가능)
+        /// - 이미 행동한 아군: -10 (버프 효과 다음 라운드까지 대기)
+        /// </summary>
+        private static float GetAllyTurnOrderBonus(BaseUnitEntity ally, BaseUnitEntity currentUnit)
+        {
+            try
+            {
+                RefreshTurnOrderCache(currentUnit);
+
+                if (_cachedTurnOrder == null || _cachedTurnOrder.Count == 0)
+                    return 0f;
+
+                if (ally.Initiative?.ActedThisRound == true)
+                    return -10f;  // 이미 행동 완료 → 버프 우선순위 낮춤
+
+                int position = _cachedTurnOrder.IndexOf(ally);
+                if (position >= 0 && position <= 2)
+                    return 15f;  // 곧 행동할 아군 → 버프 즉시 활용
+
+                return 0f;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        #endregion
+
         #region Helper Methods
 
         /// <summary>
@@ -764,6 +903,11 @@ namespace CompanionAI_v3.Analysis
                 float hpPercent = CombatCache.GetHPPercent(ally);
                 if (hpPercent < t.PreAttackBuffMinHP)
                     priority += 15f;
+
+                // ★ v3.9.16: 턴 순서 기반 버프 우선순위
+                // 곧 행동할 아군에게 버프 → 즉시 활용 / 이미 행동한 아군 → 다음 라운드 대기
+                float allyTurnBonus = GetAllyTurnOrderBonus(ally, situation.Unit);
+                priority += allyTurnBonus;
             }
             catch { }
 

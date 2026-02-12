@@ -50,6 +50,11 @@ namespace CompanionAI_v3.Analysis
         private const float WEIGHT_ENEMY_HIT = 30f;              // 일반 적 도발
         private const float WEIGHT_MOVE_PENALTY = -10f;          // 이동 비용 (MP당)
         private const float WEIGHT_DISTANCE_PENALTY = -2f;       // 거리 비용 (m당)
+        // ★ v3.9.18: 턴 순서 기반 도발 가치
+        // 곧 행동할 적 도발 = 그 적의 공격을 탱크에게 강제 (높은 가치)
+        // 이미 행동한 적 도발 = 이번 라운드 효과 없음 (낭비)
+        private const float WEIGHT_TURN_URGENCY_MAX = 40f;       // 다음 행동 적 도발 보너스 (최대)
+        private const float WEIGHT_TURN_ALREADY_ACTED = -20f;    // 이미 행동한 적 도발 페널티
 
         #endregion
 
@@ -275,6 +280,21 @@ namespace CompanionAI_v3.Analysis
                 score += moveDistance * WEIGHT_DISTANCE_PENALTY;
             }
 
+            // ★ v3.9.18: 턴 순서 기반 도발 가치 보정
+            // 곧 행동할 적 도발 = 그 적의 공격을 탱크로 강제 (가치↑)
+            // 이미 행동한 적 도발 = 이번 라운드 효과 없음 (가치↓)
+            TargetScorer.RefreshTurnOrderCache(tank);
+            float turnOrderBonus = 0f;
+            foreach (var enemy in affectedEnemies)
+            {
+                turnOrderBonus += GetEnemyTauntUrgency(enemy);
+            }
+            if (Math.Abs(turnOrderBonus) > 0.01f)
+            {
+                score += turnOrderBonus;
+                Main.LogDebug($"[TauntScorer] TurnOrder bonus: {turnOrderBonus:+0;-0} for {affectedEnemies.Count} enemies");
+            }
+
             // ★ v3.6.12: TargetPoint 계산 수정
             // - isSelfTarget=true: 캐스터 위치를 타겟으로
             // - !isSelfTarget: CannotTargetSelf 회피를 위해 적절한 오프셋 적용
@@ -415,6 +435,9 @@ namespace CompanionAI_v3.Analysis
             var tank = situation.Unit;
             float tauntRange = CombatAPI.GetAbilityRangeInTiles(taunt);
 
+            // ★ v3.9.18: 턴 순서 캐시 갱신 (GetAllyThreatUrgency에서 사용)
+            TargetScorer.RefreshTurnOrderCache(tank);
+
             // 패턴 정보에서 AOE 반경 추출
             var patternInfo = CombatAPI.GetPatternInfo(taunt);
             float aoERadius = patternInfo?.Radius ?? 3f;  // 기본 3타일
@@ -468,13 +491,19 @@ namespace CompanionAI_v3.Analysis
                 // - 아군 타겟팅 적 수 × 100
                 // - 일반 적 수 × 30
                 // - HP 낮은 아군 보너스 (최대 50점)
+                // - ★ v3.9.18: 곧 행동할 적이 근처에 있으면 보호 긴급도↑
                 float score = targetingAlliesCount * WEIGHT_ENEMY_TARGETING_ALLY;
                 score += (nearbyEnemies.Count - targetingAlliesCount) * WEIGHT_ENEMY_HIT;
                 score += (1f - CombatCache.GetHPPercent(ally)) * 50f;  // HP 0%면 50점 추가
 
+                // ★ v3.9.18: 턴 순서 기반 보호 긴급도
+                float threatUrgency = GetAllyThreatUrgency(ally, nearbyEnemies);
+                if (Math.Abs(threatUrgency) > 0.01f)
+                    score += threatUrgency;
+
                 Main.LogDebug($"[TauntScorer] AllyTarget: {ally.CharacterName} - " +
                     $"enemies={nearbyEnemies.Count}, targetingAllies={targetingAlliesCount}, " +
-                    $"HP={CombatCache.GetHPPercent(ally):P0}, score={score:F0}");
+                    $"HP={CombatCache.GetHPPercent(ally):P0}, turnThreat={threatUrgency:+0;-0}, score={score:F0}");
 
                 if (score > bestScore)
                 {
@@ -517,6 +546,57 @@ namespace CompanionAI_v3.Analysis
                 TargetAlly = bestAlly,
                 IsAllyTargetTaunt = true
             };
+        }
+
+        #endregion
+
+        #region Turn Order Helpers (★ v3.9.18)
+
+        /// <summary>
+        /// ★ v3.9.18: 도발 대상 적의 턴 순서 기반 긴급도
+        /// - 곧 행동할 적: +40 (1번째) ~ +0 (5번째 이후) — 도발로 공격 방향 강제
+        /// - 이미 행동한 적: -20 — 이번 라운드 도발 효과 없음
+        /// </summary>
+        private static float GetEnemyTauntUrgency(BaseUnitEntity enemy)
+        {
+            try
+            {
+                // 이미 행동한 적 = 이번 라운드 도발 가치 낮음
+                if (enemy.Initiative?.ActedThisRound == true)
+                    return WEIGHT_TURN_ALREADY_ACTED;
+
+                var turnOrder = TargetScorer._cachedTurnOrder;
+                if (turnOrder == null || turnOrder.Count == 0)
+                    return 0f;
+
+                int position = turnOrder.IndexOf(enemy);
+                if (position < 0) return 0f;
+
+                // 가까울수록 높은 보너스: 0=+40, 1=+30, 2=+20, 3=+10, 4+=0
+                float bonus = Math.Max(0f, WEIGHT_TURN_URGENCY_MAX - position * 10f);
+                return bonus;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.9.18: 아군 주변 적의 턴 순서 기반 위험도 합산
+        /// 곧 행동할 적이 많을수록 이 아군을 보호해야 할 긴급도↑
+        /// </summary>
+        private static float GetAllyThreatUrgency(BaseUnitEntity ally, List<BaseUnitEntity> nearbyEnemies)
+        {
+            if (nearbyEnemies == null || nearbyEnemies.Count == 0)
+                return 0f;
+
+            float totalUrgency = 0f;
+            foreach (var enemy in nearbyEnemies)
+            {
+                totalUrgency += GetEnemyTauntUrgency(enemy);
+            }
+            return totalUrgency;
         }
 
         #endregion

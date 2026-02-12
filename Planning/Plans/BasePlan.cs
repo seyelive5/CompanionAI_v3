@@ -867,7 +867,8 @@ namespace CompanionAI_v3.Planning.Plans
                 var timing = AbilityDatabase.GetTiming(buff);
                 if (timing == AbilityTiming.PreAttackBuff ||
                     timing == AbilityTiming.HeroicAct ||
-                    timing == AbilityTiming.RighteousFury)
+                    timing == AbilityTiming.RighteousFury ||
+                    timing == AbilityTiming.SelfDamage)  // ★ v3.9.14: Phase 9에서 자해 버프 차단 (HP 낭비 방지)
                     continue;
 
                 // 턴 종료 능력 제외
@@ -910,7 +911,8 @@ namespace CompanionAI_v3.Planning.Plans
 
             // 3. 마커 (적에게)
             // ★ v3.1.28: 이미 마킹된 타겟에 중복 적용 방지
-            if (situation.NearestEnemy != null && situation.AvailableMarkers != null)
+            if (situation.NearestEnemy != null && situation.AvailableMarkers != null
+                && situation.HasHittableEnemies)  // ★ v3.9.14: 때릴 수 없으면 마킹 무의미 (SingleUse 낭비 방지)
             {
                 string targetId = situation.NearestEnemy.UniqueId;
                 foreach (var marker in situation.AvailableMarkers)

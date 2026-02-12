@@ -144,6 +144,12 @@ namespace CompanionAI_v3.Core
         /// <summary>★ v3.9.06: 빈 큐 EndTurn 시 안전 재계획 횟수 (최대 1회)</summary>
         public int EmptyPlanEndCount { get; set; }
 
+        /// <summary>★ v3.9.14: 마지막 계획 생성 시점의 게임 AP (정체 감지용)</summary>
+        public float APAtLastPlanStart { get; set; } = -1f;
+
+        /// <summary>★ v3.9.14: AP 정체 연속 횟수 (AP 변화 없고 공격 안 했으면 +1, 3회 시 EndTurn)</summary>
+        public int StagnantPlanCount { get; set; }
+
         /// <summary>최대 액션 도달 여부</summary>
         public bool HasReachedMaxActions => ActionCount >= MaxActionsPerTurn;
 

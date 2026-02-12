@@ -191,6 +191,33 @@ namespace CompanionAI_v3.Core
 
             if (turnState.Plan == null || turnState.Plan.IsComplete)
             {
+                // ★ v3.9.14: AP 정체 감지 — AP가 줄지 않고 공격도 못 하면 무한루프 의심
+                float currentGameAP = CombatAPI.GetCurrentAP(unit);
+                if (turnState.APAtLastPlanStart >= 0)  // 첫 플랜이 아닌 경우만
+                {
+                    bool apUnchanged = Math.Abs(currentGameAP - turnState.APAtLastPlanStart) < 0.01f;
+                    bool noAttack = !turnState.HasAttackedThisTurn;
+
+                    if (apUnchanged && noAttack)
+                    {
+                        turnState.StagnantPlanCount++;
+                        Main.LogWarning($"[Orchestrator] {unitName}: Stagnant plan #{turnState.StagnantPlanCount} " +
+                            $"(AP={currentGameAP:F1} unchanged, no attack)");
+
+                        if (turnState.StagnantPlanCount >= 3)
+                        {
+                            Main.LogWarning($"[Orchestrator] {unitName}: ★ Ending turn — {turnState.StagnantPlanCount} " +
+                                $"stagnant plans (AP={currentGameAP:F1}, actions={turnState.ActionCount})");
+                            return ExecutionResult.EndTurn("Stagnant AP - no progress");
+                        }
+                    }
+                    else
+                    {
+                        turnState.StagnantPlanCount = 0;  // 진전 있으면 리셋
+                    }
+                }
+                turnState.APAtLastPlanStart = currentGameAP;
+
                 Main.Log($"[Orchestrator] {unitName}: Creating new turn plan (continuation={turnState.Plan?.IsComplete ?? false})");
                 turnState.Plan = _planner.CreatePlan(situation, turnState);
                 TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
@@ -277,9 +304,11 @@ namespace CompanionAI_v3.Core
                     Main.Log($"[Orchestrator] {unitName}: AP=0 but Move pending with MP={currentMP:F1} - continuing");
                 }
                 // ★ v3.5.88: 0 AP 공격이 있으면 계속 진행 (Break Through → Slash 등)
-                else if (CombatAPI.HasZeroAPAttack(unit))
+                // ★ v3.9.10: 단순 존재 확인이 아닌 사거리 도달 가능성까지 검증
+                // 0 AP 공격이 있어도 MP로 도달 불가하면 무한 이동 루프 방지를 위해 턴 종료
+                else if (CombatAPI.HasZeroAPAttack(unit) && CombatAPI.CanAnyZeroAPAttackReachEnemy(unit, currentMP))
                 {
-                    Main.Log($"[Orchestrator] {unitName}: AP=0 but 0 AP attacks available - continuing");
+                    Main.Log($"[Orchestrator] {unitName}: AP=0 but 0 AP attacks reachable (MP={currentMP:F1}) - continuing");
                 }
                 else
                 {

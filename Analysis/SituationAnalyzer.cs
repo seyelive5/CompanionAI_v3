@@ -447,6 +447,13 @@ namespace CompanionAI_v3.Analysis
                                 if (!CombatHelpers.IsAttackSafeForTarget(attack, unit, enemy, situation.Allies))
                                     continue;
 
+                                // ★ v3.9.14: AOE 높이 차이 체크 (메인 루프와 동일 기준)
+                                if (CombatAPI.IsPointTargetAbility(attack) && !CombatAPI.IsAoEHeightInRange(attack, unit, enemy))
+                                {
+                                    Main.LogDebug($"[Analyzer] Fallback AOE height failed: {attack.Name} -> {enemy.CharacterName}");
+                                    continue;
+                                }
+
                                 situation.HittableEnemies.Add(enemy);
                                 Main.LogDebug($"[Analyzer] {enemy.CharacterName} hittable by {attack.Name} (fallback)");
 
@@ -644,6 +651,15 @@ namespace CompanionAI_v3.Analysis
                         if (!AllyStateCache.HasBuff(unit, ability))
                         {
                             situation.AvailableBuffs.Add(ability);
+                            // ★ v3.9.20: PreCombatBuff 공격/방어 자동 분류 (진단 + 캐시 워밍)
+                            if (timing == AbilityTiming.PreCombatBuff)
+                            {
+                                bool isDef = AbilityDatabase.IsDefensiveBuff(ability);
+                                bool isOff = AbilityDatabase.IsOffensiveBuff(ability);
+                                string buffType = isDef && isOff ? "Mixed"
+                                    : isDef ? "Defensive" : isOff ? "Offensive" : "Unclassified";
+                                Main.LogDebug($"[Analyzer] BuffClassify: {ability.Name} → {buffType}");
+                            }
                         }
                         break;
 

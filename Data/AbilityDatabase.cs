@@ -5,8 +5,11 @@ using Kingmaker.Blueprints;
 using Kingmaker.ElementsSystem;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Abilities;
+using Kingmaker.EntitySystem.Stats.Base;
 using Kingmaker.UnitLogic.Abilities.Blueprints;
 using Kingmaker.UnitLogic.Abilities.Components;
+using Kingmaker.UnitLogic.Buffs.Components;
+using Kingmaker.UnitLogic.FactLogic;
 using Kingmaker.UnitLogic.Mechanics.Actions;
 using Kingmaker.Utility;
 using CompanionAI_v3.Analysis;
@@ -1299,6 +1302,181 @@ namespace CompanionAI_v3.Data
 
             return false;
         }
+
+        #region Buff Effect Classification (★ v3.9.20)
+
+        // ★ v3.9.20: 버프 효과 분류 캐시 (GUID별, 세션 단위)
+        // BlueprintAbility → ContextActionApplyBuff → BlueprintBuff → StatBonus 추적 결과
+        private static readonly Dictionary<string, (bool isDefensive, bool isOffensive)> _buffEffectCache
+            = new Dictionary<string, (bool, bool)>();
+
+        /// <summary>
+        /// ★ v3.9.20: 버프가 방어 효과를 가지는지 확인
+        /// BlueprintAbility → ContextActionApplyBuff → BlueprintBuff → 스탯 보너스 추적
+        /// Toughness, Evasion, DamageDeflection, TempHP 등 → 방어 버프
+        /// </summary>
+        public static bool IsDefensiveBuff(AbilityData ability)
+        {
+            if (ability == null) return false;
+
+            // 1. GUID 데이터베이스 플래그 확인
+            var info = GetInfo(ability);
+            if (info != null)
+            {
+                if ((info.Flags & AbilityFlags.IsDefensiveBuff) != 0) return true;
+                if ((info.Flags & AbilityFlags.IsDefensiveStance) != 0) return true;
+                if ((info.Flags & AbilityFlags.IsOffensiveBuff) != 0) return false;  // 명시적 공격 버프
+            }
+
+            // 2. 블루프린트 컴포넌트 자동 분석
+            var (isDef, _) = AnalyzeBuffEffect(ability);
+            return isDef;
+        }
+
+        /// <summary>
+        /// ★ v3.9.20: 버프가 공격 효과를 가지는지 확인
+        /// BS, WS, Strength, Perception, AP 보너스 등 → 공격 버프
+        /// </summary>
+        public static bool IsOffensiveBuff(AbilityData ability)
+        {
+            if (ability == null) return false;
+
+            // 1. GUID 데이터베이스 플래그 확인
+            var info = GetInfo(ability);
+            if (info != null)
+            {
+                if ((info.Flags & AbilityFlags.IsOffensiveBuff) != 0) return true;
+                if ((info.Flags & AbilityFlags.IsDefensiveBuff) != 0) return false;  // 명시적 방어 버프
+                if ((info.Flags & AbilityFlags.IsDefensiveStance) != 0) return false;
+            }
+
+            // 2. 블루프린트 컴포넌트 자동 분석
+            var (_, isOff) = AnalyzeBuffEffect(ability);
+            return isOff;
+        }
+
+        /// <summary>
+        /// ★ v3.9.20: 블루프린트 컴포넌트 체인을 추적하여 버프 효과 분류
+        /// BlueprintAbility → AbilityEffectRunAction → ContextActionApplyBuff
+        ///   → BlueprintBuff → AddGenericStatBonus/AddContextStatBonus/TemporaryHitPoints
+        /// 결과는 GUID별 캐시 (블루프린트 불변)
+        /// </summary>
+        private static (bool isDefensive, bool isOffensive) AnalyzeBuffEffect(AbilityData ability)
+        {
+            try
+            {
+                var bp = ability?.Blueprint;
+                if (bp == null) return (false, false);
+
+                string guid = bp.AssetGuid?.ToString();
+                if (!string.IsNullOrEmpty(guid) && _buffEffectCache.TryGetValue(guid, out var cached))
+                    return cached;
+
+                bool foundDefensive = false;
+                bool foundOffensive = false;
+
+                var runAction = BlueprintCache.GetCachedRunAction(bp);
+                if (runAction?.Actions?.Actions == null)
+                {
+                    var result0 = (false, false);
+                    if (!string.IsNullOrEmpty(guid)) _buffEffectCache[guid] = result0;
+                    return result0;
+                }
+
+                foreach (var action in runAction.Actions.Actions)
+                {
+                    if (!(action is ContextActionApplyBuff applyBuff)) continue;
+                    var buffBp = applyBuff.Buff;
+                    if (buffBp?.ComponentsArray == null) continue;
+
+                    foreach (var component in buffBp.ComponentsArray)
+                    {
+                        if (component is AddGenericStatBonus statBonus)
+                        {
+                            if (IsDefensiveStat(statBonus.Stat)) foundDefensive = true;
+                            else if (IsOffensiveStat(statBonus.Stat)) foundOffensive = true;
+                        }
+                        else if (component is AddContextStatBonus ctxBonus)
+                        {
+                            if (IsDefensiveStat(ctxBonus.Stat)) foundDefensive = true;
+                            else if (IsOffensiveStat(ctxBonus.Stat)) foundOffensive = true;
+                        }
+                        else if (component is TemporaryHitPoints)
+                        {
+                            foundDefensive = true;
+                        }
+                    }
+                }
+
+                var result = (foundDefensive, foundOffensive);
+                if (!string.IsNullOrEmpty(guid))
+                {
+                    _buffEffectCache[guid] = result;
+                    if (Main.IsDebugEnabled)
+                    {
+                        string classification = foundDefensive && foundOffensive ? "Mixed"
+                            : foundDefensive ? "Defensive"
+                            : foundOffensive ? "Offensive"
+                            : "NoStatBonus";
+                        Main.LogDebug($"[AbilityDB] BuffEffect: {ability.Name} → {classification}");
+                    }
+                }
+                return result;
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[AbilityDB] AnalyzeBuffEffect error: {ex.Message}");
+                return (false, false);
+            }
+        }
+
+        /// <summary>★ v3.9.20: 방어 스탯 (Toughness, Evasion, Saves, TempHP 등)</summary>
+        private static bool IsDefensiveStat(StatType stat)
+        {
+            switch (stat)
+            {
+                case StatType.WarhammerToughness:
+                case StatType.WarhammerWillpower:
+                case StatType.WarhammerAgility:      // Dodge/회피
+                case StatType.DamageDeflection:
+                case StatType.DamageAbsorption:
+                case StatType.Evasion:
+                case StatType.SaveFortitude:
+                case StatType.SaveWill:
+                case StatType.SaveReflex:
+                case StatType.HitPoints:
+                case StatType.TemporaryHitPoints:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>★ v3.9.20: 공격 스탯 (BS, WS, Strength, Perception, AP)</summary>
+        private static bool IsOffensiveStat(StatType stat)
+        {
+            switch (stat)
+            {
+                case StatType.WarhammerBallisticSkill:
+                case StatType.WarhammerWeaponSkill:
+                case StatType.WarhammerStrength:
+                case StatType.WarhammerPerception:
+                case StatType.WarhammerInitialAPBlue:
+                case StatType.WarhammerInitialAPYellow:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>★ v3.9.20: 버프 효과 캐시 클리어 (전투 종료 시)</summary>
+        public static void ClearBuffEffectCache()
+        {
+            _buffEffectCache.Clear();
+            if (Main.IsDebugEnabled) Main.LogDebug("[AbilityDB] Buff effect cache cleared");
+        }
+
+        #endregion
 
         /// <summary>
         /// ★ v3.5.22: SpringAttack 능력인지 확인 (Acrobatic Artistry)

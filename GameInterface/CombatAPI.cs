@@ -1336,6 +1336,55 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
+        /// ★ v3.9.10: 0 AP 공격이 적에게 도달 가능한지 확인
+        /// 현재 위치에서 사거리 내 적이 있거나, 이동 후 사거리 내로 진입 가능한지 확인
+        /// TurnOrchestrator에서 0 AP 공격 루프 방지용
+        /// </summary>
+        public static bool CanAnyZeroAPAttackReachEnemy(BaseUnitEntity unit, float remainingMP)
+        {
+            if (unit == null) return false;
+
+            try
+            {
+                var zeroAPAttacks = GetZeroAPAttacks(unit);
+                if (zeroAPAttacks.Count == 0) return false;
+
+                var enemies = GetEnemies(unit);
+                if (enemies.Count == 0) return false;
+
+                float movableTiles = remainingMP / GridCellSize;  // MP를 타일로 변환
+
+                foreach (var attack in zeroAPAttacks)
+                {
+                    int rangeTiles = GetAbilityRangeInTiles(attack);
+
+                    foreach (var enemy in enemies)
+                    {
+                        float distTiles = GetDistanceInTiles(unit, enemy);
+
+                        // 현재 위치에서 사거리 내이거나, 이동하면 도달 가능
+                        if (distTiles <= rangeTiles + movableTiles)
+                        {
+                            if (Main.IsDebugEnabled) Main.LogDebug(
+                                $"[CombatAPI] 0AP attack {attack.Name} can reach {enemy.CharacterName} " +
+                                $"(dist={distTiles:F1}, range={rangeTiles}, movable={movableTiles:F1})");
+                            return true;
+                        }
+                    }
+                }
+
+                Main.Log($"[CombatAPI] No 0AP attack can reach any enemy (MP={remainingMP:F1}, movable={movableTiles:F1} tiles)");
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] CanAnyZeroAPAttackReachEnemy error: {ex.Message}");
+                return true;  // 에러 시 안전하게 계속 진행 허용
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// ★ v3.0.55: 능력의 MP 코스트 계산
         /// ClearMPAfterUse가 true인 능력은 999를 반환 (전체 MP 클리어)
         /// </summary>

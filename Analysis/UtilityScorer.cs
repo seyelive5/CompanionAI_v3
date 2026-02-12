@@ -242,23 +242,41 @@ namespace CompanionAI_v3.Analysis
         }
 
         /// <summary>
-        /// 공격적 버프인가? (데미지 증가, 명중률 증가 등)
+        /// ★ v3.9.20: 공격적 버프인가? (데미지 증가, 명중률 증가 등)
+        /// PreAttackBuff/HeroicAct은 항상 공격적, PreCombatBuff는 블루프린트 분석
         /// </summary>
         private static bool IsOffensiveBuff(AbilityData buff)
         {
             if (buff == null) return false;
             var timing = AbilityDatabase.GetTiming(buff);
-            return timing == AbilityTiming.PreAttackBuff || timing == AbilityTiming.HeroicAct;
+            if (timing == AbilityTiming.PreAttackBuff || timing == AbilityTiming.HeroicAct)
+                return true;
+            // ★ v3.9.20: PreCombatBuff 중 공격 스탯 부여 버프 감지
+            if (timing == AbilityTiming.PreCombatBuff)
+                return AbilityDatabase.IsOffensiveBuff(buff);
+            return false;
         }
 
         /// <summary>
-        /// 방어적 버프인가? (방어력 증가, 회피 등)
+        /// ★ v3.9.20: 방어적 버프인가? (방어력 증가, 회피 등)
+        /// Emergency는 항상 방어적, PreCombatBuff는 블루프린트 분석
+        /// 분석 실패 시 PreCombatBuff는 방어 버프로 기본 분류 (기존 동작 유지)
         /// </summary>
         private static bool IsDefensiveBuff(AbilityData buff)
         {
             if (buff == null) return false;
             var timing = AbilityDatabase.GetTiming(buff);
-            return timing == AbilityTiming.PreCombatBuff || timing == AbilityTiming.Emergency;
+            if (timing == AbilityTiming.Emergency)
+                return true;
+            if (timing == AbilityTiming.PreCombatBuff)
+            {
+                // 블루프린트 분석으로 정확한 분류
+                bool isDef = AbilityDatabase.IsDefensiveBuff(buff);
+                bool isOff = AbilityDatabase.IsOffensiveBuff(buff);
+                if (isDef || isOff) return isDef;  // 분석 성공
+                return true;  // 분석 불가: PreCombatBuff 기본값 = 방어
+            }
+            return false;
         }
 
         /// <summary>

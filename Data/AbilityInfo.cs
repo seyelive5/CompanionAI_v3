@@ -172,6 +172,8 @@ namespace CompanionAI_v3.Data
         IsFreeAction = 1L << 30,        // 무료 행동
         HasPsychicPhenomena = 1L << 31, // 사이킥 현상 위험
         IsRetreatCapable = 1L << 32,    // ★ v3.8.23: 후퇴용 이동 스킬 (SoldierDash 등)
+        IsDefensiveBuff = 1L << 33,     // ★ v3.9.20: 방어 버프 (Toughness, Evasion, TempHP 등 부여)
+        IsOffensiveBuff = 1L << 34,     // ★ v3.9.20: 공격 버프 (BS, WS, Strength, AP 등 부여)
     }
 
     /// <summary>
