@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Enums;
 using Kingmaker.UnitLogic.Abilities;
@@ -615,6 +616,9 @@ namespace CompanionAI_v3.Planning.Plans
             bool hasMoveInPlan = CollectionHelper.Any(actions, a => a.Type == ActionType.Move ||
                 (a.Type == ActionType.Attack && a.Ability != null && AbilityDatabase.IsGapCloser(a.Ability)));
             bool canMove = situation.CanMove || remainingMP > 0;
+            // ★ v3.9.22: GapCloser(돌격 등)는 AP 기반 — MP 없어도 사용 가능
+            bool hasGapClosers = !situation.PrefersRanged &&
+                situation.AvailableAttacks.Any(a => AbilityDatabase.IsGapCloser(a));
 
             // ★ v3.5.17: Tank는 근접 캐릭터이므로 적에게 접근해야 함
             // 공격 후에도 적과 거리가 멀면(근접 공격 불가) 이동 필요
@@ -646,7 +650,8 @@ namespace CompanionAI_v3.Planning.Plans
                                  shouldAdvanceToFrontline ||
                                  shouldEngageMelee;
 
-            if (!hasMoveInPlan && needsMovement && canMove && remainingMP > 0)
+            // ★ v3.9.22: GapCloser는 MP 없이도 진입 허용 (AP 기반 이동)
+            if (!hasMoveInPlan && needsMovement && ((canMove && remainingMP > 0) || hasGapClosers))
             {
                 Main.Log($"[Tank] Phase 8: Trying move (attack={didPlanAttack}, MP={remainingMP:F1}, " +
                     $"engageMelee={shouldEngageMelee}, advanceFrontline={shouldAdvanceToFrontline}, dist={situation.NearestEnemyDistance:F1}m)");

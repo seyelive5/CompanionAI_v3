@@ -352,15 +352,9 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.8.44: 공격 실패 이유 추적 (이동 Phase에 전달)
             var attackContext = new AttackPhaseContext();
 
-            // ★ v3.1.29: Phase 4.3: Self-Targeted AOE (BladeDance 등)
-            // 아군이 인접하지 않고 적이 인접해 있을 때만 사용
-            var selfAoEAction = PlanSelfTargetedAoE(situation, ref remainingAP);
-            if (selfAoEAction != null)
-            {
-                actions.Add(selfAoEAction);
-                didPlanAttack = true;
-                Main.Log($"[DPS] Phase 4.3: Self-Targeted AOE planned");
-            }
+            // ★ v3.9.22: Phase 4.3 Self-AoE(BladeDance) → Phase 5.7로 이동
+            // BladeDance는 clearMPInsteadOfEndingTurn=true (MP 전부 소모)
+            // 일반 공격을 먼저 소진한 후 피니셔로 사용하는 것이 효율적
 
             // ★ v3.8.50: Phase 4.3b: Melee AOE (유닛 타겟 근접 스플래시)
             if (!didPlanAttack && remainingAP >= 1f)
@@ -679,6 +673,21 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.9.22: Phase 5.7: Self-AoE 폴백 (BladeDance 피니셔)
+            // 일반 공격을 모두 소진한 후 남은 AP로 BladeDance 사용
+            // BladeDance는 clearMPInsteadOfEndingTurn → MP 소모하므로 이동 후, 공격 후에 사용
+            // 다중 히트(2+Agi/4, 쌍검 2배)로 남은 AP 효율적 활용
+            if (remainingAP >= 1f)
+            {
+                var selfAoEFallback = PlanSelfTargetedAoE(situation, ref remainingAP);
+                if (selfAoEFallback != null)
+                {
+                    actions.Add(selfAoEFallback);
+                    didPlanAttack = true;
+                    Main.Log($"[DPS] Phase 5.7: Self-AoE fallback (BladeDance finisher)");
+                }
+            }
+
             // ★ Phase 5.6: GapCloser (공격 계획 실패 시) - 기존 Phase 5.5
             // ★ v3.0.86: 거리 조건 제거 - 적이 4m에 있어도 근접 사거리(2m)에 못 들어올 수 있음
             // 기존: NearestEnemyDistance > 5f → 적이 5m 이내면 스킵 (버그!)
@@ -838,6 +847,9 @@ namespace CompanionAI_v3.Planning.Plans
             bool needsMovement = ((situation.NeedsReposition || (!didPlanAttack && situation.HasLivingEnemies)) && !noAttackNoApproach) || isRangedInDanger || deferRetreat;
             // ★ v3.0.99: situation.CanMove는 계획 시작 시점 MP 기준, remainingMP는 예측된 MP 포함
             bool canMove = situation.CanMove || remainingMP > 0;
+            // ★ v3.9.22: GapCloser(돌격 등)는 AP 기반 — MP 없어도 사용 가능
+            bool hasGapClosers = !situation.PrefersRanged &&
+                situation.AvailableAttacks.Any(a => AbilityDatabase.IsGapCloser(a));
 
             if (noAttackNoApproach)
                 Main.Log($"[DPS] Phase 8: Ranged with no available attacks - skipping forward movement");
@@ -845,7 +857,8 @@ namespace CompanionAI_v3.Planning.Plans
             if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 8 check: hasMoveInPlan={hasMoveInPlan}, NeedsReposition={situation.NeedsReposition}, " +
                 $"didPlanAttack={didPlanAttack}, needsMovement={needsMovement}, CanMove={canMove}, MP={remainingMP:F1}, IsInDanger={situation.IsInDanger}");
 
-            if (!hasMoveInPlan && needsMovement && canMove && remainingMP > 0)
+            // ★ v3.9.22: GapCloser는 MP 없이도 진입 허용 (AP 기반 이동)
+            if (!hasMoveInPlan && needsMovement && ((canMove && remainingMP > 0) || hasGapClosers))
             {
                 Main.Log($"[DPS] Phase 8: Trying move (attack planned={didPlanAttack}, predictedMP={remainingMP:F1}, isRangedInDanger={isRangedInDanger}, deferRetreat={deferRetreat})");
 

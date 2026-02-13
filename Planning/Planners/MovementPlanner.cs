@@ -162,8 +162,10 @@ namespace CompanionAI_v3.Planning.Planners
                 foreach (var candidateTarget in targetsToTry)
                 {
                     // ★ v3.5.34: MP 비용 체크 (실제 타일 경로 기반)
+                    // ★ v3.9.22: MP=0이어도 GapCloser 시도 허용 — 게임 자체 경로 검증 + CanUseAbilityOn이 최종 판정
+                    // 기존: MP 프리필터가 MP=0일 때 모든 GapCloser 차단 (돌격 불가 버그)
                     float mpCost = CombatAPI.GetAbilityExpectedMPCost(gapCloser, candidateTarget);
-                    if (mpCost > remainingMP && mpCost < float.MaxValue)
+                    if (remainingMP > 0 && mpCost > remainingMP && mpCost < float.MaxValue)
                     {
                         if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} -> {candidateTarget.CharacterName} skipped - MP cost {mpCost:F1} > remaining {remainingMP:F1}");
                         continue;

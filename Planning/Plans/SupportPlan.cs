@@ -645,6 +645,9 @@ namespace CompanionAI_v3.Planning.Plans
             // NeedsReposition도 noAttackNoApproach 적용
             bool needsMovement = (situation.NeedsReposition || (!didPlanAttack && situation.HasLivingEnemies)) && !noAttackNoApproach;
             bool canMove = situation.CanMove || remainingMP > 0;
+            // ★ v3.9.22: GapCloser(돌격 등)는 AP 기반 — MP 없어도 사용 가능
+            bool hasGapClosers = !situation.PrefersRanged &&
+                situation.AvailableAttacks.Any(a => AbilityDatabase.IsGapCloser(a));
 
             // ★ v3.7.06: 사역마 Master가 사역마/아군과 너무 멀면 접근
             bool needsMoveToAlly = false;
@@ -672,7 +675,8 @@ namespace CompanionAI_v3.Planning.Plans
                     Main.Log($"[Support] Phase 9: Moving toward allies for buff range");
                 }
             }
-            else if (!hasMoveInPlan && needsMovement && canMove && remainingMP > 0)
+            // ★ v3.9.22: GapCloser는 MP 없이도 진입 허용 (AP 기반 이동)
+            else if (!hasMoveInPlan && needsMovement && ((canMove && remainingMP > 0) || hasGapClosers))
             {
                 Main.Log($"[Support] Phase 9: Trying move (attack planned={didPlanAttack}, predictedMP={remainingMP:F1})");
                 // ★ v3.0.90: 공격 실패 시 forceMove=true로 이동 강제

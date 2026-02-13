@@ -1415,7 +1415,6 @@ namespace CompanionAI_v3.Planning.Planners
             var aoeConfig = AIConfig.GetAoEConfig();
 
             // ★ v3.5.87: 게임 API 기반 패턴 내 적/아군 수 계산
-            // 기존 CountAdjacentEnemies(2.5f)는 고정 반경이라 실제 능력 범위와 불일치
             int adjacentEnemies = CombatAPI.CountEnemiesInPattern(
                 attack,
                 caster.Position,  // Self-AOE이므로 캐스터 위치 기준
@@ -1428,6 +1427,29 @@ namespace CompanionAI_v3.Planning.Planners
                 caster.Position,
                 caster,
                 situation.Allies);
+
+            // ★ v3.9.22: 커스텀 능력(BladeDance 등)은 GetPattern()이 빈 결과 반환
+            // BladeDance는 표준 AoE 패턴이 아닌 AbilityCustomBladeDance.CheckEntityTargetable()로
+            // InRangeInCells(caster, 1) 범위의 적을 직접 타격 — 거리 기반으로 재계산
+            if (adjacentEnemies == 0 && adjacentAllies == 0)
+            {
+                for (int i = 0; i < situation.Enemies.Count; i++)
+                {
+                    var enemy = situation.Enemies[i];
+                    if (enemy == null || enemy.LifeState.IsDead) continue;
+                    if (CombatAPI.GetDistanceInTiles(caster, enemy) <= 1f)
+                        adjacentEnemies++;
+                }
+                for (int i = 0; i < situation.Allies.Count; i++)
+                {
+                    var ally = situation.Allies[i];
+                    if (ally == null || ally == caster) continue;
+                    if (CombatAPI.GetDistanceInTiles(caster, ally) <= 1f)
+                        adjacentAllies++;
+                }
+                if (Main.IsDebugEnabled && adjacentEnemies > 0)
+                    Main.LogDebug($"[{roleName}] Self-AoE {attack.Name}: pattern empty, distance fallback: {adjacentEnemies} enemies, {adjacentAllies} allies within 1 cell");
+            }
 
             // ★ v3.8.94: MaxPlayerAlliesHit로 통합 — 모든 AoE 동일 기준
             if (adjacentAllies > aoeConfig.MaxPlayerAlliesHit)
