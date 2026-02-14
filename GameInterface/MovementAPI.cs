@@ -13,6 +13,7 @@ using Pathfinding;
 using UnityEngine;
 using CompanionAI_v3.Analysis;
 using CompanionAI_v3.Core;
+using CompanionAI_v3.Data;
 using CompanionAI_v3.Settings;
 
 namespace CompanionAI_v3.GameInterface
@@ -845,9 +846,11 @@ namespace CompanionAI_v3.GameInterface
             bool isScatter = CombatAPI.IsScatterAttack(primaryAttack);
             bool isMelee = primaryAttack?.IsMelee ?? false;
 
-            // ★ v3.8.70: 안전 체크용 아군 목록 (CanTargetFriends 무기만)
+            // ★ v3.8.70: 안전 체크용 아군 목록
+            // ★ v3.9.24: DangerousAoE도 아군 안전 체크 필요 (Cone/Ray가 아군을 타격)
+            //   CanTargetFriends=false라도 DangerousAoE는 AoE 범위 내 아군에 피해
             List<BaseUnitEntity> allies = null;
-            if (primaryAttack?.Blueprint?.CanTargetFriends == true)
+            if (primaryAttack?.Blueprint?.CanTargetFriends == true || AbilityDatabase.IsDangerousAoE(primaryAttack))
                 allies = CombatAPI.GetAllies(unit);
 
             // ★ v3.0.62: 위협 점수 추가 (AoE, AoO, Overwatch)
@@ -1003,16 +1006,16 @@ namespace CompanionAI_v3.GameInterface
 
                 var pos = node.Vector3Position;
 
-                // ★ v3.6.4: 적과의 거리 계산 - 타일 단위로 통일
-                // meleeRange와 SizeRect.Width는 타일 단위이므로 미터→타일 변환 필요
-                float distToTargetTiles = CombatAPI.MetersToTiles(Vector3.Distance(pos, targetPos));
+                // ★ v3.9.24: 게임과 동일한 거리 계산 (Chebyshev 기반 edge-to-edge + SizeRect)
+                // 이전: Vector3.Distance (중심-중심 유클리드) + SizeRect.Width*0.5 보정
+                //   → 대형 유닛에서 실제 게임 CanUseAbilityOn과 불일치 (2.0 tiles vs range=1)
+                // 수정: WarhammerGeometryUtils.DistanceToInCells로 대형 유닛 크기 정확 반영
+                float distToTargetTiles = CombatAPI.GetDistanceInTiles(pos, target);
 
-                // 근접 공격 사거리 내 타일만 선택 (타일 단위)
-                // 적의 크기 고려 (대형 적은 더 넓은 공격 범위)
-                float effectiveRange = meleeRange + (target.SizeRect.Width * 0.5f);
-                if (distToTargetTiles > effectiveRange) continue;
+                // 근접 공격 사거리 내 타일만 선택 (SizeRect 이미 반영됨)
+                if (distToTargetTiles > meleeRange) continue;
 
-                // 적 위치와 거의 동일하면 스킵 (점유 타일) - 0.5타일 ≈ 0.67m
+                // 적 위치와 거의 동일하면 스킵 (적 유닛이 점유하는 타일)
                 if (distToTargetTiles < 0.5f) continue;
 
                 // 점수 계산
@@ -1088,9 +1091,9 @@ namespace CompanionAI_v3.GameInterface
 
             // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
             var best = CollectionHelper.MaxBy(candidates, c => c.TotalScore);
-            float finalDist = Vector3.Distance(best.Position, targetPos);
+            float finalDistTiles = CombatAPI.GetDistanceInTiles(best.Position, target);
             Main.Log($"[MovementAPI] {unit.CharacterName}: Melee position at ({best.Position.x:F1},{best.Position.z:F1}) " +
-                $"dist={finalDist:F1}m, score={best.TotalScore:F1}");
+                $"dist={finalDistTiles:F1} tiles (range={meleeRange:F0}), score={best.TotalScore:F1}");
 
             return best;
         }

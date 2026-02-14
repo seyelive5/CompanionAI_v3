@@ -797,6 +797,35 @@ namespace CompanionAI_v3.Planning.Plans
                     string reason;
                     if (CombatAPI.CanTargetFromPosition(attack, destNode, enemy, out reason))
                     {
+                        // ★ v3.9.24: 대형 유닛 거리 보정 — CanTargetFromNode vs CanUseAbilityOn 불일치 방지
+                        // CanTargetFromNode가 대형 유닛에 대해 거리를 잘못 판정할 수 있음
+                        // WarhammerGeometryUtils.DistanceToInCells (SizeRect 반영)로 이중 검증
+                        if (!CombatAPI.IsPointTargetAbility(attack))
+                        {
+                            float rangeTiles = CombatAPI.GetAbilityRangeInTiles(attack);
+                            float distTiles = CombatAPI.GetDistanceInTiles(destination, enemy);
+                            if (distTiles > rangeTiles)
+                                continue;
+                        }
+
+                        // ★ v3.9.24: DangerousAoE Directional 패턴 거리 검증
+                        // CanTargetFromPosition은 무기 RangeCells만 체크 — 패턴 반경 미체크
+                        if (AbilityDatabase.IsDangerousAoE(attack))
+                        {
+                            var patternInfo = CombatAPI.GetPatternInfo(attack);
+                            if (patternInfo != null && patternInfo.IsValid && patternInfo.CanBeDirectional)
+                            {
+                                float distTiles = CombatAPI.GetDistanceInTiles(destination, enemy);
+                                if (distTiles > patternInfo.Radius)
+                                    continue;  // 이 attack은 패턴 범위 밖 → 다음 attack 시도
+                            }
+                        }
+
+                        // ★ v3.9.24: 아군 안전 체크 (기존 누락)
+                        if (!CombatHelpers.IsAttackSafeForTargetFromPosition(
+                            attack, destNode.Vector3Position, situation.Unit, enemy, situation.Allies))
+                            continue;
+
                         canHit = true;
                         break;
                     }

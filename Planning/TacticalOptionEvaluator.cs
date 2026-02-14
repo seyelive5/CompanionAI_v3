@@ -286,8 +286,9 @@ namespace CompanionAI_v3.Planning
             }
             else
             {
-                // 원거리 유닛: 기존 FindRangedAttackPositionSync 사용
-                float weaponRange = GetWeaponRange(unit);
+                // ★ v3.9.24: 중앙집중 무기 사거리 프로필 사용
+                float weaponRange = situation.WeaponRange.EffectiveRange;
+                if (weaponRange <= 0f) weaponRange = 15f;  // 안전 폴백
 
                 bestPosition = MovementAPI.FindRangedAttackPositionSync(
                     unit,
@@ -456,32 +457,7 @@ namespace CompanionAI_v3.Planning
 
         #region Helpers
 
-        /// <summary>
-        /// 원거리 무기 사거리 조회 (MovementPlanner.GetWeaponRange와 동일 로직)
-        /// ★ v3.8.76 fix: AttackRange 폴백 추가 (OptimalRange=0인 무기 대응)
-        /// </summary>
-        private static float GetWeaponRange(BaseUnitEntity unit)
-        {
-            float weaponRange = 15f;
-            try
-            {
-                var primaryHand = unit.Body?.PrimaryHand;
-                if (primaryHand?.HasWeapon == true && !primaryHand.Weapon.Blueprint.IsMelee)
-                {
-                    int optRange = primaryHand.Weapon.AttackOptimalRange;
-                    if (optRange > 0 && optRange < 10000)
-                        weaponRange = optRange;
-                    else
-                    {
-                        int attackRange = primaryHand.Weapon.AttackRange;
-                        if (attackRange > 0 && attackRange < 10000)
-                            weaponRange = attackRange;
-                    }
-                }
-            }
-            catch { }
-            return weaponRange;
-        }
+        // ★ v3.9.24: GetWeaponRange() 삭제 — CombatAPI.GetWeaponRangeProfile()로 중앙집중화
 
         /// <summary>
         /// ★ v3.8.98: 근접 무기 사거리 조회 (타일 단위)

@@ -3,6 +3,7 @@ using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Enums;
 using Kingmaker.UnitLogic.Abilities;
 using UnityEngine;
+using CompanionAI_v3.GameInterface;
 using CompanionAI_v3.Settings;
 
 namespace CompanionAI_v3.Analysis
@@ -64,6 +65,9 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>최대 탄약</summary>
         public int MaxAmmo { get; set; }
+
+        /// <summary>★ v3.9.24: 무기 사거리 프로필 (중앙집중 관리)</summary>
+        public CombatAPI.WeaponRangeProfile WeaponRange { get; set; }
 
         #endregion
 
@@ -347,6 +351,7 @@ namespace CompanionAI_v3.Analysis
             HasMeleeWeapon = false;
             CurrentAmmo = 0;
             MaxAmmo = 0;
+            WeaponRange = default;
 
             // Battlefield
             Enemies.Clear();

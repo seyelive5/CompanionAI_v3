@@ -183,6 +183,7 @@ namespace CompanionAI_v3.GameInterface
             _distanceCache.Clear();
             _targetingCache.Clear();
             _hpPercentCache.Clear();
+            CombatAPI.ClearWeaponRangeCache();  // ★ v3.9.24: 무기 사거리 캐시도 클리어
 
             // 통계 로깅 (이전 턴의 캐시 효율)
             if (DistanceHits + DistanceMisses > 0 || TargetingHits + TargetingMisses > 0 || HPHits + HPMisses > 0)

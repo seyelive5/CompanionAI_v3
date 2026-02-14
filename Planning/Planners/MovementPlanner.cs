@@ -488,8 +488,8 @@ namespace CompanionAI_v3.Planning.Planners
                 // 기존: 단순 벡터 계산 (적에게 3m 접근) → 위험!
                 // 수정: 엄폐, 안전거리, LOS 등 종합 점수화
 
-                // ★ v3.8.44: 능력 사거리 우선, 무기 사거리 폴백
-                float weaponRange = GetEffectiveRange(unit, attackContext);
+                // ★ v3.9.24: 능력 사거리 우선, WeaponRangeProfile 폴백
+                float weaponRange = GetEffectiveRange(situation, attackContext);
 
                 // ★ v3.1.01: predictedMP 전달
                 // ★ v3.2.00: influenceMap 전달
@@ -667,13 +667,12 @@ namespace CompanionAI_v3.Planning.Planners
             // ★ v3.2.25: Role 추출
             AIRole role = situation.CharacterSettings?.Role ?? AIRole.Auto;
 
-            // ★ v3.8.44: 무기 사거리 헬퍼 통합
-            float weaponRangeTiles = GetWeaponRange(unit);
-
-            // ★ v3.7.15: 최대 후퇴 거리 = 무기 사거리 - 1 (안전 마진)
-            // 핵심: 무기 사거리보다 더 멀리 후퇴하면 공격 불가!
-            // MinSafeDistance(7)가 무기 사거리(3)보다 크면, 무기 사거리 내에서만 후퇴
-            float maxSafeDistance = weaponRangeTiles - 1f;  // 공격 가능 거리 유지
+            // ★ v3.9.24: 중앙집중 무기 사거리 프로필 사용
+            float weaponRangeTiles = situation.WeaponRange.EffectiveRange;
+            float maxSafeDistance = situation.WeaponRange.MaxRetreatDistance;
+            // ★ v3.9.24: 단거리 무기 최소 후퇴 거리 하한선 (Scatter 제외)
+            if (maxSafeDistance < 2f && !situation.WeaponRange.IsScatter)
+                maxSafeDistance = 2f;
             Main.Log($"[MovementPlanner] {unit.CharacterName}: Retreat range check - WeaponRange={weaponRangeTiles:F1}, MinSafe={situation.MinSafeDistance:F1}, MaxSafe={maxSafeDistance:F1}");
 
             // ★ v3.7.04: 사역마 거리 제약 계산
@@ -811,8 +810,8 @@ namespace CompanionAI_v3.Planning.Planners
             float dashRange = CombatAPI.GetAbilityRangeInTiles(dashAbility);
             if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] FindRetreatDashLanding: {dashAbility.Name} range={dashRange:F1} tiles");
 
-            // ★ v3.8.44: 무기 사거리 헬퍼 통합 (후퇴 후에도 공격 가능해야 함)
-            float weaponRangeTiles = GetWeaponRange(unit);
+            // ★ v3.9.24: 중앙집중 무기 사거리 프로필 사용 (후퇴 후에도 공격 가능해야 함)
+            float weaponRangeTiles = situation.WeaponRange.EffectiveRange;
 
             // 적으로부터 반대 방향 계산
             Vector3 retreatDirection = (unit.Position - nearestEnemy.Position).normalized;
@@ -930,12 +929,12 @@ namespace CompanionAI_v3.Planning.Planners
             // ★ v3.2.25: Role 추출
             AIRole role = situation.CharacterSettings?.Role ?? AIRole.Auto;
 
-            // ★ v3.8.44: 무기 사거리 헬퍼 통합
-            float weaponRangeTiles = GetWeaponRange(unit);
-
-            // ★ v3.7.15: 최대 후퇴 거리 = 무기 사거리 - 1 (안전 마진)
-            // 무기 사거리보다 더 멀리 후퇴하면 공격 불가!
-            float maxSafeDistance = weaponRangeTiles - 1f;
+            // ★ v3.9.24: 중앙집중 무기 사거리 프로필 사용
+            float weaponRangeTiles = situation.WeaponRange.EffectiveRange;
+            float maxSafeDistance = situation.WeaponRange.MaxRetreatDistance;
+            // ★ v3.9.24: 단거리 무기 최소 후퇴 거리 하한선 (Scatter 제외)
+            if (maxSafeDistance < 2f && !situation.WeaponRange.IsScatter)
+                maxSafeDistance = 2f;
 
             // ★ v3.7.04: 사역마 거리 제약 계산
             // ★ v3.7.90: 고정 15m → 동적 사역마 스킬 사거리 기반
@@ -1020,9 +1019,11 @@ namespace CompanionAI_v3.Planning.Planners
             var unit = situation.Unit;
             if (situation.NearestEnemy == null) return null;
 
-            float weaponRange = GetWeaponRange(unit);
-            // 최대 후퇴 거리 = 무기 사거리 - 1 (다음 턴 공격 가능 거리 유지)
-            float maxSafeDistance = weaponRange - 1f;
+            // ★ v3.9.24: 중앙집중 무기 사거리 프로필 사용
+            float weaponRange = situation.WeaponRange.EffectiveRange;
+            float maxSafeDistance = situation.WeaponRange.MaxRetreatDistance;
+            if (maxSafeDistance < 2f && !situation.WeaponRange.IsScatter)
+                maxSafeDistance = 2f;
             AIRole role = situation.CharacterSettings?.Role ?? AIRole.Auto;
 
             // ★ 핵심: FindRetreatPositionSync 사용 — 안전 최대화 (공격 위치가 아님!)
@@ -1063,47 +1064,24 @@ namespace CompanionAI_v3.Planning.Planners
 
         #region Helper Methods
 
-        /// <summary>
-        /// ★ v3.8.44: 무기 사거리 추출 (중복 코드 4곳 → 1곳으로 통합)
-        /// 원거리 무기의 OptimalRange 또는 AttackRange 반환 (타일 단위)
-        /// </summary>
-        private static float GetWeaponRange(BaseUnitEntity unit)
-        {
-            float weaponRange = 15f;
-            try
-            {
-                var primaryHand = unit.Body?.PrimaryHand;
-                if (primaryHand?.HasWeapon == true && !primaryHand.Weapon.Blueprint.IsMelee)
-                {
-                    int optRange = primaryHand.Weapon.AttackOptimalRange;
-                    if (optRange > 0 && optRange < 10000)
-                        weaponRange = optRange;
-                    else
-                    {
-                        int attackRange = primaryHand.Weapon.AttackRange;
-                        if (attackRange > 0 && attackRange < 10000)
-                            weaponRange = attackRange;
-                    }
-                }
-            }
-            catch (Exception ex) { if (Main.IsDebugEnabled) Main.LogDebug($"[MovePlanner] {ex.Message}"); }
-            return weaponRange;
-        }
+        // ★ v3.9.24: GetWeaponRange() 삭제 — CombatAPI.GetWeaponRangeProfile()로 중앙집중화
 
         /// <summary>
         /// ★ v3.8.44: 유효 사거리 결정 (공격 Phase 컨텍스트 우선)
+        /// ★ v3.9.24: 폴백을 중앙집중 WeaponRangeProfile로 변경
         /// 1순위: AttackPhaseContext의 능력 사거리 (정확)
-        /// 2순위: 무기 사거리 (폴백)
+        /// 2순위: Situation.WeaponRange.EffectiveRange (중앙집중)
         /// </summary>
-        private static float GetEffectiveRange(BaseUnitEntity unit, AttackPhaseContext attackContext)
+        private static float GetEffectiveRange(Situation situation, AttackPhaseContext attackContext)
         {
             if (attackContext?.HasValidRange == true)
             {
                 if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] GetEffectiveRange: ability={attackContext.BestAbilityRange:F1} (from context)");
                 return attackContext.BestAbilityRange;
             }
-            float fallback = GetWeaponRange(unit);
-            if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] GetEffectiveRange: weapon={fallback:F1} (fallback)");
+            float fallback = situation.WeaponRange.EffectiveRange;
+            if (fallback <= 0f) fallback = 15f;  // 안전 폴백
+            if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] GetEffectiveRange: weapon={fallback:F1} (from WeaponRangeProfile)");
             return fallback;
         }
 

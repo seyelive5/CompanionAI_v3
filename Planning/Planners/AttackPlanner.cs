@@ -473,8 +473,9 @@ namespace CompanionAI_v3.Planning.Planners
                 }
             }
 
-            // 비 AOE 능력은 안전
-            return true;
+            // ★ v3.9.24: 체인 능력 안전 체크 — AoESafetyChecker로 위임
+            // 체인 능력은 aoERadius=0이지만 AbilityDeliverChain으로 아군 전파 가능
+            return AoESafetyChecker.IsAoESafeForUnitTarget(ability, situation.Unit, target, situation.Allies);
         }
 
         /// <summary>

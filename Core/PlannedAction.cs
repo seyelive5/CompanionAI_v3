@@ -92,7 +92,11 @@ namespace CompanionAI_v3.Core
             var patternType = CombatAPI.GetPatternType(ability);
             bool isActuallyDirectional = CombatAPI.GetActualIsDirectional(ability);
 
-            if (CombatAPI.IsPointTargetAbility(ability) && !isActuallyDirectional)
+            // ★ v3.9.22: 근접 능력은 Point 변환 제외 — 유닛 타겟 유지
+            // 근접 AOE(칼날 가르기 등)를 Point로 변환하면 target.Position이 대형 유닛 중심 좌표가 됨
+            // 게임은 유닛 타겟 시 SizeRect(가장자리)로 사거리 계산하지만
+            // Point 타겟 시 중심까지 직선거리로 계산 → 대형 유닛에서 TargetTooFar 발생
+            if (CombatAPI.IsPointTargetAbility(ability) && !isActuallyDirectional && !ability.IsMelee)
             {
                 Main.LogDebug($"[PlannedAction] Attack auto-converted to PositionalAttack: {ability.Name} (Point-target ability, non-directional)");
                 return PositionalAttack(ability, target.Position, reason, apCost);

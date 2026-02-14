@@ -364,6 +364,29 @@ namespace CompanionAI_v3.GameInterface
                 string reason;
                 if (CanTargetFromPosition(primaryAttack, fromNode, enemy, out reason))
                 {
+                    // ★ v3.9.24: 대형 유닛 거리 보정 — CanTargetFromNode vs CanUseAbilityOn 불일치 방지
+                    if (!IsPointTargetAbility(primaryAttack))
+                    {
+                        float rangeTiles = GetAbilityRangeInTiles(primaryAttack);
+                        float distTiles = GetDistanceInTiles(fromNode.Vector3Position, enemy);
+                        if (distTiles > rangeTiles)
+                            continue;
+                    }
+
+                    // ★ v3.9.24: DangerousAoE Directional 패턴 거리 검증
+                    // CanTargetFromPosition은 무기 RangeCells만 체크하고 패턴 반경은 체크 안 함
+                    // Cone/Ray/Sector 패턴은 patternRadius까지만 유효
+                    if (AbilityDatabase.IsDangerousAoE(primaryAttack))
+                    {
+                        var patternInfo = GetPatternInfo(primaryAttack);
+                        if (patternInfo != null && patternInfo.IsValid && patternInfo.CanBeDirectional)
+                        {
+                            float distTiles = GetDistanceInTiles(fromNode.Vector3Position, enemy);
+                            if (distTiles > patternInfo.Radius)
+                                continue;
+                        }
+                    }
+
                     // ★ v3.8.70: 후보 위치에서의 안전 체크 (scatter safety 포함)
                     if (allies != null)
                     {
@@ -938,6 +961,182 @@ namespace CompanionAI_v3.GameInterface
                 return weapon.Blueprint?.WarhammerMaxAmmo ?? -1;
             }
             catch { return -1; }
+        }
+
+        #endregion
+
+        #region Weapon Range Profile (v3.9.24)
+
+        /// <summary>
+        /// ★ v3.9.24: 무기 사거리 중앙집중 프로필
+        /// 모든 서브시스템이 일관된 무기 사거리 정보를 사용하도록 중앙에서 관리
+        /// </summary>
+        public struct WeaponRangeProfile
+        {
+            /// <summary>무기 최대 사거리 (타일 단위, RangeCells)</summary>
+            public float MaxRange;
+            /// <summary>무기 최적 사거리 (타일 단위, 없으면 0)</summary>
+            public float OptimalRange;
+            /// <summary>유효 공격 거리 (방향성 AoE면 patternRadius, 아니면 OptimalRange 또는 MaxRange)</summary>
+            public float EffectiveRange;
+            /// <summary>Scatter 무기 (자동 명중)</summary>
+            public bool IsScatter;
+            /// <summary>근접 무기</summary>
+            public bool IsMelee;
+            /// <summary>Cone/Ray/Sector 패턴 보유</summary>
+            public bool HasDirectionalPattern;
+            /// <summary>방향성 패턴 반경 (타일 단위)</summary>
+            public float PatternRadius;
+            /// <summary>min(설정값, EffectiveRange - 1) — 안전 거리가 무기 사거리를 초과하지 않도록</summary>
+            public float ClampedMinSafeDistance;
+            /// <summary>max(0, EffectiveRange - 1) — 후퇴 시 최대 거리</summary>
+            public float MaxRetreatDistance;
+            /// <summary>MinSafe가 무기 사거리에 의해 클램핑되었는지</summary>
+            public bool WasMinSafeClamped;
+            /// <summary>EffectiveRange <= 8 인 단거리 무기</summary>
+            public bool IsShortRange => EffectiveRange <= 8f;
+        }
+
+        // ★ v3.9.24: 유닛당 턴별 캐시 (턴 시작 시 ClearAll()로 클리어)
+        private static readonly Dictionary<string, WeaponRangeProfile> _weaponRangeCache = new Dictionary<string, WeaponRangeProfile>();
+
+        /// <summary>
+        /// ★ v3.9.24: 무기 사거리 프로필 중앙 계산
+        /// - 무기의 OptimalRange/AttackRange 에서 직접 조회
+        /// - 방향성 AoE(Cone/Ray/Sector)면 EffectiveRange = patternRadius
+        /// - ClampedMinSafeDistance = min(configuredMinSafe, EffectiveRange - 1)
+        /// - 모든 서브시스템이 이 하나의 소스에서 무기 사거리를 조회
+        /// </summary>
+        public static WeaponRangeProfile GetWeaponRangeProfile(BaseUnitEntity unit, float configuredMinSafe)
+        {
+            if (unit == null)
+                return CreateDefaultProfile(configuredMinSafe);
+
+            string cacheKey = unit.UniqueId;
+            if (_weaponRangeCache.TryGetValue(cacheKey, out var cached))
+                return cached;
+
+            var profile = CalculateWeaponRangeProfile(unit, configuredMinSafe);
+            _weaponRangeCache[cacheKey] = profile;
+
+            Main.Log($"[CombatAPI] WeaponRangeProfile for {unit.CharacterName}: " +
+                $"MaxRange={profile.MaxRange:F1}, OptimalRange={profile.OptimalRange:F1}, " +
+                $"EffectiveRange={profile.EffectiveRange:F1}, " +
+                $"IsMelee={profile.IsMelee}, IsScatter={profile.IsScatter}, " +
+                $"HasDirectional={profile.HasDirectionalPattern}, PatternRadius={profile.PatternRadius:F1}, " +
+                $"ClampedMinSafe={profile.ClampedMinSafeDistance:F1}" +
+                (profile.WasMinSafeClamped ? " (CLAMPED)" : "") +
+                $", IsShortRange={profile.IsShortRange}");
+
+            return profile;
+        }
+
+        private static WeaponRangeProfile CalculateWeaponRangeProfile(BaseUnitEntity unit, float configuredMinSafe)
+        {
+            var profile = new WeaponRangeProfile();
+
+            try
+            {
+                var primaryHand = unit.Body?.PrimaryHand;
+                if (primaryHand?.HasWeapon != true)
+                    return CreateDefaultProfile(configuredMinSafe);
+
+                var weapon = primaryHand.Weapon;
+                bool isMelee = weapon.Blueprint.IsMelee;
+                profile.IsMelee = isMelee;
+
+                if (isMelee)
+                {
+                    // 근접 무기: 사거리 = AttackRange (보통 2 타일)
+                    profile.MaxRange = weapon.AttackRange > 0 ? weapon.AttackRange : 2f;
+                    profile.OptimalRange = 0f;
+                    profile.EffectiveRange = profile.MaxRange;
+                    profile.ClampedMinSafeDistance = 0f;
+                    profile.MaxRetreatDistance = 0f;
+                    return profile;
+                }
+
+                // 원거리 무기
+                int attackRange = weapon.AttackRange;
+                int optimalRange = weapon.AttackOptimalRange;
+
+                profile.MaxRange = (attackRange > 0 && attackRange < 10000) ? attackRange : 15f;
+                profile.OptimalRange = (optimalRange > 0 && optimalRange < 10000) ? optimalRange : 0f;
+
+                // 기본 유효 사거리: OptimalRange > MaxRange 순서
+                profile.EffectiveRange = profile.OptimalRange > 0 ? profile.OptimalRange : profile.MaxRange;
+
+                // Scatter 체크 — 주 공격 능력에서 확인
+                var primaryAttack = FindAnyAttackAbility(unit, Settings.RangePreference.PreferRanged);
+                if (primaryAttack != null)
+                {
+                    profile.IsScatter = primaryAttack.IsScatter;
+
+                    // 방향성 AoE 패턴 체크 (Cone/Ray/Sector)
+                    var patternInfo = GetPatternInfo(primaryAttack);
+                    if (patternInfo != null && patternInfo.IsValid && patternInfo.CanBeDirectional)
+                    {
+                        profile.HasDirectionalPattern = true;
+                        profile.PatternRadius = patternInfo.Radius;
+                        // ★ 핵심: 방향성 패턴의 유효 사거리 = 패턴 반경
+                        // Cone/Ray는 시전자 위치에서 패턴 반경까지만 닿음
+                        profile.EffectiveRange = patternInfo.Radius;
+                    }
+                }
+
+                // Scatter 무기는 안전 거리 불필요 (자동 명중, 아군 피격 안 함)
+                if (profile.IsScatter)
+                {
+                    profile.ClampedMinSafeDistance = 0f;
+                    profile.MaxRetreatDistance = profile.EffectiveRange - 1f;
+                    if (profile.MaxRetreatDistance < 0f) profile.MaxRetreatDistance = 0f;
+                    return profile;
+                }
+
+                // ★ 핵심 로직: MinSafeDistance 클램핑
+                // 무기 사거리가 설정된 안전 거리보다 짧으면 안전 거리를 무기 사거리에 맞춤
+                float maxAllowedMinSafe = profile.EffectiveRange - 1f;
+                if (maxAllowedMinSafe < 0f) maxAllowedMinSafe = 0f;
+
+                if (configuredMinSafe > maxAllowedMinSafe)
+                {
+                    profile.ClampedMinSafeDistance = maxAllowedMinSafe;
+                    profile.WasMinSafeClamped = true;
+                }
+                else
+                {
+                    profile.ClampedMinSafeDistance = configuredMinSafe;
+                }
+
+                profile.MaxRetreatDistance = maxAllowedMinSafe;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[CombatAPI] CalculateWeaponRangeProfile error for {unit.CharacterName}: {ex.Message}");
+                return CreateDefaultProfile(configuredMinSafe);
+            }
+
+            return profile;
+        }
+
+        private static WeaponRangeProfile CreateDefaultProfile(float configuredMinSafe)
+        {
+            return new WeaponRangeProfile
+            {
+                MaxRange = 15f,
+                OptimalRange = 0f,
+                EffectiveRange = 15f,
+                ClampedMinSafeDistance = configuredMinSafe,
+                MaxRetreatDistance = 14f,
+            };
+        }
+
+        /// <summary>
+        /// ★ v3.9.24: 무기 사거리 캐시 클리어 (턴 시작 시 CombatCache.ClearAll()에서 호출)
+        /// </summary>
+        public static void ClearWeaponRangeCache()
+        {
+            _weaponRangeCache.Clear();
         }
 
         #endregion
@@ -3419,12 +3618,13 @@ namespace CompanionAI_v3.GameInterface
                 for (int i = 0; i < enemies.Count; i++)
                     _sharedUnitSet.Add(enemies[i]);
 
+                // ★ v3.9.22: Remove로 중복 방지 — 대형 유닛(4x4)이 여러 타일 점유 시 1회만 카운트
                 int count = 0;
                 foreach (var node in pattern.Nodes)
                 {
                     if (node.TryGetUnit(out var unit) &&
                         unit is BaseUnitEntity baseUnit &&
-                        _sharedUnitSet.Contains(baseUnit))
+                        _sharedUnitSet.Remove(baseUnit))
                     {
                         count++;
                     }
@@ -3462,13 +3662,14 @@ namespace CompanionAI_v3.GameInterface
                 for (int i = 0; i < allies.Count; i++)
                     _sharedAllySet.Add(allies[i]);
 
+                // ★ v3.9.22: Remove로 중복 방지 — 대형 유닛 다중 타일 점유 시 1회만 카운트
                 int count = 0;
                 foreach (var node in pattern.Nodes)
                 {
                     if (node.TryGetUnit(out var unit) &&
                         unit is BaseUnitEntity baseUnit &&
                         baseUnit != caster &&
-                        _sharedAllySet.Contains(baseUnit))
+                        _sharedAllySet.Remove(baseUnit))
                     {
                         count++;
                     }
@@ -3517,13 +3718,14 @@ namespace CompanionAI_v3.GameInterface
                     for (int i = 0; i < allies.Count; i++)
                         _sharedAllySet.Add(allies[i]);
 
+                // ★ v3.9.22: Remove로 중복 방지 — 대형 유닛 다중 타일 점유 시 1회만 카운트
                 foreach (var node in pattern.Nodes)
                 {
                     if (node.TryGetUnit(out var unit) && unit is BaseUnitEntity baseUnit)
                     {
-                        if (_sharedUnitSet.Contains(baseUnit))
+                        if (_sharedUnitSet.Remove(baseUnit))
                             enemyCount++;
-                        if (baseUnit != caster && _sharedAllySet.Contains(baseUnit))
+                        if (baseUnit != caster && _sharedAllySet.Remove(baseUnit))
                             allyCount++;
                     }
                 }

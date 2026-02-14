@@ -141,6 +141,20 @@ namespace CompanionAI_v3.Analysis
             situation.HasMeleeWeapon = CombatAPI.HasMeleeWeapon(unit);
             situation.CurrentAmmo = CombatAPI.GetCurrentAmmo(unit);
             situation.MaxAmmo = CombatAPI.GetMaxAmmo(unit);
+
+            // ★ v3.9.24: 무기 사거리 프로필 계산 (중앙집중 관리)
+            situation.WeaponRange = CombatAPI.GetWeaponRangeProfile(unit, situation.MinSafeDistance);
+
+            // ★ v3.9.24: MinSafeDistance 클램핑 — 무기 사거리보다 안전 거리가 크면 조정
+            // 산탄총(5 tiles)에 MinSafe=7이면 → ClampedMinSafe=4로 자동 조정
+            // 볼터(18 tiles)에 MinSafe=7이면 → 그대로 7 유지
+            if (situation.WeaponRange.WasMinSafeClamped)
+            {
+                float oldMinSafe = situation.MinSafeDistance;
+                situation.MinSafeDistance = situation.WeaponRange.ClampedMinSafeDistance;
+                Main.Log($"[Analyzer] {unit.CharacterName}: MinSafeDistance clamped {oldMinSafe:F1} → {situation.MinSafeDistance:F1} " +
+                    $"(weapon EffectiveRange={situation.WeaponRange.EffectiveRange:F1})");
+            }
         }
 
         private void AnalyzeBattlefield(Situation situation, BaseUnitEntity unit)
@@ -275,7 +289,10 @@ namespace CompanionAI_v3.Analysis
                     if (AbilityDatabase.IsGapCloser(attack)) continue;
                     if (AbilityDatabase.IsDOTIntensify(attack)) continue;
                     if (AbilityDatabase.IsChainEffect(attack)) continue;
-                    if (AbilityDatabase.IsDangerousAoE(attack)) continue;
+                    // ★ v3.9.24: DangerousAoE 제외 삭제 — 방향성 AoE 안전 체크 구현 완료로
+                    // IsAttackSafeForTarget()에서 Cone/Ray/Sector를 정확히 판정하므로
+                    // blanket 제외 불필요. 이 제외가 FindRangedAttackPosition/RecalculateHittable과의
+                    // hittable 불일치를 유발하여 "이동 → hittable=0 → 같은 위치 재이동" 루프 발생
 
                     // ★ v3.1.19: Point 타겟 AOE 처리 개선
                     if (CombatAPI.IsPointTargetAbility(attack))
