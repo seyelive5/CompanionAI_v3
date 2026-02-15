@@ -1513,6 +1513,20 @@ namespace CompanionAI_v3.GameInterface
             }
 
             var targetPos = target.Position;
+
+            // ★ v3.9.38: A* 경로 기반 접근 위치 선택
+            // 유클리드 거리가 아닌 실제 A* 경로를 따라 가장 먼 도달 가능 지점 선택
+            // 벽/장애물을 올바르게 돌아가는 다중 턴 이동이 가능
+            var pathResult = FindApproachAlongPath(unit, targetPos, tiles);
+            if (pathResult != null)
+            {
+                Main.Log($"[MovementAPI] {unit.CharacterName}: A* approach to ({pathResult.Position.x:F1},{pathResult.Position.z:F1}) dist={Vector3.Distance(pathResult.Position, targetPos):F1}m, pathRisk={pathResult.PathRiskScore:F1} to {target.CharacterName}");
+                return pathResult;
+            }
+
+            // ★ 폴백: A* 경로 실패 시 기존 유클리드 방식 사용
+            if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* path failed, falling back to Euclidean approach");
+
             PositionScore closestCandidate = null;
             float closestDist = float.MaxValue;
             float lowestPathRisk = float.MaxValue;
@@ -1526,11 +1540,8 @@ namespace CompanionAI_v3.GameInterface
                 var pos = node.Vector3Position;
                 float distToTarget = Vector3.Distance(pos, targetPos);
 
-                // ★ v3.8.13: 경로 위협도 계산 (접근 시에도 안전한 경로 선호)
                 float pathRisk = aiCell.ProvokedAttacks * WEIGHT_AOO + aiCell.EnteredAoE * WEIGHT_AOE_ENTRY + aiCell.StepsInsideDamagingAoE * WEIGHT_DAMAGING_AOE_STEP;
 
-                // 현재 위치보다 가깝고, 지금까지 찾은 것보다 가까우면 갱신
-                // 같은 거리면 더 안전한 경로 선택
                 float currentDist = Vector3.Distance(unit.Position, targetPos);
                 if (distToTarget < currentDist &&
                     (distToTarget < closestDist || (distToTarget == closestDist && pathRisk < lowestPathRisk)))
@@ -1541,18 +1552,82 @@ namespace CompanionAI_v3.GameInterface
                     {
                         Node = node,
                         CanStand = true,
-                        DistanceScore = 100f - distToTarget,  // 가까울수록 높은 점수
-                        PathRiskScore = pathRisk  // ★ v3.8.13: 경로 위험도 기록
+                        DistanceScore = 100f - distToTarget,
+                        PathRiskScore = pathRisk
                     };
                 }
             }
 
             if (closestCandidate != null)
             {
-                Main.Log($"[MovementAPI] {unit.CharacterName}: Approach position at ({closestCandidate.Position.x:F1},{closestCandidate.Position.z:F1}) dist={closestDist:F1}m, pathRisk={lowestPathRisk:F1} to {target.CharacterName}");
+                Main.Log($"[MovementAPI] {unit.CharacterName}: Euclidean approach to ({closestCandidate.Position.x:F1},{closestCandidate.Position.z:F1}) dist={closestDist:F1}m, pathRisk={lowestPathRisk:F1} to {target.CharacterName}");
             }
 
             return closestCandidate;
+        }
+
+        /// <summary>
+        /// ★ v3.9.38: A* 경로를 따라 접근 가능한 최적 위치 찾기
+        /// PathfindingService의 A* 패스파인딩으로 타겟까지의 전체 경로를 계산하고,
+        /// 그 경로 위에서 현재 MP로 도달 가능한 가장 먼 지점을 선택.
+        /// 기존 유클리드 방식은 벽 너머의 직선 거리로 판단하여 벽에 붙는 이동을 했지만,
+        /// A* 경로를 따르면 벽을 돌아가는 올바른 경로로 다중 턴에 걸쳐 접근 가능.
+        /// </summary>
+        private static PositionScore FindApproachAlongPath(
+            BaseUnitEntity unit,
+            Vector3 targetPos,
+            Dictionary<GraphNode, WarhammerPathAiCell> reachableTiles)
+        {
+            try
+            {
+                var agent = unit.View?.MovementAgent;
+                if (agent == null) return null;
+
+                // A* 경로 계산 (AP 제한 없음 → 타겟까지 전체 경로)
+                var fullPath = PathfindingService.Instance.FindPathTB_Blocking(
+                    agent, targetPos, limitRangeByActionPoints: false);
+
+                if (fullPath == null || fullPath.error || fullPath.path == null || fullPath.path.Count < 2)
+                {
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* path to target failed or too short");
+                    return null;
+                }
+
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* path has {fullPath.path.Count} nodes, searching for farthest reachable");
+
+                // 경로를 뒤에서부터 탐색 (타겟에 가장 가까운 도달 가능 노드 우선)
+                // index 0 = 유닛 현재 위치이므로 스킵 (제자리 이동 방지)
+                for (int i = fullPath.path.Count - 1; i >= 1; i--)
+                {
+                    var pathNode = fullPath.path[i];
+                    if (!reachableTiles.TryGetValue(pathNode, out var aiCell)) continue;
+
+                    var node = aiCell.Node as CustomGridNodeBase;
+                    if (node == null || !aiCell.IsCanStand) continue;
+
+                    float pathRisk = aiCell.ProvokedAttacks * WEIGHT_AOO
+                        + aiCell.EnteredAoE * WEIGHT_AOE_ENTRY
+                        + aiCell.StepsInsideDamagingAoE * WEIGHT_DAMAGING_AOE_STEP;
+
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* approach node at step {i}/{fullPath.path.Count - 1}, pathRisk={pathRisk:F1}");
+
+                    return new PositionScore
+                    {
+                        Node = node,
+                        CanStand = true,
+                        DistanceScore = 100f - Vector3.Distance(node.Vector3Position, targetPos),
+                        PathRiskScore = pathRisk
+                    };
+                }
+
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable node found along A* path ({reachableTiles.Count} reachable tiles)");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] FindApproachAlongPath error: {ex.Message}");
+                return null;
+            }
         }
 
         #endregion

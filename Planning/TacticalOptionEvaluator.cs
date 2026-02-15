@@ -203,11 +203,10 @@ namespace CompanionAI_v3.Planning
             // 스코어 = 공격 가능 적 × 가중치 + 기본 공격 보너스
             float score = currentHittable * W_HITTABLE + W_ATTACK_BASE;
 
-            // ★ v3.9.30: 명중 품질 가중치
-            // 현재 위치에서 hittable 적들의 평균 명중률로 공격 가치 조정
-            // avgHitChance 100% → factor 1.0 (점수 유지)
-            // avgHitChance 50% → factor 0.75 (25% 감점)
-            // avgHitChance 0% → factor 0.5 (50% 감점)
+            // ★ v3.9.40: 명중 품질 가중치 (power 1.5 커브)
+            // 낮은 명중률에 더 강한 감점 → 이동 후 공격(MoveToAttack) 유도
+            // avgHitChance 100% → factor 1.0, 80% → 0.72, 60% → 0.46
+            // avgHitChance 52% → 0.37, 40% → 0.25, 20% → 0.09, 0% → 0.00
             float hitQualityFactor = 1.0f;
             if (situation.PrimaryAttack != null && situation.HittableEnemies != null
                 && situation.HittableEnemies.Count > 0)
@@ -227,7 +226,8 @@ namespace CompanionAI_v3.Planning
                 if (hitChecked > 0)
                 {
                     float avgHitChance = totalHitChance / hitChecked;
-                    hitQualityFactor = 0.5f + (avgHitChance / 100f) * 0.5f;
+                    float normalized = avgHitChance / 100f;
+                    hitQualityFactor = normalized * (float)Math.Sqrt(normalized);
                     score *= hitQualityFactor;
                 }
             }

@@ -1150,15 +1150,27 @@ namespace CompanionAI_v3.GameInterface
 
             try
             {
+                // ★ v3.9.40: IsInCombat 필터로 현재 전투 참가자만 포함
+                // 기존: AllBaseAwakeUnits 전체 → 맵 전체의 모든 적 포함 (비전투 적까지 타겟팅)
+                // 수정: IsInCombat 플래그로 현재 전투에 참가 중인 유닛만 필터링
                 var allUnits = Game.Instance?.State?.AllBaseAwakeUnits;
                 if (allUnits == null) return enemies;
+
+                bool inTurnBasedCombat = Game.Instance?.TurnController?.TurnBasedModeActive == true;
+                int skippedNonCombat = 0;
 
                 foreach (var other in allUnits)
                 {
                     if (other == null || other == unit) continue;
                     if (other.LifeState.IsDead) continue;
 
-                    // 적 판별
+                    // ★ v3.9.40: 턴제 전투 중이면 전투 참가자만 포함
+                    if (inTurnBasedCombat && !other.IsInCombat)
+                    {
+                        skippedNonCombat++;
+                        continue;
+                    }
+
                     bool isEnemy = (unit.IsPlayerFaction && other.IsPlayerEnemy) ||
                                    (!unit.IsPlayerFaction && !other.IsPlayerEnemy);
 
@@ -1167,6 +1179,8 @@ namespace CompanionAI_v3.GameInterface
                         enemies.Add(other);
                     }
                 }
+
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] GetEnemies: {enemies.Count} enemies (filtered {skippedNonCombat} non-combat units)");
             }
             catch (Exception ex)
             {

@@ -573,18 +573,53 @@ namespace CompanionAI_v3.GameInterface
                 }
                 else
                 {
-                    // 가장 가까운 이동 가능 노드 찾기
-                    foreach (var kvp in cells)
+                    // ★ v3.9.38: A* 경로 기반 최적 이동 노드 선택
+                    // 유클리드 거리 대신 실제 경로를 따라 가장 먼 도달 가능 지점 선택
+                    // 벽/장애물을 올바르게 돌아가는 이동이 가능
+                    var agent = unit.View?.MovementAgent;
+                    if (agent != null)
                     {
-                        var node = kvp.Key as CustomGridNodeBase;
-                        if (node == null) continue;
-
-                        float dist = Vector3.Distance(node.Vector3Position, destination);
-                        if (dist < bestDistance)
+                        try
                         {
-                            bestDistance = dist;
-                            bestCell = kvp.Value;
-                            foundCell = true;
+                            var fullPath = PathfindingService.Instance.FindPathTB_Blocking(
+                                agent, destination, limitRangeByActionPoints: false);
+
+                            if (fullPath != null && !fullPath.error && fullPath.path != null && fullPath.path.Count >= 2)
+                            {
+                                // 경로를 뒤에서부터 탐색 (목적지에 가장 가까운 도달 가능 노드 우선)
+                                for (int i = fullPath.path.Count - 1; i >= 1; i--)
+                                {
+                                    if (cells.TryGetValue(fullPath.path[i], out var pathCell))
+                                    {
+                                        bestCell = pathCell;
+                                        foundCell = true;
+                                        if (Main.IsDebugEnabled) Main.LogDebug($"[CompanionAIDecisionNode] A* path: found reachable node at step {i}/{fullPath.path.Count - 1}");
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[CompanionAIDecisionNode] A* path error: {ex.Message}");
+                        }
+                    }
+
+                    // ★ 폴백: A* 경로 실패 시 기존 유클리드 방식
+                    if (!foundCell)
+                    {
+                        foreach (var kvp in cells)
+                        {
+                            var node = kvp.Key as CustomGridNodeBase;
+                            if (node == null) continue;
+
+                            float dist = Vector3.Distance(node.Vector3Position, destination);
+                            if (dist < bestDistance)
+                            {
+                                bestDistance = dist;
+                                bestCell = kvp.Value;
+                                foundCell = true;
+                            }
                         }
                     }
                 }
