@@ -3,6 +3,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityModManagerNet;
 using CompanionAI_v3.Analysis;
+using CompanionAI_v3.Data;
 using CompanionAI_v3.Settings;
 using CompanionAI_v3.UI;
 using CompanionAI_v3.GameInterface;
@@ -40,6 +41,9 @@ namespace CompanionAI_v3
 
             // ★ v3.1.30: Response Curves 초기화
             CurvePresets.Initialize();
+
+            // ★ v3.9.36: 대사 JSON 로드 (없으면 기본값 내보내기)
+            DialogueLocalization.LoadFromJson(modEntry.Path);
 
             Log("CompanionAI v3.0 loaded successfully");
             return true;

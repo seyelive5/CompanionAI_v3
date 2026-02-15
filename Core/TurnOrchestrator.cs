@@ -220,6 +220,7 @@ namespace CompanionAI_v3.Core
 
                 Main.Log($"[Orchestrator] {unitName}: Creating new turn plan (continuation={turnState.Plan?.IsComplete ?? false})");
                 turnState.Plan = _planner.CreatePlan(situation, turnState);
+                Data.CompanionDialogue.AnnouncePlan(unit, turnState.Plan);  // ★ v3.9.32: AI Speech
                 TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
             }
 
@@ -228,6 +229,7 @@ namespace CompanionAI_v3.Core
                 CaptureStrategicContextOnReplan(turnState);
                 Main.Log($"[Orchestrator] {unitName}: Replanning due to situation change");
                 turnState.Plan = _planner.CreatePlan(situation, turnState);
+                Data.CompanionDialogue.AnnouncePlan(unit, turnState.Plan);  // ★ v3.9.32: AI Speech (replan)
                 TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
             }
 
@@ -737,6 +739,7 @@ namespace CompanionAI_v3.Core
 
             // 능력 사용 추적 초기화
             AbilityUsageTracker.ClearForUnit(unitId);
+            Data.CompanionDialogue.ClearForUnit(unitId);  // ★ v3.9.32: AI Speech 대사 기록 초기화
 
             // ★ v3.5.00: 킬 스냅샷 초기화
             _executor.ClearSnapshots();
@@ -830,6 +833,9 @@ namespace CompanionAI_v3.Core
 
             // ★ v3.8.58: 아군 상태 캐시 정리
             AllyStateCache.Clear();
+
+            // ★ v3.9.32: AI Speech 상태 정리
+            Data.CompanionDialogue.ClearAll();
 
             // ★ v3.8.55: Raven support 사거리 캐시 정리
             GameInterface.FamiliarAPI.ClearRangeCache();

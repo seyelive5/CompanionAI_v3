@@ -4,6 +4,7 @@ using System.Linq;
 using Kingmaker;
 using Kingmaker.EntitySystem.Entities;
 using UnityEngine;
+using CompanionAI_v3.Data;
 using CompanionAI_v3.Settings;
 
 namespace CompanionAI_v3.UI
@@ -103,7 +104,15 @@ namespace CompanionAI_v3.UI
             foreach (Language lang in Enum.GetValues(typeof(Language)))
             {
                 bool isSelected = Main.Settings.UILanguage == lang;
-                string langName = lang == Language.English ? "English" : "한국어";
+                string langName;
+                switch (lang)
+                {
+                    case Language.English:  langName = "English";  break;
+                    case Language.Korean:   langName = "한국어";    break;
+                    case Language.Russian:  langName = "Русский";  break;
+                    case Language.Japanese: langName = "日本語";    break;
+                    default:               langName = lang.ToString(); break;
+                }
                 string buttonText = isSelected ? $"<color=#00FF00><b>{langName}</b></color>" : $"<color=#D8D8D8>{langName}</color>";
 
                 if (GUILayout.Button(buttonText, GUI.skin.button, GUILayout.Width(LANG_BUTTON_WIDTH), GUILayout.Height(40)))
@@ -118,6 +127,19 @@ namespace CompanionAI_v3.UI
 
             Main.Settings.EnableDebugLogging = DrawCheckbox(Main.Settings.EnableDebugLogging, L("EnableDebugLogging"));
             Main.Settings.ShowAIThoughts = DrawCheckbox(Main.Settings.ShowAIThoughts, L("ShowAIDecisionLog"));
+            Main.Settings.EnableAISpeech = DrawCheckbox(Main.Settings.EnableAISpeech, L("EnableAISpeech"));  // ★ v3.9.32
+
+            // ★ v3.9.34: 대사 JSON 리로드 버튼
+            if (Main.Settings.EnableAISpeech)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Space(55);  // 체크박스 들여쓰기와 정렬
+                if (GUILayout.Button($"<color=#D8D8D8>{L("ReloadDialogue")}</color>", GUILayout.Width(250), GUILayout.Height(30)))
+                {
+                    DialogueLocalization.ReloadFromJson();
+                }
+                GUILayout.EndHorizontal();
+            }
 
             GUILayout.Space(15);
             DrawPerformanceSettings();
