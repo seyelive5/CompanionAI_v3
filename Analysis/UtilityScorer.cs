@@ -1236,33 +1236,8 @@ namespace CompanionAI_v3.Analysis
             }
         }
 
-        /// <summary>
-        /// ★ v3.0.56: 현재 위치의 안전도 점수 (0~100)
-        /// </summary>
-        public static float EvaluateCurrentPositionSafety(Situation situation)
-        {
-            float safety = 50f;  // 기본 점수
-
-            // 적과의 거리
-            if (situation.NearestEnemyDistance >= situation.MinSafeDistance * 1.5f)
-                safety += 30f;
-            else if (situation.NearestEnemyDistance >= situation.MinSafeDistance)
-                safety += 10f;
-            else if (situation.NearestEnemyDistance < situation.MinSafeDistance * 0.5f)
-                safety -= 30f;
-            else
-                safety -= 10f;
-
-            // 엄폐 여부
-            if (situation.HasCover)
-                safety += 20f;
-
-            // HP 상태
-            if (situation.HPPercent < 30f)
-                safety -= 20f;
-
-            return Math.Max(0f, Math.Min(100f, safety));
-        }
+        // ★ v3.9.28: EvaluateCurrentPositionSafety() 삭제 — 호출자 없는 데드 코드
+        // TacticalOptionEvaluator.EvaluateCoverQualityAtPosition()이 이 역할을 더 정확하게 수행
 
         /// <summary>
         /// ★ v3.0.56: ClearMPAfterUse 능력 사용 시 선제적 이동 필요 여부

@@ -395,6 +395,12 @@ namespace CompanionAI_v3.Core
         /// </summary>
         private ExecutionResult ExecuteNextAction(BaseUnitEntity unit, string unitName, TurnState turnState, Situation situation)
         {
+            // ★ v3.9.28: skipCount — Continue 결과 시 즉시 다음 액션 실행 (프레임 낭비 방지)
+            // 예: Move가 이미 목적지에 있어 스킵 → 바로 Attack 실행
+            const int maxSkips = 3;  // 무한루프 방지
+            int skipCount = 0;
+
+        executeNextAction:
             // 다음 행동 가져오기
             var nextAction = turnState.Plan.GetNextAction();
 
@@ -465,6 +471,13 @@ namespace CompanionAI_v3.Core
             if (result.Type == ResultType.Failure)
             {
                 return HandleExecutionFailure(unitName, turnState, result);
+            }
+
+            // ★ v3.9.28: Continue 결과 시 즉시 다음 액션 실행 (Move 스킵 등)
+            // 2-Phase 분산 재진입 없이 같은 프레임에서 다음 액션으로 진행
+            if (result.Type == ResultType.Continue && ++skipCount <= maxSkips)
+            {
+                goto executeNextAction;
             }
 
             return result;

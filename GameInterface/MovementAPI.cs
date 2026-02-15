@@ -574,12 +574,19 @@ namespace CompanionAI_v3.GameInterface
         /// <param name="isScatter">★ v3.6.8: Scatter 공격 여부 (100% 명중)</param>
         /// <param name="isMelee">★ v3.6.8: 근접 공격 여부 (100% 명중)</param>
         /// <returns>명중률 보너스 점수</returns>
+        /// <summary>
+        /// ★ v3.9.26: 게임의 실제 명중률(RuleCalculateHitChances) 기반 위치 보너스
+        /// 가장 가까운 적 2명만 평가 (성능: 위치당 최대 2회 Rule 호출)
+        /// primaryAttack null 시 기존 거리 밴드 폴백
+        /// </summary>
         public static float CalculateHitChanceBonus(
             Vector3 position,
             List<BaseUnitEntity> enemies,
             float weaponRange,
             bool isScatter = false,
-            bool isMelee = false)
+            bool isMelee = false,
+            BaseUnitEntity attacker = null,
+            AbilityData primaryAttack = null)
         {
             // ★ v3.6.8: Scatter/근접은 거리와 무관하게 100% 명중 → 보너스 불필요
             if (isScatter || isMelee)
@@ -588,45 +595,120 @@ namespace CompanionAI_v3.GameInterface
             if (enemies == null || enemies.Count == 0 || weaponRange <= 0)
                 return 0f;
 
-            float bestBonus = -10f;  // 기본값: 사거리 초과 패널티
-
             try
             {
-                float optimalRange = weaponRange / 2f;  // 최적 거리 = 최대 사거리의 절반
-
-                foreach (var enemy in enemies)
+                // ★ v3.9.26: 실제 명중률 기반 보너스 (attacker + primaryAttack 사용 가능 시)
+                if (attacker != null && primaryAttack != null)
                 {
-                    if (enemy == null || enemy.LifeState.IsDead) continue;
-
-                    // 타일 단위 거리 계산
-                    float distTiles = CombatAPI.MetersToTiles(Vector3.Distance(position, enemy.Position));
-
-                    float bonus;
-                    if (distTiles <= optimalRange)
-                    {
-                        // 최적 거리 내 → +15 보너스
-                        bonus = 15f;
-                    }
-                    else if (distTiles <= weaponRange)
-                    {
-                        // 중간 거리 (절반~최대) → +5 보너스
-                        bonus = 5f;
-                    }
-                    else
-                    {
-                        // 사거리 초과 → -10 패널티
-                        bonus = -10f;
-                    }
-
-                    // 최고 보너스 채택 (가장 유리한 적 기준)
-                    if (bonus > bestBonus)
-                        bestBonus = bonus;
+                    return CalculateActualHitChanceBonus(position, enemies, attacker, primaryAttack);
                 }
+
+                // 폴백: 거리 밴드 기반 보너스 (primaryAttack 없을 때)
+                return CalculateDistanceBandBonus(position, enemies, weaponRange);
             }
             catch (Exception ex)
             {
                 if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] CalculateHitChanceBonus error: {ex.Message}");
                 return 0f;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.9.26: 게임 룰 기반 실제 명중률 보너스
+        /// 가장 가까운 적 2명에 대해 GetHitChanceFromPosition 사용
+        /// hit% → 보너스 매핑: 80%+ → +20, 60%+ → +12, 40%+ → +5, 20%+ → -5, &lt;20% → -15
+        /// </summary>
+        private static float CalculateActualHitChanceBonus(
+            Vector3 position,
+            List<BaseUnitEntity> enemies,
+            BaseUnitEntity attacker,
+            AbilityData primaryAttack)
+        {
+            // 가장 가까운 적 2명 찾기
+            float closestDist = float.MaxValue;
+            float secondDist = float.MaxValue;
+            BaseUnitEntity closest = null;
+            BaseUnitEntity secondClosest = null;
+
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                var enemy = enemies[i];
+                if (enemy == null || enemy.LifeState.IsDead) continue;
+
+                float dist = Vector3.Distance(position, enemy.Position);
+                if (dist < closestDist)
+                {
+                    secondDist = closestDist;
+                    secondClosest = closest;
+                    closestDist = dist;
+                    closest = enemy;
+                }
+                else if (dist < secondDist)
+                {
+                    secondDist = dist;
+                    secondClosest = enemy;
+                }
+            }
+
+            if (closest == null) return 0f;
+
+            // 가장 가까운 적에 대한 명중률
+            float bestBonus = HitChanceToBonus(CombatAPI.GetHitChanceFromPosition(primaryAttack, attacker, position, closest));
+
+            // 두 번째 가까운 적이 있으면 추가 평가
+            if (secondClosest != null)
+            {
+                float secondBonus = HitChanceToBonus(CombatAPI.GetHitChanceFromPosition(primaryAttack, attacker, position, secondClosest));
+                // 두 적의 보너스 중 더 좋은 것 채택
+                if (secondBonus > bestBonus) bestBonus = secondBonus;
+            }
+
+            return bestBonus;
+        }
+
+        /// <summary>
+        /// ★ v3.9.26: 명중률% → 위치 보너스 변환
+        /// </summary>
+        private static float HitChanceToBonus(CombatAPI.HitChanceInfo hitInfo)
+        {
+            if (hitInfo == null) return 0f;
+            int hitChance = hitInfo.HitChance;
+
+            if (hitChance >= 80) return 20f;
+            if (hitChance >= 60) return 12f;
+            if (hitChance >= 40) return 5f;
+            if (hitChance >= 20) return -5f;
+            return -15f;
+        }
+
+        /// <summary>
+        /// ★ v3.9.26: 폴백 거리 밴드 기반 보너스 (primaryAttack 없을 때)
+        /// </summary>
+        private static float CalculateDistanceBandBonus(
+            Vector3 position,
+            List<BaseUnitEntity> enemies,
+            float weaponRange)
+        {
+            float bestBonus = -10f;
+            float optimalRange = weaponRange / 2f;
+
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                var enemy = enemies[i];
+                if (enemy == null || enemy.LifeState.IsDead) continue;
+
+                float distTiles = CombatAPI.MetersToTiles(Vector3.Distance(position, enemy.Position));
+
+                float bonus;
+                if (distTiles <= optimalRange)
+                    bonus = 15f;
+                else if (distTiles <= weaponRange)
+                    bonus = 5f;
+                else
+                    bonus = -10f;
+
+                if (bonus > bestBonus)
+                    bestBonus = bonus;
             }
 
             return bestBonus;
@@ -686,9 +768,11 @@ namespace CompanionAI_v3.GameInterface
                 return score;
 
             float totalCoverScore = 0f;
+            float maxSingleCover = 0f;  // ★ v3.9.26: 최대 단일 엄폐 점수 추적
             float nearestEnemyDist = float.MaxValue;
             bool hasAnyLos = false;
             int hittableFromLos = 0;  // ★ v3.8.78: LOS 기반 hittable count (CountHittable 중복 제거)
+            int validEnemyCount = 0;  // ★ v3.9.26: 유효 적 수 (dead/null 제외)
 
             foreach (var enemy in enemies)
             {
@@ -696,6 +780,8 @@ namespace CompanionAI_v3.GameInterface
 
                 var enemyNode = enemy.Position.GetNearestNodeXZ() as CustomGridNodeBase;
                 if (enemyNode == null) continue;
+
+                validEnemyCount++;
 
                 // ★ v3.6.1: 타일 단위로 변환 (minSafeDistance가 타일 단위)
                 float dist = CombatAPI.MetersToTiles(Vector3.Distance(node.Vector3Position, enemy.Position));
@@ -712,18 +798,21 @@ namespace CompanionAI_v3.GameInterface
                         hittableFromLos++;  // ★ v3.8.78: LOS 있으면 hittable 카운트
                     }
 
+                    float coverVal = 0f;
                     switch (coverType)
                     {
                         case LosCalculations.CoverType.Invisible:
-                            totalCoverScore += 40f;
+                            coverVal = 40f;
                             break;
                         case LosCalculations.CoverType.Full:
-                            totalCoverScore += 30f;
+                            coverVal = 30f;
                             break;
                         case LosCalculations.CoverType.Half:
-                            totalCoverScore += 15f;
+                            coverVal = 15f;
                             break;
                     }
+                    totalCoverScore += coverVal;
+                    if (coverVal > maxSingleCover) maxSingleCover = coverVal;
 
                     if (coverType > score.BestCover)
                         score.BestCover = coverType;
@@ -731,7 +820,11 @@ namespace CompanionAI_v3.GameInterface
                 catch { }
             }
 
-            score.CoverScore = totalCoverScore / Math.Max(1, enemies.Count);
+            // ★ v3.9.26: Max-Weighted CoverScore — 가장 좋은 엄폐를 중시
+            // 기존: 평균 → 적 5명 중 1명만 Full Cover면 30/5=6 (무의미)
+            // 개선: max*0.6 + avg*0.4 → 30*0.6 + 6*0.4 = 20.4 (유의미)
+            float avgCover = validEnemyCount > 0 ? totalCoverScore / validEnemyCount : 0f;
+            score.CoverScore = maxSingleCover * 0.6f + avgCover * 0.4f;
             score.HasLosToEnemy = hasAnyLos;
             score.HittableEnemyCount = hittableFromLos;  // ★ v3.8.78: LOS 기반 hittable count
 
@@ -887,9 +980,9 @@ namespace CompanionAI_v3.GameInterface
                     }
                 }
 
-                // ★ v3.6.7/v3.6.8: 명중률 기반 위치 보너스 (Scatter/근접 예외)
-                // 최적 사거리 내 위치에 높은 보너스, 멀수록 패널티
-                score.HitChanceBonus = CalculateHitChanceBonus(score.Position, enemies, weaponRange, isScatter, isMelee);
+                // ★ v3.9.26: 게임 실제 명중률 기반 위치 보너스 (Scatter/근접 예외)
+                // primaryAttack 있으면 GetHitChanceFromPosition 사용, 없으면 거리 밴드 폴백
+                score.HitChanceBonus = CalculateHitChanceBonus(score.Position, enemies, weaponRange, isScatter, isMelee, unit, primaryAttack);
 
                 // ★ v3.8.78: LOS 기반 hittable count가 0이면 정밀 체크 생략
                 // EvaluatePosition에서 LOS로 사전 계산한 HittableEnemyCount 활용

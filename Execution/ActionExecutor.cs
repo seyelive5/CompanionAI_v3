@@ -55,7 +55,7 @@ namespace CompanionAI_v3.Execution
                         return ExecuteAbility(action, situation);
 
                     case ActionType.Move:
-                        var moveResult = ExecuteMove(action);
+                        var moveResult = ExecuteMove(action, situation);
                         // ★ v3.8.98: Move 후 CombatCache 무효화
                         // 유닛이 이동하면 모든 거리/LOS/타겟팅 결과가 변함
                         // InvalidateCaster()가 존재하지만 호출되지 않던 버그 수정
@@ -351,7 +351,7 @@ namespace CompanionAI_v3.Execution
         /// <summary>
         /// 이동 실행
         /// </summary>
-        private ExecutionResult ExecuteMove(PlannedAction action)
+        private ExecutionResult ExecuteMove(PlannedAction action, Situation situation)
         {
             if (!action.MoveDestination.HasValue)
             {
@@ -359,6 +359,23 @@ namespace CompanionAI_v3.Execution
             }
 
             var destination = action.MoveDestination.Value;
+
+            // ★ v3.9.28: 이미 목적지에 있으면 이동 스킵 → 다음 액션 즉시 실행
+            // 이동 후 replan 시 동일 위치로 Move 계획 → "Already at destination" → 턴 강제 종료 방지
+            if (situation?.Unit != null)
+            {
+                try
+                {
+                    var currentNode = situation.Unit.Position.GetNearestNodeXZ();
+                    var destNode = destination.GetNearestNodeXZ();
+                    if (currentNode != null && destNode != null && currentNode == destNode)
+                    {
+                        Main.Log($"[Executor] Already at destination — skipping move");
+                        return ExecutionResult.Continue();
+                    }
+                }
+                catch { }
+            }
 
             Main.Log($"[Executor] Move to: {destination}");
             return ExecutionResult.MoveTo(destination);

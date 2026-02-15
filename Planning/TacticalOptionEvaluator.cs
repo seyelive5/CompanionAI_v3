@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Pathfinding;
+using Kingmaker.View.Covers;
 using UnityEngine;
 using CompanionAI_v3.Analysis;
 using CompanionAI_v3.Data;
@@ -106,8 +108,8 @@ namespace CompanionAI_v3.Planning
         private const float W_MOVE_COST = 5f;
         // 공격 가능 기본 보너스
         private const float W_ATTACK_BASE = 30f;
-        // PositionScore.TotalScore 반영 비율
-        private const float W_POSITION_QUALITY = 0.3f;
+        // ★ v3.9.26: 0.3f → 0.5f — 위치 품질(커버, 거리, 위협)이 MoveToAttack 전략에 더 크게 반영
+        private const float W_POSITION_QUALITY = 0.5f;
 
         #endregion
 
@@ -137,7 +139,10 @@ namespace CompanionAI_v3.Planning
                 WasEvaluated = true
             };
 
-            int currentHittable = situation.HittableEnemies?.Count ?? 0;
+            // ★ v3.9.26: NormalHittableCount 사용 — DangerousAoE 부풀림 방지
+            // DangerousAoE(Cone/Ray)가 hittable에 포함되면서 currentHittable이 과대평가되어
+            // AttackFromCurrent 점수가 높아지고 MoveToAttack(더 나은 위치)이 선택되지 않음
+            int currentHittable = situation.NormalHittableCount;
 
             // 4가지 옵션 평가
             result.AllOptions[0] = EvaluateAttackFromCurrent(situation, currentHittable, needsRetreat);
@@ -212,8 +217,13 @@ namespace CompanionAI_v3.Planning
                 score -= 20f;
             }
 
+            // ★ v3.9.26: 현재 위치의 엄폐 품질 평가
+            // 엄폐 없이 노출되면 이동 동기 생성 (MoveToAttack이 더 매력적)
+            float coverQuality = EvaluateCoverQualityAtPosition(situation);
+            score += coverQuality;
+
             option.Score = score;
-            option.Reason = $"hittable={currentHittable}";
+            option.Reason = $"hittable={currentHittable}, cover={coverQuality:F0}";
             return option;
         }
 
@@ -477,6 +487,70 @@ namespace CompanionAI_v3.Planning
             }
             catch { }
             return 2f;  // 기본 근접 사거리
+        }
+
+        /// <summary>
+        /// ★ v3.9.26: 현재 위치의 엄폐 품질 평가
+        /// 적으로부터의 LOS/Cover를 평가하여 -15 (완전 노출) ~ +25 (우수한 엄폐)
+        /// Max-weighted: 가장 좋은 단일 엄폐를 중시 (평균이면 희석됨)
+        /// </summary>
+        private static float EvaluateCoverQualityAtPosition(Situation situation)
+        {
+            var unit = situation.Unit;
+            var enemies = situation.Enemies;
+            if (enemies == null || enemies.Count == 0) return 0f;
+
+            var unitNode = unit.Position.GetNearestNodeXZ() as CustomGridNodeBase;
+            if (unitNode == null) return 0f;
+
+            float maxCoverScore = 0f;
+            float totalCoverScore = 0f;
+            int validCount = 0;
+
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                var enemy = enemies[i];
+                if (enemy == null || enemy.LifeState.IsDead) continue;
+
+                var enemyNode = enemy.Position.GetNearestNodeXZ() as CustomGridNodeBase;
+                if (enemyNode == null) continue;
+
+                try
+                {
+                    var los = LosCalculations.GetWarhammerLos(enemyNode, enemy.SizeRect, unitNode, unit.SizeRect);
+                    float coverVal;
+                    switch (los.CoverType)
+                    {
+                        case LosCalculations.CoverType.Invisible:
+                            coverVal = 40f;
+                            break;
+                        case LosCalculations.CoverType.Full:
+                            coverVal = 30f;
+                            break;
+                        case LosCalculations.CoverType.Half:
+                            coverVal = 15f;
+                            break;
+                        default: // None
+                            coverVal = 0f;
+                            break;
+                    }
+
+                    if (coverVal > maxCoverScore) maxCoverScore = coverVal;
+                    totalCoverScore += coverVal;
+                    validCount++;
+                }
+                catch { }
+            }
+
+            if (validCount == 0) return 0f;
+
+            // Max-weighted: 최대 커버 60% + 평균 40%
+            float avgCover = totalCoverScore / validCount;
+            float weightedCover = maxCoverScore * 0.6f + avgCover * 0.4f;
+
+            // 0~40 범위를 -15~+25 범위로 매핑
+            // 0 (노출) → -15, 15 (Half) → +0, 30 (Full) → +15, 40 (Invisible) → +25
+            return weightedCover - 15f;
         }
 
         #endregion

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.Pathfinding;
+using Kingmaker.View.Covers;
 using UnityEngine;
 using CompanionAI_v3.GameInterface;
 using CompanionAI_v3.Settings;
@@ -213,18 +215,29 @@ namespace CompanionAI_v3.Analysis
             }
 
             /// <summary>
-            /// 위치에서 특정 적에 대한 엄폐 품질 계산
+            /// ★ v3.9.28: 위치에서 특정 적에 대한 엄폐 품질 계산
+            /// 기존: 거리 기반 가짜 추정 (distance > 20m = Full)
+            /// 개선: GetCellCoverStatus로 실제 타일 펜스/벽 높이 체크 + 적 방향 반영
             /// </summary>
             private float CalculateCoverValue(Vector3 position, BaseUnitEntity enemy)
             {
                 try
                 {
-                    var coverLevel = CombatAPI.GetCoverTypeAtPosition(position, enemy);
-                    switch (coverLevel)
+                    var node = position.GetNearestNodeXZ() as CustomGridNodeBase;
+                    if (node == null) return 0f;
+
+                    // 적 방향 계산 → cardinal direction index (0=S, 1=E, 2=N, 3=W)
+                    Vector3 toEnemy = enemy.Position - position;
+                    int direction = GetCardinalDirection(toEnemy.x, toEnemy.z);
+
+                    // 해당 방향의 실제 타일 엄폐 체크 (펜스/벽 높이 기반)
+                    LosCalculations.CoverType coverType = LosCalculations.GetCellCoverStatus(node, direction);
+                    switch (coverType)
                     {
-                        case CombatAPI.CoverLevel.Full:
+                        case LosCalculations.CoverType.Full:
+                        case LosCalculations.CoverType.Invisible:
                             return 1.0f;
-                        case CombatAPI.CoverLevel.Half:
+                        case LosCalculations.CoverType.Half:
                             return 0.5f;
                         default:
                             return 0.0f;
@@ -234,6 +247,17 @@ namespace CompanionAI_v3.Analysis
                 {
                     return 0.0f;
                 }
+            }
+
+            /// <summary>
+            /// ★ v3.9.28: dx/dz → cardinal direction index 변환
+            /// 0=South, 1=East, 2=North, 3=West (게임 CustomGraphHelper 기준)
+            /// </summary>
+            private static int GetCardinalDirection(float dx, float dz)
+            {
+                if (Mathf.Abs(dz) >= Mathf.Abs(dx))
+                    return dz >= 0 ? 2 : 0;  // North or South
+                return dx >= 0 ? 1 : 3;      // East or West
             }
         }
 
@@ -877,34 +901,31 @@ namespace CompanionAI_v3.Analysis
         }
 
         /// <summary>
-        /// ★ v3.5.00: 그리드 외부용 엄폐 계산
+        /// ★ v3.9.28: 그리드 외부용 엄폐 계산 (실제 타일 엄폐 기반)
+        /// GetCoverAt()에서 그리드 범위 밖 위치에 대한 폴백으로 사용
         /// </summary>
         private float CalculateCoverAtPosition(Vector3 position)
         {
             if (_enemies.Count == 0) return 1.0f;
 
-            // 가장 가까운 적 찾기
-            BaseUnitEntity nearestEnemy = null;
-            float nearestDist = float.MaxValue;
-            foreach (var enemy in _enemies)
+            try
             {
-                if (enemy == null) continue;
-                float dist = Vector3.Distance(position, enemy.Position);
-                if (dist < nearestDist)
+                // 위치의 절대 엄폐 품질 (방향 무관, 가장 좋은 방향 기준)
+                LosCalculations.CoverType coverType = LosCalculations.GetCoverType(position);
+                switch (coverType)
                 {
-                    nearestDist = dist;
-                    nearestEnemy = enemy;
+                    case LosCalculations.CoverType.Full:
+                    case LosCalculations.CoverType.Invisible:
+                        return 1.0f;
+                    case LosCalculations.CoverType.Half:
+                        return 0.5f;
+                    default:
+                        return 0.0f;
                 }
             }
-
-            if (nearestEnemy == null) return 1.0f;
-
-            var coverLevel = CombatAPI.GetCoverTypeAtPosition(position, nearestEnemy);
-            switch (coverLevel)
+            catch
             {
-                case CombatAPI.CoverLevel.Full: return 1.0f;
-                case CombatAPI.CoverLevel.Half: return 0.5f;
-                default: return 0.0f;
+                return 0.0f;
             }
         }
 

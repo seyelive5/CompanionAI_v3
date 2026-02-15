@@ -265,9 +265,10 @@ namespace CompanionAI_v3.Core
             }
 
             // 3-3. 새로운 공격 기회 발생 (처음 0이었는데 지금 > 0)
-            if (!HasAttackActions && InitialHittableCount == 0 && currentSituation.HasHittableEnemies)
+            // ★ v3.9.26: NormalHittableCount 사용 — DangerousAoE 부풀림이 불필요한 replan 유발 방지
+            if (!HasAttackActions && InitialHittableCount == 0 && currentSituation.NormalHittableCount > 0)
             {
-                Main.Log($"[TurnPlan] Replan needed: New attack opportunity ({currentSituation.HittableEnemies?.Count ?? 0} targets now available)");
+                Main.Log($"[TurnPlan] Replan needed: New attack opportunity ({currentSituation.NormalHittableCount} normal targets now available)");
                 return true;
             }
 
@@ -285,10 +286,10 @@ namespace CompanionAI_v3.Core
             }
 
             // 3-5. 공격 가능 적 크게 증가
-            // ★ v3.5.36: 매직 넘버를 GameConstants로 교체
-            if (InitialHittableCount > 0 && currentSituation.HittableEnemies != null)
+            // ★ v3.9.26: NormalHittableCount 사용 — DangerousAoE 부풀림이 불필요한 replan 유발 방지
+            if (InitialHittableCount > 0)
             {
-                int currentHittable = currentSituation.HittableEnemies.Count;
+                int currentHittable = currentSituation.NormalHittableCount;
                 if (currentHittable >= InitialHittableCount + GameConstants.MIN_ADDITIONAL_HITTABLE_TARGETS)
                 {
                     Main.Log($"[TurnPlan] Replan needed: More targets in range (was {InitialHittableCount}, now {currentHittable})");

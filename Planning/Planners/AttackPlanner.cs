@@ -92,6 +92,16 @@ namespace CompanionAI_v3.Planning.Planners
                 }
                 else
                 {
+                    // ★ v3.9.28: 이동이 계획된 상태에서 CanUseAbilityOn 실패 시
+                    // RecalculateHittableFromDestination이 목적지 기준으로 이미 검증한 타겟이면
+                    // 현재 위치 기준 사거리 실패를 우회하여 공격 계획
+                    if (context != null && context.HasPendingMove && situation.HittableEnemies.Contains(target))
+                    {
+                        remainingAP -= cost;
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] Attack (pending move bypass): {attack.Name} -> {target.CharacterName} (was: {reason})");
+                        return PlannedAction.Attack(attack, target, $"Attack with {attack.Name}", cost);
+                    }
+
                     canUseFailedCount++;
                     if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanAttack: CanUseAbility failed for {attack.Name} -> {target.CharacterName} ({reason})");
                 }

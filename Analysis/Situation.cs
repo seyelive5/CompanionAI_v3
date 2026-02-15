@@ -98,6 +98,11 @@ namespace CompanionAI_v3.Analysis
         /// <summary>★ v3.8.14: 근접 공격으로 공격 가능한 적 (폴백 제외)</summary>
         public List<BaseUnitEntity> MeleeHittableEnemies { get; set; } = new List<BaseUnitEntity>();
 
+        /// <summary>★ v3.9.26: DangerousAoE 제외한 일반 공격으로 hittable한 적 수
+        /// TacticalOptionEvaluator/TurnPlan에서 전략 평가에 사용
+        /// HittableEnemies 리스트는 DangerousAoE 포함 (hittable 일관성 유지)</summary>
+        public int NormalHittableCount { get; set; }
+
         /// <summary>최적 타겟</summary>
         public BaseUnitEntity BestTarget { get; set; }
 

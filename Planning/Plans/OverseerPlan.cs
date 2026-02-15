@@ -481,6 +481,9 @@ namespace CompanionAI_v3.Planning.Plans
             bool didPlanAttack = false;
             // ★ v3.8.44: 공격 실패 이유 추적 (이동 Phase에 전달)
             var attackContext = new AttackPhaseContext();
+            // ★ v3.9.28: 이동이 이미 계획됨 → AttackPlanner에 pending move 알림
+            if (CollectionHelper.Any(actions, a => a.Type == ActionType.Move))
+                attackContext.HasPendingMove = true;
             var plannedTargetIds = new HashSet<string>();
             // ★ v3.8.57: 키스톤에서 사용된 능력 GUID를 Phase 5에 전달 → 이중 계획 방지
             // (Warp Relay로 계획된 사이킥 공격이 직접 공격으로 또 계획되는 것 방지)
@@ -739,8 +742,9 @@ namespace CompanionAI_v3.Planning.Plans
             if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] Plan complete: {actions.Count} actions, AP={remainingAP:F1}, MP={remainingMP:F1}");
 
             int zeroAPAttackCount = CombatAPI.GetZeroAPAttacks(situation.Unit).Count;
+            // ★ v3.9.26: NormalHittableCount 사용 — DangerousAoE 부풀림이 replan을 불필요하게 유발 방지
             return new TurnPlan(actions, priority, reasoning, situation.HPPercent, situation.NearestEnemyDistance,
-                situation.HittableEnemies?.Count ?? 0, situation.CurrentAP, situation.CurrentMP, zeroAPAttackCount);
+                situation.NormalHittableCount, situation.CurrentAP, situation.CurrentMP, zeroAPAttackCount);
         }
 
         #region Overseer-Specific Methods

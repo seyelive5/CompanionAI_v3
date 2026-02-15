@@ -2595,40 +2595,10 @@ namespace CompanionAI_v3.GameInterface
 
         #region Retreat & Cover System
 
-        /// <summary>
-        /// 엄폐 타입 (게임 API 래퍼)
-        /// </summary>
-        public enum CoverLevel
-        {
-            None,
-            Half,
-            Full,
-            Invisible
-        }
-
-        /// <summary>
-        /// 특정 위치의 엄폐 타입 (간략화 - 거리 기반 추정)
-        /// </summary>
-        public static CoverLevel GetCoverTypeAtPosition(Vector3 position, BaseUnitEntity fromEnemy)
-        {
-            if (fromEnemy == null) return CoverLevel.None;
-
-            try
-            {
-                // 간단한 거리 기반 추정 (실제 LOS 체크는 게임 노드 필요)
-                float distance = Vector3.Distance(fromEnemy.Position, position);
-
-                // 거리가 멀면 Full cover 추정
-                if (distance > 20f) return CoverLevel.Full;
-                if (distance > 10f) return CoverLevel.Half;
-
-                return CoverLevel.None;
-            }
-            catch
-            {
-                return CoverLevel.None;
-            }
-        }
+        // ★ v3.9.28: CoverLevel enum + GetCoverTypeAtPosition() 삭제
+        // 거리 기반 가짜 추정이었음 (distance > 20m = Full, > 10m = Half)
+        // BattlefieldInfluenceMap → GetCellCoverStatus (타일 펜스 기반)
+        // SituationAnalyzer → GetWarhammerLos (실제 LOS 기반)으로 교체됨
 
         /// <summary>
         /// 후퇴 위치 찾기 - TurnPlanner.PlanRetreat에서 사용

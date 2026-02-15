@@ -44,6 +44,13 @@ namespace CompanionAI_v3.Core
         public bool HittableMismatch;
 
         /// <summary>
+        /// ★ v3.9.28: 이동 액션이 이미 계획됨 (MoveToAttack 전략)
+        /// true면 CanUseAbilityOn 사거리 실패 시 RecalculateHittable 결과를 신뢰
+        /// (유닛이 아직 이동 전이므로 현재 위치 기준 CanUseAbilityOn이 TargetTooFar 반환)
+        /// </summary>
+        public bool HasPendingMove;
+
+        /// <summary>
         /// 이동으로 공격 문제를 해결할 수 있는지 판단
         /// ★ v3.8.72: HittableMismatch도 이동 후보 (새 위치에서 LoS 확보 가능)
         /// </summary>
@@ -58,7 +65,7 @@ namespace CompanionAI_v3.Core
         {
             return $"AttackCtx[range={BestAbilityRange:F1}, rangeIssue={RangeWasIssue}, " +
                    $"heightFail={HeightCheckFailed}, allFiltered={AllAbilitiesFiltered}, " +
-                   $"hittableMismatch={HittableMismatch}, shouldMove={ShouldForceMove}]";
+                   $"hittableMismatch={HittableMismatch}, pendingMove={HasPendingMove}, shouldMove={ShouldForceMove}]";
         }
     }
 }

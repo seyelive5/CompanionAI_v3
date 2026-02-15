@@ -322,6 +322,9 @@ namespace CompanionAI_v3.Planning.Plans
             bool didPlanAttack = false;
             // ★ v3.8.44: 공격 실패 이유 추적 (이동 Phase에 전달)
             var attackContext = new AttackPhaseContext();
+            // ★ v3.9.28: 이동이 이미 계획됨 → AttackPlanner에 pending move 알림
+            if (CollectionHelper.Any(actions, a => a.Type == ActionType.Move))
+                attackContext.HasPendingMove = true;
 
             // ★ v3.8.50: Phase 4.8a: Self-Targeted AOE (BladeDance 등)
             var selfAoEAction = PlanSelfTargetedAoE(situation, ref remainingAP);
@@ -810,8 +813,9 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.1.09: InitialAP/InitialMP 전달 (리플랜 감지용)
             // ★ v3.5.88: 0 AP 공격 수 전달 (Break Through → Slash 감지용)
             int zeroAPAttackCount = CombatAPI.GetZeroAPAttacks(situation.Unit).Count;
+            // ★ v3.9.26: NormalHittableCount 사용 — DangerousAoE 부풀림이 replan을 불필요하게 유발 방지
             return new TurnPlan(actions, priority, reasoning, situation.HPPercent, situation.NearestEnemyDistance,
-                situation.HittableEnemies?.Count ?? 0, situation.CurrentAP, situation.CurrentMP, zeroAPAttackCount);
+                situation.NormalHittableCount, situation.CurrentAP, situation.CurrentMP, zeroAPAttackCount);
         }
 
         #region Tank-Specific Methods

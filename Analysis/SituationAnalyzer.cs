@@ -7,7 +7,9 @@ using Kingmaker.Enums;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.UnitLogic.Abilities.Components;  // ★ v3.7.29: AbilityMultiTarget
 using Kingmaker.UnitLogic.Parts;  // ★ v3.8.90: PartOverwatch
+using Kingmaker.Pathfinding;  // ★ v3.9.28: GetNearestNodeXZ 확장 메서드
 using Kingmaker.Utility;
+using Kingmaker.View.Covers;  // ★ v3.9.28: LosCalculations
 using UnityEngine;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Data;
@@ -271,6 +273,9 @@ namespace CompanionAI_v3.Analysis
             // ★ v3.8.70: 위협 범위 체크 (CombatHelpers 공통 필터에서 사용)
             bool isInThreatArea = CombatAPI.IsInThreateningArea(unit);
 
+            // ★ v3.9.26: NormalHittableCount — DangerousAoE 제외한 일반 공격 hittable 수
+            int normalHittableCount = 0;
+
             // 각 적에 대해 어떤 공격이든 사용 가능한지 확인
             foreach (var enemy in situation.Enemies)
             {
@@ -278,6 +283,7 @@ namespace CompanionAI_v3.Analysis
 
                 var targetWrapper = new TargetWrapper(enemy);
                 bool isHittable = false;
+                bool isHittableByNormal = false;  // ★ v3.9.26: 일반 공격으로 hittable
                 string hittableBy = null;
 
                 foreach (var attack in attacks)
@@ -290,9 +296,8 @@ namespace CompanionAI_v3.Analysis
                     if (AbilityDatabase.IsDOTIntensify(attack)) continue;
                     if (AbilityDatabase.IsChainEffect(attack)) continue;
                     // ★ v3.9.24: DangerousAoE 제외 삭제 — 방향성 AoE 안전 체크 구현 완료로
-                    // IsAttackSafeForTarget()에서 Cone/Ray/Sector를 정확히 판정하므로
-                    // blanket 제외 불필요. 이 제외가 FindRangedAttackPosition/RecalculateHittable과의
-                    // hittable 불일치를 유발하여 "이동 → hittable=0 → 같은 위치 재이동" 루프 발생
+                    // ★ v3.9.26: 대신 DangerousAoE 여부를 추적하여 NormalHittableCount에서 구분
+                    bool isDangerousAoE = AbilityDatabase.IsDangerousAoE(attack);
 
                     // ★ v3.1.19: Point 타겟 AOE 처리 개선
                     if (CombatAPI.IsPointTargetAbility(attack))
@@ -369,6 +374,7 @@ namespace CompanionAI_v3.Analysis
                         }
 
                         isHittable = true;
+                        if (!isDangerousAoE) isHittableByNormal = true;
                         hittableBy = $"{attack.Name} (AOE r={patternInfo.Radius:F0})";
                         break;
                     }
@@ -385,6 +391,7 @@ namespace CompanionAI_v3.Analysis
                             continue;
                         }
                         isHittable = true;
+                        if (!isDangerousAoE) isHittableByNormal = true;
                         hittableBy = attack.Name;
                         break;
                     }
@@ -400,9 +407,13 @@ namespace CompanionAI_v3.Analysis
                 if (isHittable)
                 {
                     situation.HittableEnemies.Add(enemy);
-                    Main.LogDebug($"[Analyzer] {enemy.CharacterName} hittable by {hittableBy}");
+                    if (isHittableByNormal) normalHittableCount++;
+                    Main.LogDebug($"[Analyzer] {enemy.CharacterName} hittable by {hittableBy}{(isHittableByNormal ? "" : " (DangerousAoE only)")}");
                 }
             }
+
+            // ★ v3.9.26: NormalHittableCount 설정 — DangerousAoE 제외한 일반 공격 hittable 수
+            situation.NormalHittableCount = normalHittableCount;
 
             // ★ v3.8.14: 근접 선호 캐릭터의 경우, 폴백 전에 근접 공격으로 타격 가능한 적 저장
             // 폴백이 원거리 공격을 추가하면, 근접 캐릭터가 "공격 가능"으로 판단하여 접근 안 함
@@ -580,11 +591,22 @@ namespace CompanionAI_v3.Analysis
             // ★ v3.0.93: MP > 0 체크 추가 - MP 없으면 이동 불가능하므로 NeedsReposition=false
             situation.NeedsReposition = !situation.HasHittableEnemies && situation.HasLivingEnemies && situation.CurrentMP > 0;
 
-            // 엄폐 분석
+            // ★ v3.9.28: 엄폐 분석 — 실제 GetWarhammerLos 기반 (기존 거리 추정 교체)
             if (situation.NearestEnemy != null)
             {
-                var cover = CombatAPI.GetCoverTypeAtPosition(unit.Position, situation.NearestEnemy);
-                situation.HasCover = cover != CombatAPI.CoverLevel.None;
+                try
+                {
+                    var unitNode = unit.Position.GetNearestNodeXZ() as CustomGridNodeBase;
+                    var enemyNode = situation.NearestEnemy.Position.GetNearestNodeXZ() as CustomGridNodeBase;
+                    if (unitNode != null && enemyNode != null)
+                    {
+                        var los = LosCalculations.GetWarhammerLos(
+                            enemyNode, situation.NearestEnemy.SizeRect,
+                            unitNode, unit.SizeRect);
+                        situation.HasCover = los.CoverType != LosCalculations.CoverType.None;
+                    }
+                }
+                catch { }
             }
 
             // ★ v3.0.60: 후퇴 위치 계산 - MovementAPI 기반 실제 도달 가능 타일 사용
