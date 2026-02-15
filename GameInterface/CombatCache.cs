@@ -14,6 +14,7 @@ namespace CompanionAI_v3.GameInterface
     /// - 거리 캐시: 유닛 쌍별 거리 (같은 턴 내 위치 불변) - 94% 히트율
     /// - 타겟팅 캐시: 능력-타겟 쌍별 사용 가능 여부 - 46-82% 히트율
     /// - HP% 캐시: 유닛별 HP 비율 (같은 계획 사이클 내 불변) ★ v3.8.60
+    /// - 명중률 캐시: 능력-타겟 쌍별 명중률 (같은 턴 내 위치 불변) ★ v3.9.30
     ///
     /// 캐시 생명주기:
     /// - ClearAll(): 턴 시작 시 전체 캐시 클리어
@@ -123,6 +124,48 @@ namespace CompanionAI_v3.GameInterface
 
         #endregion
 
+        #region Hit Chance Cache
+
+        /// <summary>
+        /// ★ v3.9.30: 명중률 캐시: (abilityBlueprintName, targetId) → HitChanceInfo
+        /// 같은 턴 내 동일 ability-target 쌍의 명중률은 불변
+        /// TargetScorer + TacticalOptionEvaluator + UtilityScorer에서 공유
+        /// </summary>
+        private static readonly Dictionary<(string, string), CombatAPI.HitChanceInfo> _hitChanceCache
+            = new Dictionary<(string, string), CombatAPI.HitChanceInfo>();
+
+        /// <summary>캐시 통계</summary>
+        public static int HitChanceHits { get; private set; }
+        public static int HitChanceMisses { get; private set; }
+
+        /// <summary>
+        /// ★ v3.9.30: 캐시된 명중률 반환
+        /// </summary>
+        public static CombatAPI.HitChanceInfo GetHitChance(
+            AbilityData ability, BaseUnitEntity attacker, BaseUnitEntity target)
+        {
+            if (ability == null || attacker == null || target == null)
+                return null;
+
+            string abilityKey = ability.Blueprint?.name ?? "unknown";
+            string targetKey = target.UniqueId;
+            var key = (abilityKey, targetKey);
+
+            if (_hitChanceCache.TryGetValue(key, out var cached))
+            {
+                HitChanceHits++;
+                return cached;
+            }
+
+            HitChanceMisses++;
+            var result = CombatAPI.GetHitChance(ability, attacker, target);
+            if (result != null)
+                _hitChanceCache[key] = result;
+            return result;
+        }
+
+        #endregion
+
         #region Targeting Cache
 
         /// <summary>
@@ -179,14 +222,17 @@ namespace CompanionAI_v3.GameInterface
             int distCount = _distanceCache.Count;
             int targetCount = _targetingCache.Count;
             int hpCount = _hpPercentCache.Count;
+            int hitChanceCount = _hitChanceCache.Count;
 
             _distanceCache.Clear();
             _targetingCache.Clear();
             _hpPercentCache.Clear();
+            _hitChanceCache.Clear();  // ★ v3.9.30
             CombatAPI.ClearWeaponRangeCache();  // ★ v3.9.24: 무기 사거리 캐시도 클리어
 
             // 통계 로깅 (이전 턴의 캐시 효율)
-            if (DistanceHits + DistanceMisses > 0 || TargetingHits + TargetingMisses > 0 || HPHits + HPMisses > 0)
+            if (DistanceHits + DistanceMisses > 0 || TargetingHits + TargetingMisses > 0
+                || HPHits + HPMisses > 0 || HitChanceHits + HitChanceMisses > 0)
             {
                 float distHitRate = DistanceHits + DistanceMisses > 0
                     ? (float)DistanceHits / (DistanceHits + DistanceMisses) * 100f
@@ -197,10 +243,14 @@ namespace CompanionAI_v3.GameInterface
                 float hpHitRate = HPHits + HPMisses > 0
                     ? (float)HPHits / (HPHits + HPMisses) * 100f
                     : 0f;
+                float hitChanceHitRate = HitChanceHits + HitChanceMisses > 0
+                    ? (float)HitChanceHits / (HitChanceHits + HitChanceMisses) * 100f
+                    : 0f;
 
                 Main.LogDebug($"[CombatCache] Cleared: Distance({distCount}, {distHitRate:F0}%), " +
                              $"Targeting({targetCount}, {targetHitRate:F0}%), " +
-                             $"HP({hpCount}, {hpHitRate:F0}%)");
+                             $"HP({hpCount}, {hpHitRate:F0}%), " +
+                             $"HitChance({hitChanceCount}, {hitChanceHitRate:F0}%)");
             }
 
             ResetStats();
@@ -251,10 +301,24 @@ namespace CompanionAI_v3.GameInterface
             // ★ v3.8.60: HP 캐시도 무효화 (데미지/힐 후 HP 변경)
             _hpPercentCache.Remove(targetId);
 
-            if (invalidatedDist > 0 || invalidatedTarget > 0)
+            // ★ v3.9.30: 명중률 캐시에서 해당 타겟 관련 항목 제거
+            int invalidatedHitChance = 0;
+            _keysToRemove.Clear();
+            foreach (var key in _hitChanceCache.Keys)
+            {
+                if (key.Item2 == targetId)
+                    _keysToRemove.Add(key);
+            }
+            for (int i = 0; i < _keysToRemove.Count; i++)
+            {
+                _hitChanceCache.Remove(_keysToRemove[i]);
+                invalidatedHitChance++;
+            }
+
+            if (invalidatedDist > 0 || invalidatedTarget > 0 || invalidatedHitChance > 0)
             {
                 Main.LogDebug($"[CombatCache] Invalidated for {target.CharacterName}: " +
-                             $"Distance={invalidatedDist}, Targeting={invalidatedTarget}, HP=1");
+                             $"Distance={invalidatedDist}, Targeting={invalidatedTarget}, HP=1, HitChance={invalidatedHitChance}");
             }
         }
 
@@ -289,9 +353,13 @@ namespace CompanionAI_v3.GameInterface
             int targetingCleared = _targetingCache.Count;
             _targetingCache.Clear();
 
-            if (invalidated > 0 || targetingCleared > 0)
+            // ★ v3.9.30: 시전자 이동 → 명중률 변경 (거리/LOS 변화) → 전체 클리어
+            int hitChanceCleared = _hitChanceCache.Count;
+            _hitChanceCache.Clear();
+
+            if (invalidated > 0 || targetingCleared > 0 || hitChanceCleared > 0)
             {
-                Main.LogDebug($"[CombatCache] Caster moved {caster.CharacterName}: cleared {invalidated} distance entries, {targetingCleared} targeting entries");
+                Main.LogDebug($"[CombatCache] Caster moved {caster.CharacterName}: cleared {invalidated} distance, {targetingCleared} targeting, {hitChanceCleared} hitChance");
             }
         }
 
@@ -306,6 +374,8 @@ namespace CompanionAI_v3.GameInterface
             TargetingMisses = 0;
             HPHits = 0;
             HPMisses = 0;
+            HitChanceHits = 0;
+            HitChanceMisses = 0;
         }
 
         #endregion
@@ -327,10 +397,14 @@ namespace CompanionAI_v3.GameInterface
             float hpHitRate = HPHits + HPMisses > 0
                 ? (float)HPHits / (HPHits + HPMisses) * 100f
                 : 0f;
+            float hitChanceHitRate = HitChanceHits + HitChanceMisses > 0
+                ? (float)HitChanceHits / (HitChanceHits + HitChanceMisses) * 100f
+                : 0f;
 
             return $"Distance: {_distanceCache.Count} ({distHitRate:F0}%), " +
                    $"Targeting: {_targetingCache.Count} ({targetHitRate:F0}%), " +
-                   $"HP: {_hpPercentCache.Count} ({hpHitRate:F0}%)";
+                   $"HP: {_hpPercentCache.Count} ({hpHitRate:F0}%), " +
+                   $"HitChance: {_hitChanceCache.Count} ({hitChanceHitRate:F0}%)";
         }
 
         #endregion

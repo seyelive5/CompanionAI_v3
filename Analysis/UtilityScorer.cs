@@ -578,6 +578,19 @@ namespace CompanionAI_v3.Analysis
                 else if (distanceTiles < 2f) score -= 10f;  // 너무 가까우면 감점 (2타일 ≈ 2.7m)
             }
 
+            // ★ v3.9.30: 명중률 기반 점수 조정
+            // 근접/Scatter → GetHitChance에서 100% 반환 → 영향 없음
+            var hitInfo = CombatCache.GetHitChance(attack, situation.Unit, target);
+            if (hitInfo != null)
+            {
+                if (hitInfo.HitChance < 30)
+                    score -= 20f;       // 매우 낮은 명중률 → 강한 감점
+                else if (hitInfo.HitChance < 50)
+                    score -= 10f;       // 낮은 명중률 → 중간 감점
+                else if (hitInfo.HitChance >= 80)
+                    score += 5f;        // 높은 명중률 → 약간의 보너스
+            }
+
             // ★ RangePreference 적합성
             var preference = situation.RangePreference;
             if (preference == RangePreference.PreferRanged)

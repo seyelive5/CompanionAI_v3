@@ -178,7 +178,7 @@ namespace CompanionAI_v3.Analysis
                 // - 엄폐 상태 반영
                 if (situation.PrimaryAttack != null)
                 {
-                    var hitInfo = CombatAPI.GetHitChance(situation.PrimaryAttack, situation.Unit, target);
+                    var hitInfo = CombatCache.GetHitChance(situation.PrimaryAttack, situation.Unit, target);
                     if (hitInfo != null)
                     {
                         // 명중률 기반 점수 조정

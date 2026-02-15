@@ -170,18 +170,11 @@ namespace CompanionAI_v3.Planning.Planners
                 }
             }
 
-            if (rangePreference == RangePreference.PreferRanged)
-            {
-                var rangedOnly = filteredAttacks.Where(a => !a.IsMelee).ToList();
-                if (rangedOnly.Count > 0)
-                    filteredAttacks = rangedOnly;
-            }
-            else if (rangePreference == RangePreference.PreferMelee)
-            {
-                var meleeOnly = filteredAttacks.Where(a => a.IsMelee).ToList();
-                if (meleeOnly.Count > 0)
-                    filteredAttacks = meleeOnly;
-            }
+            // ★ v3.9.30: RangePreference 하드 필터 제거 (이중 필터 버그 수정)
+            // SituationAnalyzer가 이미 FilterAbilitiesByRangePreference 적용 (line 843)
+            // UtilityScorer.ScoreAttack이 RangePreference 소프트 스코어링 (±35점)
+            // 하드 필터는 Fallback으로 추가된 공격(수류탄 등)을 다시 제거하여
+            // 근접 도달 불가 시 사용 가능한 원거리 공격마저 차단하는 버그 발생
 
             // ★ v3.8.48: anonymous type → ValueTuple (GC 압박 감소)
             var scoredAttacks = new List<(AbilityData Attack, float Score)>();

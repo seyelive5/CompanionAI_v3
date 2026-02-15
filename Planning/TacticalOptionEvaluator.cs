@@ -203,6 +203,35 @@ namespace CompanionAI_v3.Planning
             // 스코어 = 공격 가능 적 × 가중치 + 기본 공격 보너스
             float score = currentHittable * W_HITTABLE + W_ATTACK_BASE;
 
+            // ★ v3.9.30: 명중 품질 가중치
+            // 현재 위치에서 hittable 적들의 평균 명중률로 공격 가치 조정
+            // avgHitChance 100% → factor 1.0 (점수 유지)
+            // avgHitChance 50% → factor 0.75 (25% 감점)
+            // avgHitChance 0% → factor 0.5 (50% 감점)
+            float hitQualityFactor = 1.0f;
+            if (situation.PrimaryAttack != null && situation.HittableEnemies != null
+                && situation.HittableEnemies.Count > 0)
+            {
+                float totalHitChance = 0f;
+                int hitChecked = 0;
+                foreach (var enemy in situation.HittableEnemies)
+                {
+                    var hitInfo = CombatCache.GetHitChance(
+                        situation.PrimaryAttack, situation.Unit, enemy);
+                    if (hitInfo != null)
+                    {
+                        totalHitChance += hitInfo.HitChance;
+                        hitChecked++;
+                    }
+                }
+                if (hitChecked > 0)
+                {
+                    float avgHitChance = totalHitChance / hitChecked;
+                    hitQualityFactor = 0.5f + (avgHitChance / 100f) * 0.5f;
+                    score *= hitQualityFactor;
+                }
+            }
+
             // 안전도 반영
             if (situation.InfluenceMap != null && situation.InfluenceMap.IsValid)
             {
@@ -223,7 +252,7 @@ namespace CompanionAI_v3.Planning
             score += coverQuality;
 
             option.Score = score;
-            option.Reason = $"hittable={currentHittable}, cover={coverQuality:F0}";
+            option.Reason = $"hittable={currentHittable}, hitQ={hitQualityFactor:F2}, cover={coverQuality:F0}";
             return option;
         }
 
