@@ -582,7 +582,8 @@ namespace CompanionAI_v3.GameInterface
                         try
                         {
                             var fullPath = PathfindingService.Instance.FindPathTB_Blocking(
-                                agent, destination, limitRangeByActionPoints: false);
+                                agent, destination, limitRangeByActionPoints: false,
+                                ignoreThreateningAreaCost: true);
 
                             if (fullPath != null && !fullPath.error && fullPath.path != null && fullPath.path.Count >= 2)
                             {

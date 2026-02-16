@@ -314,7 +314,8 @@ namespace CompanionAI_v3.GameInterface
                 if (!task.Wait(100))
                 {
                     if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: AI pathfinding timeout, falling back to player version");
-                    var fallback = ConvertToAiCells(FindAllReachableTilesSync(unit, maxAP));
+                    // ★ v3.9.42: 폴백 시에도 위협 데이터 보존 (threatsDict 활용)
+                    var fallback = ConvertToAiCells(FindAllReachableTilesSync(unit, maxAP), threatsDict);
                     CacheAiTiles(unitId, ap, currentTurn, fallback);
                     return fallback;
                 }
@@ -323,7 +324,7 @@ namespace CompanionAI_v3.GameInterface
                 if (tiles == null || tiles.Count == 0)
                 {
                     if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: AI pathfinding returned null/empty, falling back");
-                    var fallback = ConvertToAiCells(FindAllReachableTilesSync(unit, maxAP));
+                    var fallback = ConvertToAiCells(FindAllReachableTilesSync(unit, maxAP), threatsDict);
                     CacheAiTiles(unitId, ap, currentTurn, fallback);
                     return fallback;
                 }
@@ -358,19 +359,35 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// ★ v3.8.13: WarhammerPathPlayerCell → WarhammerPathAiCell 변환 (폴백용)
-        /// 위협 데이터는 0으로 설정 (플레이어 셀에는 없음)
+        /// ★ v3.9.42: threatsDict가 있으면 각 노드의 AoE/AoO 위협 데이터 복원
         /// </summary>
         private static Dictionary<GraphNode, WarhammerPathAiCell> ConvertToAiCells(
-            Dictionary<GraphNode, WarhammerPathPlayerCell> playerCells)
+            Dictionary<GraphNode, WarhammerPathPlayerCell> playerCells,
+            Dictionary<GraphNode, AiBrainHelper.ThreatsInfo> threatsDict = null)
         {
             var result = new Dictionary<GraphNode, WarhammerPathAiCell>();
             if (playerCells == null) return result;
 
+            int threatsRestored = 0;
             foreach (var kvp in playerCells)
             {
                 var pc = kvp.Value;
                 var node = pc.Node as CustomGridNodeBase;
                 if (node == null) continue;
+
+                int enteredAoE = 0;
+                int stepsInsideDamagingAoE = 0;
+                int provokedAttacks = 0;
+
+                // ★ v3.9.42: threatsDict에서 해당 노드의 위협 데이터 조회
+                if (threatsDict != null && threatsDict.TryGetValue(kvp.Key, out var threats))
+                {
+                    if (threats.aes != null) enteredAoE = threats.aes.Count;
+                    if (threats.dmgOnMoveAes != null) stepsInsideDamagingAoE = threats.dmgOnMoveAes.Count;
+                    if (threats.aooUnits != null) provokedAttacks = threats.aooUnits.Count;
+                    if (enteredAoE > 0 || stepsInsideDamagingAoE > 0 || provokedAttacks > 0)
+                        threatsRestored++;
+                }
 
                 result[kvp.Key] = new WarhammerPathAiCell(
                     pc.Position,
@@ -379,11 +396,15 @@ namespace CompanionAI_v3.GameInterface
                     pc.Node,
                     pc.ParentNode,
                     pc.IsCanStand,
-                    0,  // EnteredAoE - 플레이어 셀에는 없음
-                    0,  // StepsInsideDamagingAoE
-                    0   // ProvokedAttacks
+                    enteredAoE,
+                    stepsInsideDamagingAoE,
+                    provokedAttacks
                 );
             }
+
+            if (threatsRestored > 0 && Main.IsDebugEnabled)
+                Main.LogDebug($"[MovementAPI] ConvertToAiCells: Restored threat data for {threatsRestored}/{result.Count} tiles");
+
             return result;
         }
 
@@ -1645,10 +1666,13 @@ namespace CompanionAI_v3.GameInterface
                 }
 
                 // 캐시 미스 → 새 A* 경로 계산
+                // ★ v3.9.42: ignoreThreateningAreaCost=true → 근접 위협/AoE 비용 무시
+                // 장거리 접근 시 순수 거리 기반 최단 경로로 일관된 방향 유지
                 if (pathNodes == null)
                 {
                     var fullPath = PathfindingService.Instance.FindPathTB_Blocking(
-                        agent, targetPos, limitRangeByActionPoints: false);
+                        agent, targetPos, limitRangeByActionPoints: false,
+                        ignoreThreateningAreaCost: true);
 
                     if (fullPath == null || fullPath.error || fullPath.path == null || fullPath.path.Count < 2)
                     {
