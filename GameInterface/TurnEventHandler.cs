@@ -106,6 +106,9 @@ namespace CompanionAI_v3.GameInterface
 
                 // ★ v3.7.62: BattlefieldGrid 정리
                 BattlefieldGrid.Instance.Clear();
+
+                // ★ v3.9.42: 접근 경로 캐시 클리어
+                MovementAPI.ClearApproachPathCache();
             }
             else
             {

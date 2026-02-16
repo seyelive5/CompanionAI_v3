@@ -75,6 +75,40 @@ namespace CompanionAI_v3.GameInterface
 
         #endregion
 
+        #region ★ v3.9.42: Approach Path Cache (다중 턴 접근 방향 일관성)
+
+        /// <summary>
+        /// 유닛별 A* 접근 경로 캐시
+        /// 문제: 좁은 통로에서 매 턴 A* 재계산 → 다른 경로 선택 → 왔다갔다 진동
+        /// 해결: 접근 경로를 캐시하여 같은 적에게 계속 접근할 때 동일 경로 유지
+        /// </summary>
+        private struct CachedApproachPath
+        {
+            public string TargetId;          // 접근 대상 적 UniqueId
+            public Vector3 TargetPosition;   // 경로 계산 시 적 위치
+            public List<GraphNode> Path;     // 전체 A* 경로 노드
+        }
+
+        private static readonly Dictionary<string, CachedApproachPath> _approachPathCache = new();
+
+        /// <summary>접근 경로 캐시 전체 클리어 (전투 종료 시)</summary>
+        public static void ClearApproachPathCache()
+        {
+            _approachPathCache.Clear();
+            if (Main.IsDebugEnabled) Main.LogDebug("[MovementAPI] Approach path cache cleared");
+        }
+
+        /// <summary>특정 유닛의 접근 경로 캐시 클리어</summary>
+        public static void ClearApproachPathCache(string unitId)
+        {
+            _approachPathCache.Remove(unitId);
+        }
+
+        /// <summary>적 위치가 크게 변했는지 확인 (3타일 이상 이동 시 경로 재계산)</summary>
+        private const float APPROACH_CACHE_INVALIDATION_DIST = 3f * 1.35f; // 3 tiles in meters
+
+        #endregion
+
         #region Position Scoring
 
         public class PositionScore
@@ -1567,11 +1601,10 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
-        /// ★ v3.9.38: A* 경로를 따라 접근 가능한 최적 위치 찾기
+        /// ★ v3.9.42: A* 경로를 따라 접근 가능한 최적 위치 찾기
         /// PathfindingService의 A* 패스파인딩으로 타겟까지의 전체 경로를 계산하고,
         /// 그 경로 위에서 현재 MP로 도달 가능한 가장 먼 지점을 선택.
-        /// 기존 유클리드 방식은 벽 너머의 직선 거리로 판단하여 벽에 붙는 이동을 했지만,
-        /// A* 경로를 따르면 벽을 돌아가는 올바른 경로로 다중 턴에 걸쳐 접근 가능.
+        /// ★ 접근 경로 캐시: 같은 적에게 다중 턴 접근 시 이전 경로를 유지하여 진동 방지
         /// </summary>
         private static PositionScore FindApproachAlongPath(
             BaseUnitEntity unit,
@@ -1583,23 +1616,67 @@ namespace CompanionAI_v3.GameInterface
                 var agent = unit.View?.MovementAgent;
                 if (agent == null) return null;
 
-                // A* 경로 계산 (AP 제한 없음 → 타겟까지 전체 경로)
-                var fullPath = PathfindingService.Instance.FindPathTB_Blocking(
-                    agent, targetPos, limitRangeByActionPoints: false);
+                string unitId = unit.UniqueId;
+                List<GraphNode> pathNodes = null;
+                bool usedCache = false;
 
-                if (fullPath == null || fullPath.error || fullPath.path == null || fullPath.path.Count < 2)
+                // ★ v3.9.42: 캐시된 접근 경로 확인
+                // 같은 적에게 접근 중이고, 적이 크게 이동하지 않았으면 캐시 경로 재사용
+                if (_approachPathCache.TryGetValue(unitId, out var cached))
                 {
-                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* path to target failed or too short");
-                    return null;
+                    float targetMoved = Vector3.Distance(cached.TargetPosition, targetPos);
+                    if (targetMoved < APPROACH_CACHE_INVALIDATION_DIST && cached.Path != null && cached.Path.Count >= 2)
+                    {
+                        // 캐시 경로에서 현재 위치 찾기 (가장 가까운 노드)
+                        int currentIdx = FindNearestNodeOnPath(unit.Position, cached.Path);
+                        if (currentIdx >= 0 && currentIdx < cached.Path.Count - 1)
+                        {
+                            // 현재 위치 이후의 경로만 사용
+                            pathNodes = cached.Path;
+                            usedCache = true;
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Using cached approach path ({cached.Path.Count} nodes, current at step {currentIdx})");
+                        }
+                    }
+                    else
+                    {
+                        // 적이 이동했거나 캐시 무효 → 제거
+                        _approachPathCache.Remove(unitId);
+                    }
                 }
 
-                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* path has {fullPath.path.Count} nodes, searching for farthest reachable");
+                // 캐시 미스 → 새 A* 경로 계산
+                if (pathNodes == null)
+                {
+                    var fullPath = PathfindingService.Instance.FindPathTB_Blocking(
+                        agent, targetPos, limitRangeByActionPoints: false);
+
+                    if (fullPath == null || fullPath.error || fullPath.path == null || fullPath.path.Count < 2)
+                    {
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* path to target failed or too short");
+                        return null;
+                    }
+
+                    pathNodes = fullPath.path;
+
+                    // ★ 새 경로를 캐시에 저장 (5노드 이상인 장거리 경로만)
+                    if (pathNodes.Count >= 5)
+                    {
+                        _approachPathCache[unitId] = new CachedApproachPath
+                        {
+                            TargetId = null, // targetId는 여기서 접근 불가 — 위치로 판별
+                            TargetPosition = targetPos,
+                            Path = new List<GraphNode>(pathNodes)  // 복사본 저장
+                        };
+                    }
+                }
+
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* path has {pathNodes.Count} nodes{(usedCache ? " (CACHED)" : "")}, searching for farthest reachable");
 
                 // 경로를 뒤에서부터 탐색 (타겟에 가장 가까운 도달 가능 노드 우선)
                 // index 0 = 유닛 현재 위치이므로 스킵 (제자리 이동 방지)
-                for (int i = fullPath.path.Count - 1; i >= 1; i--)
+                for (int i = pathNodes.Count - 1; i >= 1; i--)
                 {
-                    var pathNode = fullPath.path[i];
+                    var pathNode = pathNodes[i];
                     if (!reachableTiles.TryGetValue(pathNode, out var aiCell)) continue;
 
                     var node = aiCell.Node as CustomGridNodeBase;
@@ -1609,7 +1686,7 @@ namespace CompanionAI_v3.GameInterface
                         + aiCell.EnteredAoE * WEIGHT_AOE_ENTRY
                         + aiCell.StepsInsideDamagingAoE * WEIGHT_DAMAGING_AOE_STEP;
 
-                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* approach node at step {i}/{fullPath.path.Count - 1}, pathRisk={pathRisk:F1}");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* approach node at step {i}/{pathNodes.Count - 1}, pathRisk={pathRisk:F1}");
 
                     return new PositionScore
                     {
@@ -1628,6 +1705,33 @@ namespace CompanionAI_v3.GameInterface
                 if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] FindApproachAlongPath error: {ex.Message}");
                 return null;
             }
+        }
+
+        /// <summary>
+        /// ★ v3.9.42: 경로 위에서 주어진 위치에 가장 가까운 노드 인덱스 찾기
+        /// </summary>
+        private static int FindNearestNodeOnPath(Vector3 position, List<GraphNode> path)
+        {
+            int bestIdx = -1;
+            float bestDist = float.MaxValue;
+
+            // 경로 전반부만 탐색 (현재 위치는 경로 시작 부분에 있을 것)
+            int searchLimit = Math.Min(path.Count, path.Count / 2 + 5);
+            for (int i = 0; i < searchLimit; i++)
+            {
+                var node = path[i] as CustomGridNodeBase;
+                if (node == null) continue;
+
+                float dist = Vector3.Distance(position, node.Vector3Position);
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    bestIdx = i;
+                }
+            }
+
+            // 2타일(2.7m) 이내여야 유효한 매칭
+            return bestDist < 2.7f ? bestIdx : -1;
         }
 
         #endregion
