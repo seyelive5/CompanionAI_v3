@@ -541,6 +541,10 @@ namespace CompanionAI_v3.Analysis
             var contactPoints = _contactPointsBuffer;
 
             // 1. 각 아군-최근접 적 쌍의 접촉점 계산
+            // ★ v3.9.48: 교전 거리 가중치 — 적과 가까운 아군이 전선에 더 큰 영향
+            Vector3 weightedSum = Vector3.zero;
+            float totalWeight = 0f;
+
             foreach (var ally in _allies)
             {
                 if (ally == null) continue;
@@ -564,12 +568,23 @@ namespace CompanionAI_v3.Analysis
                 {
                     Vector3 contactPoint = (ally.Position + nearestEnemy.Position) / 2f;
                     contactPoints.Add(contactPoint);
+
+                    // ★ v3.9.48: 가까운 아군일수록 가중치 높음 (실제 교전 = 전선 정의)
+                    // 5m 거리 → weight 3.0, 10m → 2.0, 20m → 1.0
+                    float weight = 1f + Math.Max(0f, (20f - nearestDist) * 0.1f);
+                    weightedSum += contactPoint * weight;
+                    totalWeight += weight;
                 }
             }
 
-            // 2. 접촉 지점들의 평균 = 전선
-            if (contactPoints.Count > 0)
+            // 2. 가중 평균 = 전선 (교전 중인 아군에 편향)
+            if (totalWeight > 0f)
             {
+                Frontline = weightedSum / totalWeight;
+            }
+            else if (contactPoints.Count > 0)
+            {
+                // 폴백: 단순 평균
                 Vector3 sum = Vector3.zero;
                 foreach (var point in contactPoints)
                     sum += point;
@@ -586,7 +601,7 @@ namespace CompanionAI_v3.Analysis
             FrontlineDirection = direction.magnitude > 0.01f ? direction.normalized : Vector3.forward;
 
             Main.LogDebug($"[InfluenceMap] Frontline computed: {contactPoints.Count} contact points, " +
-                $"Pos={Frontline}, Dir={FrontlineDirection}");
+                $"totalWeight={totalWeight:F1}, Pos={Frontline}, Dir={FrontlineDirection}");
         }
 
         private void FindSafeZones()

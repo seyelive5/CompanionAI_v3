@@ -913,19 +913,26 @@ namespace CompanionAI_v3.GameInterface
 
                     if (nearestEnemyDist < minSafeDistance)
                     {
+                        // 안전 거리 미만 = 위험 (변경 없음)
                         score.DistanceScore = -50f + nearestEnemyDist * 5f;
                     }
                     else if (nearestEnemyDist <= weaponRange)
                     {
-                        // ★ v3.0.46: Division by Zero 방지
+                        // ★ v3.9.48: 최적 사거리(60%) 선호 벨 커브
+                        // 기존: 멀수록 높은 점수 (20~30) → 유닛이 최대 사거리에 고착
+                        // 개선: 60% 사거리에서 최고점(25), 양 극단에서 감소
+                        // minSafe(0%)→17.8, 30%→21.4, 60%→25, 80%→22.6, 100%→20.2
                         float denominator = weaponRange - minSafeDistance;
                         float distRatio = denominator > 0.1f
                             ? (nearestEnemyDist - minSafeDistance) / denominator
                             : 0.5f;
-                        score.DistanceScore = 20f + distRatio * 10f;
+                        float optimalRatio = 0.6f;
+                        float deviation = Math.Abs(distRatio - optimalRatio);
+                        score.DistanceScore = 25f - deviation * 12f;
                     }
                     else
                     {
+                        // 무기 사거리 초과 = 접근 필요
                         score.DistanceScore = Math.Max(0f, 10f - (nearestEnemyDist - weaponRange) * 2f);
                     }
                     break;
@@ -1884,8 +1891,9 @@ namespace CompanionAI_v3.GameInterface
             // 공격 성향이 높으면(>1) 전진 보너스, 방어 필요도 높으면(>1) 엄폐 보너스 증폭
             if (aggressionMod > 1f)
             {
-                // 공격적 상황: 적에게 가까운 위치에 약간 보너스
-                score.TacticalAdjustment += (aggressionMod - 1f) * 5f;
+                // ★ v3.9.48: 공격적 상황 보너스 강화 (5f → 12f)
+                // 팀 신뢰도 높을 때 전진 위치에 유의미한 보너스 부여
+                score.TacticalAdjustment += (aggressionMod - 1f) * 12f;
             }
             if (defenseMod > 1f)
             {
@@ -1924,17 +1932,17 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// ★ v3.2.25: Role별 전선 위치 점수
-        /// Tank: 전선 앞(0~5m) 선호, 후방 페널티
-        /// DPS: 전선 너머 10m 이상 고립 페널티
-        /// Support: 전선 뒤(-5m 이하) 선호, 전선 앞 페널티
+        /// ★ v3.9.48: 전선 점수 완화 — 전진 억제 해소
+        /// 기존: Support 4f/m (무캡), DPS 3f/m (10m+) → 과도한 전진 억제
+        /// 개선: 페널티 시작 거리 확대, 감점 약화, 상한 설정
         /// </summary>
         private static void ApplyFrontlineScore(PositionScore score, float frontlineDist, AIRole role)
         {
             switch (role)
             {
                 case AIRole.Tank:
-                    // Tank: 전선 앞(0~5m)에서 보너스, 후방(-5m 이하) 페널티
-                    if (frontlineDist >= 0f && frontlineDist <= 5f)
+                    // Tank: 전선 앞(0~8m)에서 보너스, 후방(-5m 이하) 페널티
+                    if (frontlineDist >= 0f && frontlineDist <= 8f)
                     {
                         score.InfluenceControlBonus += 15f;  // 전선 앞 적극 위치
                     }
@@ -1945,23 +1953,25 @@ namespace CompanionAI_v3.GameInterface
                     break;
 
                 case AIRole.DPS:
-                    // DPS: 전선 너머 10m 이상 침투 시 고립 페널티
-                    if (frontlineDist > 10f)
+                    // ★ v3.9.48: 고립 페널티 완화 (10m/3f → 15m/2f, 상한 20)
+                    if (frontlineDist > 15f)
                     {
-                        float isolationPenalty = (frontlineDist - 10f) * 3f;
+                        float isolationPenalty = Math.Min(20f, (frontlineDist - 15f) * 2f);
                         score.InfluenceThreatScore += isolationPenalty;
                     }
                     break;
 
                 case AIRole.Support:
-                    // Support: 전선 뒤(-5m 이하) 보너스, 전선 앞 페널티
+                    // ★ v3.9.48: 전선 앞 페널티 완화 (0m/4f → 5m/2f, 상한 15)
+                    // Support도 전투 상황에 따라 전선 근처까지 전진 가능
                     if (frontlineDist < -5f)
                     {
                         score.InfluenceControlBonus += 10f;  // 후방 안전 위치
                     }
-                    else if (frontlineDist > 0f)
+                    else if (frontlineDist > 5f)
                     {
-                        score.InfluenceThreatScore += frontlineDist * 4f;  // 전선 앞 = 위험
+                        float penalty = Math.Min(15f, (frontlineDist - 5f) * 2f);
+                        score.InfluenceThreatScore += penalty;
                     }
                     break;
 
