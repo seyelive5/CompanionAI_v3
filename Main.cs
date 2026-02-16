@@ -36,6 +36,10 @@ namespace CompanionAI_v3
             // 설정 로드
             ModSettings.Load(modEntry);
 
+            // ★ v3.9.40: 저장된 언어 설정을 Localization에 즉시 반영
+            // (UI를 열기 전에도 올바른 언어로 대사가 출력되도록)
+            Localization.CurrentLanguage = ModSettings.Instance.UILanguage;
+
             // ★ v3.5.96: PerSaveSettings에 모드 경로 설정
             PerSaveSettings.SetModPath(modEntry.Path);
 
