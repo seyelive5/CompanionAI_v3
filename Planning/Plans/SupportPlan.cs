@@ -184,13 +184,17 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.8.67: ClearMP 선제 후퇴는 Phase 5.8에서 처리
             // 일반 후퇴는 Phase 8.5에서 처리
 
-            // Phase 2: 아군 힐 (Confidence 기반 임계값 조정)
+            // Phase 2: 아군 힐 (사용자 설정 + Confidence 보정)
             // ★ v3.2.15: TeamBlackboard 기반 힐 대상 선택 (팀 전체 최적화)
             // ★ v3.2.20: 신뢰도가 낮으면 더 빨리 힐, 높으면 늦게 힐
+            // ★ v3.9.46: HealAtHPPercent 사용자 설정 연동 (UI 슬라이더 20-80%)
             float confidence = GetTeamConfidence();
-            float healThreshold = confidence > 0.7f ? 30f :  // 높은 신뢰도: HP<30%만 힐
-                                  confidence > 0.3f ? 50f :  // 보통: HP<50%
-                                                      70f;   // 낮은 신뢰도: HP<70%도 힐
+            int userHealSetting = situation.CharacterSettings?.HealAtHPPercent ?? 50;
+            // 사용자 설정값 기반 + Confidence 보정 (-20 ~ +20)
+            float confidenceModifier = confidence > 0.7f ? -20f :   // 높은 신뢰도: 좀 더 보수적
+                                       confidence > 0.3f ? 0f :     // 보통: 설정값 그대로
+                                                           20f;    // 낮은 신뢰도: 좀 더 적극적
+            float healThreshold = Math.Max(20f, Math.Min(80f, userHealSetting + confidenceModifier));
 
             // ★ v3.7.12: Vitality Signal (Servo-Skull AoE 힐) - 개별 힐보다 우선
             // 여러 아군이 부상 시 효율적
@@ -215,6 +219,16 @@ namespace CompanionAI_v3.Planning.Plans
                 if (allyHealAction != null)
                 {
                     actions.Add(allyHealAction);
+                }
+                // ★ v3.9.46: 힐 실패 시 이동 후 힐 시도 (메디킷 Touch 사거리 대응)
+                else if (remainingMP > 0)
+                {
+                    var moveHealActions = PlanMoveToHeal(situation, woundedAlly, ref remainingAP, remainingMP);
+                    if (moveHealActions != null)
+                    {
+                        actions.AddRange(moveHealActions);
+                        remainingMP = 0;  // 이동 소모 반영 (보수적)
+                    }
                 }
             }
 
@@ -814,6 +828,97 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// ★ v3.9.46: 이동 후 힐 - 힐 사거리 밖의 아군에게 접근하여 힐
+        /// Touch 사거리 메디킷 등을 위해 아군 근접 위치로 이동 후 힐 시전
+        /// </summary>
+        private List<PlannedAction> PlanMoveToHeal(Situation situation, BaseUnitEntity woundedAlly, ref float remainingAP, float remainingMP)
+        {
+            if (remainingMP <= 0) return null;
+            if (situation.AvailableHeals.Count == 0) return null;
+
+            var unit = situation.Unit;
+            if (unit == null || woundedAlly == null) return null;
+
+            // 가장 저렴한 사용 가능한 힐 능력 찾기
+            AbilityData bestHeal = null;
+            float bestHealCost = float.MaxValue;
+            int healRange = 0;
+
+            foreach (var heal in situation.AvailableHeals)
+            {
+                float cost = CombatAPI.GetAbilityAPCost(heal);
+                if (cost > remainingAP) continue;
+
+                if (cost < bestHealCost)
+                {
+                    bestHealCost = cost;
+                    bestHeal = heal;
+                    healRange = CombatAPI.GetAbilityRangeInTiles(heal);
+                }
+            }
+
+            if (bestHeal == null) return null;
+
+            // 현재 거리 확인 - 이미 사거리 내면 move-to-heal 불필요 (LOS 문제 등)
+            float currentDistTiles = CombatAPI.GetDistanceInTiles(unit, woundedAlly);
+            if (currentDistTiles <= healRange)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Support] MoveToHeal: Already in range ({currentDistTiles:F1} <= {healRange}) but heal failed - likely LOS issue");
+                return null;
+            }
+
+            // 도달 가능한 타일 획득
+            var tiles = MovementAPI.FindAllReachableTilesSync(unit, remainingMP);
+            if (tiles == null || tiles.Count == 0) return null;
+
+            // 아군의 힐 사거리 내에 도달 가능한 타일 찾기
+            UnityEngine.Vector3? bestPos = null;
+            float bestDist = float.MaxValue;
+
+            foreach (var kvp in tiles)
+            {
+                var cell = kvp.Value;
+                if (!cell.IsCanStand) continue;
+
+                var node = kvp.Key as CustomGridNodeBase;
+                if (node == null) continue;
+
+                var pos = node.Vector3Position;
+                float distToAllyTiles = CombatAPI.MetersToTiles(
+                    UnityEngine.Vector3.Distance(pos, woundedAlly.Position));
+
+                // 힐 사거리 내이고, 가장 가까운 타일 선택
+                if (distToAllyTiles <= healRange && distToAllyTiles < bestDist)
+                {
+                    bestDist = distToAllyTiles;
+                    bestPos = pos;
+                }
+            }
+
+            if (!bestPos.HasValue)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Support] MoveToHeal: No reachable tile within heal range ({healRange} tiles) of {woundedAlly.CharacterName} (current dist={currentDistTiles:F1})");
+                return null;
+            }
+
+            // ★ v3.5.10: 힐 대상 예약 (중복 힐 방지)
+            TeamBlackboard.Instance.ReserveHeal(woundedAlly);
+
+            // Move + Heal 계획
+            remainingAP -= bestHealCost;
+
+            var result = new List<PlannedAction>();
+            result.Add(PlannedAction.Move(bestPos.Value,
+                $"Move to heal {woundedAlly.CharacterName} (range={healRange} tiles)"));
+            result.Add(PlannedAction.Heal(bestHeal, woundedAlly,
+                $"Heal after move: {woundedAlly.CharacterName}", bestHealCost));
+
+            Main.Log($"[Support] MoveToHeal: Moving {CombatAPI.MetersToTiles(UnityEngine.Vector3.Distance(unit.Position, bestPos.Value)):F1} tiles to heal {woundedAlly.CharacterName} ({bestHeal.Name}, range={healRange})");
+
+            return result;
         }
 
         // ★ v3.7.93: PlanAllyBuff 메서드는 BasePlan으로 이동

@@ -347,6 +347,19 @@ namespace CompanionAI_v3.Planning.Plans
                 if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 4: Skipping buff (confidence={confidence:F2} > 0.75)");
             }
 
+            // ★ v3.9.44: Phase 4.1 - 아군 버프 (CanTargetFriends=true 버프를 아군에게 사용)
+            // DPS도 아군에게 사용 가능한 버프(팀 버프, 보호 버프 등)가 있으면 아군에게 사용
+            // 자기 공격 버프(Phase 4) 이후, 전투(Phase 5) 이전에 실행
+            if (!isRetreatMode && remainingAP >= 1f)
+            {
+                var allyBuffAction = PlanAllyBuff(situation, ref remainingAP);
+                if (allyBuffAction != null)
+                {
+                    actions.Add(allyBuffAction);
+                    Main.Log($"[DPS] Phase 4.1: Ally buff planned - {allyBuffAction.Ability?.Name} -> {(allyBuffAction.Target?.Entity as BaseUnitEntity)?.CharacterName ?? "unknown"}");
+                }
+            }
+
             // ★ v3.1.16: didPlanAttack 변수를 여기서 미리 선언 (Phase 4.4 AOE용)
             bool didPlanAttack = false;
             // ★ v3.8.44: 공격 실패 이유 추적 (이동 Phase에 전달)
@@ -797,13 +810,40 @@ namespace CompanionAI_v3.Planning.Plans
                     var bp = buff.Blueprint;
                     if (bp?.CanTargetSelf != true && bp?.CanTargetFriends != true) continue;
 
-                    var target = new TargetWrapper(situation.Unit);
-                    string reason;
-                    if (CombatAPI.CanUseAbilityOn(buff, target, out reason))
+                    // ★ v3.9.44: CanTargetFriends=true면 아군 우선 시도 (자신만 버프하는 문제 수정)
+                    bool usedOnAlly = false;
+                    if (bp?.CanTargetFriends == true && situation.Allies != null)
                     {
-                        remainingAP -= cost;
-                        actions.Add(PlannedAction.Buff(buff, situation.Unit, "Fallback buff - no attack available", cost));
-                        Main.Log($"[DPS] Fallback buff: {buff.Name}");
+                        foreach (var ally in situation.Allies)
+                        {
+                            if (ally == null || ally.LifeState.IsDead || ally == situation.Unit) continue;
+                            if (AllyStateCache.HasBuff(ally, buff)) continue;
+                            if (!CombatAPI.NeedsBuffRefresh(ally, buff)) continue;
+
+                            var allyTarget = new TargetWrapper(ally);
+                            string allyReason;
+                            if (CombatAPI.CanUseAbilityOn(buff, allyTarget, out allyReason))
+                            {
+                                remainingAP -= cost;
+                                actions.Add(PlannedAction.Buff(buff, ally, $"Fallback buff ally: {buff.Name}", cost));
+                                Main.Log($"[DPS] Fallback buff (ally): {buff.Name} -> {ally.CharacterName}");
+                                usedOnAlly = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    // 아군에게 사용 못했으면 자기 자신에게
+                    if (!usedOnAlly)
+                    {
+                        var target = new TargetWrapper(situation.Unit);
+                        string reason;
+                        if (CombatAPI.CanUseAbilityOn(buff, target, out reason))
+                        {
+                            remainingAP -= cost;
+                            actions.Add(PlannedAction.Buff(buff, situation.Unit, "Fallback buff - no attack available", cost));
+                            Main.Log($"[DPS] Fallback buff: {buff.Name}");
+                        }
                     }
                 }
             }
