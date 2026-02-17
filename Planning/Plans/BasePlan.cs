@@ -162,6 +162,78 @@ namespace CompanionAI_v3.Planning.Plans
         protected bool ShouldRetreat(Situation situation)
             => MovementPlanner.ShouldRetreat(situation);
 
+        /// <summary>
+        /// ★ v3.9.70: 긴급 AoE 대피 — 현재 위치가 피해 AoE 안이면 가장 가까운 안전 타일로 이동
+        /// Phase 0.5 (Emergency Heal 전)에서 호출
+        /// </summary>
+        protected PlannedAction PlanAoEEvacuation(Situation situation)
+        {
+            if (!situation.NeedsAoEEvacuation) return null;
+            if (!situation.CanMove || situation.CurrentMP <= 0) return null;
+
+            var unit = situation.Unit;
+            bool inDamage = situation.IsInDamagingAoE;
+            bool inPsychicNull = situation.IsInPsychicNullZone;
+            string reason = inDamage && inPsychicNull ? "damaging AoE + psychic null zone"
+                          : inDamage ? "damaging AoE"
+                          : "psychic null zone";
+            Main.Log($"[{RoleName}] ★ AoE Evacuation: {unit.CharacterName} is in {reason}, searching for safe tile");
+
+            try
+            {
+                // 도달 가능 타일 조회 (캐시 활용)
+                var reachableTiles = MovementAPI.FindAllReachableTilesWithThreatsSync(unit);
+                if (reachableTiles == null || reachableTiles.Count == 0)
+                {
+                    Main.Log($"[{RoleName}] AoE Evacuation: No reachable tiles");
+                    return null;
+                }
+
+                // 가장 가까운 안전 타일 탐색 (위험 구역 밖 + 최단 이동거리)
+                GraphNode bestNode = null;
+                float bestDist = float.MaxValue;
+
+                foreach (var kvp in reachableTiles)
+                {
+                    var node = kvp.Key as CustomGridNodeBase;
+                    if (node == null) continue;
+
+                    var pos = node.Vector3Position;
+
+                    // 현재 위치와 동일하면 스킵
+                    if (Vector3.Distance(pos, unit.Position) < 1f) continue;
+
+                    // ★ 핵심: 이 타일이 모든 위험 구역 밖인지 확인
+                    if (inDamage && CombatAPI.IsPositionInDamagingAoE(pos, unit)) continue;
+                    if (inPsychicNull && CombatAPI.IsPositionInPsychicNullZone(pos)) continue;
+
+                    // 이동 거리 계산 (짧을수록 좋음 — 에너지 절약)
+                    float moveDist = Vector3.Distance(unit.Position, pos);
+                    if (moveDist < bestDist)
+                    {
+                        bestDist = moveDist;
+                        bestNode = kvp.Key;
+                    }
+                }
+
+                if (bestNode == null)
+                {
+                    Main.Log($"[{RoleName}] AoE Evacuation: No safe tile found within movement range!");
+                    return null;
+                }
+
+                var safePos = ((CustomGridNodeBase)bestNode).Vector3Position;
+                Main.Log($"[{RoleName}] ★ AoE Evacuation: Moving to ({safePos.x:F1},{safePos.z:F1}), distance={bestDist:F1}m");
+
+                return PlannedAction.Move(safePos, $"Emergency evacuation ({reason})");
+            }
+            catch (Exception ex)
+            {
+                Main.LogError($"[{RoleName}] AoE Evacuation error: {ex.Message}");
+                return null;
+            }
+        }
+
         #endregion
 
         #region Attack - Delegates to AttackPlanner

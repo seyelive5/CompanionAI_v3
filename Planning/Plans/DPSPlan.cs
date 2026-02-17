@@ -55,6 +55,17 @@ namespace CompanionAI_v3.Planning.Plans
                 return new TurnPlan(actions, TurnPriority.EndTurn, "DPS ultimate failed (Transcend Potential)");
             }
 
+            // ★ v3.9.70: Phase 0.5 - 긴급 AoE/사이킥 차단 구역 대피
+            if (situation.NeedsAoEEvacuation && situation.CanMove)
+            {
+                var evacAction = PlanAoEEvacuation(situation);
+                if (evacAction != null)
+                {
+                    actions.Add(evacAction);
+                    return new TurnPlan(actions, TurnPriority.Emergency, "DPS AoE evacuation");
+                }
+            }
+
             // Phase 1: 긴급 자기 힐
             var healAction = PlanEmergencyHeal(situation, ref remainingAP);
             if (healAction != null)

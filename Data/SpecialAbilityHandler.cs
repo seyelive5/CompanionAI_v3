@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Code.Enums;
+using Kingmaker;
 using Kingmaker.Blueprints;
+using Kingmaker.EntitySystem;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.UnitLogic.Abilities.Components;
@@ -321,72 +323,102 @@ namespace CompanionAI_v3.Data
         #region Chain Effect Detection
 
         /// <summary>
-        /// 연쇄 효과용 유효 타겟 수 계산
+        /// ★ v3.9.68: 게임 AbilityDataHelper.SelectNextTarget 알고리즘 정밀 복제
+        /// 기존 자체 시뮬레이션의 3가지 버그 수정:
+        ///   1. Vector3.Distance (유클리드 미터) → DistanceToInCells (Chebyshev 셀)
+        ///   2. Radius * GridCellSize (셀→미터 변환) → Radius 직접 사용 (이미 셀)
+        ///   3. enemies만 순회 → Game.Instance.State.AllBaseUnits (TargetType.Any 시 아군 포함)
+        /// 추가: IsValidTargetForAttack, CheckTarget, IsInCombat 검증 (게임과 동일)
         /// </summary>
-        public static int CountChainTargets(AbilityData ability, BaseUnitEntity initialTarget, List<BaseUnitEntity> enemies)
+        public static List<BaseUnitEntity> PredictChainTargets(AbilityData ability, BaseUnitEntity initialTarget)
         {
-            if (ability == null || initialTarget == null || enemies == null) return 0;
+            var result = new List<BaseUnitEntity>();
+            if (ability == null || initialTarget == null) return result;
 
-            // ★ v3.8.63: 블루프린트에서 연쇄 파라미터 추출 (기존 하드코딩 대체)
-            float chainRadius = 7f;  // 폴백: 기본 연쇄 범위 (미터)
-            int maxChainTargets = 5;  // 폴백: 기본 최대 연쇄
+            result.Add(initialTarget);
 
             try
             {
                 var deliverChain = ability.Blueprint?.GetComponent<AbilityDeliverChain>();
-                if (deliverChain != null)
-                {
-                    // Radius는 셀 단위 → 미터로 변환
-                    if (deliverChain.Radius > 0)
-                        chainRadius = deliverChain.Radius * GameInterface.CombatAPI.GridCellSize;
+                if (deliverChain == null) return result;
 
-                    // TargetsCount — 정적 값 사용 (런타임 컨텍스트 없이 접근 가능)
+                int radiusCells = deliverChain.Radius;
+                if (radiusCells <= 0) return result;
+
+                int maxTargets = 5;
+                try
+                {
                     int targets = deliverChain.TargetsCount.Value;
-                    if (targets > 0)
-                        maxChainTargets = targets;
+                    if (targets > 0) maxTargets = targets;
+                }
+                catch { }
 
-                    Main.LogDebug($"[SpecialAbility] Chain params from blueprint: radius={chainRadius:F1}m ({deliverChain.Radius} cells), maxTargets={maxChainTargets}");
-                }
-                else
+                var usedTargets = new HashSet<BaseUnitEntity> { initialTarget };
+                Vector3 currentPoint = initialTarget.Position;
+
+                for (int i = 1; i < maxTargets; i++)
                 {
-                    Main.LogDebug($"[SpecialAbility] No AbilityDeliverChain on {ability.Name} — using fallback: radius={chainRadius}m, maxTargets={maxChainTargets}");
+                    BaseUnitEntity nextTarget = null;
+                    float minDist = float.MaxValue;
+
+                    // 게임: Game.Instance.State.AllBaseUnits 전체 순회
+                    foreach (var unit in Game.Instance.State.AllBaseUnits)
+                    {
+                        // 게임: IsValidTargetForAttack (HP, 의식, 펫 제한 등)
+                        if (!ability.IsValidTargetForAttack(unit)) continue;
+                        // 게임: IsInCombat (전투 참여 유닛만)
+                        if (!unit.IsInCombat) continue;
+
+                        // 게임: DistanceToInCells (Chebyshev + SizeRect)
+                        float dist = (float)unit.DistanceToInCells(currentPoint);
+
+                        // 게임: CheckTarget (TargetDead, TargetType)
+                        if (!CheckChainTarget(ability, deliverChain, unit)) continue;
+
+                        if (dist <= radiusCells && !usedTargets.Contains(unit) && dist < minDist)
+                        {
+                            minDist = dist;
+                            nextTarget = unit;
+                        }
+                    }
+
+                    if (nextTarget == null) break;
+
+                    result.Add(nextTarget);
+                    usedTargets.Add(nextTarget);
+                    currentPoint = nextTarget.Position;
                 }
+
+                if (Main.IsDebugEnabled)
+                    Main.LogDebug($"[SpecialAbility] Chain prediction: {ability.Name} -> {result.Count} targets (radius={radiusCells} cells, max={maxTargets})");
             }
             catch (Exception ex)
             {
-                Main.LogDebug($"[SpecialAbility] Chain blueprint extraction error: {ex.Message}");
+                Main.LogDebug($"[SpecialAbility] Chain prediction error: {ex.Message}");
             }
 
-            int count = 1;  // 초기 타겟 포함
-            var usedTargets = new HashSet<BaseUnitEntity> { initialTarget };
-            Vector3 currentPosition = initialTarget.Position;
+            return result;
+        }
 
-            for (int i = 0; i < maxChainTargets - 1; i++)
-            {
-                BaseUnitEntity nextTarget = null;
-                float closestDistance = float.MaxValue;
+        /// <summary>
+        /// ★ v3.9.68: 게임 AbilityDeliverChain.CheckTarget 복제
+        /// </summary>
+        private static bool CheckChainTarget(AbilityData ability, AbilityDeliverChain chain, BaseUnitEntity unit)
+        {
+            if (ability.Caster == null) return false;
+            if (unit.LifeState.IsDead && !chain.TargetDead) return false;
+            if (chain.TargetType == TargetType.Enemy && !ability.Caster.IsEnemy(unit)) return false;
+            if (chain.TargetType == TargetType.Ally && ability.Caster.IsEnemy(unit)) return false;
+            return true;
+        }
 
-                foreach (var enemy in enemies)
-                {
-                    if (enemy == null || enemy.LifeState.IsDead) continue;
-                    if (usedTargets.Contains(enemy)) continue;
-
-                    float distance = Vector3.Distance(currentPosition, enemy.Position);
-                    if (distance <= chainRadius && distance < closestDistance)
-                    {
-                        closestDistance = distance;
-                        nextTarget = enemy;
-                    }
-                }
-
-                if (nextTarget == null) break;
-
-                count++;
-                usedTargets.Add(nextTarget);
-                currentPosition = nextTarget.Position;
-            }
-
-            return count;
+        /// <summary>
+        /// 연쇄 효과용 유효 타겟 수 계산
+        /// ★ v3.9.68: PredictChainTargets 기반으로 교체
+        /// </summary>
+        public static int CountChainTargets(AbilityData ability, BaseUnitEntity initialTarget, List<BaseUnitEntity> enemies)
+        {
+            return PredictChainTargets(ability, initialTarget).Count;
         }
 
         #endregion

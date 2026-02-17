@@ -472,9 +472,9 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// ★ v3.9.24: 체인 능력의 아군 안전 체크
-        /// AbilityDeliverChain 컴포넌트를 동적 감지하여 체인 전파 시뮬레이션
-        /// 게임 로직과 동일: 현재 타겟 위치에서 Radius 내 가장 가까운 유닛을 다음 대상으로 선택
-        /// TargetType.Any인 경우 아군도 체인 대상이 될 수 있음
+        /// ★ v3.9.68: SpecialAbilityHandler.PredictChainTargets 기반으로 교체
+        ///   기존 자체 시뮬레이션(SimulateChainAllyHits) 삭제
+        ///   게임 API 정밀 복제 알고리즘으로 통합 (AllBaseUnits, DistanceToInCells, CheckTarget)
         /// </summary>
         private static bool IsChainAbilitySafeForTarget(
             AbilityData ability, BaseUnitEntity target, BaseUnitEntity caster, List<BaseUnitEntity> allies)
@@ -486,25 +486,22 @@ namespace CompanionAI_v3.GameInterface
                 var deliverChain = ability.Blueprint?.GetComponent<AbilityDeliverChain>();
                 if (deliverChain == null) return true;  // 체인 능력이 아님 → 안전
 
-                // TargetType.Enemy만 체인하는 능력은 아군 안전
+                // TargetType.Enemy만 체인하는 능력은 아군 안전 (조기 반환)
                 if (deliverChain.TargetType == TargetType.Enemy) return true;
 
-                // TargetType.Any 또는 Ally → 아군 피격 가능성 있음
-                float chainRadiusCells = deliverChain.Radius;
-                if (chainRadiusCells <= 0) chainRadiusCells = 5;  // 폴백
+                // ★ v3.9.68: 게임 알고리즘 기반 체인 타겟 예측
+                var chainTargets = SpecialAbilityHandler.PredictChainTargets(ability, target);
 
-                int maxChainTargets = 5;
-                try
+                // 아군 피격 수 계산
+                int alliesHit = 0;
+                if (!caster.IsPlayerEnemy)
                 {
-                    int targets = deliverChain.TargetsCount.Value;
-                    if (targets > 0) maxChainTargets = targets;
+                    foreach (var chainTarget in chainTargets)
+                    {
+                        if (chainTarget != target && chainTarget.IsInPlayerParty && chainTarget != caster)
+                            alliesHit++;
+                    }
                 }
-                catch { }
-
-                // 아군 피격 시뮬레이션: 게임과 동일한 알고리즘
-                // 현재 위치에서 Radius 내 가장 가까운 유닛을 다음 대상으로 선택
-                // 적+아군 모두 후보에 포함 (TargetType.Any)
-                int alliesHit = SimulateChainAllyHits(target, caster, allies, chainRadiusCells, maxChainTargets);
 
                 var aoeConfig = AIConfig.GetAoEConfig();
                 int maxAlliesAllowed = aoeConfig?.MaxPlayerAlliesHit ?? 0;
@@ -513,8 +510,7 @@ namespace CompanionAI_v3.GameInterface
                 {
                     if (Main.IsDebugEnabled) Main.LogDebug(
                         $"[AOE] Chain safety: {ability.Name} -> {target.CharacterName} blocked " +
-                        $"(chainRadius={chainRadiusCells} cells, maxTargets={maxChainTargets}, " +
-                        $"alliesHit={alliesHit} > max={maxAlliesAllowed})");
+                        $"(chainTargets={chainTargets.Count}, alliesHit={alliesHit} > max={maxAlliesAllowed})");
                     return false;
                 }
 
@@ -525,78 +521,6 @@ namespace CompanionAI_v3.GameInterface
                 Main.LogDebug($"[AoESafety] Chain check error: {ex.Message}");
                 return true;  // 에러 시 안전하게 허용 (기존 동작 유지)
             }
-        }
-
-        /// <summary>
-        /// ★ v3.9.24: 게임 AbilityDeliverChain.SelectNextTarget과 동일한 알고리즘으로
-        /// 체인 전파를 시뮬레이션하여 아군 피격 수 계산
-        /// 게임: 현재 피격 위치 → Radius(셀) 내 가장 가까운 미피격 유닛 → 다음 대상
-        /// </summary>
-        private static int SimulateChainAllyHits(
-            BaseUnitEntity initialTarget, BaseUnitEntity caster,
-            List<BaseUnitEntity> allies, float chainRadiusCells, int maxChainTargets)
-        {
-            if (allies == null || allies.Count == 0) return 0;
-
-            // 모든 전투 참여 유닛 수집 (적 + 아군) — 게임의 Game.Instance.State.AllBaseUnits와 동등
-            var allUnits = new List<BaseUnitEntity>();
-            try
-            {
-                // 아군 추가
-                foreach (var ally in allies)
-                {
-                    if (ally != null && ally.IsConscious && ally != caster)
-                        allUnits.Add(ally);
-                }
-                // 적 추가 (전투 참여 적들)
-                var enemies = CombatAPI.GetEnemies(caster);
-                if (enemies != null)
-                {
-                    foreach (var enemy in enemies)
-                    {
-                        if (enemy != null && enemy.IsConscious)
-                            allUnits.Add(enemy);
-                    }
-                }
-            }
-            catch { return 0; }
-
-            var usedTargets = new HashSet<BaseUnitEntity> { initialTarget };
-            Vector3 currentPosition = initialTarget.Position;
-            int alliesHitCount = 0;
-
-            // 체인 시뮬레이션 — 게임의 SelectNextTarget 알고리즘 재현
-            for (int i = 0; i < maxChainTargets - 1; i++)
-            {
-                BaseUnitEntity nextTarget = null;
-                float closestDist = float.MaxValue;
-
-                foreach (var unit in allUnits)
-                {
-                    if (usedTargets.Contains(unit)) continue;
-
-                    // 게임: DistanceToInCells 사용 (Chebyshev, SizeRect 반영)
-                    float dist = CombatAPI.GetDistanceInTiles(currentPosition, unit);
-                    if (dist <= chainRadiusCells && dist < closestDist)
-                    {
-                        closestDist = dist;
-                        nextTarget = unit;
-                    }
-                }
-
-                if (nextTarget == null) break;
-
-                usedTargets.Add(nextTarget);
-                currentPosition = nextTarget.Position;
-
-                // 아군 피격 판정
-                if (!caster.IsPlayerEnemy && nextTarget.IsInPlayerParty && nextTarget != caster)
-                {
-                    alliesHitCount++;
-                }
-            }
-
-            return alliesHitCount;
         }
 
         #endregion

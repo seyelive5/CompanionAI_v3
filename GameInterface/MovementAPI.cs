@@ -25,10 +25,13 @@ namespace CompanionAI_v3.GameInterface
     {
         #region Path Threat Weights
 
-        /// <summary>★ v3.8.59: 경로 위협 가중치 — 중복 제거, 단일 정의</summary>
-        private const float WEIGHT_AOO = 20f;           // 기회공격 유발
-        private const float WEIGHT_AOE_ENTRY = 15f;     // AoE 진입
-        private const float WEIGHT_DAMAGING_AOE_STEP = 10f;  // 데미지 AoE 내 이동
+        /// <summary>★ v3.9.70: 경로 위협 가중치 — 게임 수준으로 대폭 상향
+        /// 게임 원본: AoO=+1000, AoE진입=+300, DamagingAoE스텝=+100
+        /// v3.8.59: 20/15/10 → 위험 구역 통과 패널티 미미하여 무시됨
+        /// v3.9.70: 100/80/60 → 위험 경로를 확실히 기피하되 필수 이동은 허용</summary>
+        private const float WEIGHT_AOO = 100f;           // 기회공격 유발
+        private const float WEIGHT_AOE_ENTRY = 80f;      // AoE 진입
+        private const float WEIGHT_DAMAGING_AOE_STEP = 60f;  // 데미지 AoE 내 이동
 
         #endregion
 

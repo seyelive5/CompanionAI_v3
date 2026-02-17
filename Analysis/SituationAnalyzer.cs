@@ -587,6 +587,21 @@ namespace CompanionAI_v3.Analysis
                 situation.NearestEnemyDistance,
                 situation.MinSafeDistance);
 
+            // ★ v3.9.70: 피해를 주는 AoE 구역 감지 (워프 피해, 화염 구역 등)
+            situation.IsInDamagingAoE = CombatAPI.IsUnitInDamagingAoE(unit);
+            if (situation.IsInDamagingAoE)
+            {
+                Main.Log($"[Analyzer] ★ {unit.CharacterName}: Standing in DAMAGING AoE! Evacuation needed.");
+            }
+
+            // ★ v3.9.70: 사이킥 사용 불가 구역 감지 (Inert Warp Effect)
+            // 사이커 캐릭터가 이 구역에 있으면 모든 사이킥 능력이 차단됨
+            if (CombatAPI.HasPsychicAbilities(unit) && CombatAPI.IsUnitInPsychicNullZone(unit))
+            {
+                situation.IsInPsychicNullZone = true;
+                Main.Log($"[Analyzer] ★ {unit.CharacterName}: In PSYCHIC NULL ZONE! All psychic abilities blocked. Evacuation needed.");
+            }
+
             // 이동 필요: 공격 가능한 적 없음
             // ★ v3.0.93: MP > 0 체크 추가 - MP 없으면 이동 불가능하므로 NeedsReposition=false
             situation.NeedsReposition = !situation.HasHittableEnemies && situation.HasLivingEnemies && situation.CurrentMP > 0;

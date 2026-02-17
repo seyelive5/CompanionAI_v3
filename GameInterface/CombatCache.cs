@@ -229,6 +229,7 @@ namespace CompanionAI_v3.GameInterface
             _hpPercentCache.Clear();
             _hitChanceCache.Clear();  // ★ v3.9.30
             CombatAPI.ClearWeaponRangeCache();  // ★ v3.9.24: 무기 사거리 캐시도 클리어
+            CombatAPI.ClearDamagingAoECache();  // ★ v3.9.70: AoE 피해 판별 캐시도 클리어
 
             // 통계 로깅 (이전 턴의 캐시 효율)
             if (DistanceHits + DistanceMisses > 0 || TargetingHits + TargetingMisses > 0

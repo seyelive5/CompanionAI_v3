@@ -139,6 +139,15 @@ namespace CompanionAI_v3.Analysis
         /// <summary>위험 상태 (원거리인데 적이 가까움)</summary>
         public bool IsInDanger { get; set; }
 
+        /// <summary>★ v3.9.70: 피해를 주는 AoE 구역 안에 있는지 (워프 피해 등)</summary>
+        public bool IsInDamagingAoE { get; set; }
+
+        /// <summary>★ v3.9.70: 사이킥 사용 불가 구역에 있는지 (Inert Warp Effect)</summary>
+        public bool IsInPsychicNullZone { get; set; }
+
+        /// <summary>★ v3.9.70: 위험 구역에서 대피가 필요한지 (데미지 AoE 또는 사이킥 차단 구역)</summary>
+        public bool NeedsAoEEvacuation => IsInDamagingAoE || IsInPsychicNullZone;
+
         /// <summary>엄폐 확보 여부</summary>
         public bool HasCover { get; set; }
 
@@ -385,6 +394,8 @@ namespace CompanionAI_v3.Analysis
 
             // Position Analysis
             IsInDanger = false;
+            IsInDamagingAoE = false;
+            IsInPsychicNullZone = false;
             HasCover = false;
             BetterPositionAvailable = false;
             NeedsReposition = false;
@@ -434,7 +445,7 @@ namespace CompanionAI_v3.Analysis
             return $"[Situation] {Unit?.CharacterName}: HP={HPPercent:F0}%, AP={CurrentAP:F1}, MP={CurrentMP:F1}, " +
                    $"Enemies={Enemies?.Count ?? 0}, Hittable={HittableEnemies?.Count ?? 0}, " +
                    $"AoE={AvailableAoEAttacks?.Count ?? 0}, " +
-                   $"InDanger={IsInDanger}, NeedsReload={NeedsReload}";
+                   $"InDanger={IsInDanger}, InDamagingAoE={IsInDamagingAoE}, PsychicNull={IsInPsychicNullZone}, NeedsReload={NeedsReload}";
         }
     }
 }

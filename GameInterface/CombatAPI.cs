@@ -4,6 +4,11 @@ using System.Linq;
 using Kingmaker;
 using Kingmaker.Blueprints;
 using Kingmaker.EntitySystem;  // ★ v3.8.66: EntityHelper.DistanceToInCells 확장 메서드
+using Kingmaker.AI;  // ★ v3.9.70: AiBrainHelper.IsThreatningArea
+using Kingmaker.UnitLogic.Abilities.Components.AreaEffects;  // ★ v3.9.70: AbilityAreaEffectRunAction, AbilityAreaEffectBuff
+using Kingmaker.ElementsSystem;  // ★ v3.9.70: ActionList, GameAction
+using Kingmaker.UnitLogic.Mechanics.Components;  // ★ v3.9.70: AddFactContextActions
+using Kingmaker.Controllers;  // ★ v3.9.70: AreaEffectsController.CheckInertWarpEffect
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Items;
 using Kingmaker.Pathfinding;
@@ -214,6 +219,22 @@ namespace CompanionAI_v3.GameInterface
                                 reasons.Add($"BuffRestriction: {buff.Name} (WarhammerAbilityRestriction)");
                             }
                         }
+                    }
+                }
+
+                // ★ v3.9.70: Area Effect 기반 능력 제한 체크
+                // Inert Warp (사이킥 사용 불가), Concussion (무기만 사용 가능), CantAttack (무기 사용 불가)
+                if (unitCaster != null)
+                {
+                    var node = (CustomGridNodeBase)(Pathfinding.GraphNode)unitCaster.CurrentNode;
+                    if (node != null)
+                    {
+                        if (bp.IsPsykerAbility && AreaEffectsController.CheckInertWarpEffect(node))
+                            reasons.Add("InertWarpEffect (psychic null zone)");
+                        if (!bp.IsWeaponAbility && AreaEffectsController.CheckConcussionEffect(node))
+                            reasons.Add("ConcussionEffect (weapon-only zone)");
+                        if (bp.IsWeaponAbility && AreaEffectsController.CheckCantAttackEffect(node))
+                            reasons.Add("CantAttackEffect (no weapon zone)");
                     }
                 }
             }
@@ -4541,6 +4562,247 @@ namespace CompanionAI_v3.GameInterface
                 if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] FindNonOverlappingZonePosition error: {ex.Message}");
                 return null;
             }
+        }
+
+        #endregion
+
+        #region Damaging AoE Detection (v3.9.70)
+
+        // ★ v3.9.70: 블루프린트 기반 피해 AoE 판별 캐시 (정적 데이터이므로 전투 내 재사용)
+        private static readonly Dictionary<string, bool> _damagingAoECache = new Dictionary<string, bool>();
+
+        /// <summary>
+        /// ★ v3.9.70: 유닛이 현재 피해를 주는 AoE 구역 안에 있는지 확인
+        /// 1차: AiBrainHelper.IsThreatningArea() (적 AoE에 대해 정확)
+        /// 2차 폴백: 블루프린트 컴포넌트 직접 검사 (환경 AoE — caster null로 IsSuitableTargetType 실패 우회)
+        /// </summary>
+        public static bool IsUnitInDamagingAoE(BaseUnitEntity unit)
+        {
+            if (unit == null) return false;
+
+            try
+            {
+                foreach (var areaEffect in Game.Instance.State.AreaEffects)
+                {
+                    if (areaEffect == null) continue;
+
+                    // 1차: 게임 API — 적 AoE에 대해 팩션 체크 포함
+                    if (AiBrainHelper.IsThreatningArea(areaEffect, unit))
+                    {
+                        if (areaEffect.Contains(unit))
+                            return true;
+                        continue;
+                    }
+
+                    // 2차 폴백: 환경/중립 AoE — IsSuitableTargetType이 caster null로 실패하는 경우
+                    // 아군이 시전한 AoE는 건너뛰기 (아군 AoE에서 도망칠 필요 없음)
+                    var caster = areaEffect.Context?.MaybeCaster;
+                    if (caster != null && !caster.IsEnemy(unit))
+                        continue;
+
+                    // 블루프린트에 피해 컴포넌트가 있고, 유닛이 안에 있는가?
+                    if (HasDamagingComponents(areaEffect) && areaEffect.Contains(unit))
+                    {
+                        if (Main.IsDebugEnabled)
+                            Main.LogDebug($"[CombatAPI] ★ Damaging AoE detected via fallback: {areaEffect.Blueprint?.name ?? "unknown"} (caster={(caster != null ? "enemy" : "null/environmental")})");
+                        return true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsUnitInDamagingAoE error: {ex.Message}");
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// ★ v3.9.70: 특정 위치가 피해를 주는 AoE 구역 안에 있는지 확인
+        /// 이동 후보 타일 평가에 사용 — unit은 팩션 체크용
+        /// </summary>
+        public static bool IsPositionInDamagingAoE(Vector3 position, BaseUnitEntity unit)
+        {
+            if (unit == null) return false;
+
+            try
+            {
+                foreach (var areaEffect in Game.Instance.State.AreaEffects)
+                {
+                    if (areaEffect == null) continue;
+
+                    // 1차: 게임 API
+                    if (AiBrainHelper.IsThreatningArea(areaEffect, unit))
+                    {
+                        if (areaEffect.Contains(position))
+                            return true;
+                        continue;
+                    }
+
+                    // 2차 폴백: 아군 시전 AoE 건너뛰기
+                    var caster = areaEffect.Context?.MaybeCaster;
+                    if (caster != null && !caster.IsEnemy(unit))
+                        continue;
+
+                    if (HasDamagingComponents(areaEffect) && areaEffect.Contains(position))
+                        return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsPositionInDamagingAoE error: {ex.Message}");
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// AoE 블루프린트에 피해를 주는 컴포넌트가 있는지 직접 확인
+        /// 게임의 CheckDealDamage + CheckApplyBuffWithDamage 로직 재현
+        /// IsSuitableTargetType 팩션 체크를 우회하여 환경 AoE도 감지
+        /// </summary>
+        private static bool HasDamagingComponents(AreaEffectEntity areaEffect)
+        {
+            var blueprint = areaEffect?.Blueprint;
+            if (blueprint == null) return false;
+
+            // 캐시 확인 (블루프린트 컴포넌트는 정적 데이터)
+            string bpId = blueprint.AssetGuid?.ToString();
+            if (bpId != null && _damagingAoECache.TryGetValue(bpId, out bool cached))
+                return cached;
+
+            bool isDamaging = false;
+
+            foreach (var component in blueprint.ComponentsArray)
+            {
+                if (component == null) continue;
+
+                // Check 1: AbilityAreaEffectRunAction — UnitEnter/UnitMove/Round에 ContextActionDealDamage가 있는지
+                if (component is AbilityAreaEffectRunAction runAction)
+                {
+                    if (ContainsDamageAction(runAction.UnitEnter) ||
+                        ContainsDamageAction(runAction.UnitExit) ||
+                        ContainsDamageAction(runAction.UnitMove) ||
+                        ContainsDamageAction(runAction.Round))
+                    {
+                        isDamaging = true;
+                        break;
+                    }
+                }
+
+                // Check 2: AbilityAreaEffectBuff — 버프에 AddFactContextActions.Activated/NewRound에 피해가 있는지
+                if (component is AbilityAreaEffectBuff buffComponent)
+                {
+                    var buff = buffComponent.Buff;
+                    if (buff != null)
+                    {
+                        foreach (var buffComp in buff.ComponentsArray)
+                        {
+                            if (buffComp is AddFactContextActions contextActions)
+                            {
+                                if (ContainsDamageAction(contextActions.Activated) ||
+                                    ContainsDamageAction(contextActions.NewRound) ||
+                                    ContainsDamageAction(contextActions.RoundEnd))
+                                {
+                                    isDamaging = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (isDamaging) break;
+                    }
+                }
+            }
+
+            // 캐시 저장
+            if (bpId != null)
+                _damagingAoECache[bpId] = isDamaging;
+
+            return isDamaging;
+        }
+
+        /// <summary>
+        /// ActionList 내에 ContextActionDealDamage가 포함되어 있는지 확인
+        /// </summary>
+        private static bool ContainsDamageAction(ActionList actionList)
+        {
+            if (actionList?.Actions == null) return false;
+            foreach (var action in actionList.Actions)
+            {
+                if (action is ContextActionDealDamage)
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 전투 시작 시 AoE 캐시 초기화 (CombatCache.ClearAll에서 호출)
+        /// </summary>
+        public static void ClearDamagingAoECache()
+        {
+            _damagingAoECache.Clear();
+        }
+
+        /// <summary>
+        /// ★ v3.9.70: 유닛이 사이킥 사용 불가 구역(Inert Warp Effect)에 있는지 확인
+        /// 워프 데미지 존은 AreaEffectRestrictions.CannotUsePsychicPowers 플래그를 가짐
+        /// </summary>
+        public static bool IsUnitInPsychicNullZone(BaseUnitEntity unit)
+        {
+            if (unit == null) return false;
+            try
+            {
+                var node = (CustomGridNodeBase)(Pathfinding.GraphNode)unit.CurrentNode;
+                if (node == null) return false;
+                return AreaEffectsController.CheckInertWarpEffect(node);
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsUnitInPsychicNullZone error: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.9.70: 특정 위치가 사이킥 사용 불가 구역에 있는지 확인
+        /// 이동 후보 타일 평가에 사용
+        /// </summary>
+        public static bool IsPositionInPsychicNullZone(Vector3 position)
+        {
+            try
+            {
+                foreach (var areaEffect in Game.Instance.State.AreaEffects)
+                {
+                    if (areaEffect == null) continue;
+                    if (areaEffect.Blueprint.HasInertWarpEffect && areaEffect.Contains(position))
+                        return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsPositionInPsychicNullZone error: {ex.Message}");
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// ★ v3.9.70: 유닛이 사이킥 능력을 보유하고 있는지 확인
+        /// </summary>
+        public static bool HasPsychicAbilities(BaseUnitEntity unit)
+        {
+            if (unit == null) return false;
+            try
+            {
+                var abilities = unit.Abilities;
+                if (abilities == null) return false;
+                foreach (var ability in abilities.RawFacts)
+                {
+                    if (ability?.Blueprint?.IsPsykerAbility == true)
+                        return true;
+                }
+            }
+            catch { }
+            return false;
         }
 
         #endregion

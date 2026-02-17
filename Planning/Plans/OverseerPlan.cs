@@ -66,6 +66,19 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // ══════════════════════════════════════════════════════════════
+            // ★ v3.9.70: Phase 0.5 - 긴급 AoE/사이킥 차단 구역 대피
+            // ══════════════════════════════════════════════════════════════
+            if (situation.NeedsAoEEvacuation && situation.CanMove)
+            {
+                var evacAction = PlanAoEEvacuation(situation);
+                if (evacAction != null)
+                {
+                    actions.Add(evacAction);
+                    return new TurnPlan(actions, TurnPriority.Emergency, "Overseer AoE evacuation");
+                }
+            }
+
+            // ══════════════════════════════════════════════════════════════
             // Phase 1: Emergency Heal
             // ══════════════════════════════════════════════════════════════
             var healAction = PlanEmergencyHeal(situation, ref remainingAP);
