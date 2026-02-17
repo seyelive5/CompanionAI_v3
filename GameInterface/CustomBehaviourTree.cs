@@ -573,9 +573,9 @@ namespace CompanionAI_v3.GameInterface
                 }
                 else
                 {
-                    // ★ v3.9.38: A* 경로 기반 최적 이동 노드 선택
-                    // 유클리드 거리 대신 실제 경로를 따라 가장 먼 도달 가능 지점 선택
-                    // 벽/장애물을 올바르게 돌아가는 이동이 가능
+                    // ★ v3.9.54: A* 경로 기반 최적 이동 노드 선택 + 거리 가드 복원
+                    // A* 역방향 탐색 시 목적지에서 멀어지는 노드 방지
+                    float currentDistToDest = Vector3.Distance(unit.Position, destination);
                     var agent = unit.View?.MovementAgent;
                     if (agent != null)
                     {
@@ -592,6 +592,18 @@ namespace CompanionAI_v3.GameInterface
                                 {
                                     if (cells.TryGetValue(fullPath.path[i], out var pathCell))
                                     {
+                                        // 거리 가드: 현재보다 목적지에 더 가까운 노드만 선택
+                                        var pathNodeBase = fullPath.path[i] as CustomGridNodeBase;
+                                        if (pathNodeBase != null)
+                                        {
+                                            float nodeDist = Vector3.Distance(pathNodeBase.Vector3Position, destination);
+                                            if (nodeDist >= currentDistToDest)
+                                            {
+                                                if (Main.IsDebugEnabled) Main.LogDebug($"[CompanionAIDecisionNode] A* step {i} skipped — not closer (dist={nodeDist:F1} >= current={currentDistToDest:F1})");
+                                                continue;
+                                            }
+                                        }
+
                                         bestCell = pathCell;
                                         foundCell = true;
                                         if (Main.IsDebugEnabled) Main.LogDebug($"[CompanionAIDecisionNode] A* path: found reachable node at step {i}/{fullPath.path.Count - 1}");
@@ -606,7 +618,9 @@ namespace CompanionAI_v3.GameInterface
                         }
                     }
 
-                    // ★ 폴백: A* 경로 실패 시 기존 유클리드 방식
+                    // ★ v3.9.54: 폴백 — 도달 가능 셀 중 목적지에 가장 가까운 것 (거리 가드 없음)
+                    // 벽 우회 시 A* 가드로 모든 노드 거부되면 여기서 처리
+                    // 게임 네이티브 AI와 동일: "도달 가능한 셀 중 타겟에 가장 가까운 셀"
                     if (!foundCell)
                     {
                         foreach (var kvp in cells)

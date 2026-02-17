@@ -943,6 +943,11 @@ namespace CompanionAI_v3.GameInterface
             if (hasAnyLos && nearestEnemyDist <= targetDistance)
                 score.AttackScore = 20f;
 
+            // ★ v3.9.50: Hittable 적 수 보너스 — 공격 가능 위치에 적극적 보너스
+            // 방어 패널티만 있고 공격 기회 보너스가 없으면 항상 후퇴가 유리해짐
+            if (hittableFromLos > 0)
+                score.AttackScore += hittableFromLos * 8f;
+
             return score;
         }
 
@@ -1181,9 +1186,12 @@ namespace CompanionAI_v3.GameInterface
                 score -= distFromUnit * 2f;
 
                 // 2. 플랭킹 보너스 (적 뒤쪽에서 공격)
+                // ★ v3.9.50: 부호 수정 — flankDir(유닛→적)와 attackDir(후보→적)가
+                // 반대 방향(dot < -0.3)이면 후보가 적 반대편 = 플랭킹
+                // 이전: dot > 0.5 = 같은 방향에서 접근 (플랭킹 아님) → 잘못된 보너스
                 var attackDir = (targetPos - pos).normalized;
                 float flankDot = Vector3.Dot(attackDir, flankDir);
-                if (flankDot > 0.5f)  // 뒤쪽에서 공격
+                if (flankDot < -0.3f)  // 적 반대편에서 공격 = 플랭킹
                     score += 15f;
 
                 // 3. ★ v3.8.13: AI 셀의 경로 위협 데이터 활용 (목적지 위협 + 경로 위협)
@@ -1604,9 +1612,9 @@ namespace CompanionAI_v3.GameInterface
 
                 float pathRisk = aiCell.ProvokedAttacks * WEIGHT_AOO + aiCell.EnteredAoE * WEIGHT_AOE_ENTRY + aiCell.StepsInsideDamagingAoE * WEIGHT_DAMAGING_AOE_STEP;
 
-                float currentDist = Vector3.Distance(unit.Position, targetPos);
-                if (distToTarget < currentDist &&
-                    (distToTarget < closestDist || (distToTarget == closestDist && pathRisk < lowestPathRisk)))
+                // ★ v3.9.52: currentDist 가드 제거 — 게임 네이티브 AI와 동일하게
+                // 도달 가능한 모든 셀 중 타겟에 가장 가까운 셀 선택 (벽 우회 시 필수)
+                if (distToTarget < closestDist || (distToTarget == closestDist && pathRisk < lowestPathRisk))
                 {
                     closestDist = distToTarget;
                     lowestPathRisk = pathRisk;
@@ -1634,6 +1642,12 @@ namespace CompanionAI_v3.GameInterface
         /// 그 경로 위에서 현재 MP로 도달 가능한 가장 먼 지점을 선택.
         /// ★ 접근 경로 캐시: 같은 적에게 다중 턴 접근 시 이전 경로를 유지하여 진동 방지
         /// </summary>
+        // ★ v3.9.64: A* 경로 접근 — Phase 1 (거리 가드) + 조건부 A* 우회
+        // Phase 1: A* 경로 중 적에게 더 가까운 노드 선택 (거리 가드)
+        // Phase 1 실패 시: Euclidean 진행도 측정 (최선 도달 타일이 현재보다 ≥1m 가까운지)
+        //   - 진행 ≥ 1m: 개활지 → null 반환 → Euclidean 폴백 사용
+        //   - 진행 < 1m: 벽 막힘 → A* 경로 따라 우회 (거리 가드 없이)
+        // 흐름: 캐시 Phase 1 → 신선한 Phase 1 → Euclidean 진행도 체크 → 분기.
         private static PositionScore FindApproachAlongPath(
             BaseUnitEntity unit,
             Vector3 targetPos,
@@ -1645,66 +1659,84 @@ namespace CompanionAI_v3.GameInterface
                 if (agent == null) return null;
 
                 string unitId = unit.UniqueId;
-                List<GraphNode> pathNodes = null;
-                bool usedCache = false;
+                float currentDistToTarget = Vector3.Distance(unit.Position, targetPos);
 
-                // ★ v3.9.42: 캐시된 접근 경로 확인
-                // 같은 적에게 접근 중이고, 적이 크게 이동하지 않았으면 캐시 경로 재사용
+                // ── Step 1: 캐시된 경로로 Phase 1 시도 ──
                 if (_approachPathCache.TryGetValue(unitId, out var cached))
                 {
                     float targetMoved = Vector3.Distance(cached.TargetPosition, targetPos);
                     if (targetMoved < APPROACH_CACHE_INVALIDATION_DIST && cached.Path != null && cached.Path.Count >= 2)
                     {
-                        // 캐시 경로에서 현재 위치 찾기 (가장 가까운 노드)
-                        int currentIdx = FindNearestNodeOnPath(unit.Position, cached.Path);
-                        if (currentIdx >= 0 && currentIdx < cached.Path.Count - 1)
+                        int foundIdx = FindNearestNodeOnPath(unit.Position, cached.Path);
+                        if (foundIdx >= 0 && foundIdx < cached.Path.Count - 1)
                         {
-                            // 현재 위치 이후의 경로만 사용
-                            pathNodes = cached.Path;
-                            usedCache = true;
-                            if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Using cached approach path ({cached.Path.Count} nodes, current at step {currentIdx})");
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Using cached approach path ({cached.Path.Count} nodes, current at step {foundIdx})");
+
+                            // ★ v3.9.60: currentIdx 이후만 탐색 (현재 위치 선택 방지)
+                            int cachedMinIdx = Math.Max(foundIdx + 1, 1);
+                            var cachedResult = SearchApproachPhase1(unit, cached.Path, cachedMinIdx,
+                                reachableTiles, targetPos, currentDistToTarget);
+                            if (cachedResult != null) return cachedResult;
                         }
                     }
-                    else
-                    {
-                        // 적이 이동했거나 캐시 무효 → 제거
-                        _approachPathCache.Remove(unitId);
-                    }
+
+                    // 캐시 경로 Phase 1 실패 → 캐시 무효화 (오래되었거나 방향 불일치)
+                    _approachPathCache.Remove(unitId);
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Cached path stale — invalidating, computing fresh path");
                 }
 
-                // 캐시 미스 → 새 A* 경로 계산
-                // ★ v3.9.42: ignoreThreateningAreaCost=true → 근접 위협/AoE 비용 무시
-                // 장거리 접근 시 순수 거리 기반 최단 경로로 일관된 방향 유지
-                if (pathNodes == null)
+                // ── Step 2: 신선한 A* 경로 계산 ──
+                // ignoreThreateningAreaCost=true → 근접 위협/AoE 비용 무시 (순수 최단 경로)
+                var fullPath = PathfindingService.Instance.FindPathTB_Blocking(
+                    agent, targetPos, limitRangeByActionPoints: false,
+                    ignoreThreateningAreaCost: true);
+
+                if (fullPath == null || fullPath.error || fullPath.path == null || fullPath.path.Count < 2)
                 {
-                    var fullPath = PathfindingService.Instance.FindPathTB_Blocking(
-                        agent, targetPos, limitRangeByActionPoints: false,
-                        ignoreThreateningAreaCost: true);
-
-                    if (fullPath == null || fullPath.error || fullPath.path == null || fullPath.path.Count < 2)
-                    {
-                        if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* path to target failed or too short");
-                        return null;
-                    }
-
-                    pathNodes = fullPath.path;
-
-                    // ★ 새 경로를 캐시에 저장 (5노드 이상인 장거리 경로만)
-                    if (pathNodes.Count >= 5)
-                    {
-                        _approachPathCache[unitId] = new CachedApproachPath
-                        {
-                            TargetId = null, // targetId는 여기서 접근 불가 — 위치로 판별
-                            TargetPosition = targetPos,
-                            Path = new List<GraphNode>(pathNodes)  // 복사본 저장
-                        };
-                    }
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* path to target failed or too short");
+                    return null;
                 }
 
-                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* path has {pathNodes.Count} nodes{(usedCache ? " (CACHED)" : "")}, searching for farthest reachable");
+                var pathNodes = fullPath.path;
 
-                // 경로를 뒤에서부터 탐색 (타겟에 가장 가까운 도달 가능 노드 우선)
-                // index 0 = 유닛 현재 위치이므로 스킵 (제자리 이동 방지)
+                // 신선한 경로 캐시 저장 (5노드 이상의 장거리 경로만)
+                if (pathNodes.Count >= 5)
+                {
+                    _approachPathCache[unitId] = new CachedApproachPath
+                    {
+                        TargetId = null,
+                        TargetPosition = targetPos,
+                        Path = new List<GraphNode>(pathNodes)
+                    };
+                }
+
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Fresh A* path has {pathNodes.Count} nodes, currentDist={currentDistToTarget:F1}");
+
+                // ── Step 3: Phase 1 — 거리 가드 (적에게 더 가까운 노드 선택) ──
+                var freshResult = SearchApproachPhase1(unit, pathNodes, 1, reachableTiles, targetPos, currentDistToTarget);
+                if (freshResult != null) return freshResult;
+
+                // ★ v3.9.64: Euclidean 진행도 기반 분기
+                // Euclidean 최선 타일이 현재보다 충분히 가까우면(≥1m) → null → Euclidean 사용.
+                // Euclidean이 막힘(벽 인접, 진행<1m)일 때만 → A* 경로 따라 벽 우회.
+                float bestEucDist = float.MaxValue;
+                foreach (var kvp in reachableTiles)
+                {
+                    var tileNode = kvp.Value.Node as CustomGridNodeBase;
+                    if (tileNode == null || !kvp.Value.IsCanStand) continue;
+                    float d = Vector3.Distance(tileNode.Vector3Position, targetPos);
+                    if (d < bestEucDist) bestEucDist = d;
+                }
+
+                float eucProgress = currentDistToTarget - bestEucDist;
+                if (eucProgress >= 1.0f)
+                {
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Euclidean progress={eucProgress:F1}m sufficient — deferring to Euclidean");
+                    return null;
+                }
+
+                // Euclidean 막힘 → A* 경로를 따라 벽 우회 (proximity matching)
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: Euclidean stuck (progress={eucProgress:F1}m) — following A* path detour");
                 for (int i = pathNodes.Count - 1; i >= 1; i--)
                 {
                     var pathNode = pathNodes[i];
@@ -1713,22 +1745,25 @@ namespace CompanionAI_v3.GameInterface
                     var node = aiCell.Node as CustomGridNodeBase;
                     if (node == null || !aiCell.IsCanStand) continue;
 
+                    if (Vector3.Distance(node.Vector3Position, unit.Position) < 1.5f) continue;
+
+                    float distToTarget = Vector3.Distance(node.Vector3Position, targetPos);
                     float pathRisk = aiCell.ProvokedAttacks * WEIGHT_AOO
                         + aiCell.EnteredAoE * WEIGHT_AOE_ENTRY
                         + aiCell.StepsInsideDamagingAoE * WEIGHT_DAMAGING_AOE_STEP;
 
-                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* approach node at step {i}/{pathNodes.Count - 1}, pathRisk={pathRisk:F1}");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* detour step {i}/{pathNodes.Count - 1}, dist={distToTarget:F1}m, pathRisk={pathRisk:F1}");
 
                     return new PositionScore
                     {
                         Node = node,
                         CanStand = true,
-                        DistanceScore = 100f - Vector3.Distance(node.Vector3Position, targetPos),
+                        DistanceScore = 100f - distToTarget,
                         PathRiskScore = pathRisk
                     };
                 }
 
-                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No reachable node found along A* path ({reachableTiles.Count} reachable tiles)");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: No A* detour node found ({reachableTiles.Count} reachable tiles)");
                 return null;
             }
             catch (Exception ex)
@@ -1736,6 +1771,61 @@ namespace CompanionAI_v3.GameInterface
                 if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] FindApproachAlongPath error: {ex.Message}");
                 return null;
             }
+        }
+
+        /// <summary>
+        /// ★ v3.9.60: Phase 1 — A* 경로에서 적에게 더 가까운 도달 가능 노드 탐색
+        /// 경로 끝(타겟 쪽)부터 역방향 검색. 거리 가드 적용 (현재보다 가까운 노드만).
+        /// 현재 위치와 동일한 노드(1.5m 이내)는 제외.
+        /// </summary>
+        private static PositionScore SearchApproachPhase1(
+            BaseUnitEntity unit,
+            List<GraphNode> pathNodes,
+            int minIdx,
+            Dictionary<GraphNode, WarhammerPathAiCell> reachableTiles,
+            Vector3 targetPos,
+            float currentDistToTarget)
+        {
+            for (int i = pathNodes.Count - 1; i >= minIdx; i--)
+            {
+                var pathNode = pathNodes[i];
+                if (!reachableTiles.TryGetValue(pathNode, out var aiCell)) continue;
+
+                var node = aiCell.Node as CustomGridNodeBase;
+                if (node == null || !aiCell.IsCanStand) continue;
+
+                float distToTarget = Vector3.Distance(node.Vector3Position, targetPos);
+
+                // 거리 가드: 현재보다 적에게 더 가까운 노드만
+                if (distToTarget >= currentDistToTarget)
+                {
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* step {i} skipped — not closer (dist={distToTarget:F1} >= current={currentDistToTarget:F1})");
+                    continue;
+                }
+
+                // 현재 위치와 동일한 노드 제외 (부동소수점 오차 방지)
+                if (Vector3.Distance(node.Vector3Position, unit.Position) < 1.5f)
+                {
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* step {i} skipped — same as current position");
+                    continue;
+                }
+
+                float pathRisk = aiCell.ProvokedAttacks * WEIGHT_AOO
+                    + aiCell.EnteredAoE * WEIGHT_AOE_ENTRY
+                    + aiCell.StepsInsideDamagingAoE * WEIGHT_DAMAGING_AOE_STEP;
+
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* approach node at step {i}/{pathNodes.Count - 1}, dist={distToTarget:F1}, pathRisk={pathRisk:F1}");
+
+                return new PositionScore
+                {
+                    Node = node,
+                    CanStand = true,
+                    DistanceScore = 100f - distToTarget,
+                    PathRiskScore = pathRisk
+                };
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -1888,11 +1978,19 @@ namespace CompanionAI_v3.GameInterface
             float aggressionMod = CurvePresets.ConfidenceToAggression?.Evaluate(confidence) ?? 1f;
             float defenseMod = CurvePresets.ConfidenceToDefenseNeed?.Evaluate(confidence) ?? 1f;
 
-            // 공격 성향이 높으면(>1) 전진 보너스, 방어 필요도 높으면(>1) 엄폐 보너스 증폭
+            // ★ v3.9.50: 공격 기회 기반 전진 보너스 (무조건 적용)
+            // 이전: aggressionMod > 1일 때만 보너스 → 팀 신뢰도 낮으면 보너스 0
+            // 수정: 공격 가능 위치는 항상 보너스, 신뢰도에 따라 증폭
+            if (score.HittableEnemyCount > 0)
+            {
+                float attackOpportunityBonus = score.HittableEnemyCount * 8f;
+                attackOpportunityBonus *= Math.Max(0.6f, aggressionMod);
+                score.TacticalAdjustment += attackOpportunityBonus;
+            }
+
+            // 공격 성향이 높으면 추가 전진 보너스
             if (aggressionMod > 1f)
             {
-                // ★ v3.9.48: 공격적 상황 보너스 강화 (5f → 12f)
-                // 팀 신뢰도 높을 때 전진 위치에 유의미한 보너스 부여
                 score.TacticalAdjustment += (aggressionMod - 1f) * 12f;
             }
             if (defenseMod > 1f)

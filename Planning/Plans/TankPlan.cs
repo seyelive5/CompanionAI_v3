@@ -302,12 +302,28 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // Phase 4.5: 마킹 (공격 전 적 지정)
-            if (situation.AvailableMarkers.Count > 0 && situation.NearestEnemy != null)
+            // ★ v3.9.50: Phase 5와 동일한 타겟 선택 (NearestEnemy 대신 TargetScorer + 위협 적 우선)
+            if (situation.AvailableMarkers.Count > 0 && situation.HasHittableEnemies)
             {
-                var markerAction = PlanMarker(situation, situation.NearestEnemy, ref remainingAP);
-                if (markerAction != null)
+                var markerTarget = TargetScorer.SelectBestEnemy(situation.HittableEnemies, situation, Settings.AIRole.Tank)
+                    ?? situation.NearestEnemy;
+
+                // 아군 위협 적 우선 (Phase 5 동일)
+                var threateningEnemy = CollectionHelper.MaxByWhere(
+                    situation.Enemies,
+                    e => e != null && situation.HittableEnemies.Contains(e) &&
+                         TeamBlackboard.Instance.CountAlliesTargeting(e) > 0,
+                    e => (float)TeamBlackboard.Instance.CountAlliesTargeting(e));
+                if (threateningEnemy != null)
+                    markerTarget = threateningEnemy;
+
+                if (markerTarget != null)
                 {
-                    actions.Add(markerAction);
+                    var markerAction = PlanMarker(situation, markerTarget, ref remainingAP);
+                    if (markerAction != null)
+                    {
+                        actions.Add(markerAction);
+                    }
                 }
             }
 

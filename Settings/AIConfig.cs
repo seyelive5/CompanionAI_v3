@@ -144,7 +144,7 @@ namespace CompanionAI_v3.Settings
 
         /// <summary>자해 스킬 사용 최소 HP% (이 이상이어야 사용)</summary>
         [JsonProperty("selfDamageMinHP")]
-        public float SelfDamageMinHP { get; set; } = 70f;
+        public float SelfDamageMinHP { get; set; } = 80f;
 
         /// <summary>위협 근접 거리 (미터)</summary>
         [JsonProperty("threatProximity")]

@@ -69,6 +69,13 @@ namespace CompanionAI_v3.Analysis
         /// <summary>★ v3.9.24: 무기 사거리 프로필 (중앙집중 관리)</summary>
         public CombatAPI.WeaponRangeProfile WeaponRange { get; set; }
 
+        /// <summary>
+        /// ★ v3.9.56: 블렌딩 공격 사거리 — 모든 유한 사거리 공격 능력을 고려한 최적 포지셔닝 거리
+        /// 무제한 사거리 능력 제외, 모든 유한 사거리 공격을 사용할 수 있는 최소 사거리
+        /// 0이면 미계산 (WeaponRange.EffectiveRange 폴백)
+        /// </summary>
+        public float BlendedAttackRange { get; set; }
+
         #endregion
 
         #region Battlefield
@@ -292,14 +299,13 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>
         /// 원거리 선호인가?
-        /// ★ v3.6.5: Adaptive 모드에서 무기 타입 자동 감지
-        /// - PreferRanged → true
-        /// - PreferMelee → false
-        /// - Adaptive → HasRangedWeapon 기준 (원거리 무기 보유 시 원거리 선호)
+        /// ★ v3.9.50: Adaptive 모드 수정 — 근접 무기도 보유 시 근접 우선
+        /// 이전: HasRangedWeapon만 체크 → 근접+원거리 양손 캐릭터가 원거리로 분류 → 후퇴 발동
+        /// 수정: 순수 원거리만(근접 무기 없음) PrefersRanged → 근접 캐릭터의 잘못된 후퇴 방지
         /// </summary>
         public bool PrefersRanged =>
             RangePreference == RangePreference.PreferRanged ||
-            (RangePreference == RangePreference.Adaptive && HasRangedWeapon);
+            (RangePreference == RangePreference.Adaptive && HasRangedWeapon && !HasMeleeWeapon);
 
         #endregion
 

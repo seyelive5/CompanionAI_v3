@@ -325,8 +325,11 @@ namespace CompanionAI_v3.Planning
             }
             else
             {
-                // ★ v3.9.24: 중앙집중 무기 사거리 프로필 사용
-                float weaponRange = situation.WeaponRange.EffectiveRange;
+                // ★ v3.9.56: BlendedAttackRange 사용 (모든 유한 사거리 스킬 고려)
+                // 무제한 사거리 스킬은 제외되어 포지셔닝에 영향 안 줌
+                float weaponRange = situation.BlendedAttackRange > 0
+                    ? situation.BlendedAttackRange
+                    : situation.WeaponRange.EffectiveRange;
                 if (weaponRange <= 0f) weaponRange = 15f;  // 안전 폴백
 
                 bestPosition = MovementAPI.FindRangedAttackPositionSync(
@@ -355,15 +358,22 @@ namespace CompanionAI_v3.Planning
             option.IsViable = true;
 
             // 스코어 계산
+            // ★ v3.9.50: MoveToAttack 점수 개선
+            // 이전: 같은 hittable 수 → -10 페널티, 위치 품질 ×0.5 → 이동이 항상 불리
+            // 수정: 같은 수 → 0 (중립), 위치 품질 ×0.8 → 더 나은 위치로의 이동 장려
             float hittableScore = bestPosition.HittableEnemyCount * W_HITTABLE;
             float improvementBonus = (bestPosition.HittableEnemyCount - currentHittable) * W_HITTABLE_IMPROVEMENT;
-            float positionQuality = bestPosition.TotalScore * W_POSITION_QUALITY;
+            float positionQuality = bestPosition.TotalScore * 0.8f;
             float moveCost = -W_MOVE_COST;
 
-            // 현재 위치보다 나아지지 않으면 페널티
-            if (currentHittable >= bestPosition.HittableEnemyCount)
+            // hittable 감소 시에만 페널티 (같으면 중립 - 위치 개선 이동 허용)
+            if (bestPosition.HittableEnemyCount < currentHittable)
             {
                 improvementBonus = -10f;
+            }
+            else if (bestPosition.HittableEnemyCount == currentHittable)
+            {
+                improvementBonus = 0f;  // 중립 (위치 품질로 판단)
             }
 
             option.Score = hittableScore + improvementBonus + positionQuality + moveCost;

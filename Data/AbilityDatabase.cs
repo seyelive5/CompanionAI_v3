@@ -70,9 +70,10 @@ namespace CompanionAI_v3.Data
             { "83de00a47cb74f518e127978d3049a6e", new AbilityInfo("83de00a47cb74f518e127978d3049a6e", "RunAndGun2", AbilityTiming.PostFirstAction, flags: AbilityFlags.SelfTargetOnly) },
 
             // Daring Breach
-            { "51366be5481b4ca7b348d9ac69a79f46", new AbilityInfo("51366be5481b4ca7b348d9ac69a79f46", "DaringBreach", AbilityTiming.PostFirstAction, hpThreshold: 30f) },
-            { "845a1ed417f2489489eab670b00b773a", new AbilityInfo("845a1ed417f2489489eab670b00b773a", "DaringBreach_Fighter", AbilityTiming.PostFirstAction, hpThreshold: 30f) },
-            { "ed21642647a14ead9a09183cd5318d11", new AbilityInfo("ed21642647a14ead9a09183cd5318d11", "DaringBreach_Ultimate", AbilityTiming.PostFirstAction, hpThreshold: 30f) },
+            // ★ v3.9.50: HP 임계값 상향 (30 → 40)
+            { "51366be5481b4ca7b348d9ac69a79f46", new AbilityInfo("51366be5481b4ca7b348d9ac69a79f46", "DaringBreach", AbilityTiming.PostFirstAction, hpThreshold: 40f) },
+            { "845a1ed417f2489489eab670b00b773a", new AbilityInfo("845a1ed417f2489489eab670b00b773a", "DaringBreach_Fighter", AbilityTiming.PostFirstAction, hpThreshold: 40f) },
+            { "ed21642647a14ead9a09183cd5318d11", new AbilityInfo("ed21642647a14ead9a09183cd5318d11", "DaringBreach_Ultimate", AbilityTiming.PostFirstAction, hpThreshold: 40f) },
 
             // ========================================
             // PreCombatBuff - 전투 시작 시 버프
@@ -189,9 +190,10 @@ namespace CompanionAI_v3.Data
 
             // ★ v3.0.42: BloodOath는 적을 마킹하는 스킬 (SelfDamage → Marker)
             // 적에게 사용 → 공격 시 보너스 획득, HP 비용 있음
-            { "590c990c1d684fd09ae883754d28a8ac", new AbilityInfo("590c990c1d684fd09ae883754d28a8ac", "BloodOath", AbilityTiming.Marker, hpThreshold: 60f, flags: AbilityFlags.EnemyTarget | AbilityFlags.SingleUse) },
-            { "858e841542554025bc3ecdb6336b87ea", new AbilityInfo("858e841542554025bc3ecdb6336b87ea", "Bloodletting", AbilityTiming.SelfDamage, hpThreshold: 50f) },
-            { "566b140329b3441aafa971d729124947", new AbilityInfo("566b140329b3441aafa971d729124947", "RecklessDecision", AbilityTiming.SelfDamage, hpThreshold: 70f) },
+            // ★ v3.9.50: HP 임계값 상향 (자해 스킬 제한 강화)
+            { "590c990c1d684fd09ae883754d28a8ac", new AbilityInfo("590c990c1d684fd09ae883754d28a8ac", "BloodOath", AbilityTiming.Marker, hpThreshold: 70f, flags: AbilityFlags.EnemyTarget | AbilityFlags.SingleUse) },
+            { "858e841542554025bc3ecdb6336b87ea", new AbilityInfo("858e841542554025bc3ecdb6336b87ea", "Bloodletting", AbilityTiming.SelfDamage, hpThreshold: 60f) },
+            { "566b140329b3441aafa971d729124947", new AbilityInfo("566b140329b3441aafa971d729124947", "RecklessDecision", AbilityTiming.SelfDamage, hpThreshold: 80f) },
             // ★ v3.0.43: HyperMetabolism는 아군에게 추가 턴을 주는 버프 (SelfDamage → PreCombatBuff)
             // 아군 타겟 + 단일 사용, HP 임계값은 아군에게 적용되지 않으므로 제거
             { "29b7ab2d3e2640f3ad20a5c44c300346", new AbilityInfo("29b7ab2d3e2640f3ad20a5c44c300346", "HyperMetabolism", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SingleUse | AbilityFlags.AllyTarget) },
@@ -321,7 +323,8 @@ namespace CompanionAI_v3.Data
 
             // ★ v3.0.43: Oath of Vengeance - 아군 지정 버프 (SelfDamage → PreCombatBuff)
             // wound 소모하지만 타겟은 아군, 해당 아군 공격한 적에게 크리 보너스
-            { "3774147440ac412a876725b9b2b24682", new AbilityInfo("3774147440ac412a876725b9b2b24682", "OathOfVengeance", AbilityTiming.PreCombatBuff, hpThreshold: 60f, flags: AbilityFlags.AllyTarget) },
+            // ★ v3.9.50: HP 임계값 상향 (60 → 70)
+            { "3774147440ac412a876725b9b2b24682", new AbilityInfo("3774147440ac412a876725b9b2b24682", "OathOfVengeance", AbilityTiming.PreCombatBuff, hpThreshold: 70f, flags: AbilityFlags.AllyTarget) },
 
             // Captive Audience - 다음 공격에 출혈+고정 효과 부여
             { "ce30e102719a4671b660ffe5bff7c43d", new AbilityInfo("ce30e102719a4671b660ffe5bff7c43d", "CaptiveAudience", AbilityTiming.PreAttackBuff, flags: AbilityFlags.SelfTargetOnly) },
@@ -331,7 +334,8 @@ namespace CompanionAI_v3.Data
 
             // ★ v3.8.18: Veil of Blades - wound 소모 + 턴 종료 + 방어 영역 생성
             // 블루프린트: CanTargetPoint=true, Range=1, MinRange=1 (1타일 떨어진 지점에 영역 생성)
-            { "8b7bcaa093224422ac66c80ffcf69f6d", new AbilityInfo("8b7bcaa093224422ac66c80ffcf69f6d", "VeilOfBlades", AbilityTiming.TurnEnding, hpThreshold: 60f, flags: AbilityFlags.PointTarget) },
+            // ★ v3.9.50: HP 임계값 상향 (60 → 70)
+            { "8b7bcaa093224422ac66c80ffcf69f6d", new AbilityInfo("8b7bcaa093224422ac66c80ffcf69f6d", "VeilOfBlades", AbilityTiming.TurnEnding, hpThreshold: 70f, flags: AbilityFlags.PointTarget) },
 
             // ★ v3.8.18: Blade Dance - 주변 모든 적에게 다중 공격 (2 AP, 쿨다운 1)
             // 블루프린트: AbilityCustomBladeDance, clearMPInsteadOfEndingTurn=true, AbilityCasterIsNearOtherUnits

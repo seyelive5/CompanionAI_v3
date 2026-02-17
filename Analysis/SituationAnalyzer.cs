@@ -934,6 +934,89 @@ namespace CompanionAI_v3.Analysis
                 var buffNames = string.Join(", ", situation.AvailableBuffs.Select(b => b.Name));
                 Main.LogDebug($"[Analyzer] Available buffs: {buffNames}");
             }
+
+            // ★ v3.9.56: 블렌딩 공격 사거리 계산
+            // 모든 유한 사거리 공격 능력의 최소값 = 모든 스킬을 사용할 수 있는 최적 포지셔닝 거리
+            // 무제한 사거리(≥1000), GapCloser, 원거리 캐릭터의 근접 전용(≤2타일) 제외
+            ComputeBlendedAttackRange(situation, unit);
+        }
+
+        /// <summary>
+        /// ★ v3.9.56: 블렌딩 공격 사거리 계산
+        /// 모든 유한 사거리 공격 능력 중 최소 사거리를 찾아 포지셔닝에 사용
+        /// → 유닛이 모든 유한 사거리 공격을 사용할 수 있는 거리에 위치
+        /// </summary>
+        private void ComputeBlendedAttackRange(Situation situation, BaseUnitEntity unit)
+        {
+            float minFiniteRange = float.MaxValue;
+            int finiteCount = 0;
+            bool isRangedUnit = situation.PrefersRanged;
+            string shortestAbilityName = null;
+
+            foreach (var attack in situation.AvailableAttacks)
+            {
+                if (attack == null) continue;
+                // GapCloser는 특수 이동 스킬 — 포지셔닝에 영향 없음
+                if (AbilityDatabase.IsGapCloser(attack)) continue;
+
+                float abilityRange;
+
+                if (attack.Weapon != null)
+                {
+                    // 무기 기반 공격: WeaponRangeProfile의 EffectiveRange
+                    abilityRange = situation.WeaponRange.EffectiveRange;
+                }
+                else if (CombatAPI.IsPointTargetAbility(attack))
+                {
+                    // 포인트 타겟 능력
+                    int castRange = CombatAPI.GetAbilityRangeInTiles(attack);
+                    if (castRange >= 1000) continue; // ★ 무제한 사거리 → 포지셔닝에서 제외
+
+                    var patternInfo = CombatAPI.GetPatternInfo(attack);
+                    if (patternInfo != null && patternInfo.IsValid && patternInfo.CanBeDirectional)
+                    {
+                        // 방향성 패턴 (Ray/Cone/Sector): 시전자에서 패턴 반경만큼
+                        abilityRange = patternInfo.Radius;
+                    }
+                    else
+                    {
+                        // 원형 AoE: 시전 사거리 (적 위치에 직접 타겟 가능)
+                        abilityRange = castRange;
+                    }
+                }
+                else
+                {
+                    // 직접 타겟 능력
+                    int castRange = CombatAPI.GetAbilityRangeInTiles(attack);
+                    if (castRange >= 1000) continue; // ★ 무제한 사거리 → 포지셔닝에서 제외
+                    if (castRange <= 0) continue; // 유효하지 않은 사거리
+                    abilityRange = castRange;
+                }
+
+                // 원거리 캐릭터: 근접 전용 사거리(≤2타일) 제외 — 밀리로 돌진하면 안 됨
+                if (isRangedUnit && abilityRange <= 2f) continue;
+
+                finiteCount++;
+                if (abilityRange > 0 && abilityRange < minFiniteRange)
+                {
+                    minFiniteRange = abilityRange;
+                    shortestAbilityName = attack.Name;
+                }
+            }
+
+            if (finiteCount > 0 && minFiniteRange < float.MaxValue)
+            {
+                situation.BlendedAttackRange = minFiniteRange;
+                // 무기 사거리와 다를 때만 로깅 (동일하면 변화 없음)
+                if (Math.Abs(minFiniteRange - situation.WeaponRange.EffectiveRange) > 0.5f)
+                {
+                    Main.Log($"[Analyzer] {unit.CharacterName}: BlendedAttackRange={minFiniteRange:F1} " +
+                        $"(shortest: {shortestAbilityName}, weapon={situation.WeaponRange.EffectiveRange:F1}, " +
+                        $"{finiteCount} finite-range attacks)");
+                }
+            }
+            // 유한 사거리 공격이 없으면 (무제한만 있거나 공격 없음) 무기 사거리 폴백
+            // BlendedAttackRange = 0은 미설정 상태로 소비자에서 WeaponRange 폴백
         }
 
         private void CopyTurnState(Situation situation, TurnState turnState)

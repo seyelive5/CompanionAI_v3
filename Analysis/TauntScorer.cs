@@ -5,6 +5,7 @@ using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Utility;
 using Kingmaker.Pathfinding;
+using Kingmaker.View.Covers;
 using UnityEngine;
 using CompanionAI_v3.GameInterface;
 using CompanionAI_v3.Data;
@@ -221,6 +222,9 @@ namespace CompanionAI_v3.Analysis
 
                 Main.LogDebug($"[TauntScorer] AOE center for prediction: ({aoeCenterForPrediction.x:F1}, {aoeCenterForPrediction.z:F1}), radius={effectiveRadiusTiles:F1} tiles");
 
+                // ★ v3.9.54: 캐스터 위치의 노드 (LOS 체크용)
+                var casterNode = position.GetNearestNodeXZ() as CustomGridNodeBase;
+
                 foreach (var enemy in enemies)
                 {
                     if (enemy == null || !enemy.IsConscious) continue;
@@ -228,6 +232,22 @@ namespace CompanionAI_v3.Analysis
                     float distTiles = CombatAPI.MetersToTiles(Vector3.Distance(aoeCenterForPrediction, enemy.Position));
                     if (distTiles <= effectiveRadiusTiles)
                     {
+                        // ★ v3.9.54: LOS 체크 — 벽 너머 적은 도발 대상에서 제외
+                        // 캐스터에서 적에게 LOS가 없으면 (CoverType.Invisible) 도발 효과 없음
+                        if (casterNode != null)
+                        {
+                            var enemyNode = enemy.Position.GetNearestNodeXZ() as CustomGridNodeBase;
+                            if (enemyNode != null)
+                            {
+                                var los = LosCalculations.GetWarhammerLos(casterNode, tank.SizeRect, enemyNode, enemy.SizeRect);
+                                if (los.CoverType == LosCalculations.CoverType.Invisible)
+                                {
+                                    Main.LogDebug($"[TauntScorer] Enemy {enemy.CharacterName} at {distTiles:F1} tiles — NO LOS (behind wall), skipped");
+                                    continue;
+                                }
+                            }
+                        }
+
                         affectedEnemies.Add(enemy);
                         if (enemiesTargetingAllies.Contains(enemy))
                             targetingAlliesCount++;
@@ -240,19 +260,32 @@ namespace CompanionAI_v3.Analysis
                 // 단일 타겟 도발: 범위 내 아군 타겟팅 적 우선
                 BaseUnitEntity target = null;
 
-                // ★ v3.5.98: 1순위: 아군 타겟팅 중인 적 (타일 단위)
+                // ★ v3.9.54: LOS 체크 헬퍼 — 벽 뒤 적 제외
+                var singleCasterNode = position.GetNearestNodeXZ() as CustomGridNodeBase;
+                Func<BaseUnitEntity, bool> hasLosToEnemy = (BaseUnitEntity e) =>
+                {
+                    if (singleCasterNode == null) return true;  // 노드 실패 시 허용
+                    var eNode = e.Position.GetNearestNodeXZ() as CustomGridNodeBase;
+                    if (eNode == null) return true;
+                    var los = LosCalculations.GetWarhammerLos(singleCasterNode, tank.SizeRect, eNode, e.SizeRect);
+                    return los.CoverType != LosCalculations.CoverType.Invisible;
+                };
+
+                // ★ v3.5.98: 1순위: 아군 타겟팅 중인 적 (타일 단위 + LOS 체크)
                 target = enemiesTargetingAllies
                     .Where(e => e != null && e.IsConscious)
                     .Where(e => CombatAPI.MetersToTiles(Vector3.Distance(position, e.Position)) <= tauntRange)
+                    .Where(hasLosToEnemy)
                     .OrderBy(e => Vector3.Distance(position, e.Position))
                     .FirstOrDefault();
 
-                // ★ v3.5.98: 2순위: 가장 가까운 적 (타일 단위)
+                // ★ v3.5.98: 2순위: 가장 가까운 적 (타일 단위 + LOS 체크)
                 if (target == null)
                 {
                     target = enemies
                         .Where(e => e != null && e.IsConscious)
                         .Where(e => CombatAPI.MetersToTiles(Vector3.Distance(position, e.Position)) <= tauntRange)
+                        .Where(hasLosToEnemy)
                         .OrderBy(e => Vector3.Distance(position, e.Position))
                         .FirstOrDefault();
                 }

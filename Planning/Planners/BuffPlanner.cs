@@ -574,11 +574,35 @@ namespace CompanionAI_v3.Planning.Planners
         /// <summary>
         /// 마킹 스킬 계획
         /// </summary>
+        /// <summary>
+        /// ★ v3.9.50: 마킹 스킬 계획 - Hittable 대상에만 마크 적용
+        /// 공격 불가능한 대상에 SingleUse 마커 낭비 방지
+        /// </summary>
         public static PlannedAction PlanMarker(Situation situation, BaseUnitEntity target, ref float remainingAP, string roleName)
         {
             var markers = situation.AvailableMarkers;
             if (markers.Count == 0) return null;
             if (target == null) return null;
+
+            // ★ v3.9.50: 마크 대상이 공격 가능한지 검증
+            // HittableEnemies (현재 위치에서 공격 가능) 또는 이동 후 도달 가능해야 함
+            bool isHittable = situation.HittableEnemies != null && situation.HittableEnemies.Contains(target);
+            if (!isHittable)
+            {
+                // 이동 후 공격 가능한지 거리 체크 (무기 사거리 + 이동력)
+                float distToTarget = CombatCache.GetDistanceInTiles(situation.Unit, target);
+                float weaponRange = situation.PrimaryAttack != null
+                    ? CombatAPI.GetAbilityRangeInTiles(situation.PrimaryAttack) : 1f;
+                float moveRange = CombatAPI.GetCurrentMP(situation.Unit) / CombatAPI.GridCellSize;
+                float reachRange = weaponRange + moveRange;
+
+                if (distToTarget > reachRange)
+                {
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] Marker skipped: {target.CharacterName} unreachable " +
+                        $"(dist={distToTarget:F1} > reach={reachRange:F1} = weapon {weaponRange:F1} + move {moveRange:F1})");
+                    return null;
+                }
+            }
 
             var targetWrapper = new TargetWrapper(target);
 

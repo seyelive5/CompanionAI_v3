@@ -613,8 +613,17 @@ namespace CompanionAI_v3.Planning.Planners
 
                 if (bestPosition == null)
                 {
-                    // 폴백: 적 위치 직접 사용 (게임이 경로 처리)
-                    if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanMoveToEnemy: No melee position found, falling back to target position");
+                    // ★ v3.9.52: FindBestApproachPosition 사용 (벽 뒤 적에게 A* 경로 기반 우회 접근)
+                    // 게임 네이티브 AI처럼 도달 가능한 셀 중 타겟에 가장 가까운 위치로 이동
+                    var approachPosition = MovementAPI.FindBestApproachPosition(unit, target, effectiveMP);
+                    if (approachPosition != null)
+                    {
+                        Main.Log($"[{roleName}] PlanMoveToEnemy: No melee position, approach via pathfinding ({approachPosition.Position.x:F1},{approachPosition.Position.z:F1})");
+                        return PlannedAction.Move(approachPosition.Position, $"Approach {target.CharacterName}");
+                    }
+
+                    // 최후 폴백: 적 위치 직접 사용 (FindBestApproachPosition도 실패한 경우)
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanMoveToEnemy: No approach position found, falling back to target position");
                     return PlannedAction.Move(target.Position, $"Approach {target.CharacterName}");
                 }
 
@@ -1079,9 +1088,13 @@ namespace CompanionAI_v3.Planning.Planners
                 if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] GetEffectiveRange: ability={attackContext.BestAbilityRange:F1} (from context)");
                 return attackContext.BestAbilityRange;
             }
-            float fallback = situation.WeaponRange.EffectiveRange;
+            // ★ v3.9.56: BlendedAttackRange 우선 (모든 유한 사거리 스킬 고려)
+            float fallback = situation.BlendedAttackRange > 0
+                ? situation.BlendedAttackRange
+                : situation.WeaponRange.EffectiveRange;
             if (fallback <= 0f) fallback = 15f;  // 안전 폴백
-            if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] GetEffectiveRange: weapon={fallback:F1} (from WeaponRangeProfile)");
+            if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] GetEffectiveRange: {fallback:F1} " +
+                $"(blended={situation.BlendedAttackRange:F1}, weapon={situation.WeaponRange.EffectiveRange:F1})");
             return fallback;
         }
 

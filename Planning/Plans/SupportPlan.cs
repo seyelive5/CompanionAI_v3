@@ -314,9 +314,10 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // Phase 4.7: 마킹
-            if (situation.AvailableMarkers.Count > 0 && situation.NearestEnemy != null)
+            // ★ v3.9.50: NearestEnemy → BestTarget (실제 공격 대상과 일치)
+            if (situation.AvailableMarkers.Count > 0 && situation.BestTarget != null)
             {
-                var markerAction = PlanMarker(situation, situation.NearestEnemy, ref remainingAP);
+                var markerAction = PlanMarker(situation, situation.BestTarget, ref remainingAP);
                 if (markerAction != null)
                 {
                     actions.Add(markerAction);

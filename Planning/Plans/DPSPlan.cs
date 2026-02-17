@@ -494,12 +494,29 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // Phase 4.6: 마킹
-            if (situation.AvailableMarkers.Count > 0 && situation.BestTarget != null)
+            // ★ v3.9.50: Phase 5와 동일한 타겟 선택 로직 (BestTarget ≠ 실제 공격 대상 불일치 수정)
+            if (situation.AvailableMarkers.Count > 0 && situation.HasHittableEnemies)
             {
-                var markerAction = PlanMarker(situation, situation.BestTarget, ref remainingAP);
-                if (markerAction != null)
+                // Phase 5와 동일: FindWeakestEnemy → SharedTarget 점수 비교
+                var markerTarget = FindWeakestEnemy(situation) ?? situation.BestTarget;
+
+                var sharedTarget = TeamBlackboard.Instance.SharedTarget;
+                if (sharedTarget != null && markerTarget != null &&
+                    situation.HittableEnemies.Contains(sharedTarget))
                 {
-                    actions.Add(markerAction);
+                    float bestScore = TargetScorer.ScoreEnemy(markerTarget, situation, Settings.AIRole.DPS);
+                    float sharedScore = TargetScorer.ScoreEnemy(sharedTarget, situation, Settings.AIRole.DPS);
+                    if (sharedScore >= bestScore * 0.9f)
+                        markerTarget = sharedTarget;
+                }
+
+                if (markerTarget != null)
+                {
+                    var markerAction = PlanMarker(situation, markerTarget, ref remainingAP);
+                    if (markerAction != null)
+                    {
+                        actions.Add(markerAction);
+                    }
                 }
             }
 
@@ -955,26 +972,20 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // ★ v3.8.45: Phase 8.5 - 행동 완료 후 원거리 안전 후퇴
-            // SupportPlan과 동일 패턴 - 모든 행동 후에도 적이 가까우면 후퇴
-            if (!hasMoveInPlan && remainingMP > 0 && situation.CanMove && situation.PrefersRanged)
+            // ★ v3.9.50: 후퇴 조건 대폭 완화
+            // 이전: PrefersRanged + (적 거리 < MinSafe*1.2 || 전선 거리 > -5m)
+            //   → 거의 모든 전투 위치에서 후퇴 발동 (전선 -5m 임계값이 너무 관대)
+            // 수정: 명시적 PreferRanged만 + 적 거리 < MinSafe만 체크 (전선 체크 제거)
+            if (!hasMoveInPlan && remainingMP > 0 && situation.CanMove
+                && situation.RangePreference == Settings.RangePreference.PreferRanged)
             {
                 bool needsSafeRetreat = false;
                 string retreatReason = "";
 
-                if (situation.NearestEnemy != null && situation.NearestEnemyDistance < situation.MinSafeDistance * 1.2f)
+                if (situation.NearestEnemy != null && situation.NearestEnemyDistance < situation.MinSafeDistance)
                 {
                     needsSafeRetreat = true;
-                    retreatReason = $"enemy too close ({situation.NearestEnemyDistance:F1}m)";
-                }
-
-                if (situation.InfluenceMap != null && situation.InfluenceMap.IsValid)
-                {
-                    float frontlineDist = situation.InfluenceMap.GetFrontlineDistance(situation.Unit.Position);
-                    if (frontlineDist > -5f)
-                    {
-                        needsSafeRetreat = true;
-                        retreatReason = $"too close to frontline ({frontlineDist:F1}m)";
-                    }
+                    retreatReason = $"enemy inside MinSafe ({situation.NearestEnemyDistance:F1} < {situation.MinSafeDistance:F1})";
                 }
 
                 if (needsSafeRetreat)

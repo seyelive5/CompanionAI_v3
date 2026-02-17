@@ -397,12 +397,14 @@ namespace CompanionAI_v3.Analysis
                 };
 
                 // Position Scoring
+                // ★ v3.9.50: MinOutput 완화 (-50 → -15)
+                // 아군 통제 낮은 구역의 과도한 페널티 제거 — 전진 억제 해소
                 SafetyByDistance = new ResponseCurve
                 {
                     Type = CurveType.Quadratic,
                     MinInput = 0f,
                     MaxInput = 15f,
-                    MinOutput = -50f,  // 너무 가까우면 위험
+                    MinOutput = -15f,
                     MaxOutput = 30f
                 };
 
@@ -415,13 +417,16 @@ namespace CompanionAI_v3.Analysis
                     MaxOutput = 40f
                 };
 
+                // ★ v3.9.50: 부호 수정 + 크기 완화
+                // 이전: MaxOutput=-100 → InfluenceThreatScore에 음수 저장 → TotalScore에서 빼면 보너스로 반전!
+                // 수정: 양수 출력 (TotalScore에서 차감되므로 양수 = 올바른 페널티)
                 ThreatCountPenalty = new ResponseCurve
                 {
                     Type = CurveType.Linear,
                     MinInput = 0f,
                     MaxInput = 5f,
                     MinOutput = 0f,
-                    MaxOutput = -100f
+                    MaxOutput = 35f
                 };
 
                 // Buff Scoring
