@@ -446,7 +446,12 @@ namespace CompanionAI_v3.Core
             }
 
             // 결과 기록
-            bool success = result.Type == ResultType.CastAbility || result.Type == ResultType.MoveTo;
+            // ★ v3.9.78: WeaponSwitch 성공 판정
+            // Waiting = 실제 전환 실행됨 → GameCommand 처리 대기 (다음 프레임 fresh 분석)
+            // Continue = "already on target set" 스킵 (전환 불필요, 즉시 다음 액션)
+            bool success = result.Type == ResultType.CastAbility || result.Type == ResultType.MoveTo
+                || (nextAction.Type == ActionType.WeaponSwitch &&
+                    (result.Type == ResultType.Waiting || result.Type == ResultType.Continue));
             turnState.RecordAction(nextAction, success);
 
             // 능력 사용 추적

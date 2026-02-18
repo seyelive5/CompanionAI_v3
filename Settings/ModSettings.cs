@@ -290,6 +290,19 @@ namespace CompanionAI_v3.Settings
                 { Language.Russian, "Предсказывает движение врагов для выбора более безопасных позиций.\nУчитывает, куда враги могут переместиться в следующий ход." },
                 { Language.Japanese, "敵の移動を予測してより安全な位置を選択します。\n次のターンに敵が移動できる位置を考慮します。" }
             },
+            // ★ v3.9.72: Weapon Set Rotation
+            ["EnableWeaponSetRotation"] = new() {
+                { Language.English, "Enable Weapon Set Rotation" },
+                { Language.Korean, "무기 세트 로테이션 사용" },
+                { Language.Russian, "Ротация комплектов оружия" },
+                { Language.Japanese, "武器セットローテーション" }
+            },
+            ["EnableWeaponSetRotationDesc"] = new() {
+                { Language.English, "Use both weapon sets in a single turn.\nSwitches weapons (0 AP) to use attacks from the alternate set." },
+                { Language.Korean, "한 턴에 양쪽 무기 세트를 모두 사용합니다.\n무기 전환(0 AP)으로 대체 세트의 공격을 활용합니다." },
+                { Language.Russian, "Использовать оба комплекта оружия за один ход.\nПереключает оружие (0 AP) для атак из альтернативного комплекта." },
+                { Language.Japanese, "1ターンで両方の武器セットを使用します。\n武器切替(0 AP)で代替セットの攻撃を活用します。" }
+            },
 
             // ★ v3.5.13: Advanced Settings UI
             ["AdvancedSettings"] = new() {
@@ -524,6 +537,9 @@ namespace CompanionAI_v3.Settings
 
         // ★ v3.4.00: 예측적 이동 토글 (적 이동 예측하여 안전 위치 선택)
         public bool UsePredictiveMovement { get; set; } = true;
+
+        // ★ v3.9.72: 무기 세트 로테이션 (한 턴에 양쪽 세트 공격)
+        public bool EnableWeaponSetRotation { get; set; } = false;
     }
 
     /// <summary>
@@ -741,7 +757,8 @@ namespace CompanionAI_v3.Settings
                     HealAtHPPercent = DefaultSettings.HealAtHPPercent,
                     UseKillSimulator = DefaultSettings.UseKillSimulator,
                     UseAoEOptimization = DefaultSettings.UseAoEOptimization,
-                    UsePredictiveMovement = DefaultSettings.UsePredictiveMovement
+                    UsePredictiveMovement = DefaultSettings.UsePredictiveMovement,
+                    EnableWeaponSetRotation = DefaultSettings.EnableWeaponSetRotation
                 };
                 perSave.CharacterSettings[characterId] = settings;
                 // ★ v3.6.23: 자동 저장 제거 - 매 턴 NPC 분석 시 파일 크기가 계속 증가하는 문제 해결

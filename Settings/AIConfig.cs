@@ -222,6 +222,14 @@ namespace CompanionAI_v3.Settings
         public AoEConfig AoE { get; set; } = new AoEConfig();
 
         #endregion
+
+        #region ★ v3.9.72: 무기 세트 로테이션 설정
+
+        /// <summary>무기 세트 로테이션 설정</summary>
+        [JsonProperty("weaponRotation")]
+        public WeaponRotationConfig WeaponRotation { get; set; } = new WeaponRotationConfig();
+
+        #endregion
     }
 
     /// <summary>
@@ -317,6 +325,21 @@ namespace CompanionAI_v3.Settings
 
         // ★ v3.6.15: DangerousAoEAllyPenalty, AoEAllyCheckRadius 삭제
         // 이제 실제 AOE 반경을 사용하고 아군 있으면 무조건 차단
+    }
+
+    /// <summary>
+    /// ★ v3.9.72: 무기 세트 로테이션 설정
+    /// </summary>
+    [Serializable]
+    public class WeaponRotationConfig
+    {
+        /// <summary>턴당 최대 무기 전환 횟수</summary>
+        [JsonProperty("maxSwitchesPerTurn")]
+        public int MaxSwitchesPerTurn { get; set; } = 2;
+
+        /// <summary>대체 세트 AoE 사용 최소 적 수</summary>
+        [JsonProperty("minEnemiesForAlternateAoE")]
+        public int MinEnemiesForAlternateAoE { get; set; } = 2;
     }
 
     /// <summary>
@@ -682,6 +705,12 @@ namespace CompanionAI_v3.Settings
         public static PerformanceConfig GetPerformance()
         {
             return Instance?.Performance ?? new PerformanceConfig();
+        }
+
+        /// <summary>★ v3.9.72: 무기 세트 로테이션 설정 (null-safe)</summary>
+        public static WeaponRotationConfig GetWeaponRotationConfig()
+        {
+            return Instance?.Thresholds?.WeaponRotation ?? new WeaponRotationConfig();
         }
 
         /// <summary>★ v3.8.46: 스코어링 가중치 (null-safe)</summary>

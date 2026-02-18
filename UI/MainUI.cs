@@ -418,6 +418,12 @@ namespace CompanionAI_v3.UI
             GUILayout.Space(15);
             DrawRangePreferenceSelection();
             GUILayout.Space(15);
+
+            // ★ v3.9.72: Weapon Set Rotation — 캐릭터별 토글
+            _editingSettings.EnableWeaponSetRotation = DrawCheckbox(_editingSettings.EnableWeaponSetRotation, L("EnableWeaponSetRotation"));
+            GUILayout.Label($"<color=#888888><size=14>{L("EnableWeaponSetRotationDesc")}</size></color>", _descriptionStyle);
+            GUILayout.Space(15);
+
             DrawAdvancedSettings();
             GUILayout.Space(10);
         }
@@ -454,6 +460,7 @@ namespace CompanionAI_v3.UI
                 _editingSettings.UseKillSimulator = true;
                 _editingSettings.UseAoEOptimization = true;
                 _editingSettings.UsePredictiveMovement = true;
+                _editingSettings.EnableWeaponSetRotation = false;  // ★ 기본값 OFF
             }
             GUILayout.Space(15);
 

@@ -1083,19 +1083,53 @@ namespace CompanionAI_v3.Planning.Planners
         /// </summary>
         private static float GetEffectiveRange(Situation situation, AttackPhaseContext attackContext)
         {
+            float range;
+
             if (attackContext?.HasValidRange == true)
             {
-                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] GetEffectiveRange: ability={attackContext.BestAbilityRange:F1} (from context)");
-                return attackContext.BestAbilityRange;
+                range = attackContext.BestAbilityRange;
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] GetEffectiveRange: ability={range:F1} (from context)");
             }
-            // ★ v3.9.56: BlendedAttackRange 우선 (모든 유한 사거리 스킬 고려)
-            float fallback = situation.BlendedAttackRange > 0
-                ? situation.BlendedAttackRange
-                : situation.WeaponRange.EffectiveRange;
-            if (fallback <= 0f) fallback = 15f;  // 안전 폴백
-            if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] GetEffectiveRange: {fallback:F1} " +
+            else
+            {
+                // ★ v3.9.56: BlendedAttackRange 우선 (모든 유한 사거리 스킬 고려)
+                range = situation.BlendedAttackRange > 0
+                    ? situation.BlendedAttackRange
+                    : situation.WeaponRange.EffectiveRange;
+                if (range <= 0f) range = 15f;  // 안전 폴백
+            }
+
+            // ★ v3.9.74: 무기 로테이션 활성 시 짧은 사거리 무기 기준 포지셔닝
+            // 유저가 로테이션을 켰다면 양쪽 무기 모두 사용할 의도
+            // → 짧은 사거리 무기 기준으로 이동 (긴 사거리 무기는 가까이서도 사용 가능)
+            // ★ v3.9.78: 동일 타입(원거리+원거리, 근접+근접)에만 적용
+            // 혼합 타입(원거리+근접)은 현재 무기 사거리 유지 — 원거리 캐릭이 근접 거리로 돌진 방지
+            if (situation.WeaponRotationAvailable && situation.WeaponSetData != null)
+            {
+                int currentIdx = situation.CurrentWeaponSetIndex;
+                int altIdx = currentIdx == 0 ? 1 : 0;
+                if (altIdx < situation.WeaponSetData.Length && currentIdx < situation.WeaponSetData.Length)
+                {
+                    var currentSet = situation.WeaponSetData[currentIdx];
+                    var altSet = situation.WeaponSetData[altIdx];
+                    float altRange = altSet.PrimaryWeaponRange;
+
+                    // 동일 타입일 때만 짧은 사거리 적용 (볼터+화염방사기 등)
+                    bool bothRanged = currentSet.HasRangedWeapon && altSet.HasRangedWeapon;
+                    bool bothMelee = currentSet.HasMeleeWeapon && altSet.HasMeleeWeapon;
+                    if ((bothRanged || bothMelee) && altRange > 0 && altRange < range)
+                    {
+                        float original = range;
+                        range = altRange;
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] GetEffectiveRange: rotation → {original:F1} → {range:F1} " +
+                            $"(same-type shorter weapon range={altRange:F0})");
+                    }
+                }
+            }
+
+            if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] GetEffectiveRange: {range:F1} " +
                 $"(blended={situation.BlendedAttackRange:F1}, weapon={situation.WeaponRange.EffectiveRange:F1})");
-            return fallback;
+            return range;
         }
 
         private static Vector3 CalculateAveragePosition(IEnumerable<BaseUnitEntity> units)

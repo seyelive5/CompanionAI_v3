@@ -23,6 +23,7 @@ using Kingmaker.UnitLogic.Mechanics.Actions;
 using Kingmaker.UnitLogic.Parts;
 using Kingmaker.UnitLogic.Levelup.Obsolete.Blueprints.Spells;
 using Kingmaker.Utility;
+using Kingmaker.GameCommands;  // ★ v3.9.72: SwitchHandEquipment 확장 메서드
 using Kingmaker.View.Covers;
 using Kingmaker.RuleSystem;
 using Kingmaker.RuleSystem.Rules;
@@ -169,7 +170,7 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
-        /// ★ v3.8.36: 능력 제한 이유 상세 파악 (버프 기반 제한 추가)
+        /// ★ v3.9.72: 능력 제한 이유 상세 파악 — 게임 IsRestricted 16가지 체크 전부 커버
         /// </summary>
         private static string GetRestrictionReason(AbilityData ability)
         {
@@ -179,64 +180,129 @@ namespace CompanionAI_v3.GameInterface
             {
                 var bp = ability.Blueprint;
                 var caster = ability.Caster;
+                var unitCaster = caster as BaseUnitEntity;
 
-                // CombatStateRestriction 체크
+                // Check 2: CombatStateRestriction
                 if (bp.CombatStateRestriction == BlueprintAbility.CombatStateRestrictionType.InCombatOnly && !caster.IsInCombat)
                     reasons.Add("InCombatOnly but not in combat");
                 if (bp.CombatStateRestriction == BlueprintAbility.CombatStateRestrictionType.NotInCombatOnly && caster.IsInCombat)
                     reasons.Add("NotInCombatOnly but in combat");
 
-                // CasterRestrictions 체크
+                // Check 3: InterruptionAbilityRestrictions (보너스/인터럽트 턴 제한)
+                // PartAbilitySettings 직접 접근 불가 → Fact 기반으로 간접 확인
+                // (정확한 진단은 Check 11/13/16에서 수행)
+
+                // Check 4: CasterRestrictions
                 foreach (var restriction in bp.CasterRestrictions)
                 {
                     if (!restriction.IsCasterRestrictionPassed(caster))
                     {
                         var text = restriction.GetAbilityCasterRestrictionUIText(caster);
-                        reasons.Add($"{restriction.GetType().Name}: {text}");
+                        reasons.Add($"CasterRestriction: {restriction.GetType().Name}: {text}");
                     }
                 }
 
-                // UsingInThreateningArea 체크
-                var unitCaster = caster as BaseUnitEntity;
+                // Check 6: UsingInThreateningArea
                 if (unitCaster?.CombatState != null && unitCaster.CombatState.IsEngaged)
                 {
                     if (ability.UsingInThreateningArea == BlueprintAbility.UsingInThreateningAreaType.CannotUse)
                         reasons.Add("CannotUse in threatening area (engaged)");
                 }
 
-                // ★ v3.8.36: 버프 기반 WarhammerAbilityRestriction 체크
-                // 잠재력 초월(SoulMarkHope4) 같은 버프가 능력 사용을 제한할 수 있음
+                // Check 7-9: Area Effect 제한
                 if (unitCaster != null)
                 {
-                    var buffs = unitCaster.Buffs;
-                    if (buffs != null)
+                    try
                     {
-                        foreach (var buff in buffs.RawFacts)
+                        var node = (CustomGridNodeBase)(Pathfinding.GraphNode)unitCaster.CurrentNode;
+                        if (node != null)
                         {
-                            var restriction = buff.Blueprint?.GetComponent<Kingmaker.UnitLogic.Buffs.Components.WarhammerAbilityRestriction>();
-                            if (restriction != null && restriction.AbilityIsRestricted(ability))
-                            {
-                                reasons.Add($"BuffRestriction: {buff.Name} (WarhammerAbilityRestriction)");
-                            }
+                            if (!bp.IsWeaponAbility && AreaEffectsController.CheckConcussionEffect(node))
+                                reasons.Add("ConcussionEffect (weapon-only zone)");
+                            if (bp.IsWeaponAbility && AreaEffectsController.CheckCantAttackEffect(node))
+                                reasons.Add("CantAttackEffect (no weapon zone)");
+                            if (bp.IsPsykerAbility && AreaEffectsController.CheckInertWarpEffect(node))
+                                reasons.Add("InertWarpEffect (psychic null zone)");
+                        }
+                    }
+                    catch { }
+                }
+
+                // Check 11: Blueprint.Restrictions (IAbilityRestriction[])
+                try
+                {
+                    // Restrictions 프로퍼티 직접 사용 (ComponentsArray 대신)
+                    foreach (var restriction in bp.Restrictions)
+                    {
+                        if (!restriction.IsAbilityRestrictionPassed(ability))
+                        {
+                            var uiText = restriction.GetAbilityRestrictionUIText();
+                            reasons.Add($"AbilityRestriction: {restriction.GetType().Name}: {uiText}");
                         }
                     }
                 }
+                catch { }
 
-                // ★ v3.9.70: Area Effect 기반 능력 제한 체크
-                // Inert Warp (사이킥 사용 불가), Concussion (무기만 사용 가능), CantAttack (무기 사용 불가)
+                // Check 13: UnitPartForbiddenAbilities (AbilityGroupLimitation, AbilitySourceLimitation 등)
+                // 직접 접근 불가 (IHavePrototype 어셈블리 미참조) → 버프의 제한 컴포넌트 직접 확인
                 if (unitCaster != null)
                 {
-                    var node = (CustomGridNodeBase)(Pathfinding.GraphNode)unitCaster.CurrentNode;
-                    if (node != null)
+                    try
                     {
-                        if (bp.IsPsykerAbility && AreaEffectsController.CheckInertWarpEffect(node))
-                            reasons.Add("InertWarpEffect (psychic null zone)");
-                        if (!bp.IsWeaponAbility && AreaEffectsController.CheckConcussionEffect(node))
-                            reasons.Add("ConcussionEffect (weapon-only zone)");
-                        if (bp.IsWeaponAbility && AreaEffectsController.CheckCantAttackEffect(node))
-                            reasons.Add("CantAttackEffect (no weapon zone)");
+                        var buffs = unitCaster.Buffs;
+                        if (buffs != null)
+                        {
+                            foreach (var buff in buffs.RawFacts)
+                            {
+                                if (buff.Blueprint?.ComponentsArray == null) continue;
+                                foreach (var comp in buff.Blueprint.ComponentsArray)
+                                {
+                                    string compName = comp.GetType().Name;
+                                    if (compName == "AbilityGroupLimitation" ||
+                                        compName == "AbilitySourceLimitation" ||
+                                        compName == "TargetLimitation")
+                                    {
+                                        reasons.Add($"ForbiddenAbility: {buff.Name} ({compName})");
+                                    }
+                                }
+                            }
+                        }
                     }
+                    catch { }
                 }
+
+                // Check 16: WarhammerAbilityRestriction — Facts 전체 (Buffs + Features)
+                if (unitCaster != null)
+                {
+                    try
+                    {
+                        bool hasFactRestriction = unitCaster.Facts
+                            .GetComponents<Kingmaker.UnitLogic.Buffs.Components.WarhammerAbilityRestriction>(
+                                r => r.AbilityIsRestricted(ability)).Any();
+                        if (hasFactRestriction)
+                        {
+                            reasons.Add("FactRestriction (WarhammerAbilityRestriction on caster fact)");
+                        }
+                    }
+                    catch { }
+                }
+
+                // ★ Final check: HasRequiredParams / Fact.Active
+                // 게임 IsRestricted 최종 return true 경로:
+                //   if (HasRequiredParams) { if (Fact == null || Fact.Active) { ...checks... } } return true;
+                // → HasRequiredParams=false 이거나 Fact!=null && !Fact.Active 이면 무조건 restricted
+                try
+                {
+                    bool hasReqParams = ability.HasRequiredParams;
+                    var fact = ability.Fact;
+                    bool factActive = fact?.Active ?? true;  // Fact==null이면 true (통과)
+
+                    if (!hasReqParams)
+                        reasons.Add($"HasRequiredParams=false (RequireParamUnitFact)");
+                    if (fact != null && !factActive)
+                        reasons.Add($"Fact.Active=false (ability fact deactivated, fact={fact.Name})");
+                }
+                catch { }
             }
             catch { }
 
@@ -982,6 +1048,87 @@ namespace CompanionAI_v3.GameInterface
                 return weapon.Blueprint?.WarhammerMaxAmmo ?? -1;
             }
             catch { return -1; }
+        }
+
+        #endregion
+
+        #region Weapon Set Management (v3.9.72)
+
+        /// <summary>
+        /// ★ v3.9.72: 현재 활성 무기 세트 인덱스 (0 또는 1)
+        /// </summary>
+        public static int GetCurrentWeaponSetIndex(BaseUnitEntity unit)
+        {
+            return unit?.Body?.CurrentHandEquipmentSetIndex ?? 0;
+        }
+
+        /// <summary>
+        /// ★ v3.9.72: 양쪽 세트에 모두 무기가 장착되어 있는지 확인
+        /// </summary>
+        public static bool HasMultipleWeaponSets(BaseUnitEntity unit)
+        {
+            if (unit?.Body?.HandsEquipmentSets == null) return false;
+            var sets = unit.Body.HandsEquipmentSets;
+            if (sets.Count < 2) return false;
+
+            try
+            {
+                bool set0HasWeapon = sets[0]?.PrimaryHand?.HasItem == true;
+                bool set1HasWeapon = sets[1]?.PrimaryHand?.HasItem == true;
+                return set0HasWeapon && set1HasWeapon;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// ★ v3.9.72: 무기 세트 전환 실행 (0 AP)
+        /// </summary>
+        public static void SwitchWeaponSet(BaseUnitEntity unit, int targetSetIndex)
+        {
+            if (unit == null || targetSetIndex < 0 || targetSetIndex > 1) return;
+            if (unit.Body.CurrentHandEquipmentSetIndex == targetSetIndex) return;
+
+            Game.Instance.GameCommandQueue.SwitchHandEquipment(unit, targetSetIndex);
+            Main.Log($"[CombatAPI] ★ Weapon switch: {unit.CharacterName} -> Set {targetSetIndex}");
+        }
+
+        /// <summary>
+        /// ★ v3.9.72: 특정 무기 세트의 주 무기 이름 조회
+        /// </summary>
+        public static string GetWeaponSetPrimaryName(BaseUnitEntity unit, int setIndex)
+        {
+            if (unit?.Body?.HandsEquipmentSets == null) return null;
+            var sets = unit.Body.HandsEquipmentSets;
+            if (setIndex < 0 || setIndex >= sets.Count) return null;
+
+            try
+            {
+                // ★ MaybeItem 사용 — MaybeWeapon은 비활성 세트에서 Active 체크로 null 반환
+                var weapon = sets[setIndex]?.PrimaryHand?.MaybeItem as ItemEntityWeapon;
+                return weapon?.Name;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// ★ v3.9.72: 양쪽 세트의 주 무기 Blueprint가 동일한지 확인
+        /// 같은 무기면 전환 의미 없음
+        /// </summary>
+        public static bool AreBothWeaponSetsSame(BaseUnitEntity unit)
+        {
+            if (unit?.Body?.HandsEquipmentSets == null) return true;
+            var sets = unit.Body.HandsEquipmentSets;
+            if (sets.Count < 2) return true;
+
+            try
+            {
+                // ★ MaybeItem 사용 — MaybeWeapon은 비활성 세트에서 Active 체크로 null 반환
+                var weapon0 = (sets[0]?.PrimaryHand?.MaybeItem as ItemEntityWeapon)?.Blueprint;
+                var weapon1 = (sets[1]?.PrimaryHand?.MaybeItem as ItemEntityWeapon)?.Blueprint;
+                if (weapon0 == null || weapon1 == null) return false;
+                return weapon0 == weapon1;
+            }
+            catch { return true; }
         }
 
         #endregion

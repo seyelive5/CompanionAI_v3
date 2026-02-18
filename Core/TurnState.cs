@@ -96,6 +96,9 @@ namespace CompanionAI_v3.Core
         /// <summary>★ v3.0.7: 추격 이동 허용 (이동했지만 공격 못함 - 적이 너무 멀어서)</summary>
         public bool AllowChaseMove => HasMovedThisTurn && !HasAttackedThisTurn;
 
+        /// <summary>★ v3.9.72: 이번 턴 무기 세트 전환 횟수</summary>
+        public int WeaponSwitchCount { get; set; }
+
         #endregion
 
         #region Resources
@@ -268,6 +271,9 @@ namespace CompanionAI_v3.Core
                     case ActionType.Special:
                         HasPerformedFirstAction = true;
                         RemainingAP -= action.APCost;
+                        break;
+                    case ActionType.WeaponSwitch:  // ★ v3.9.72: 무기 전환 (0 AP)
+                        WeaponSwitchCount++;
                         break;
                 }
             }

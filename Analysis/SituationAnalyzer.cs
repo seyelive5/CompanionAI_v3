@@ -157,6 +157,47 @@ namespace CompanionAI_v3.Analysis
                 Main.Log($"[Analyzer] {unit.CharacterName}: MinSafeDistance clamped {oldMinSafe:F1} → {situation.MinSafeDistance:F1} " +
                     $"(weapon EffectiveRange={situation.WeaponRange.EffectiveRange:F1})");
             }
+
+            // ★ v3.9.72: 무기 세트 로테이션 분석
+            if (situation.CharacterSettings?.EnableWeaponSetRotation == true &&
+                CombatAPI.HasMultipleWeaponSets(unit))
+            {
+                AnalyzeWeaponSets(situation, unit);
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.9.72: 양쪽 무기 세트 분석 — 무기 정보만 수집 (능력 X, 임시 전환 X)
+        ///
+        /// 설계: HandsEquipmentSets에서 무기 아이템을 직접 읽어 이름/타입만 수집
+        /// 능력(AbilityData)은 수집하지 않음 — 실제 전환 후 re-analysis에서 자동 수집
+        /// </summary>
+        private void AnalyzeWeaponSets(Situation situation, BaseUnitEntity unit)
+        {
+            try
+            {
+                situation.CurrentWeaponSetIndex = CombatAPI.GetCurrentWeaponSetIndex(unit);
+                situation.WeaponSetData = WeaponSetAnalyzer.AnalyzeBothSets(unit);
+
+                if (situation.WeaponSetData == null) return;
+
+                situation.WeaponRotationAvailable =
+                    WeaponSetAnalyzer.ShouldConsiderWeaponSwitch(unit, situation);
+
+                if (situation.WeaponRotationAvailable)
+                {
+                    var set0 = situation.WeaponSetData[0];
+                    var set1 = situation.WeaponSetData[1];
+                    Main.Log($"[Analyzer] ★ {unit.CharacterName}: Weapon rotation available — " +
+                        $"Set0={set0.PrimaryWeaponName ?? "?"} (R={set0.HasRangedWeapon},M={set0.HasMeleeWeapon}), " +
+                        $"Set1={set1.PrimaryWeaponName ?? "?"} (R={set1.HasRangedWeapon},M={set1.HasMeleeWeapon}), " +
+                        $"Active=Set{situation.CurrentWeaponSetIndex}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[Analyzer] Weapon set analysis failed: {ex.Message}");
+            }
         }
 
         private void AnalyzeBattlefield(Situation situation, BaseUnitEntity unit)

@@ -76,6 +76,21 @@ namespace CompanionAI_v3.Analysis
         /// </summary>
         public float BlendedAttackRange { get; set; }
 
+        /// <summary>★ v3.9.72: 현재 활성 무기 세트 인덱스 (0 또는 1)</summary>
+        public int CurrentWeaponSetIndex { get; set; }
+
+        /// <summary>★ v3.9.72: 양쪽 무기 세트 분석 데이터</summary>
+        public Data.WeaponSetAnalyzer.WeaponSetAbilities[] WeaponSetData { get; set; }
+
+        /// <summary>★ v3.9.72: 대체 세트의 공격 능력</summary>
+        public List<AbilityData> AlternateSetAttacks { get; set; } = new List<AbilityData>();
+
+        /// <summary>★ v3.9.72: 대체 세트의 AoE 공격 능력</summary>
+        public List<AbilityData> AlternateSetAoEAttacks { get; set; } = new List<AbilityData>();
+
+        /// <summary>★ v3.9.72: 무기 세트 로테이션이 유익한지</summary>
+        public bool WeaponRotationAvailable { get; set; }
+
         #endregion
 
         #region Battlefield
@@ -372,6 +387,12 @@ namespace CompanionAI_v3.Analysis
             CurrentAmmo = 0;
             MaxAmmo = 0;
             WeaponRange = default;
+            BlendedAttackRange = 0f;
+            CurrentWeaponSetIndex = 0;
+            WeaponSetData = null;
+            AlternateSetAttacks.Clear();
+            AlternateSetAoEAttacks.Clear();
+            WeaponRotationAvailable = false;
 
             // Battlefield
             Enemies.Clear();
@@ -445,7 +466,8 @@ namespace CompanionAI_v3.Analysis
             return $"[Situation] {Unit?.CharacterName}: HP={HPPercent:F0}%, AP={CurrentAP:F1}, MP={CurrentMP:F1}, " +
                    $"Enemies={Enemies?.Count ?? 0}, Hittable={HittableEnemies?.Count ?? 0}, " +
                    $"AoE={AvailableAoEAttacks?.Count ?? 0}, " +
-                   $"InDanger={IsInDanger}, InDamagingAoE={IsInDamagingAoE}, PsychicNull={IsInPsychicNullZone}, NeedsReload={NeedsReload}";
+                   $"InDanger={IsInDanger}, InDamagingAoE={IsInDamagingAoE}, PsychicNull={IsInPsychicNullZone}, NeedsReload={NeedsReload}" +
+                   (WeaponRotationAvailable ? $", WeaponRotation=Set{CurrentWeaponSetIndex}→Alt" : "");
         }
     }
 }

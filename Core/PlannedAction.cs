@@ -60,6 +60,12 @@ namespace CompanionAI_v3.Core
         /// </summary>
         public GroupFailurePolicy FailurePolicy { get; set; }
 
+        /// <summary>
+        /// ★ v3.9.72: 무기 세트 전환 대상 인덱스 (0 또는 1)
+        /// WeaponSwitch 타입에서만 사용
+        /// </summary>
+        public int WeaponSetIndex { get; set; } = -1;
+
         /// <summary>실행 완료 여부</summary>
         public bool IsExecuted { get; set; }
 
@@ -309,6 +315,21 @@ namespace CompanionAI_v3.Core
             };
         }
 
+        /// <summary>
+        /// ★ v3.9.72: 무기 세트 전환 (0 AP 무료 액션)
+        /// </summary>
+        public static PlannedAction WeaponSwitch(int targetSetIndex, string reason)
+        {
+            return new PlannedAction
+            {
+                Type = ActionType.WeaponSwitch,
+                WeaponSetIndex = targetSetIndex,
+                APCost = 0,  // 무료!
+                Reason = reason,
+                Priority = 35  // 공격(50) 전, 이동(20) 후
+            };
+        }
+
         public static PlannedAction EndTurn(string reason = "No more actions available")
         {
             return new PlannedAction
@@ -333,6 +354,12 @@ namespace CompanionAI_v3.Core
             if (Type == ActionType.Move)
             {
                 return $"[Move] -> {MoveDestination?.ToString() ?? "unknown"} ({Reason})";
+            }
+
+            // ★ v3.9.72: WeaponSwitch 별도 처리
+            if (Type == ActionType.WeaponSwitch)
+            {
+                return $"[WeaponSwitch] -> Set {WeaponSetIndex} ({Reason})";
             }
 
             string targetName = Target?.Entity is BaseUnitEntity unit ? unit.CharacterName : "point";
@@ -369,6 +396,9 @@ namespace CompanionAI_v3.Core
 
         /// <summary>특수 능력 (DoT 콤보, 연쇄 등)</summary>
         Special,
+
+        /// <summary>★ v3.9.72: 무기 세트 전환 (0 AP)</summary>
+        WeaponSwitch,
 
         /// <summary>턴 종료</summary>
         EndTurn

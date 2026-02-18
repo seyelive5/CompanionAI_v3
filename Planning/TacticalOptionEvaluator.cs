@@ -332,6 +332,28 @@ namespace CompanionAI_v3.Planning
                     : situation.WeaponRange.EffectiveRange;
                 if (weaponRange <= 0f) weaponRange = 15f;  // 안전 폴백
 
+                // ★ v3.9.74: 무기 로테이션 시 짧은 사거리 무기 기준 포지셔닝
+                // ★ v3.9.78: 동일 타입(원거리+원거리)에만 적용 — 혼합(원거리+근접) 시 현재 무기 사거리 유지
+                if (situation.WeaponRotationAvailable && situation.WeaponSetData != null)
+                {
+                    int currentIdx = situation.CurrentWeaponSetIndex;
+                    int altIdx = currentIdx == 0 ? 1 : 0;
+                    if (altIdx < situation.WeaponSetData.Length && currentIdx < situation.WeaponSetData.Length)
+                    {
+                        var currentSet = situation.WeaponSetData[currentIdx];
+                        var altSet = situation.WeaponSetData[altIdx];
+                        float altRange = altSet.PrimaryWeaponRange;
+
+                        bool bothRanged = currentSet.HasRangedWeapon && altSet.HasRangedWeapon;
+                        bool bothMelee = currentSet.HasMeleeWeapon && altSet.HasMeleeWeapon;
+                        if ((bothRanged || bothMelee) && altRange > 0 && altRange < weaponRange)
+                        {
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[TacticalEval] MoveToAttack range: {weaponRange:F1} → {altRange:F0} (same-type rotation: shorter weapon)");
+                            weaponRange = altRange;
+                        }
+                    }
+                }
+
                 bestPosition = MovementAPI.FindRangedAttackPositionSync(
                     unit,
                     situation.Enemies,

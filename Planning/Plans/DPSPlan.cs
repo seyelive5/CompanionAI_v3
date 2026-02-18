@@ -81,6 +81,22 @@ namespace CompanionAI_v3.Planning.Plans
                 actions.Add(reloadAction);
             }
 
+            // ★ v3.9.74: Phase 1.55 — Switch-First: 현재 무기 무용 시 즉시 전환
+            // 조건: 무기 로테이션 가능 + Hittable 적 없음 + 현재/대체 무기 타입 다름
+            // 현재 무기로 공격할 수 없는 상황에서 대체 무기가 도움이 되면 즉시 전환
+            // 전환 후 re-analysis에서 새 무기로 전체 계획 생성
+            if (situation.WeaponRotationAvailable && !situation.HasHittableEnemies
+                && ShouldSwitchFirst(situation))
+            {
+                var switchActions = PlanWeaponSetRotationAttack(situation, ref remainingAP);
+                if (switchActions.Count > 0)
+                {
+                    actions.AddRange(switchActions);
+                    Main.Log($"[DPS] Phase 1.55: Switch-First — current weapon ineffective, switching before attacks");
+                    return new TurnPlan(actions, TurnPriority.DirectAttack, "DPS weapon switch-first");
+                }
+            }
+
             // ══════════════════════════════════════════════════════════════
             // Phase 1.6: 전략 옵션 평가 (공격-이동 조합 선택)
             // ★ v3.8.76: TacticalOptionEvaluator로 4가지 전략 비교
@@ -1081,12 +1097,40 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.9.74: Phase 9.5 — Switch-After: 현재 무기 공격 소진 후 대체 무기로 전환
+            // 모든 공격/이동/버프가 끝난 후 AP가 충분히 남으면 무기 전환
+            // WeaponSwitch가 플랜의 마지막 액션 → 실행 후 re-analysis에서 새 무기 공격 계획
+            // ★ 사거리 체크: 대체 무기가 현재 위치에서 적에게 도달 가능하거나, MP가 남아 이동 가능해야 전환
+            bool weaponSwitchPlanned = false;
+            if (situation.WeaponRotationAvailable && didPlanAttack && remainingAP >= 2f)
+            {
+                bool shouldSwitch = CanAlternateWeaponReach(situation);
+                if (shouldSwitch)
+                {
+                    var switchActions = PlanWeaponSetRotationAttack(situation, ref remainingAP);
+                    if (switchActions.Count > 0)
+                    {
+                        actions.AddRange(switchActions);
+                        weaponSwitchPlanned = true;
+                        Main.Log($"[DPS] Phase 9.5: Switch-After — attacks exhausted, switching for additional damage (AP={remainingAP:F1})");
+                    }
+                }
+                else if (Main.IsDebugEnabled)
+                {
+                    Main.LogDebug($"[DPS] Phase 9.5: Skip — alternate weapon can't reach enemies from current position");
+                }
+            }
+
             // ★ v3.5.35: Phase 10 - 턴 종료 스킬 (항상 마지막!)
             // TurnEnding 능력은 턴을 즉시 종료하므로 반드시 마지막에 배치
-            var turnEndAction = PlanTurnEndingAbility(situation, ref remainingAP);
-            if (turnEndAction != null)
+            // ★ v3.9.74: 무기 전환이 계획된 경우 TurnEnding 스킵 (전환 후 re-analysis 필요)
+            if (!weaponSwitchPlanned)
             {
-                actions.Add(turnEndAction);
+                var turnEndAction = PlanTurnEndingAbility(situation, ref remainingAP);
+                if (turnEndAction != null)
+                {
+                    actions.Add(turnEndAction);
+                }
             }
 
             // 턴 종료

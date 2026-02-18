@@ -67,6 +67,9 @@ namespace CompanionAI_v3.Execution
                         }
                         return moveResult;
 
+                    case ActionType.WeaponSwitch:  // ★ v3.9.72
+                        return ExecuteWeaponSwitch(action, situation);
+
                     case ActionType.EndTurn:
                         return ExecutionResult.EndTurn(action.Reason);
 
@@ -79,6 +82,35 @@ namespace CompanionAI_v3.Execution
                 Main.LogError($"[Executor] Error executing {action.Type}: {ex.Message}");
                 return ExecutionResult.Failure($"Execution error: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// ★ v3.9.72: 무기 세트 전환 실행
+        /// </summary>
+        private ExecutionResult ExecuteWeaponSwitch(PlannedAction action, Situation situation)
+        {
+            var unit = situation?.Unit;
+            int targetSet = action.WeaponSetIndex;
+
+            if (unit == null || targetSet < 0 || targetSet > 1)
+                return ExecutionResult.Failure("Invalid weapon switch parameters");
+
+            if (unit.Body.CurrentHandEquipmentSetIndex == targetSet)
+            {
+                Main.Log($"[Executor] Weapon switch skipped — already on Set {targetSet}");
+                return ExecutionResult.Continue();
+            }
+
+            CombatAPI.SwitchWeaponSet(unit, targetSet);
+
+            // 캐시 전체 무효화 — 무기 변경 시 사거리/능력/타겟팅 모두 변함
+            CombatCache.ClearAll();
+
+            Main.Log($"[Executor] ★ Weapon switch executed: {unit.CharacterName} -> Set {targetSet}");
+            // ★ v3.9.78: Waiting 반환 — GameCommand 비동기 처리 대기
+            // Continue → goto executeNextAction → 같은 프레임에서 stale 데이터로 재분석 (버그)
+            // Waiting → 게임에 제어 반환 → 다음 프레임 AnalyzePhase에서 fresh 분석
+            return ExecutionResult.Waiting("Weapon switch queued");
         }
 
         /// <summary>
