@@ -164,6 +164,43 @@ namespace CompanionAI_v3.Planning.Plans
                 }
 
                 // ────────────────────────────────────────────────────────────
+                // ★ v3.10.0: Phase 3.2.5 - Pre-relocate Keystone Buffs (DEBUFF mode)
+                // 디버프 모드에서 Raven은 3.3에서 적 클러스터로 이동 → 아군과 멀어짐
+                // 이동 전에 현재 위치(아군 근처)에서 버프를 먼저 전달해야 함
+                // ────────────────────────────────────────────────────────────
+                bool preRelocateKeystoneDone = false;
+                if (!isRavenBuffPhase && situation.FamiliarType == PetType.Raven && situation.Familiar != null)
+                {
+                    var preKeystoneActions = PlanAllFamiliarKeystoneBuffs(situation, ref remainingAP, heroicActPlanned,
+                        overrideCheckPosition: situation.Familiar.Position);
+                    if (preKeystoneActions.Count > 0)
+                    {
+                        // ★ v3.8.86: Raven + HeroicAct → WarpRelay 콤보 그룹 태깅
+                        if (heroicActPlanned)
+                        {
+                            foreach (var ka in preKeystoneActions)
+                                ka.GroupTag = "OverseerHeroicWarp";
+                        }
+
+                        actions.AddRange(preKeystoneActions);
+                        preRelocateKeystoneDone = true;
+                        Main.Log($"[Overseer] Phase 3.2.5: {preKeystoneActions.Count} keystone buffs delivered BEFORE relocate (DEBUFF MODE)");
+
+                        foreach (var action in preKeystoneActions)
+                        {
+                            if (action.Ability?.Blueprint != null)
+                            {
+                                string guid = action.Ability.Blueprint.AssetGuid?.ToString();
+                                if (!string.IsNullOrEmpty(guid))
+                                    usedKeystoneAbilityGuids.Add(guid);
+                            }
+                        }
+
+                        usedWarpRelay = true;
+                    }
+                }
+
+                // ────────────────────────────────────────────────────────────
                 // 3.3: Familiar Relocate (최적 위치로 이동 - Mastiff 제외)
                 // ────────────────────────────────────────────────────────────
                 var familiarRelocate = PlanFamiliarRelocate(situation, ref remainingAP);
@@ -177,33 +214,37 @@ namespace CompanionAI_v3.Planning.Plans
                 // 3.4: Keystone Abilities (Extrapolation/WarpRelay) ★핵심★
                 // Phase 2에서 HeroicAct로 Momentum 활성화했으므로 WarpRelay AOE 전파 가능!
                 // ★ v3.8.01: heroicActPlanned 전달 - 계획 단계에서 Momentum 있는 것으로 간주
+                // ★ v3.10.0: 디버프 모드에서 Phase 3.2.5에서 이미 전달했으면 스킵
                 // ────────────────────────────────────────────────────────────
-                var keystoneActions = PlanAllFamiliarKeystoneBuffs(situation, ref remainingAP, heroicActPlanned);
-                if (keystoneActions.Count > 0)
+                if (!preRelocateKeystoneDone)
                 {
-                    // ★ v3.8.86: Raven + HeroicAct → WarpRelay 콤보 그룹 태깅
-                    if (heroicActPlanned && situation.FamiliarType == PetType.Raven)
+                    var keystoneActions = PlanAllFamiliarKeystoneBuffs(situation, ref remainingAP, heroicActPlanned);
+                    if (keystoneActions.Count > 0)
                     {
-                        foreach (var ka in keystoneActions)
-                            ka.GroupTag = "OverseerHeroicWarp";
-                    }
-
-                    actions.AddRange(keystoneActions);
-                    Main.Log($"[Overseer] Phase 3.4: {keystoneActions.Count} keystone abilities planned");
-
-                    // ★ v3.7.93: 실제 사용된 능력 GUID 추적 (아군 버프에서 중복 방지)
-                    foreach (var action in keystoneActions)
-                    {
-                        if (action.Ability?.Blueprint != null)
+                        // ★ v3.8.86: Raven + HeroicAct → WarpRelay 콤보 그룹 태깅
+                        if (heroicActPlanned && situation.FamiliarType == PetType.Raven)
                         {
-                            string guid = action.Ability.Blueprint.AssetGuid?.ToString();
-                            if (!string.IsNullOrEmpty(guid))
-                                usedKeystoneAbilityGuids.Add(guid);
+                            foreach (var ka in keystoneActions)
+                                ka.GroupTag = "OverseerHeroicWarp";
                         }
-                    }
 
-                    // Raven이면 WarpRelay 사용됨
-                    usedWarpRelay = situation.FamiliarType == PetType.Raven;
+                        actions.AddRange(keystoneActions);
+                        Main.Log($"[Overseer] Phase 3.4: {keystoneActions.Count} keystone abilities planned");
+
+                        // ★ v3.7.93: 실제 사용된 능력 GUID 추적 (아군 버프에서 중복 방지)
+                        foreach (var action in keystoneActions)
+                        {
+                            if (action.Ability?.Blueprint != null)
+                            {
+                                string guid = action.Ability.Blueprint.AssetGuid?.ToString();
+                                if (!string.IsNullOrEmpty(guid))
+                                    usedKeystoneAbilityGuids.Add(guid);
+                            }
+                        }
+
+                        // Raven이면 WarpRelay 사용됨
+                        usedWarpRelay = situation.FamiliarType == PetType.Raven;
+                    }
                 }
 
                 // ────────────────────────────────────────────────────────────
@@ -866,6 +907,9 @@ namespace CompanionAI_v3.Planning.Plans
                 // 4. 사역마와 가까울수록 보너스
                 score -= distToFamiliar * 0.3f;
 
+                // ★ v3.10.0: 5. 아군 밀집 패널티 (동일 위치 수렴 방지)
+                score -= MovementAPI.GetAllyClusterPenalty(pos, situation.Unit);
+
                 if (score > bestScore)
                 {
                     bestScore = score;
@@ -894,6 +938,8 @@ namespace CompanionAI_v3.Planning.Plans
                 }
 
                 Main.Log($"[Overseer] Retreat within {maxFamiliarRange:F0}m of familiar (enemy dist +{distImprovement:F1}m)");
+                // ★ v3.10.0: 후퇴 위치 예약 (다른 유닛 밀집 방지)
+                TeamBlackboard.Instance?.ReserveMovePosition(bestPos.Value);
                 return PlannedAction.Move(bestPos.Value, $"Safe retreat (within {maxFamiliarRange:F0}m of familiar)");
             }
 
@@ -901,6 +947,8 @@ namespace CompanionAI_v3.Planning.Plans
             if (closestToFamiliarPos.HasValue && closestToFamiliarDist < currentDistToFamiliar)
             {
                 Main.Log($"[Overseer] Retreating toward familiar (current={currentDistToFamiliar:F1}m → {closestToFamiliarDist:F1}m)");
+                // ★ v3.10.0: 후퇴 위치 예약
+                TeamBlackboard.Instance?.ReserveMovePosition(closestToFamiliarPos.Value);
                 return PlannedAction.Move(closestToFamiliarPos.Value, $"Retreat toward familiar ({closestToFamiliarDist:F1}m)");
             }
 
@@ -1029,6 +1077,9 @@ namespace CompanionAI_v3.Planning.Plans
                     score -= 20f;  // 제자리 이동 페널티
                 }
 
+                // ★ v3.10.0: 6. 아군 밀집 패널티 (동일 위치 수렴 방지)
+                score -= MovementAPI.GetAllyClusterPenalty(pos, situation.Unit);
+
                 if (score > bestScore)
                 {
                     bestScore = score;
@@ -1053,6 +1104,8 @@ namespace CompanionAI_v3.Planning.Plans
 
                 float finalDist = Vector3.Distance(bestPos.Value, situation.FamiliarPosition);
                 Main.Log($"[Overseer] Movement within {maxFamiliarRange:F0}m of familiar (dist={finalDist:F1}m, improvement={scoreImprovement:F1})");
+                // ★ v3.10.0: 이동 위치 예약 (다른 유닛 밀집 방지)
+                TeamBlackboard.Instance?.ReserveMovePosition(bestPos.Value);
                 return PlannedAction.Move(bestPos.Value, $"Attack position (within {maxFamiliarRange:F0}m of familiar)");
             }
 
@@ -1061,6 +1114,8 @@ namespace CompanionAI_v3.Planning.Plans
             {
                 // 현재보다 사역마에 가까워지는 경우에만 이동
                 Main.Log($"[Overseer] Moving toward familiar (current={currentDistToFamiliar:F1}m → {closestToFamiliarDist:F1}m)");
+                // ★ v3.10.0: 이동 위치 예약
+                TeamBlackboard.Instance?.ReserveMovePosition(closestToFamiliarPos.Value);
                 return PlannedAction.Move(closestToFamiliarPos.Value, $"Move toward familiar ({closestToFamiliarDist:F1}m)");
             }
 
@@ -1290,6 +1345,9 @@ namespace CompanionAI_v3.Planning.Plans
                 score += (maxFamiliarRange - distToFamiliar) * 0.5f;
             else
                 score -= 50f;  // 사거리 밖 페널티
+
+            // ★ v3.10.0: 5. 아군 밀집 패널티
+            score -= MovementAPI.GetAllyClusterPenalty(pos, situation.Unit);
 
             return score;
         }

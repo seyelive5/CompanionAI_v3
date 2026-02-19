@@ -352,7 +352,8 @@ namespace CompanionAI_v3.Analysis
         /// 버프 능력의 데미지 증가 배율 추정
         /// ★ v3.4.01: P2-2 Blueprint 기반 분석 + 이름 기반 휴리스틱
         /// </summary>
-        private static float EstimateBuffMultiplier(AbilityData buff)
+        // ★ v3.10.0: private → internal (TurnStrategyPlanner에서 재사용)
+        internal static float EstimateBuffMultiplier(AbilityData buff)
         {
             if (buff?.Blueprint == null)
                 return 1.25f;

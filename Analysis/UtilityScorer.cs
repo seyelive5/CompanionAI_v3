@@ -208,9 +208,33 @@ namespace CompanionAI_v3.Analysis
                     break;
             }
 
-            // ★ 공격 시너지: 공격 가능한 적이 있고 공격적 버프면 보너스
+            // ★ v3.10.0: 공격 시너지 — 고정 +20에서 동적 데미지 이득 기반으로 개선
+            // EstimateBuffMultiplier로 실제 데미지 증폭을 추정하여 버프 간 차별화
+            // 예: +30% 버프 → gainScore=30, +20% 버프 → gainScore=20 (기존: 둘 다 +20)
             if (situation.HasHittableEnemies && IsOffensiveBuff(buff))
-                score += 20f;
+            {
+                float gainScore = 10f; // 폴백: 타겟/공격 정보 없을 때 보수적 점수
+
+                if (situation.BestTarget != null && situation.PrimaryAttack != null)
+                {
+                    float buffMultiplier = KillSimulator.EstimateBuffMultiplier(buff);
+                    if (buffMultiplier > 1f)
+                    {
+                        var (minDmg, maxDmg, _) = CombatAPI.GetDamagePrediction(situation.PrimaryAttack, situation.BestTarget);
+                        float baseDamage = (minDmg + maxDmg) / 2f;
+                        float damageGain = baseDamage * (buffMultiplier - 1f);
+
+                        // 데미지 이득을 점수로 변환 (5~40 범위)
+                        gainScore = Mathf.Clamp(damageGain / 3f, 5f, 40f);
+
+                        if (Main.IsDebugEnabled)
+                            Main.LogDebug($"[UtilityScorer] BuffCoupling: {buff.Name} mult={buffMultiplier:F2}, " +
+                                $"baseDmg={baseDamage:F0}, gain={damageGain:F0}, score={gainScore:F1} (was fixed +20)");
+                    }
+                }
+
+                score += gainScore;
+            }
 
             // ★ 방어 시너지: 위험 상황에서 방어적 버프면 보너스
             if (situation.IsInDanger && IsDefensiveBuff(buff))

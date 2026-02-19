@@ -69,6 +69,20 @@ namespace CompanionAI_v3.GameInterface
         /// </summary>
         private const float SecondsToWaitAtStart = 0.5f;
 
+        /// <summary>
+        /// ★ v3.10.0: CompanionAIDecisionNode 도달 여부 추적 (턴 스킵 진단용)
+        /// </summary>
+        private static readonly HashSet<string> _decisionNodeReached = new HashSet<string>();
+
+        /// <summary>
+        /// ★ v3.10.0: CanActInTurnBased 실패 대기 카운터 (유닛별)
+        /// </summary>
+        private static readonly Dictionary<string, int> _canActWaitCounts
+            = new Dictionary<string, int>();
+
+        /// <summary>CanActInTurnBased 최대 대기 프레임 (약 3초)</summary>
+        private const int MAX_CAN_ACT_WAIT_FRAMES = 180;
+
         #region PartUnitBrain.Tick Patch - 매 Tick마다 트리 확인/교체
 
         /// <summary>
@@ -251,11 +265,15 @@ namespace CompanionAI_v3.GameInterface
 
                 // ★ v3.7.16: 메인 액션 시퀀스 (루프 내부)
                 // ★ 수정: SafeAsyncTaskNodeInitializeDecisionContext로 교체 - 정렬 예외 방지
+                // ★ v3.10.0: CanActInTurnBased 체크를 Condition에서 제거 → CompanionAIDecisionNode 내부로 이동
+                // 이유: Condition 실패 시 CompanionAIDecisionNode에 도달하지 못하고 바로 TaskNodeTryFinishTurn 실행
+                //       → 아무 로그 없이 턴 종료되는 버그 발생 (진단 불가)
+                //       CompanionAIDecisionNode 내부에서 Running을 반환하여 대기할 수 있고, 진단 로그도 남김
                 var mainSelector = new Selector(
                     new Sequence(
                         new TaskNodeWaitCommandsDone(),
                         new Condition(
-                            b => b.Unit.Commands.Empty && b.Unit.State.CanActInTurnBased,
+                            b => b.Unit.Commands.Empty,
                             new Sequence(
                                 new AsyncTaskNodeInitializeDecisionContext(),  // ★ v3.7.19: 래퍼 제거, 직접 사용 복원
                                 new AsyncTaskNodeCreateMoveVariants(),  // ★ v3.5.28: 이동 가능 타일 계산 (이동 시 필요)
@@ -322,7 +340,65 @@ namespace CompanionAI_v3.GameInterface
         public static void ClearTurnStart(string unitId)
         {
             _turnStartTimes.Remove(unitId);
+            _canActWaitCounts.Remove(unitId);
         }
+
+        /// <summary>
+        /// ★ v3.10.0: 이번 턴에 CompanionAIDecisionNode가 도달되었는지 확인 (턴 스킵 진단)
+        /// </summary>
+        public static bool WasDecisionNodeReached(string unitId)
+        {
+            return _decisionNodeReached.Contains(unitId);
+        }
+
+        /// <summary>
+        /// ★ v3.10.0: 디시전 노드 도달 추적 정리 (턴 시작 시)
+        /// </summary>
+        public static void ClearDecisionNodeTracking(string unitId)
+        {
+            _decisionNodeReached.Remove(unitId);
+        }
+
+        /// <summary>
+        /// ★ v3.10.0: 디시전 노드 도달 기록
+        /// </summary>
+        public static void RecordDecisionNodeReached(string unitId)
+        {
+            _decisionNodeReached.Add(unitId);
+        }
+
+        /// <summary>
+        /// ★ v3.10.0: CanActInTurnBased 대기 체크 (CompanionAIDecisionNode에서 호출)
+        /// </summary>
+        /// <returns>true이면 대기 계속 (Running 반환 필요), false이면 행동 가능 또는 타임아웃</returns>
+        public static CanActCheckResult CheckCanActInTurnBased(BaseUnitEntity unit)
+        {
+            if (unit.State.CanActInTurnBased)
+            {
+                _canActWaitCounts.Remove(unit.UniqueId);
+                return CanActCheckResult.CanAct;
+            }
+
+            string uid = unit.UniqueId;
+            if (!_canActWaitCounts.TryGetValue(uid, out int waitCount))
+                waitCount = 0;
+            waitCount++;
+            _canActWaitCounts[uid] = waitCount;
+
+            if (waitCount >= MAX_CAN_ACT_WAIT_FRAMES)
+            {
+                Main.LogWarning($"[CompanionAIDecisionNode] {unit.CharacterName}: ★ CanActInTurnBased=false for {waitCount} frames — ending turn (possible stun/incapacitation)");
+                _canActWaitCounts.Remove(uid);
+                return CanActCheckResult.Timeout;
+            }
+
+            if (waitCount == 1 || waitCount % 60 == 0)
+                Main.Log($"[CompanionAIDecisionNode] {unit.CharacterName}: Waiting for CanActInTurnBased (frame {waitCount})");
+
+            return CanActCheckResult.Waiting;
+        }
+
+        public enum CanActCheckResult { CanAct, Waiting, Timeout }
 
         /// <summary>
         /// ★ v3.8.48: 전투 종료 시 리플렉션 캐시 정리
@@ -330,6 +406,8 @@ namespace CompanionAI_v3.GameInterface
         public static void ClearTreeCache()
         {
             _lastKnownTree.Clear();
+            _decisionNodeReached.Clear();
+            _canActWaitCounts.Clear();
         }
 
         /// <summary>
@@ -406,6 +484,20 @@ namespace CompanionAI_v3.GameInterface
                     return Status.Running;  // 대기
                 }
 
+                // ★ v3.10.0: CanActInTurnBased 체크 (기존 트리 Condition에서 이동)
+                // Condition에서 실패하면 CompanionAIDecisionNode에 도달하지 못하고 바로 턴 종료
+                // → 여기서 Running을 반환하여 대기하고, 타임아웃 시 진단 로그 출력
+                var canActResult = CustomBehaviourTreePatch.CheckCanActInTurnBased(unit);
+                if (canActResult == CustomBehaviourTreePatch.CanActCheckResult.Timeout)
+                {
+                    blackboard.IsFinishedTurn = true;
+                    return Status.Success;
+                }
+                if (canActResult == CustomBehaviourTreePatch.CanActCheckResult.Waiting)
+                {
+                    return Status.Running;  // 대기 — 게임이 상태 업데이트할 시간을 줌
+                }
+
                 // ★ 명령 큐가 비어있지 않으면 대기 (이동/능력 애니메이션 중)
                 if (!CombatAPI.IsCommandQueueEmpty(unit))
                 {
@@ -417,6 +509,9 @@ namespace CompanionAI_v3.GameInterface
                 {
                     return Status.Success;
                 }
+
+                // ★ v3.10.0: 디시전 노드 도달 기록 (턴 스킵 진단용)
+                CustomBehaviourTreePatch.RecordDecisionNodeReached(unit.UniqueId);
 
                 // ★ TurnOrchestrator에서 결정 가져오기
                 var result = TurnOrchestrator.Instance.ProcessTurn(unit);

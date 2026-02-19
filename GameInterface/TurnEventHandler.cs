@@ -68,6 +68,9 @@ namespace CompanionAI_v3.GameInterface
 
             // ★ v3.5.26: 턴 시작 시간 기록 (IsActingEnabled 구현용)
             CustomBehaviourTreePatch.RecordTurnStart(unit.UniqueId);
+
+            // ★ v3.10.0: 디시전 노드 도달 추적 초기화
+            CustomBehaviourTreePatch.ClearDecisionNodeTracking(unit.UniqueId);
         }
 
         /// <summary>
@@ -82,6 +85,16 @@ namespace CompanionAI_v3.GameInterface
             if (unit == null) return;
 
             Main.LogDebug($"[TurnEventHandler] Turn ended for {unit.CharacterName}");
+
+            // ★ v3.10.0: 디시전 노드 도달 여부 진단
+            if (TurnOrchestrator.Instance.ShouldControl(unit) &&
+                !CustomBehaviourTreePatch.WasDecisionNodeReached(unit.UniqueId))
+            {
+                Main.LogWarning($"[TurnEventHandler] ★ TURN SKIPPED: {unit.CharacterName} — " +
+                    $"CompanionAIDecisionNode was NEVER reached this turn! " +
+                    $"Possible cause: CanActInTurnBased=false, stun, or tree failure. " +
+                    $"CanAct={unit.State?.CanActInTurnBased}, Commands.Empty={unit.Commands?.Empty}");
+            }
 
             // TurnOrchestrator에 턴 종료 알림
             TurnOrchestrator.Instance.OnTurnEnd(unit);

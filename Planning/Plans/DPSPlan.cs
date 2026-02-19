@@ -146,6 +146,20 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.11.0: 전략적 시퀀스 평가 — Phase들에게 가이드 제공
+            // 10가지 시드 템플릿(Standard~BuffedRnGAoE)을 시뮬레이션하여
+            // TotalDamage + KillBonus + UtilityBonus 통합 스코어로 최적 전략 선택
+            TurnStrategy strategy = null;
+            if (situation.HasHittableEnemies &&
+                TeamBlackboard.Instance.CurrentTactic != TacticalSignal.Retreat)
+            {
+                strategy = TurnStrategyPlanner.Evaluate(situation);
+                if (strategy != null)
+                {
+                    turnState.SetContext(StrategicContextKeys.TurnStrategyKey, strategy);
+                }
+            }
+
             // ══════════════════════════════════════════════════════════════
             // Phase 1.6: 전략 옵션 평가 (공격-이동 조합 선택)
             // ★ v3.8.76: TacticalOptionEvaluator로 4가지 전략 비교
@@ -313,83 +327,130 @@ namespace CompanionAI_v3.Planning.Plans
             var plannedAbilityGuids = new HashSet<string>();
             BaseUnitEntity killSequenceTarget = null;  // 킬 시퀀스로 계획된 타겟
 
+            // ★ v3.10.0: Kill Seq vs AoE 경쟁 — AoE에 밀려 보류된 킬 시퀀스
+            KillSimulator.KillSequence pendingKillSequence = null;
+
             if (useKillSimulator && situation.BestTarget != null)
             {
                 var killSequence = KillSimulator.FindKillSequence(situation, situation.BestTarget);
                 if (killSequence != null && killSequence.IsConfirmedKill && killSequence.APCost <= remainingAP)
                 {
-                    Main.Log($"[DPS] Phase 3: Kill sequence found for {situation.BestTarget.CharacterName} ({killSequence.Abilities.Count} abilities, {killSequence.TotalDamage:F0} dmg)");
+                    // ★ v3.11.0: 전략 기반 Kill Seq 결정 — 전략이 있으면 비교 스킵
+                    bool killSeqDeferred = false;
 
-                    // ★ v3.8.54: Kill Sequence 아군 안전 - AP/액션 저장 (안전 차단 시 복원용)
-                    float savedAPBeforeKillSeq = remainingAP;
-                    int actionsBeforeKillSeq = actions.Count;
-
-                    // ★ v3.8.86: 킬 시퀀스 그룹 태그 (실패 시 나머지 스킵)
-                    string killGroupTag = "KillSeq_" + killSequence.Target.UniqueId;
-
-                    foreach (var ability in killSequence.Abilities)
+                    if (strategy?.PrioritizesKillSequence == true)
                     {
-                        // ★ v3.4.01: P1-1 능력 사용 가능 여부 재확인
-                        List<string> unavailReasons;
-                        if (!CombatAPI.IsAbilityAvailable(ability, out unavailReasons))
+                        // 전략이 킬 시퀀스를 추천 → 바로 실행
+                        Main.Log($"[DPS] Phase 3: Strategy recommends KillSequence — executing directly");
+                    }
+                    else if (strategy?.ShouldPrioritizeAoE == true)
+                    {
+                        // 전략이 AoE를 추천 → 킬 시퀀스 보류
+                        killSeqDeferred = true;
+                        pendingKillSequence = killSequence;
+                        Main.Log($"[DPS] Phase 3: Strategy prioritizes AoE over Kill Seq — deferring");
+                    }
+                    else
+                    {
+                        // ★ v3.10.0: 전략 없음/미해당 — 기존 Kill Seq vs AoE 비교 로직
+                        int minEnemiesForAoE = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+                        if (situation.HasAoEAttacks && situation.Enemies.Count >= minEnemiesForAoE)
                         {
-                            if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Kill sequence ability no longer available: {ability.Name} ({string.Join(", ", unavailReasons)})");
-                            break;  // 시퀀스 중단
-                        }
-
-                        float apCost = ability.CalculateActionPointCost();
-                        if (remainingAP >= apCost)
-                        {
-                            var timing = AbilityDatabase.GetTiming(ability);
-                            // ★ v3.5.00: SelfBuff → PreCombatBuff (SelfBuff enum 없음)
-                            if (timing == AbilityTiming.PreAttackBuff || timing == AbilityTiming.PreCombatBuff)
+                            float aoEValue = EstimateAoEValue(situation);
+                            if (aoEValue > 0f)
                             {
-                                // ★ v3.4.02: P0 수정 - reason, apCost 파라미터 추가
-                                var buffAction = PlannedAction.Buff(ability, situation.Unit, "Kill sequence buff", apCost);
-                                buffAction.GroupTag = killGroupTag;  // ★ v3.8.86
-                                buffAction.FailurePolicy = GroupFailurePolicy.SkipRemainingInGroup;
-                                actions.Add(buffAction);
-                            }
-                            else
-                            {
-                                // ★ v3.8.54: Kill Sequence 공격의 아군 안전 체크 (CanTargetFriends/사선)
-                                if (CombatAPI.IsPointTargetAbility(ability) || ability.Blueprint?.CanTargetFriends == true)
+                                float killValue = CalculateKillValue(killSequence, situation);
+                                if (killValue >= aoEValue * 1.1f)
                                 {
-                                    if (!AoESafetyChecker.IsAoESafeForUnitTarget(ability, situation.Unit, killSequence.Target, situation.Allies))
-                                    {
-                                        Main.Log($"[DPS] Phase 3: Kill sequence BLOCKED by ally safety: {ability.Name} -> {killSequence.Target.CharacterName}");
-                                        // 킬 시퀀스에서 추가된 액션 제거 + AP 복원
-                                        while (actions.Count > actionsBeforeKillSeq)
-                                            actions.RemoveAt(actions.Count - 1);
-                                        remainingAP = savedAPBeforeKillSeq;
-                                        break;
-                                    }
+                                    if (Main.IsDebugEnabled)
+                                        Main.LogDebug($"[DPS] Phase 3: Kill Seq wins (kill={killValue:F0} >= aoe×1.1={aoEValue * 1.1f:F0})");
                                 }
-                                var atkAction = PlannedAction.Attack(ability, killSequence.Target, "Kill sequence attack", apCost);
-                                atkAction.GroupTag = killGroupTag;  // ★ v3.8.86
-                                atkAction.FailurePolicy = GroupFailurePolicy.SkipRemainingInGroup;
-                                actions.Add(atkAction);
+                                else
+                                {
+                                    killSeqDeferred = true;
+                                    pendingKillSequence = killSequence;
+                                    Main.Log($"[DPS] Phase 3: AoE wins over Kill Seq (kill={killValue:F0} < aoe×1.1={aoEValue * 1.1f:F0}) — deferring kill seq to preserve AP for AoE");
+                                }
                             }
-                            remainingAP -= apCost;
                         }
                     }
 
-                    if (actions.Count > actionsBeforeKillSeq)
+                    if (!killSeqDeferred)
                     {
-                        didPlanKillSequence = true;
-                        // ★ v3.5.79: 킬 시퀀스 타겟을 Phase 5에서 SharedTarget으로 덮어쓰지 않도록 등록
-                        killSequenceTarget = killSequence.Target;
-                        if (killSequenceTarget != null)
+                        Main.Log($"[DPS] Phase 3: Kill sequence found for {situation.BestTarget.CharacterName} ({killSequence.Abilities.Count} abilities, {killSequence.TotalDamage:F0} dmg)");
+
+                        // ★ v3.8.54: Kill Sequence 아군 안전 - AP/액션 저장 (안전 차단 시 복원용)
+                        float savedAPBeforeKillSeq = remainingAP;
+                        int actionsBeforeKillSeq = actions.Count;
+
+                        // ★ v3.8.86: 킬 시퀀스 그룹 태그 (실패 시 나머지 스킵)
+                        string killGroupTag = "KillSeq_" + killSequence.Target.UniqueId;
+
+                        foreach (var ability in killSequence.Abilities)
                         {
-                            plannedTargetIds.Add(killSequenceTarget.UniqueId);
-                            if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 3: Kill sequence target {killSequenceTarget.CharacterName} added to plannedTargetIds");
+                            // ★ v3.4.01: P1-1 능력 사용 가능 여부 재확인
+                            List<string> unavailReasons;
+                            if (!CombatAPI.IsAbilityAvailable(ability, out unavailReasons))
+                            {
+                                if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Kill sequence ability no longer available: {ability.Name} ({string.Join(", ", unavailReasons)})");
+                                break;  // 시퀀스 중단
+                            }
+
+                            float apCost = ability.CalculateActionPointCost();
+                            if (remainingAP >= apCost)
+                            {
+                                var timing = AbilityDatabase.GetTiming(ability);
+                                // ★ v3.5.00: SelfBuff → PreCombatBuff (SelfBuff enum 없음)
+                                if (timing == AbilityTiming.PreAttackBuff || timing == AbilityTiming.PreCombatBuff)
+                                {
+                                    // ★ v3.4.02: P0 수정 - reason, apCost 파라미터 추가
+                                    var buffAction = PlannedAction.Buff(ability, situation.Unit, "Kill sequence buff", apCost);
+                                    buffAction.GroupTag = killGroupTag;  // ★ v3.8.86
+                                    buffAction.FailurePolicy = GroupFailurePolicy.SkipRemainingInGroup;
+                                    actions.Add(buffAction);
+                                }
+                                else
+                                {
+                                    // ★ v3.8.54: Kill Sequence 공격의 아군 안전 체크 (CanTargetFriends/사선)
+                                    if (CombatAPI.IsPointTargetAbility(ability) || ability.Blueprint?.CanTargetFriends == true)
+                                    {
+                                        if (!AoESafetyChecker.IsAoESafeForUnitTarget(ability, situation.Unit, killSequence.Target, situation.Allies))
+                                        {
+                                            Main.Log($"[DPS] Phase 3: Kill sequence BLOCKED by ally safety: {ability.Name} -> {killSequence.Target.CharacterName}");
+                                            // 킬 시퀀스에서 추가된 액션 제거 + AP 복원
+                                            while (actions.Count > actionsBeforeKillSeq)
+                                                actions.RemoveAt(actions.Count - 1);
+                                            remainingAP = savedAPBeforeKillSeq;
+                                            break;
+                                        }
+                                    }
+                                    var atkAction = PlannedAction.Attack(ability, killSequence.Target, "Kill sequence attack", apCost);
+                                    atkAction.GroupTag = killGroupTag;  // ★ v3.8.86
+                                    atkAction.FailurePolicy = GroupFailurePolicy.SkipRemainingInGroup;
+                                    actions.Add(atkAction);
+                                }
+                                remainingAP -= apCost;
+                            }
+                        }
+
+                        if (actions.Count > actionsBeforeKillSeq)
+                        {
+                            didPlanKillSequence = true;
+                            // ★ v3.5.79: 킬 시퀀스 타겟을 Phase 5에서 SharedTarget으로 덮어쓰지 않도록 등록
+                            killSequenceTarget = killSequence.Target;
+                            if (killSequenceTarget != null)
+                            {
+                                plannedTargetIds.Add(killSequenceTarget.UniqueId);
+                                if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 3: Kill sequence target {killSequenceTarget.CharacterName} added to plannedTargetIds");
+                            }
                         }
                     }
                 }
             }
 
             // 킬 시퀀스로 계획하지 않았으면 기존 Finisher 로직 사용
-            if (!didPlanKillSequence)
+            // ★ v3.10.0: Kill Seq가 AoE에 보류된 경우에도 Finisher 스킵 (AoE를 위해 AP 보존)
+            if (!didPlanKillSequence && pendingKillSequence == null)
             {
                 var lowHPEnemy = FindLowHPEnemy(situation, 30f);
                 if (lowHPEnemy != null)
@@ -404,23 +465,44 @@ namespace CompanionAI_v3.Planning.Plans
 
             // Phase 4: 공격 버프 (첫 행동 전)
             // ★ v3.2.15: Retreat 전술이면 버프 스킵 (생존 우선)
-            // ★ v3.2.20: 신뢰도가 높으면(>0.75) 버프 스킵하고 즉시 공격
-            float confidence = GetTeamConfidence();
+            // ★ v3.10.0: TurnStrategy 가이드 기반 결정
+            //   전략이 버프 추천 → confidence 무시하고 버프 사용
+            //   전략이 버프 비추천 → 기존 confidence 체크로 폴백
             bool isRetreatMode = TeamBlackboard.Instance.CurrentTactic == TacticalSignal.Retreat;
-            bool veryConfident = confidence > 0.75f;
+            bool strategyRecommendsBuff = strategy?.ShouldBuffBeforeAttack == true;
 
-            if (!situation.HasPerformedFirstAction && !situation.HasBuffedThisTurn &&
-                !isRetreatMode && !veryConfident)
+            if (!situation.HasPerformedFirstAction && !situation.HasBuffedThisTurn && !isRetreatMode)
             {
-                var buffAction = PlanAttackBuffWithReservation(situation, ref remainingAP, reservedAP);
-                if (buffAction != null)
+                if (strategyRecommendsBuff)
                 {
-                    actions.Add(buffAction);
+                    // ★ v3.10.0: 전략이 버프 추천 — confidence 무시, 추천 버프 우선
+                    var buffAction = strategy.RecommendedBuff != null
+                        ? PlanSpecificBuff(situation, strategy.RecommendedBuff, ref remainingAP, reservedAP)
+                        : PlanAttackBuffWithReservation(situation, ref remainingAP, reservedAP);
+                    if (buffAction != null)
+                    {
+                        actions.Add(buffAction);
+                        Main.Log($"[DPS] Phase 4: Strategy-guided buff — {buffAction.Ability?.Name} (expected total: {strategy.ExpectedTotalDamage:F0}dmg)");
+                    }
                 }
-            }
-            else if (veryConfident && !situation.HasPerformedFirstAction)
-            {
-                if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 4: Skipping buff (confidence={confidence:F2} > 0.75)");
+                else
+                {
+                    // 전략 없거나 버프 비추천 — 기존 confidence 체크
+                    float confidence = GetTeamConfidence();
+                    bool veryConfident = confidence > 0.75f;
+                    if (!veryConfident)
+                    {
+                        var buffAction = PlanAttackBuffWithReservation(situation, ref remainingAP, reservedAP);
+                        if (buffAction != null)
+                        {
+                            actions.Add(buffAction);
+                        }
+                    }
+                    else
+                    {
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 4: Skipping buff (no strategy recommendation, confidence={confidence:F2} > 0.75)");
+                    }
+                }
             }
 
             // ★ v3.9.44: Phase 4.1 - 아군 버프 (CanTargetFriends=true 버프를 아군에게 사용)
@@ -466,13 +548,20 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.3.00: 클러스터 기반 AOE 기회 탐색
             // ★ v3.5.37: MinEnemiesForAoE 설정 적용
             // ★ v3.8.96: AvailableAoEAttacks 캐시 사용 + Unit-targeted AoE (Burst/Scatter 등) 추가
+            // ★ v3.11.0: 전략이 AoE 추천 시 클러스터 검증 바이패스
             int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
             if (remainingAP >= 1f && situation.HasAoEAttacks && situation.Enemies.Count >= minEnemies)
             {
                 bool hasAoEOpportunity = false;
                 bool useAoEOptimization = situation.CharacterSettings?.UseAoEOptimization ?? true;
 
-                if (useAoEOptimization)
+                // ★ v3.11.0: 전략이 AoE를 추천하면 클러스터 검증 스킵 (전략이 이미 검증)
+                if (strategy?.ShouldPrioritizeAoE == true)
+                {
+                    hasAoEOpportunity = true;
+                    Main.Log($"[DPS] Phase 4.4: Strategy recommends AoE — bypassing cluster check");
+                }
+                else if (useAoEOptimization)
                 {
                     // ★ v3.8.96: 캐시된 AvailableAoEAttacks 사용 (인라인 LINQ 제거)
                     foreach (var aoeAbility in situation.AvailableAoEAttacks)
@@ -542,6 +631,14 @@ namespace CompanionAI_v3.Planning.Plans
 
                     Main.Log($"[DPS] Phase 4.4.5: AoE reposition planned");
                 }
+            }
+
+            // ★ v3.10.0: Kill Seq 폴백 — AoE가 경쟁에서 이겼지만 Phase 4.4에서 실행 불가 시
+            // Phase 5 일반 공격이 킬 시퀀스 타겟(BestTarget)을 자연스럽게 공격
+            if (pendingKillSequence != null && !didPlanAttack && !didPlanKillSequence)
+            {
+                Main.Log($"[DPS] Phase 3↔4.4: AoE deferred kill seq but AoE also failed — Phase 5 will target {pendingKillSequence.Target?.CharacterName}");
+                pendingKillSequence = null;
             }
 
             // ★ v3.1.22: Phase 4.5: 특수 능력 + 콤보 연계 감지
@@ -646,7 +743,9 @@ namespace CompanionAI_v3.Planning.Plans
 
             // ★ v3.6.14: AP >= 0 으로 완화 (bonus usage 공격은 0 AP로 사용 가능)
             // AttackPlanner.PlanAttack()이 GetEffectiveAPCost()로 AP 체크하므로 안전
-            while (remainingAP >= 0f && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
+            // ★ v3.10.0: 전략이 R&G를 계획하면 AP 하한을 R&G 비용으로 설정
+            float strategyAPFloor = strategy?.ReservedAPForPostAction ?? 0f;
+            while (remainingAP >= strategyAPFloor && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
             {
                 var weakestEnemy = FindWeakestEnemy(situation, plannedTargetIds);
                 var preferTarget = weakestEnemy ?? situation.BestTarget;
@@ -1481,6 +1580,109 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             return null;
+        }
+
+        #endregion
+
+        #region Kill Seq vs AoE Competition (v3.10.0)
+
+        /// <summary>
+        /// ★ v3.10.0: 킬 시퀀스의 전략적 가치 계산 (Kill Seq vs AoE 비교용)
+        /// 확정 킬 보너스 + AP 효율 + AoE 부가 타격 보너스
+        /// </summary>
+        private float CalculateKillValue(KillSimulator.KillSequence killSequence, Situation situation)
+        {
+            // 확정 킬 보너스 (TargetScorer의 1-hit kill bonus와 동일 스케일)
+            float baseScore = 60f;
+
+            // AP 효율 점수 (0~20 범위)
+            float efficiency = killSequence.APCost > 0 ? killSequence.TotalDamage / killSequence.APCost : 0f;
+            float efficiencyScore = Math.Min(efficiency / 5f, 20f);
+
+            // 킬 시퀀스 내 AoE 능력의 부가 타격 보너스
+            float aoeBonus = 0f;
+            foreach (var ability in killSequence.Abilities)
+            {
+                float radius = CombatAPI.GetAoERadius(ability);
+                if (radius > 0)
+                {
+                    int additionalEnemies = 0;
+                    foreach (var enemy in situation.Enemies)
+                    {
+                        if (enemy == null || !enemy.IsConscious) continue;
+                        if (enemy == killSequence.Target) continue;
+                        if (CombatCache.GetDistanceInTiles(killSequence.Target, enemy) <= radius)
+                            additionalEnemies++;
+                    }
+                    aoeBonus += additionalEnemies * 15f;
+                }
+            }
+
+            float total = baseScore + efficiencyScore + aoeBonus;
+            if (Main.IsDebugEnabled)
+                Main.LogDebug($"[DPS] KillValue: base={baseScore:F0} + eff={efficiencyScore:F1} + aoe={aoeBonus:F0} = {total:F0}");
+            return total;
+        }
+
+        /// <summary>
+        /// ★ v3.10.0: AoE 기회의 전략적 가치 추정 (실행 없이 평가만)
+        /// 경량 평가 — AP/상태 변경 없음, Kill Seq vs AoE 비교 전용
+        /// </summary>
+        private float EstimateAoEValue(Situation situation)
+        {
+            int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+            float bestValue = 0f;
+            string bestAbilityName = null;
+            int bestClusterCount = 0;
+
+            foreach (var aoeAbility in situation.AvailableAoEAttacks)
+            {
+                float apCost = CombatAPI.GetAbilityAPCost(aoeAbility);
+                if (apCost > situation.CurrentAP) continue;
+
+                float aoERadius = CombatAPI.GetAoERadius(aoeAbility);
+                if (aoERadius <= 0) aoERadius = 5f;
+
+                var clusters = ClusterDetector.FindClusters(situation.Enemies, aoERadius);
+
+                foreach (var cluster in clusters)
+                {
+                    if (cluster.Count < minEnemies) continue;
+
+                    // 적별 데미지 비율 기반 가치 산출
+                    float totalDamageValue = 0f;
+                    foreach (var enemy in cluster.Enemies)
+                    {
+                        if (enemy == null || !enemy.IsConscious) continue;
+
+                        var (minDmg, maxDmg, _) = CombatAPI.GetDamagePrediction(aoeAbility, enemy);
+                        float avgDmg = (minDmg + maxDmg) / 2f;
+                        float enemyHP = CombatAPI.GetActualHP(enemy);
+                        if (enemyHP <= 0) continue;
+
+                        float damageRatio = avgDmg / enemyHP;
+                        if (damageRatio >= 0.8f) totalDamageValue += 40f;      // 거의 킬
+                        else if (damageRatio >= 0.5f) totalDamageValue += 25f;  // 상당한 데미지
+                        else totalDamageValue += damageRatio * 30f;             // 비례 점수
+                    }
+
+                    float perEnemyBase = 25f * cluster.Count;
+                    float apEfficiency = apCost > 0 ? Math.Min(totalDamageValue / apCost, 20f) : 0f;
+
+                    float value = perEnemyBase + totalDamageValue + apEfficiency;
+                    if (value > bestValue)
+                    {
+                        bestValue = value;
+                        bestAbilityName = aoeAbility.Name;
+                        bestClusterCount = cluster.Count;
+                    }
+                }
+            }
+
+            if (bestValue > 0 && Main.IsDebugEnabled)
+                Main.LogDebug($"[DPS] AoEValue: best={bestAbilityName} hitting {bestClusterCount} enemies, value={bestValue:F0}");
+
+            return bestValue;
         }
 
         #endregion

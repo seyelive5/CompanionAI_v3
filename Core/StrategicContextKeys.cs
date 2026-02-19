@@ -28,6 +28,11 @@ namespace CompanionAI_v3.Core
         /// Phase 1.55가 즉시 되돌리지 않도록 방지 — 이동 후 재분석에서 공격 가능</summary>
         public const string BonusWeaponSwitch = "BonusWeaponSwitch";
 
+        // ── 전략 평가 ──
+
+        /// <summary>★ v3.10.0: TurnStrategy 전략 가이드 (replan 시 보존)</summary>
+        public const string TurnStrategyKey = "TurnStrategy";
+
         // ── 공통: 킬 시퀀스 ──
 
         /// <summary>string - 킬 시퀀스 타겟 UniqueId (재계획 시 동일 타겟 우선)</summary>

@@ -186,33 +186,58 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
-        /// ★ v3.9.02: 아군 밀집 패널티 계산
-        /// 후퇴/이동 위치 선택 시 아군 간 분산을 유도
-        /// - 3타일 이내 아군: 거리 비례 패널티 (가까울수록 큼)
-        /// - 적 AoE 피해 분산 + 아군 AoE 사용 공간 확보
+        /// ★ v3.10.0: 아군 밀집 패널티 공개 API (OverseerPlan 등 외부 위치 스코어링용)
+        /// </summary>
+        public static float GetAllyClusterPenalty(Vector3 position, BaseUnitEntity self)
+        {
+            return CalculateAllyClusterPenalty(position, self);
+        }
+
+        /// <summary>
+        /// ★ v3.10.0: 강화된 아군 밀집 패널티
+        /// 1) 물리적 아군 위치: 20pt/tile (기존 10 → 20, 4타일 범위)
+        /// 2) 예약된 이동 목적지: 30pt/tile (다른 유닛이 이번 라운드에 계획한 위치)
+        /// 예약 시스템으로 순차적 턴에서도 위치 분산 보장
         /// </summary>
         private static float CalculateAllyClusterPenalty(Vector3 position, BaseUnitEntity self)
         {
-            const float CLUSTER_RADIUS_TILES = 3f;
-            const float PENALTY_PER_TILE_UNIT = 10f;
+            const float CLUSTER_RADIUS_TILES = 4f;
+            const float PENALTY_PER_TILE_ALLY = 20f;       // 물리적 아군: 0타일=80, 1타일=60, 2타일=40
+            const float PENALTY_PER_TILE_RESERVED = 30f;   // 예약 위치: 0타일=120, 1타일=90, 2타일=60
 
             float penalty = 0f;
             try
             {
+                // 1. 물리적 아군 위치 패널티
                 var allUnits = Game.Instance?.TurnController?.AllUnits;
-                if (allUnits == null) return 0f;
-
-                foreach (var entity in allUnits)
+                if (allUnits != null)
                 {
-                    var ally = entity as BaseUnitEntity;
-                    if (ally == null || ally == self) continue;
-                    if (!ally.IsPlayerFaction || ally.LifeState.IsDead) continue;
-
-                    float distTiles = CombatAPI.MetersToTiles(Vector3.Distance(position, ally.Position));
-                    if (distTiles < CLUSTER_RADIUS_TILES)
+                    foreach (var entity in allUnits)
                     {
-                        // 가까울수록 큰 패널티 (역선형: 0타일=30, 1타일=20, 2타일=10)
-                        penalty += (CLUSTER_RADIUS_TILES - distTiles) * PENALTY_PER_TILE_UNIT;
+                        var ally = entity as BaseUnitEntity;
+                        if (ally == null || ally == self) continue;
+                        if (!ally.IsPlayerFaction || ally.LifeState.IsDead) continue;
+
+                        float distTiles = CombatAPI.MetersToTiles(Vector3.Distance(position, ally.Position));
+                        if (distTiles < CLUSTER_RADIUS_TILES)
+                        {
+                            penalty += (CLUSTER_RADIUS_TILES - distTiles) * PENALTY_PER_TILE_ALLY;
+                        }
+                    }
+                }
+
+                // 2. ★ v3.10.0: 예약된 이동 목적지 패널티 (더 강력)
+                // 다른 유닛이 이번 라운드에 이미 계획한 이동 위치 → 강한 회피
+                var reservedPositions = Core.TeamBlackboard.Instance?.GetReservedMovePositions();
+                if (reservedPositions != null)
+                {
+                    for (int i = 0; i < reservedPositions.Count; i++)
+                    {
+                        float distTiles = CombatAPI.MetersToTiles(Vector3.Distance(position, reservedPositions[i]));
+                        if (distTiles < CLUSTER_RADIUS_TILES)
+                        {
+                            penalty += (CLUSTER_RADIUS_TILES - distTiles) * PENALTY_PER_TILE_RESERVED;
+                        }
                     }
                 }
             }
@@ -1033,6 +1058,9 @@ namespace CompanionAI_v3.GameInterface
             foreach (var score in scores)
             {
                 score.ThreatScore += CalculateThreatScore(unit, score.Node);
+
+                // ★ v3.10.0: 아군 밀집 패널티 (이동 위치 분산)
+                score.AllyClusterPenalty = CalculateAllyClusterPenalty(score.Position, unit);
 
                 // ★ v3.2.25: 영향력 맵 + Role별 Frontline 점수 적용
                 // ★ v3.4.00: 예측 위협 맵 점수 추가

@@ -572,6 +572,8 @@ namespace CompanionAI_v3.Planning.Planners
 
                 Main.Log($"[{roleName}] Safe ranged position: ({bestPosition.Position.x:F1},{bestPosition.Position.z:F1}) " +
                     $"score={bestPosition.TotalScore:F1}, cover={bestPosition.BestCover}");
+                // ★ v3.10.0: 원거리 공격 위치 예약 (다른 유닛 밀집 방지)
+                Core.TeamBlackboard.Instance?.ReserveMovePosition(bestPosition.Position);
                 return PlannedAction.Move(bestPosition.Position, $"Safe attack position");
             }
             else
@@ -724,6 +726,8 @@ namespace CompanionAI_v3.Planning.Planners
                 return null;
             }
 
+            // ★ v3.10.0: 후퇴 위치 예약 (다른 유닛 밀집 방지)
+            Core.TeamBlackboard.Instance?.ReserveMovePosition(retreatScore.Position);
             return PlannedAction.Move(retreatScore.Position, $"Retreat from {nearestEnemy.CharacterName}");
         }
 
@@ -993,6 +997,8 @@ namespace CompanionAI_v3.Planning.Planners
                 return null;
             }
 
+            // ★ v3.10.0: 후퇴 위치 예약 (다른 유닛 밀집 방지)
+            Core.TeamBlackboard.Instance?.ReserveMovePosition(retreatScore.Position);
             return PlannedAction.Move(retreatScore.Position, $"Safe retreat from {nearestEnemy.CharacterName}");
         }
 
@@ -1068,6 +1074,8 @@ namespace CompanionAI_v3.Planning.Planners
             Main.Log($"[MovementPlanner] TacticalReposition: ({bestPosition.Position.x:F1},{bestPosition.Position.z:F1}), " +
                 $"score={bestPosition.TotalScore:F1}, move={moveDistance:F1}m, cover={bestPosition.CoverScore:F1}");
 
+            // ★ v3.10.0: 이동 위치 예약 (다른 유닛 밀집 방지)
+            Core.TeamBlackboard.Instance?.ReserveMovePosition(bestPosition.Position);
             return PlannedAction.Move(bestPosition.Position, "Tactical reposition (cooldown)");
         }
 

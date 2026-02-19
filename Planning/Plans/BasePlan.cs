@@ -660,6 +660,29 @@ namespace CompanionAI_v3.Planning.Plans
         protected PlannedAction PlanAttackBuffWithReservation(Situation situation, ref float remainingAP, float reservedAP)
             => BuffPlanner.PlanAttackBuffWithReservation(situation, ref remainingAP, reservedAP, RoleName);
 
+        /// <summary>
+        /// ★ v3.10.0: 전략이 추천한 특정 버프를 사용하는 헬퍼
+        /// TurnStrategyPlanner가 선택한 최적 버프를 Phase 4에서 직접 적용
+        /// </summary>
+        protected PlannedAction PlanSpecificBuff(Situation situation, AbilityData buff, ref float remainingAP, float reservedAP)
+        {
+            if (buff == null) return null;
+
+            float cost = CombatAPI.GetAbilityAPCost(buff);
+            if (cost > remainingAP - reservedAP) return null;
+
+            var target = new TargetWrapper(situation.Unit);
+            string reason;
+            if (!CombatAPI.CanUseAbilityOn(buff, target, out reason))
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] PlanSpecificBuff: {buff.Name} unavailable — {reason}");
+                return null;
+            }
+
+            remainingAP -= cost;
+            return PlannedAction.Buff(buff, situation.Unit, "Strategy-recommended buff", cost);
+        }
+
         protected PlannedAction PlanTaunt(Situation situation, ref float remainingAP)
             => BuffPlanner.PlanTaunt(situation, ref remainingAP, RoleName);
 
@@ -1489,7 +1512,10 @@ namespace CompanionAI_v3.Planning.Plans
         /// 계획 단계에서 HeroicAct를 계획했으면 Momentum이 있는 것으로 간주
         /// (버프는 실행 시에만 적용되므로, 계획 단계에서는 "계획됨" 상태로 판단)
         /// </summary>
-        protected List<PlannedAction> PlanAllFamiliarKeystoneBuffs(Situation situation, ref float remainingAP, bool heroicActPlanned = false)
+        /// <param name="overrideCheckPosition">★ v3.10.0: 아군 범위 체크 위치 오버라이드.
+        /// null이면 optimalPos.Position 사용 (기존 동작).
+        /// 디버프 모드에서 재배치 전 사역마 현재 위치를 전달하여 아군 근처에서 버프 전달.</param>
+        protected List<PlannedAction> PlanAllFamiliarKeystoneBuffs(Situation situation, ref float remainingAP, bool heroicActPlanned = false, Vector3? overrideCheckPosition = null)
         {
             var actions = new List<PlannedAction>();
 
@@ -1569,15 +1595,19 @@ namespace CompanionAI_v3.Planning.Plans
 
             // ★ v3.7.22: 범위 내 실제 아군 목록 (버프 중복 체크용)
             // ★ v3.8.78: LINQ → CollectionHelper (0 할당)
+            // ★ v3.10.0: overrideCheckPosition이 주어지면 해당 위치에서 아군 체크
+            //   디버프 모드에서 재배치 전 사역마 현재 위치 사용 → 아군 근처에서 버프 가능
             CollectionHelper.FillWhere(situation.Allies, _tempUnits,
                 a => a.IsConscious && !FamiliarAPI.IsFamiliar(a));
+            Vector3 checkPosition = overrideCheckPosition ?? optimalPos.Position;
             var alliesInRange = FamiliarAPI.GetAlliesInRadius(
-                optimalPos.Position,
+                checkPosition,
                 FamiliarPositioner.EFFECT_RADIUS_TILES,
                 _tempUnits);
 
-            // ★ v3.8.57: 아군 1명이라도 있으면 Raven Warp Relay 경유 (직접 시전과 동일 AP + 추가 확산 가능성)
-            if (keystoneBuffs.Count > 0 && optimalPos.AlliesInRange >= 1)
+            // ★ v3.10.0: 스냅샷(optimalPos.AlliesInRange) 대신 fresh 계산(alliesInRange.Count) 사용
+            // optimalPos.AlliesInRange는 분석 프레임에서 계산된 스냅샷 — 재배치/이동 후 stale 가능
+            if (keystoneBuffs.Count > 0 && alliesInRange.Count >= 1)
             {
                 foreach (var buff in keystoneBuffs)
                 {
@@ -1637,7 +1667,7 @@ namespace CompanionAI_v3.Planning.Plans
                         usedAbilityGuids.Add(guid);
 
                     Main.Log($"[{RoleName}] ★ Familiar Keystone Buff: {buff.Name} on {typeName} " +
-                        $"({alliesNeedingBuff}/{optimalPos.AlliesInRange} allies need buff)" +
+                        $"({alliesNeedingBuff}/{alliesInRange.Count} allies need buff)" +
                         (isPointTarget ? " [Point AOE]" : ""));
 
                     // ★ v3.7.71: Point AOE는 위치 타겟, 유닛 타겟은 사역마 직접 타겟

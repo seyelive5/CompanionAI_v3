@@ -74,6 +74,13 @@ namespace CompanionAI_v3.Core
 
         #endregion
 
+        #region ★ v3.10.0: Position Reservation System (이동 위치 선점)
+
+        /// <summary>이번 라운드에 유닛들이 예약한 이동 목적지 (밀집 방지)</summary>
+        private readonly List<UnityEngine.Vector3> _reservedMovePositions = new List<UnityEngine.Vector3>(6);
+
+        #endregion
+
         #region ★ v3.7.87: Round Action Tracking (보너스 턴 대응)
 
         /// <summary>이번 라운드에 이미 행동한 유닛 ID 집합</summary>
@@ -717,14 +724,38 @@ namespace CompanionAI_v3.Core
         {
             int tauntCount = _reservedTauntTargets.Count;
             int healCount = _reservedHealTargets.Count;
+            int posCount = _reservedMovePositions.Count;
 
             _reservedTauntTargets.Clear();
             _reservedHealTargets.Clear();
+            _reservedMovePositions.Clear();
 
-            if (tauntCount > 0 || healCount > 0)
+            if (tauntCount > 0 || healCount > 0 || posCount > 0)
             {
-                Main.LogDebug($"[Blackboard] Reservations cleared: {tauntCount} taunts, {healCount} heals");
+                Main.LogDebug($"[Blackboard] Reservations cleared: {tauntCount} taunts, {healCount} heals, {posCount} positions");
             }
+        }
+
+        #endregion
+
+        #region ★ v3.10.0: Position Reservation API (이동 밀집 방지)
+
+        /// <summary>
+        /// 이동 목적지 예약 (다른 유닛이 같은 위치 선택 방지)
+        /// 계획 단계에서 이동 목적지가 확정되면 호출
+        /// </summary>
+        public void ReserveMovePosition(UnityEngine.Vector3 position)
+        {
+            _reservedMovePositions.Add(position);
+            Main.LogDebug($"[Blackboard] Position reserved: ({position.x:F1}, {position.z:F1}). Total={_reservedMovePositions.Count}");
+        }
+
+        /// <summary>
+        /// 예약된 이동 목적지 목록 조회 (밀집 패널티 계산용)
+        /// </summary>
+        public List<UnityEngine.Vector3> GetReservedMovePositions()
+        {
+            return _reservedMovePositions;
         }
 
         #endregion
