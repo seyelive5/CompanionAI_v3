@@ -589,6 +589,13 @@ namespace CompanionAI_v3.Planning.Planners
                 string reason;
                 if (CombatAPI.CanUseAbilityOn(ability, targetWrapper, out reason))
                 {
+                    // ★ v3.9.82: 체인/AoE 아군 안전 체크 (기존 누락 — 일반 공격 경로에서만 체크되고 있었음)
+                    if (!CombatHelpers.IsAttackSafeForTarget(ability, situation.Unit, target, situation.Allies))
+                    {
+                        Main.LogDebug($"[{roleName}] Special ability ally safety blocked: {ability.Name} -> {target.CharacterName}");
+                        continue;
+                    }
+
                     remainingAP -= entry.Cost;
 
                     string abilityType = AbilityDatabase.IsDOTIntensify(ability) ? "DoT Intensify" :
@@ -783,7 +790,42 @@ namespace CompanionAI_v3.Planning.Planners
 
                     if (primaryTarget == null) continue;
 
-                    // 유닛 타겟 검증
+                    // ★ v3.9.92: DangerousAoE CanTargetEnemies=false — 포인트 타겟으로 전환
+                    // Cone/Ray 패턴은 방향만 지정하면 됨 → 클릭 사거리 내 방향 포인트 사용
+                    bool isDangerousAoENoUnitTarget = AbilityDatabase.IsDangerousAoE(ability)
+                        && ability.Blueprint != null && !ability.Blueprint.CanTargetEnemies;
+
+                    if (isDangerousAoENoUnitTarget)
+                    {
+                        var casterPos = situation.Unit.Position;
+                        var toTarget = primaryTarget.Position - casterPos;
+                        float distMeters = toTarget.magnitude;
+                        if (distMeters < 0.01f) continue;
+                        var direction = toTarget / distMeters;
+
+                        float clickRangeMeters = CombatAPI.TilesToMeters(CombatAPI.GetAbilityRangeInTiles(ability));
+                        float targetDist = Math.Min(clickRangeMeters * 0.95f, distMeters);
+                        var directionPoint = casterPos + direction * targetDist;
+
+                        string dirReason;
+                        if (!CombatAPI.CanUseAbilityOnPoint(ability, directionPoint, out dirReason))
+                        {
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] DangerousAoE direction blocked: {ability.Name} - {dirReason}");
+                            continue;
+                        }
+
+                        remainingAP -= cost;
+                        Main.Log($"[{roleName}] Directional DangerousAoE ({patternType}): {ability.Name} -> direction of {primaryTarget.CharacterName} " +
+                            $"- {bestResult.EnemiesHit} enemies, {bestResult.AlliesHit} allies");
+
+                        return PlannedAction.PositionalAttack(
+                            ability,
+                            directionPoint,
+                            $"Directional DangerousAoE ({patternType}) on {bestResult.EnemiesHit} enemies",
+                            cost);
+                    }
+
+                    // 유닛 타겟 검증 (기존 로직)
                     var targetWrapper = new TargetWrapper(primaryTarget);
                     string reason;
                     if (!CombatAPI.CanUseAbilityOn(ability, targetWrapper, out reason))

@@ -114,6 +114,35 @@ namespace CompanionAI_v3.Core
                 if (waitResult != null)
                     return waitResult;
 
+                // ★ v3.9.92: 비동기 무기 전환 완료 대기
+                // GameCommandQueue.SwitchHandEquipment는 비동기 — 처리 완료 전 재분석하면 stale 데이터
+                // WeaponSetChangedTrigger(Versatility) 보너스도 이 시점에 반영되어야 함
+                if (turnState.PendingWeaponSwitchTarget >= 0)
+                {
+                    if (unit.Body.CurrentHandEquipmentSetIndex != turnState.PendingWeaponSwitchTarget)
+                    {
+                        turnState.WaitCount++;
+                        if (turnState.WaitCount > GameConstants.COMMAND_WAIT_TIMEOUT_FRAMES)
+                        {
+                            Main.LogWarning($"[Orchestrator] {unitName}: Weapon switch timeout — forcing continue");
+                            turnState.PendingWeaponSwitchTarget = -1;
+                            turnState.WaitCount = 0;
+                        }
+                        else
+                        {
+                            Main.LogDebug($"[Orchestrator] {unitName}: Waiting for weapon switch to Set {turnState.PendingWeaponSwitchTarget} (current={unit.Body.CurrentHandEquipmentSetIndex}, wait={turnState.WaitCount})");
+                            return ExecutionResult.Waiting("Weapon switch pending");
+                        }
+                    }
+                    else
+                    {
+                        Main.Log($"[Orchestrator] {unitName}: ★ Weapon switch confirmed — Set {turnState.PendingWeaponSwitchTarget} active, forcing fresh analysis");
+                        turnState.PendingWeaponSwitchTarget = -1;
+                        turnState.WaitCount = 0;
+                        turnState.CurrentComputePhase = ComputePhase.Ready;
+                    }
+                }
+
                 // 3. 명령 완료 후 처리
                 _executor.CheckForKills();
                 NotifyRoundChangeIfNeeded();

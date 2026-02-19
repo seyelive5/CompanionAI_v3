@@ -300,6 +300,12 @@ namespace CompanionAI_v3.Data
                     "Supporting [ally]! Hold your ground!",
                     "I've got your back, [ally]!"
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "The Emperor protects, and so do we.",
+                    "Another victory for the Rogue Trader.",
+                    "Well fought. Secure the area."
+                },
             },
 
             // ── Heinrix ──
@@ -355,6 +361,12 @@ namespace CompanionAI_v3.Data
                 {
                     "The Emperor wills your survival, [ally].",
                     "You serve a purpose yet, [ally]."
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "The Emperor's judgment has been rendered.",
+                    "Another heresy purged.",
+                    "Justice is served. For now."
                 },
             },
 
@@ -412,6 +424,12 @@ namespace CompanionAI_v3.Data
                     "The Emperor shields His faithful, [ally]!",
                     "Stand firm, [ally]! Faith is your strength!"
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "By the Emperor's light, we prevail!",
+                    "The heretics are purged!",
+                    "His judgment has been delivered!"
+                },
             },
 
             // ── Pasqal ──
@@ -467,6 +485,12 @@ namespace CompanionAI_v3.Data
                 {
                     "Providing tactical augmentation to [ally].",
                     "Optimizing [ally]'s combat parameters."
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "Combat efficiency: optimal. All targets neutralized.",
+                    "Victory logged. Praise the Omnissiah.",
+                    "Mission objective achieved. Systems nominal."
                 },
             },
 
@@ -524,6 +548,12 @@ namespace CompanionAI_v3.Data
                     "I can feel your pain, [ally]... let me ease it.",
                     "The Warp can help, [ally]. Sometimes."
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "It's... over? Oh, thank the Throne...",
+                    "We survived... somehow...",
+                    "The voices are quieting... we won..."
+                },
             },
 
             // ── Cassia ──
@@ -579,6 +609,12 @@ namespace CompanionAI_v3.Data
                 {
                     "Don't get used to this, [ally].",
                     "I suppose I shall assist you, [ally]."
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "Well, that was rather thrilling, wasn't it?",
+                    "Was there ever any doubt?",
+                    "A satisfactory outcome, I suppose."
                 },
             },
 
@@ -636,6 +672,12 @@ namespace CompanionAI_v3.Data
                     "Consider this a courtesy, [ally].",
                     "Assisting [ally]. Do try to keep up."
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "Adequate. For mon-keigh.",
+                    "The skein predicted this outcome.",
+                    "As expected. Shall we move on?"
+                },
             },
 
             // ── Jae ──
@@ -691,6 +733,12 @@ namespace CompanionAI_v3.Data
                 {
                     "Helping [ally] \u2014 add it to my tab.",
                     "Covering [ally]. You owe me for this."
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "That's done. Where's the loot?",
+                    "Not bad, everyone. Not bad at all.",
+                    "We're alive. That's profit enough."
                 },
             },
 
@@ -748,6 +796,12 @@ namespace CompanionAI_v3.Data
                     "Don't die yet, [ally]. I haven't finished watching.",
                     "Assisting [ally]. Don't mistake this for affection."
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "Mmm... how delightful. Savor the moment.",
+                    "Already? I was just beginning to enjoy myself.",
+                    "Their screams were... acceptable."
+                },
             },
 
             // ── Ulfar ──
@@ -803,6 +857,12 @@ namespace CompanionAI_v3.Data
                 {
                     "Stand with me, [ally]! The pack fights together!",
                     "I've got your flank, [ally]! ONWARDS!"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "HA! Another great victory, packmates!",
+                    "By Russ! What a fight!",
+                    "VICTORY! The sagas will sing of this!"
                 },
             },
 
@@ -860,6 +920,12 @@ namespace CompanionAI_v3.Data
                     "I will guard your step, [ally].",
                     "The dance continues \u2014 together, [ally]."
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "The dance ends. For now.",
+                    "Death has chosen its partners today.",
+                    "The final step is taken."
+                },
             },
 
             // ── Solomorne (DLC) ──
@@ -916,6 +982,12 @@ namespace CompanionAI_v3.Data
                     "Providing support to [ally]. Regulation-compliant.",
                     "Covering [ally]. Glaito, with me. Good boy."
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "Area secured. Filing post-action report.",
+                    "Hostiles neutralized. Order is restored.",
+                    "Justice has been served. Case closed."
+                },
             },
 
             // ── Unknown (Default) ──
@@ -929,6 +1001,7 @@ namespace CompanionAI_v3.Data
                 [SpeechCategory.Retreat] = new[]    { "Falling back!", "Pulling out!", "Tactical retreat!", "Repositioning!" },
                 [SpeechCategory.Reload] = new[]     { "Reloading!", "Cycling ammo!", "Swapping magazine!", "Need a moment \u2014 reloading!" },
                 [SpeechCategory.Support] = new[]    { "Supporting [ally]!", "Covering [ally]!" },
+                [SpeechCategory.Victory] = new[]    { "Area clear.", "Hostiles eliminated.", "Combat complete." },
             },
         };
 
@@ -1007,6 +1080,12 @@ namespace CompanionAI_v3.Data
                     "[ally]을 지원합니다! 자리를 사수하십시오!",
                     "[ally], 제가 뒤를 맡겠습니다!"
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "황제께서 보호하시고, 저희가 지킵니다.",
+                    "로그 트레이더를 위한 또 하나의 승리입니다.",
+                    "잘 싸우셨습니다. 지역을 확보하겠습니다."
+                },
             },
 
             // ── Heinrix ── 냉담한 해라체
@@ -1062,6 +1141,12 @@ namespace CompanionAI_v3.Data
                 {
                     "황제께서 네 생존을 원하신다, [ally].",
                     "아직 쓸모가 있다, [ally]."
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "황제의 심판이 내려졌다.",
+                    "또 하나의 이단이 제거되었다.",
+                    "정의가 실현되었다. 지금은."
                 },
             },
 
@@ -1119,6 +1204,12 @@ namespace CompanionAI_v3.Data
                     "황제께서 충실한 자를 지키신다, [ally]!",
                     "버텨라, [ally]! 신앙이 곧 힘이다!"
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "황제의 빛으로, 승리하였다!",
+                    "이단자들이 숙청되었다!",
+                    "그분의 심판이 내려졌다!"
+                },
             },
 
             // ── Pasqal ── 건조한 보고체
@@ -1174,6 +1265,12 @@ namespace CompanionAI_v3.Data
                 {
                     "[ally]에게 전술적 증강 제공 중.",
                     "[ally]의 전투 매개변수 최적화 중."
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "전투 효율: 최적. 모든 목표 무력화 완료.",
+                    "승리 기록됨. Omnissiah를 찬양하라.",
+                    "임무 목표 달성. 시스템 정상."
                 },
             },
 
@@ -1231,6 +1328,12 @@ namespace CompanionAI_v3.Data
                     "고통이 느껴져요, [ally]... 달래줄게요.",
                     "Warp가 도움이 될 수 있어요, [ally]. 가끔은."
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "끝... 난 거예요? 아, 다행이다...",
+                    "살아남았어요... 어떻게든...",
+                    "목소리가 잠잠해져요... 이겼어요..."
+                },
             },
 
             // ── Cassia ── 도도한 해요체
@@ -1286,6 +1389,12 @@ namespace CompanionAI_v3.Data
                 {
                     "익숙해지지는 마세요, [ally].",
                     "도와드려야겠네요, [ally]."
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "꽤 흥미진진했네요, 그렇지 않아요?",
+                    "의심의 여지가 있었나요?",
+                    "만족스러운 결과인 것 같네요."
                 },
             },
 
@@ -1343,6 +1452,12 @@ namespace CompanionAI_v3.Data
                     "이건 호의로 여겨라, [ally].",
                     "[ally] 지원 중이다. 뒤처지지 않도록."
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "충분하다. mon-keigh치고는.",
+                    "실타래가 이 결과를 예측했다.",
+                    "예상대로. 이동하겠는가?"
+                },
             },
 
             // ── Jae ── 캐주얼 반말
@@ -1398,6 +1513,12 @@ namespace CompanionAI_v3.Data
                 {
                     "[ally] 도와주는 거야 \u2014 외상에 추가.",
                     "[ally] 엄호 중. 이건 빚이야."
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "끝났네. 전리품은 어디 있어?",
+                    "나쁘지 않았어, 다들. 나쁘지 않아.",
+                    "살아있으니까. 그것만으로도 이득이야."
                 },
             },
 
@@ -1455,6 +1576,12 @@ namespace CompanionAI_v3.Data
                     "아직 죽지 마, [ally]. 구경이 안 끝났다.",
                     "[ally] 지원 중이다. 이걸 애정으로 착각하지 마라."
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "음... 유쾌하군. 이 순간을 음미하라.",
+                    "벌써? 이제 막 즐기기 시작했는데.",
+                    "비명이... 괜찮았다."
+                },
             },
 
             // ── Ulfar ── 호쾌한 반말
@@ -1510,6 +1637,12 @@ namespace CompanionAI_v3.Data
                 {
                     "내 곁에 서라, [ally]! 무리는 함께 싸운다!",
                     "네 옆구리를 지킨다, [ally]! 앞으로!"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "하! 또 하나의 대승이다, 동지들이여!",
+                    "러스에게 맹세코! 대단한 싸움이었다!",
+                    "승리다! 사가에 기록될 것이다!"
                 },
             },
 
@@ -1567,6 +1700,12 @@ namespace CompanionAI_v3.Data
                     "네 발걸음을 지키겠다, [ally].",
                     "춤은 계속된다 \u2014 함께, [ally]."
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "춤이 끝났다. 지금은.",
+                    "죽음이 오늘의 파트너를 선택했다.",
+                    "마지막 발걸음이 내딛어졌다."
+                },
             },
 
             // ── Solomorne (DLC) ── 공식 보고체
@@ -1623,6 +1762,12 @@ namespace CompanionAI_v3.Data
                     "[ally] 지원 중. 규정 준수.",
                     "[ally] 엄호. Glaito, 따라와. 잘한다."
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "지역 확보. 사후 보고서 작성 중.",
+                    "적 무력화 완료. 질서가 회복되었다.",
+                    "정의가 집행되었다. 사건 종결."
+                },
             },
 
             // ── Unknown (기본) ──
@@ -1636,6 +1781,7 @@ namespace CompanionAI_v3.Data
                 [SpeechCategory.Retreat] = new[]    { "후퇴!", "철수!", "전술 후퇴!", "재배치!" },
                 [SpeechCategory.Reload] = new[]     { "재장전!", "탄약 교체!", "탄창 교환!", "잠깐 \u2014 재장전!" },
                 [SpeechCategory.Support] = new[]    { "[ally] 지원!", "[ally] 엄호!" },
+                [SpeechCategory.Victory] = new[]    { "지역 소탕 완료.", "적 제거 완료.", "전투 종료." },
             },
         };
 
@@ -1714,6 +1860,12 @@ namespace CompanionAI_v3.Data
                     "Поддерживаю [ally]! Держите позицию!",
                     "Прикрываю тебя, [ally]!"
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "Император защищает, и мы тоже.",
+                    "Ещё одна победа для Вольного Торговца.",
+                    "Отлично сражались. Обеспечиваем территорию."
+                },
             },
 
             // ── Heinrix ──
@@ -1769,6 +1921,12 @@ namespace CompanionAI_v3.Data
                 {
                     "Император желает твоего выживания, [ally].",
                     "В тебе ещё есть нужда, [ally]."
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "Суд Императора свершился.",
+                    "Ещё одна ересь уничтожена.",
+                    "Справедливость восторжествовала. Пока."
                 },
             },
 
@@ -1826,6 +1984,12 @@ namespace CompanionAI_v3.Data
                     "Император укрывает верных, [ally]!",
                     "Стой крепко, [ally]! Вера \u2014 твоя сила!"
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "Светом Императора мы побеждаем!",
+                    "Еретики уничтожены!",
+                    "Его суд свершился!"
+                },
             },
 
             // ── Pasqal ──
@@ -1881,6 +2045,12 @@ namespace CompanionAI_v3.Data
                 {
                     "Обеспечиваю тактическое усиление [ally].",
                     "Оптимизирую боевые параметры [ally]."
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "Боевая эффективность: оптимальна. Все цели нейтрализованы.",
+                    "Победа зафиксирована. Слава Омниссии.",
+                    "Задача выполнена. Системы в норме."
                 },
             },
 
@@ -1938,6 +2108,12 @@ namespace CompanionAI_v3.Data
                     "Я чувствую твою боль, [ally]... позволь мне облегчить её.",
                     "Варп может помочь, [ally]. Иногда."
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "Всё... закончилось? О, слава Трону...",
+                    "Мы выжили... каким-то чудом...",
+                    "Голоса утихают... мы победили..."
+                },
             },
 
             // ── Cassia ──
@@ -1993,6 +2169,12 @@ namespace CompanionAI_v3.Data
                 {
                     "Не привыкай к этому, [ally].",
                     "Полагаю, придётся помочь тебе, [ally]."
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "Довольно захватывающе, не правда ли?",
+                    "Были ли какие-то сомнения?",
+                    "Удовлетворительный результат, полагаю."
                 },
             },
 
@@ -2050,6 +2232,12 @@ namespace CompanionAI_v3.Data
                     "Считай это любезностью, [ally].",
                     "Помогаю [ally]. Постарайся не отставать."
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "Достаточно. Для мон-кей.",
+                    "Моток предвидел этот исход.",
+                    "Как и ожидалось. Двигаемся дальше?"
+                },
             },
 
             // ── Jae ──
@@ -2105,6 +2293,12 @@ namespace CompanionAI_v3.Data
                 {
                     "Помогаю [ally] \u2014 запиши на мой счёт.",
                     "Прикрываю [ally]. За тобой должок."
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "Готово. Где добыча?",
+                    "Неплохо, все. Совсем неплохо.",
+                    "Мы живы. Это уже прибыль."
                 },
             },
 
@@ -2162,6 +2356,12 @@ namespace CompanionAI_v3.Data
                     "Не умирай пока, [ally]. Я ещё не насмотрелся.",
                     "Помогаю [ally]. Не путай это с привязанностью."
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "Ммм... как восхитительно. Насладитесь моментом.",
+                    "Уже? Я только начал наслаждаться.",
+                    "Их крики были... приемлемы."
+                },
             },
 
             // ── Ulfar ──
@@ -2217,6 +2417,12 @@ namespace CompanionAI_v3.Data
                 {
                     "Рядом со мной, [ally]! Стая сражается вместе!",
                     "Прикрываю твой фланг, [ally]! ВПЕРЁД!"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "ХА! Ещё одна великая победа, братья!",
+                    "Клянусь Руссом! Что за бой!",
+                    "ПОБЕДА! Саги воспоют это!"
                 },
             },
 
@@ -2274,6 +2480,12 @@ namespace CompanionAI_v3.Data
                     "Я буду охранять твой шаг, [ally].",
                     "Танец продолжается \u2014 вместе, [ally]."
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "Танец окончен. Пока.",
+                    "Смерть выбрала своих партнёров сегодня.",
+                    "Последний шаг сделан."
+                },
             },
 
             // ── Solomorne (DLC) ──
@@ -2330,6 +2542,12 @@ namespace CompanionAI_v3.Data
                     "Поддерживаю [ally]. Согласно регламенту.",
                     "Прикрываю [ally]. Глайто, за мной. Хороший мальчик."
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "Территория зачищена. Составляю рапорт.",
+                    "Враждебные нейтрализованы. Порядок восстановлен.",
+                    "Правосудие свершилось. Дело закрыто."
+                },
             },
 
             // ── Unknown ──
@@ -2343,6 +2561,7 @@ namespace CompanionAI_v3.Data
                 [SpeechCategory.Retreat] = new[]    { "Отступаю!", "Отхожу!", "Тактический отход!", "Перегруппировка!" },
                 [SpeechCategory.Reload] = new[]     { "Перезарядка!", "Смена магазина!", "Меняю обойму!", "Секунду \u2014 перезарядка!" },
                 [SpeechCategory.Support] = new[]    { "Поддерживаю [ally]!", "Прикрываю [ally]!" },
+                [SpeechCategory.Victory] = new[]    { "Территория зачищена.", "Враги уничтожены.", "Бой окончен." },
             },
         };
 
@@ -2421,6 +2640,12 @@ namespace CompanionAI_v3.Data
                     "[ally]を支援します！持ち場を守ってください！",
                     "[ally]、背中は任せてください！"
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "皇帝がお守りくださいます。我々もまた。",
+                    "ローグ・トレイダーのための勝利であります。",
+                    "見事な戦いでありました。地域を確保します。"
+                },
             },
 
             // ── Heinrix ── 冷淡な断定
@@ -2476,6 +2701,12 @@ namespace CompanionAI_v3.Data
                 {
                     "皇帝が貴様の生存を望まれている、[ally]。",
                     "まだ用途がある、[ally]。"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "皇帝の審判が下された。",
+                    "また一つ、異端が粛清された。",
+                    "正義は果たされた。今は。"
                 },
             },
 
@@ -2533,6 +2764,12 @@ namespace CompanionAI_v3.Data
                     "皇帝が忠実なる者を守りたもう、[ally]！",
                     "踏みとどまれ、[ally]！信仰こそ力だ！"
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "皇帝の光によって、勝利した！",
+                    "異端者は粛清された！",
+                    "その裁きが下された！"
+                },
             },
 
             // ── Pasqal ── 機械的報告
@@ -2588,6 +2825,12 @@ namespace CompanionAI_v3.Data
                 {
                     "[ally]に戦術的増強を提供中。",
                     "[ally]の戦闘パラメータを最適化中。"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "戦闘効率：最適。全目標無力化完了。",
+                    "勝利記録。オムニシアに讃えあれ。",
+                    "任務目標達成。システム正常。"
                 },
             },
 
@@ -2645,6 +2888,12 @@ namespace CompanionAI_v3.Data
                     "痛みが感じられるよ、[ally]…楽にしてあげる。",
                     "Warpが助けになれる、[ally]。時々ね。"
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "終わった…の？ああ、よかった…",
+                    "生き延びた…どうにか…",
+                    "声が静まっていく…勝ったんだ…"
+                },
             },
 
             // ── Cassia ── お嬢様口調
@@ -2700,6 +2949,12 @@ namespace CompanionAI_v3.Data
                 {
                     "慣れないでちょうだいね、[ally]。",
                     "お手伝いして差し上げますわ、[ally]。"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "なかなかスリリングでしたわね？",
+                    "疑いの余地がありまして？",
+                    "まずまずの結果ですわね。"
                 },
             },
 
@@ -2757,6 +3012,12 @@ namespace CompanionAI_v3.Data
                     "好意と受け取れ、[ally]。",
                     "[ally]を支援中。遅れるなよ。"
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "十分だ。モンキーにしては。",
+                    "絲がこの結末を予見していた。",
+                    "予想通りだ。先に進むか？"
+                },
             },
 
             // ── Jae ── 砕けた口調
@@ -2812,6 +3073,12 @@ namespace CompanionAI_v3.Data
                 {
                     "[ally]を助けるわ \u2014 ツケに追加ね。",
                     "[ally]を援護中。これは借りよ。"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "終わったわね。戦利品はどこ？",
+                    "悪くなかったわよ、みんな。",
+                    "生きてる。それだけで儲けものよ。"
                 },
             },
 
@@ -2869,6 +3136,12 @@ namespace CompanionAI_v3.Data
                     "まだ死ぬなよ、[ally]。鑑賞が終わっていない。",
                     "[ally]を支援中。これを愛情と勘違いするな。"
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "ふむ…実に愉快だ。この瞬間を味わえ。",
+                    "もう終わりか？楽しみ始めたところだったのに。",
+                    "悲鳴は…まずまずだったな。"
+                },
             },
 
             // ── Ulfar ── 豪快
@@ -2924,6 +3197,12 @@ namespace CompanionAI_v3.Data
                 {
                     "俺の傍に立て、[ally]！群れは共に戦う！",
                     "[ally]の横腹を守る！前進！"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "ハッ！また一つ大勝利だ、仲間たちよ！",
+                    "ラスに誓って！見事な戦いだった！",
+                    "勝利だ！サガに歌われるぞ！"
                 },
             },
 
@@ -2981,6 +3260,12 @@ namespace CompanionAI_v3.Data
                     "その足を守ろう、[ally]。",
                     "舞は続く \u2014 共に、[ally]。"
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "舞は終わった。今は。",
+                    "死が今日のパートナーを選んだ。",
+                    "最後の一歩が踏み出された。"
+                },
             },
 
             // ── Solomorne (DLC) ── 法律用語・公式
@@ -3037,6 +3322,12 @@ namespace CompanionAI_v3.Data
                     "[ally]を支援中。規定に準拠。",
                     "[ally]を援護。Glaito、ついてこい。良い子だ。"
                 },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "地域確保。事後報告書を作成中。",
+                    "敵性対象を無力化。秩序が回復された。",
+                    "正義は遂行された。事件終結。"
+                },
             },
 
             // ── Unknown ──
@@ -3050,6 +3341,7 @@ namespace CompanionAI_v3.Data
                 [SpeechCategory.Retreat] = new[]    { "後退！", "撤退！", "戦術的後退！", "再配置！" },
                 [SpeechCategory.Reload] = new[]     { "装填！", "弾薬交換！", "マガジン交換！", "少し待て \u2014 装填中！" },
                 [SpeechCategory.Support] = new[]    { "[ally]を支援！", "[ally]を援護！" },
+                [SpeechCategory.Victory] = new[]    { "地域掃討完了。", "敵排除完了。", "戦闘終了。" },
             },
         };
 

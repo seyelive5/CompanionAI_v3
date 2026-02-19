@@ -140,6 +140,7 @@ namespace CompanionAI_v3.UI
                 }
                 GUILayout.EndHorizontal();
             }
+            Main.Settings.EnableVictoryBark = DrawCheckbox(Main.Settings.EnableVictoryBark, L("EnableVictoryBark"));  // ★ v3.9.80
 
             GUILayout.Space(15);
             DrawPerformanceSettings();

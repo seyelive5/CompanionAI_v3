@@ -33,6 +33,7 @@ using CompanionAI_v3.Settings;
 using Kingmaker.UnitLogic;  // ★ v3.7.89: AOO API
 using Kingmaker.UnitLogic.Buffs.Components;  // ★ v3.8.36: WarhammerAbilityRestriction
 using Kingmaker.Blueprints.Classes.Experience;  // ★ v3.8.49: UnitDifficultyType
+using Kingmaker.Designers.Mechanics.Facts;  // ★ v3.9.88: WeaponSetChangedTrigger
 
 namespace CompanionAI_v3.GameInterface
 {
@@ -422,7 +423,8 @@ namespace CompanionAI_v3.GameInterface
             CustomGridNodeBase fromNode,
             List<BaseUnitEntity> enemies,
             AbilityData primaryAttack = null,
-            List<BaseUnitEntity> allies = null)  // ★ v3.8.70: scatter safety용
+            List<BaseUnitEntity> allies = null,  // ★ v3.8.70: scatter safety용
+            float maxRangeOverride = 0f)  // ★ v3.9.86: 무기 로테이션용 사거리 오버라이드
         {
             if (unit == null || fromNode == null || enemies == null || enemies.Count == 0)
                 return 0;
@@ -439,22 +441,75 @@ namespace CompanionAI_v3.GameInterface
             {
                 primaryAttack = FindAnyAttackAbility(unit, Settings.RangePreference.PreferRanged);
             }
+            // ★ v3.9.92: 일반 공격 없으면 DangerousAoE (화염방사기 등) 시도
+            if (primaryAttack == null)
+            {
+                primaryAttack = FindAnyAttackAbility(unit, Settings.RangePreference.PreferRanged, includeDangerousAoE: true);
+            }
 
             if (primaryAttack == null)
                 return 0;
+
+            // ★ v3.9.92: DangerousAoE 포인트 타겟 감지
+            // CanTargetEnemies=false인 DangerousAoE는 CanTargetFromPosition이 항상 실패
+            // → 거리+LOS 기반 평가로 대체 (패턴 반경 내 + 시야 확인)
+            bool isDangerousAoEPointTarget = AbilityDatabase.IsDangerousAoE(primaryAttack)
+                && primaryAttack.Blueprint != null && !primaryAttack.Blueprint.CanTargetEnemies;
+            float dangerousAoERadius = 0f;
+            if (isDangerousAoEPointTarget)
+            {
+                var patternInfo = GetPatternInfo(primaryAttack);
+                dangerousAoERadius = (patternInfo != null && patternInfo.IsValid)
+                    ? patternInfo.Radius
+                    : (float)GetAbilityRangeInTiles(primaryAttack);
+            }
 
             int count = 0;
             foreach (var enemy in enemies)
             {
                 if (enemy == null || enemy.LifeState.IsDead) continue;
 
+                // ★ v3.9.92: DangerousAoE 포인트 타겟 — 거리+LOS 기반 평가
+                // CanTargetFromPosition은 CanTargetEnemies=false라 항상 실패
+                // 대신: 패턴 반경 내 + LOS 확보 시 hittable 판정
+                if (isDangerousAoEPointTarget)
+                {
+                    float distTiles = GetDistanceInTiles(fromNode.Vector3Position, enemy);
+                    if (distTiles > dangerousAoERadius) continue;
+
+                    // LOS 체크
+                    try
+                    {
+                        var enemyNode = enemy.CurrentUnwalkableNode;
+                        if (enemyNode == null) continue;
+                        var los = LosCalculations.GetWarhammerLos(
+                            fromNode, unit.SizeRect, enemyNode, enemy.SizeRect);
+                        if (los.CoverType == LosCalculations.CoverType.Invisible) continue;
+                    }
+                    catch { continue; }
+
+                    // 아군 안전 체크
+                    if (allies != null)
+                    {
+                        if (!CombatHelpers.IsAttackSafeForTargetFromPosition(
+                            primaryAttack, fromNode.Vector3Position, unit, enemy, allies))
+                            continue;
+                    }
+                    count++;
+                    continue;  // 다음 적으로
+                }
+
                 string reason;
                 if (CanTargetFromPosition(primaryAttack, fromNode, enemy, out reason))
                 {
                     // ★ v3.9.24: 대형 유닛 거리 보정 — CanTargetFromNode vs CanUseAbilityOn 불일치 방지
+                    // ★ v3.9.86: maxRangeOverride가 설정되면 능력 사거리 대신 사용
+                    //   (무기 로테이션: 볼터 24 → 화염방사기 7 전환 시 짧은 사거리로 필터링)
                     if (!IsPointTargetAbility(primaryAttack))
                     {
-                        float rangeTiles = GetAbilityRangeInTiles(primaryAttack);
+                        float rangeTiles = maxRangeOverride > 0f
+                            ? maxRangeOverride
+                            : (float)GetAbilityRangeInTiles(primaryAttack);
                         float distTiles = GetDistanceInTiles(fromNode.Vector3Position, enemy);
                         if (distTiles > rangeTiles)
                             continue;
@@ -1470,7 +1525,8 @@ namespace CompanionAI_v3.GameInterface
         /// - RangePreference에 맞는 무기 우선
         /// - 폴백으로 IsOffensiveAbility 확인
         /// </summary>
-        public static AbilityData FindAnyAttackAbility(BaseUnitEntity unit, RangePreference preference)
+        public static AbilityData FindAnyAttackAbility(BaseUnitEntity unit, RangePreference preference,
+            bool includeDangerousAoE = false)  // ★ v3.9.92: DangerousAoE 포함 옵션
         {
             if (unit == null) return null;
 
@@ -1503,11 +1559,20 @@ namespace CompanionAI_v3.GameInterface
 
                     // 4. ★ v3.0.18: CanTargetEnemies 체크 (v3.0.16에서 누락됨!)
                     // "칼날" 같은 스킬은 Weapon != null 이지만 적을 타겟할 수 없음
+                    // ★ v3.9.92: DangerousAoE (화염방사기 Cone/Ray)는 포인트 타겟이지만
+                    //   적 위치를 타겟할 수 있으므로 includeDangerousAoE=true 시 허용
                     var bp = abilityData.Blueprint;
                     if (bp != null && !bp.CanTargetEnemies)
                     {
-                        if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Skipping {abilityData.Name}: CanTargetEnemies=false");
-                        continue;
+                        if (includeDangerousAoE && AbilityDatabase.IsDangerousAoE(abilityData))
+                        {
+                            // DangerousAoE 포인트 타겟 — 위치 평가에 사용 가능
+                        }
+                        else
+                        {
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Skipping {abilityData.Name}: CanTargetEnemies=false");
+                            continue;
+                        }
                     }
 
                     // 5. ★ v3.0.17: 핵심! GetUnavailabilityReasons() 체크 (v2.2 포팅)
@@ -2084,6 +2149,30 @@ namespace CompanionAI_v3.GameInterface
             try
             {
                 return unit.Facts.HasComponent<WarhammerFreeUltimateBuff>(null);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.9.88: 유닛이 무기 전환 시 보너스 공격을 받는지 확인
+        /// WeaponSetChangedTrigger가 있으면 무기 전환 시 ActionList 실행
+        /// → ContextActionAddBonusAbilityUsage로 보너스 공격 부여 (Versatility 등)
+        ///
+        /// 게임 메커니즘: PrimaryHandAbilityGroup 공유 쿨다운
+        /// - 무기 공격 사용 → 해당 그룹 전체 쿨다운 (같은 슬롯의 모든 무기)
+        /// - 무기 세트 전환만으로는 쿨다운 우회 불가
+        /// - WeaponSetChangedTrigger → ContextActionAddBonusAbilityUsage → IsBonusUsage=true → 쿨다운 우회
+        /// </summary>
+        public static bool HasWeaponSwitchBonusAttack(BaseUnitEntity unit)
+        {
+            if (unit == null) return false;
+
+            try
+            {
+                return unit.Facts.HasComponent<WeaponSetChangedTrigger>(null);
             }
             catch
             {

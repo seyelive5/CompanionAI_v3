@@ -99,6 +99,11 @@ namespace CompanionAI_v3.Core
         /// <summary>★ v3.9.72: 이번 턴 무기 세트 전환 횟수</summary>
         public int WeaponSwitchCount { get; set; }
 
+        /// <summary>★ v3.9.92: 비동기 무기 전환 대기 — 목표 세트 인덱스 (-1 = 대기 없음)
+        /// GameCommandQueue.SwitchHandEquipment는 비동기 처리 → 매 프레임 CurrentHandEquipmentSetIndex 확인
+        /// 일치 시 Ready로 전환하여 fresh 분석 강제</summary>
+        public int PendingWeaponSwitchTarget { get; set; } = -1;
+
         #endregion
 
         #region Resources

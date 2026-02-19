@@ -186,12 +186,17 @@ namespace CompanionAI_v3.Analysis
 
                 if (situation.WeaponRotationAvailable)
                 {
+                    // ★ v3.9.88: 무기 전환 시 보너스 공격 가능 여부 감지
+                    // WeaponSetChangedTrigger → ContextActionAddBonusAbilityUsage (Versatility 등)
+                    situation.HasWeaponSwitchBonus = CombatAPI.HasWeaponSwitchBonusAttack(unit);
+
                     var set0 = situation.WeaponSetData[0];
                     var set1 = situation.WeaponSetData[1];
                     Main.Log($"[Analyzer] ★ {unit.CharacterName}: Weapon rotation available — " +
                         $"Set0={set0.PrimaryWeaponName ?? "?"} (R={set0.HasRangedWeapon},M={set0.HasMeleeWeapon}), " +
                         $"Set1={set1.PrimaryWeaponName ?? "?"} (R={set1.HasRangedWeapon},M={set1.HasMeleeWeapon}), " +
-                        $"Active=Set{situation.CurrentWeaponSetIndex}");
+                        $"Active=Set{situation.CurrentWeaponSetIndex}" +
+                        (situation.HasWeaponSwitchBonus ? ", SwitchBonus=YES" : ""));
                 }
             }
             catch (Exception ex)
@@ -403,15 +408,41 @@ namespace CompanionAI_v3.Analysis
                         }
 
                         // ★ v3.5.13: Point AOE에 대해 LOS 체크 추가
-                        // 문제: 거리/안전성 체크만 하면 Hittable=true지만 실제 시전 시 HasNoLosToTarget
-                        // 해결: 적 위치를 타겟 포인트로 CanUseAbilityOn 체크
-                        // ★ v3.5.29: 캐시 사용
-                        var pointTarget = new TargetWrapper(enemy.Position);
-                        string aoeReason;
-                        if (!CombatCache.CanUseAbilityOn(attack, pointTarget, out aoeReason))
+                        // ★ v3.9.92: DangerousAoE 방향성 패턴 (Cone/Ray) — CanTargetEnemies=false 처리
+                        // enemy.Position이 RangeCells(클릭 사거리=3) 밖이지만 패턴 반경(6) 안일 수 있음
+                        // → 클릭 사거리 내 방향 포인트로 CanUseAbilityOnPoint 검증
+                        if (isDangerousAoE && canBeDirectionalPattern
+                            && attack.Blueprint != null && !attack.Blueprint.CanTargetEnemies
+                            && castRange > 0)
                         {
-                            Main.LogDebug($"[Analyzer] AOE LOS failed: {attack.Name} -> {enemy.CharacterName} ({aoeReason})");
-                            continue;
+                            var casterPos = unit.Position;
+                            var toEnemy = enemy.Position - casterPos;
+                            float distMeters = toEnemy.magnitude;
+                            if (distMeters < 0.01f) continue;
+                            var dirNorm = toEnemy / distMeters;
+
+                            float clickRangeMeters = CombatAPI.TilesToMeters(castRange);
+                            float targetDist = Math.Min(clickRangeMeters * 0.95f, distMeters);
+                            var directionPoint = casterPos + dirNorm * targetDist;
+
+                            string aoeReason;
+                            if (!CombatAPI.CanUseAbilityOnPoint(attack, directionPoint, out aoeReason))
+                            {
+                                Main.LogDebug($"[Analyzer] DangerousAoE direction failed: {attack.Name} -> {enemy.CharacterName} ({aoeReason})");
+                                continue;
+                            }
+                        }
+                        else
+                        {
+                            // 기존 로직: 적 위치를 타겟 포인트로 CanUseAbilityOn 체크
+                            // ★ v3.5.29: 캐시 사용
+                            var pointTarget = new TargetWrapper(enemy.Position);
+                            string aoeReason;
+                            if (!CombatCache.CanUseAbilityOn(attack, pointTarget, out aoeReason))
+                            {
+                                Main.LogDebug($"[Analyzer] AOE LOS failed: {attack.Name} -> {enemy.CharacterName} ({aoeReason})");
+                                continue;
+                            }
                         }
 
                         isHittable = true;
@@ -1019,8 +1050,26 @@ namespace CompanionAI_v3.Analysis
 
                 if (attack.Weapon != null)
                 {
-                    // 무기 기반 공격: WeaponRangeProfile의 EffectiveRange
-                    abilityRange = situation.WeaponRange.EffectiveRange;
+                    // ★ v3.9.92: 무기 기반 DangerousAoE (화염방사기)는 패턴 반경이 실제 유효 사거리
+                    // WeaponRange.EffectiveRange = 클릭 사거리 (3), PatternInfo.Radius = 피해 사거리 (6)
+                    // 포지셔닝에는 피해 사거리를 사용해야 정확
+                    if (AbilityDatabase.IsDangerousAoE(attack))
+                    {
+                        var patternInfo = CombatAPI.GetPatternInfo(attack);
+                        if (patternInfo != null && patternInfo.IsValid && patternInfo.Radius > 0)
+                        {
+                            abilityRange = patternInfo.Radius;
+                        }
+                        else
+                        {
+                            abilityRange = situation.WeaponRange.EffectiveRange;
+                        }
+                    }
+                    else
+                    {
+                        // 일반 무기 기반 공격: WeaponRangeProfile의 EffectiveRange
+                        abilityRange = situation.WeaponRange.EffectiveRange;
+                    }
                 }
                 else if (CombatAPI.IsPointTargetAbility(attack))
                 {

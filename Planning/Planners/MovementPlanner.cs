@@ -1104,7 +1104,10 @@ namespace CompanionAI_v3.Planning.Planners
             // → 짧은 사거리 무기 기준으로 이동 (긴 사거리 무기는 가까이서도 사용 가능)
             // ★ v3.9.78: 동일 타입(원거리+원거리, 근접+근접)에만 적용
             // 혼합 타입(원거리+근접)은 현재 무기 사거리 유지 — 원거리 캐릭이 근접 거리로 돌진 방지
-            if (situation.WeaponRotationAvailable && situation.WeaponSetData != null)
+            // ★ v3.9.88: HasWeaponSwitchBonus 조건 추가 — 보너스 공격 없으면 양쪽 무기 고려 불필요
+            // ★ v3.9.92: 공격 전에만 사거리 조정 (공격 후엔 전환할 이유 없음)
+            if (situation.WeaponRotationAvailable && situation.HasWeaponSwitchBonus && situation.WeaponSetData != null
+                && !situation.HasAttackedThisTurn)
             {
                 int currentIdx = situation.CurrentWeaponSetIndex;
                 int altIdx = currentIdx == 0 ? 1 : 0;

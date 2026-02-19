@@ -103,6 +103,12 @@ namespace CompanionAI_v3.Execution
 
             CombatAPI.SwitchWeaponSet(unit, targetSet);
 
+            // ★ v3.9.92: 비동기 전환 대기 등록
+            // Orchestrator가 매 프레임 CurrentHandEquipmentSetIndex 확인 후 fresh 분석
+            var turnState = Core.TurnOrchestrator.Instance?.GetCurrentTurnState();
+            if (turnState != null)
+                turnState.PendingWeaponSwitchTarget = targetSet;
+
             // 캐시 전체 무효화 — 무기 변경 시 사거리/능력/타겟팅 모두 변함
             CombatCache.ClearAll();
 

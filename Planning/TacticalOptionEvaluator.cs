@@ -334,7 +334,11 @@ namespace CompanionAI_v3.Planning
 
                 // ★ v3.9.74: 무기 로테이션 시 짧은 사거리 무기 기준 포지셔닝
                 // ★ v3.9.78: 동일 타입(원거리+원거리)에만 적용 — 혼합(원거리+근접) 시 현재 무기 사거리 유지
-                if (situation.WeaponRotationAvailable && situation.WeaponSetData != null)
+                // ★ v3.9.88: HasWeaponSwitchBonus 조건 추가 — 보너스 공격 없으면 양쪽 무기 고려 불필요
+                //   PrimaryHandAbilityGroup 공유 쿨다운 때문에 전환만으로는 추가 공격 불가
+                // ★ v3.9.92: 공격 전에만 사거리 조정 (공격 후엔 전환할 이유 없음)
+                if (situation.WeaponRotationAvailable && situation.HasWeaponSwitchBonus && situation.WeaponSetData != null
+                    && !situation.HasAttackedThisTurn)
                 {
                     int currentIdx = situation.CurrentWeaponSetIndex;
                     int altIdx = currentIdx == 0 ? 1 : 0;

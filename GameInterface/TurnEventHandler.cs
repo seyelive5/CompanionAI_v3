@@ -8,6 +8,7 @@ using Kingmaker.PubSubSystem.Core;
 using Kingmaker.PubSubSystem.Core.Interfaces;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
+using CompanionAI_v3.Data;
 
 namespace CompanionAI_v3.GameInterface
 {
@@ -99,6 +100,26 @@ namespace CompanionAI_v3.GameInterface
             if (!isTurnBased)
             {
                 Main.Log("[TurnEventHandler] Combat ended");
+
+                // ★ v3.9.80: 승리 환호 — OnCombatEnd() 전에 호출 (ClearAll 이전에 캐릭터 식별 필요)
+                try
+                {
+                    var party = Game.Instance?.Player?.PartyAndPets;
+                    if (party != null)
+                    {
+                        var conscious = new System.Collections.Generic.List<BaseUnitEntity>();
+                        foreach (var u in party)
+                            if (u?.LifeState?.IsConscious == true) conscious.Add(u);
+
+                        if (conscious.Count > 0)
+                            CompanionDialogue.AnnounceVictory(conscious);
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    Main.LogDebug($"[TurnEventHandler] Victory bark error: {ex.Message}");
+                }
+
                 TurnOrchestrator.Instance.OnCombatEnd();
 
                 // ★ v3.1.19: 패턴 캐시 클리어

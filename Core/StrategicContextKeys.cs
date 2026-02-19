@@ -22,6 +22,12 @@ namespace CompanionAI_v3.Core
         /// <summary>bool - 공격 후 후퇴 전략이었음 (재계획 시 후퇴 우선)</summary>
         public const string DeferredRetreat = "DeferRetreat";
 
+        // ── DPS: 보너스 무기 전환 ──
+
+        /// <summary>★ v3.9.92: bool - Phase 1.56이 보너스 공격을 위해 무기 전환함
+        /// Phase 1.55가 즉시 되돌리지 않도록 방지 — 이동 후 재분석에서 공격 가능</summary>
+        public const string BonusWeaponSwitch = "BonusWeaponSwitch";
+
         // ── 공통: 킬 시퀀스 ──
 
         /// <summary>string - 킬 시퀀스 타겟 UniqueId (재계획 시 동일 타겟 우선)</summary>

@@ -43,7 +43,8 @@ namespace CompanionAI_v3.Data
             Retreat,
             Reload,
             Taunt,
-            EndTurn  // Silent — no speech
+            EndTurn,  // Silent — no speech
+            Victory   // ★ v3.9.80: 전투 승리 환호
         }
 
         #endregion
@@ -433,6 +434,63 @@ namespace CompanionAI_v3.Data
                 }
             }
             return null;
+        }
+
+        #endregion
+
+        #region Victory Bark (v3.9.80)
+
+        /// <summary>
+        /// ★ v3.9.80: 전투 승리 시 환호 대사 — TurnEventHandler에서 호출
+        /// 의식있는 파티원 중 랜덤 1명이 승리 대사를 말풍선으로 표시
+        /// </summary>
+        public static void AnnounceVictory(List<BaseUnitEntity> consciousParty)
+        {
+            if (!(ModSettings.Instance?.EnableVictoryBark ?? false)) return;
+            if (consciousParty == null || consciousParty.Count == 0) return;
+
+            var speaker = SelectVictorySpeaker(consciousParty);
+            if (speaker == null) return;
+
+            var companion = IdentifyCompanion(speaker);
+            string[] lines = GetLines(companion, SpeechCategory.Victory);
+            if (lines == null || lines.Length == 0) return;
+
+            string line = SelectLine(speaker.UniqueId, SpeechCategory.Victory, lines);
+            float duration = Mathf.Clamp(line.Length * 0.06f, 3f, 5f);
+            string coloredLine = ApplyCharacterColor(line, companion);
+
+            try
+            {
+                Kingmaker.Code.UI.MVVM.VM.Bark.BarkPlayer.Bark(
+                    speaker, coloredLine, duration,
+                    voiceOver: null, interactUser: null, synced: true,
+                    overrideName: null, overrideNameColor: AISpeechNameColor);
+                Main.Log($"[Speech] Victory bark: {speaker.CharacterName} ({companion}): \"{line}\"");
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[Speech] Victory bark failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 승리 환호 화자 선택: AI 제어 동료 중 랜덤 (주인공 제외)
+        /// AI 동료가 없으면 아무 의식있는 파티원
+        /// </summary>
+        private static BaseUnitEntity SelectVictorySpeaker(List<BaseUnitEntity> party)
+        {
+            // AI 제어 동료 우선 (주인공 제외)
+            var candidates = new List<BaseUnitEntity>();
+            for (int i = 0; i < party.Count; i++)
+            {
+                if (party[i].IsPlayerFaction && !party[i].IsMainCharacter)
+                    candidates.Add(party[i]);
+            }
+            if (candidates.Count == 0)
+                candidates.AddRange(party);
+
+            return candidates[_rng.Next(candidates.Count)];
         }
 
         #endregion

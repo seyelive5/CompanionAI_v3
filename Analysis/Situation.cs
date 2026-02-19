@@ -91,6 +91,13 @@ namespace CompanionAI_v3.Analysis
         /// <summary>★ v3.9.72: 무기 세트 로테이션이 유익한지</summary>
         public bool WeaponRotationAvailable { get; set; }
 
+        /// <summary>★ v3.9.88: 무기 전환 시 보너스 공격이 가능한지 (WeaponSetChangedTrigger 보유)</summary>
+        /// <remarks>
+        /// PrimaryHandAbilityGroup 공유 쿨다운 때문에 무기 전환만으로는 추가 공격 불가.
+        /// Versatility 등 WeaponSetChangedTrigger가 ContextActionAddBonusAbilityUsage를 부여해야 함.
+        /// </remarks>
+        public bool HasWeaponSwitchBonus { get; set; }
+
         #endregion
 
         #region Battlefield
@@ -393,6 +400,7 @@ namespace CompanionAI_v3.Analysis
             AlternateSetAttacks.Clear();
             AlternateSetAoEAttacks.Clear();
             WeaponRotationAvailable = false;
+            HasWeaponSwitchBonus = false;
 
             // Battlefield
             Enemies.Clear();
@@ -467,7 +475,7 @@ namespace CompanionAI_v3.Analysis
                    $"Enemies={Enemies?.Count ?? 0}, Hittable={HittableEnemies?.Count ?? 0}, " +
                    $"AoE={AvailableAoEAttacks?.Count ?? 0}, " +
                    $"InDanger={IsInDanger}, InDamagingAoE={IsInDamagingAoE}, PsychicNull={IsInPsychicNullZone}, NeedsReload={NeedsReload}" +
-                   (WeaponRotationAvailable ? $", WeaponRotation=Set{CurrentWeaponSetIndex}→Alt" : "");
+                   (WeaponRotationAvailable ? $", WeaponRotation=Set{CurrentWeaponSetIndex}→Alt" + (HasWeaponSwitchBonus ? "(+Bonus)" : "") : "");
         }
     }
 }

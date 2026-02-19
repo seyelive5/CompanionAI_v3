@@ -65,6 +65,12 @@ namespace CompanionAI_v3.Settings
                 { Language.Russian, "Включить реплики ИИ" },
                 { Language.Japanese, "AIセリフ吹き出しを有効化" }
             },
+            ["EnableVictoryBark"] = new() {
+                { Language.English, "Victory Bark" },
+                { Language.Korean, "승리 환호" },
+                { Language.Russian, "Возглас победы" },
+                { Language.Japanese, "勝利の叫び" }
+            },
             ["ReloadDialogue"] = new() {
                 { Language.English, "Reload Dialogue JSON" },
                 { Language.Korean, "대사 JSON 다시 불러오기" },
@@ -689,6 +695,9 @@ namespace CompanionAI_v3.Settings
 
         /// <summary>★ v3.9.32: AI 대사 (BarkPlayer 말풍선) 표시 여부</summary>
         public bool EnableAISpeech { get; set; } = true;
+
+        /// <summary>★ v3.9.80: 전투 승리 시 환호 말풍선 표시 여부</summary>
+        public bool EnableVictoryBark { get; set; } = true;
 
         public Language UILanguage { get; set; } = Language.English;
 

@@ -39,6 +39,7 @@ namespace CompanionAI_v3.Planning.Plans
             bool comboAlreadyApplied = turnState.GetContext<bool>(StrategicContextKeys.ComboPrereqApplied, false);
             string comboTargetId = turnState.GetContext<string>(StrategicContextKeys.ComboTargetId, null);
             bool shouldPrioritizeRetreat = turnState.GetContext<bool>(StrategicContextKeys.DeferredRetreat, false);
+            bool bonusWeaponSwitch = turnState.GetContext<bool>(StrategicContextKeys.BonusWeaponSwitch, false);
 
             // ★ v3.8.41: Phase 0 - 잠재력 초월 궁극기 (최우선)
             if (CombatAPI.HasFreeUltimateBuff(situation.Unit))
@@ -85,15 +86,63 @@ namespace CompanionAI_v3.Planning.Plans
             // 조건: 무기 로테이션 가능 + Hittable 적 없음 + 현재/대체 무기 타입 다름
             // 현재 무기로 공격할 수 없는 상황에서 대체 무기가 도움이 되면 즉시 전환
             // 전환 후 re-analysis에서 새 무기로 전체 계획 생성
+            // ★ v3.9.92: Phase 1.56이 보너스 공격을 위해 전환한 경우 억제
+            // MP가 남아 이동 가능하면 이동→재분석으로 새 무기 사용 기회 제공
             if (situation.WeaponRotationAvailable && !situation.HasHittableEnemies
                 && ShouldSwitchFirst(situation))
             {
-                var switchActions = PlanWeaponSetRotationAttack(situation, ref remainingAP);
-                if (switchActions.Count > 0)
+                if (bonusWeaponSwitch && situation.CanMove)
                 {
-                    actions.AddRange(switchActions);
-                    Main.Log($"[DPS] Phase 1.55: Switch-First — current weapon ineffective, switching before attacks");
-                    return new TurnPlan(actions, TurnPriority.DirectAttack, "DPS weapon switch-first");
+                    Main.Log($"[DPS] Phase 1.55: Suppressed — bonus weapon switch active, will try MoveToAttack (MP={situation.CurrentMP:F1})");
+                }
+                else
+                {
+                    var switchActions = PlanWeaponSetRotationAttack(situation, ref remainingAP);
+                    if (switchActions.Count > 0)
+                    {
+                        actions.AddRange(switchActions);
+                        Main.Log($"[DPS] Phase 1.55: Switch-First — current weapon ineffective, switching before attacks");
+                        return new TurnPlan(actions, TurnPriority.DirectAttack, "DPS weapon switch-first");
+                    }
+                }
+            }
+
+            // ★ v3.9.92: Phase 1.56 — Bonus-Only Switch: 보너스 공격을 대체 무기에 사용
+            // 인라인 체크: AvailableAttacks/AoEAttacks만 검사 → 재장전 등 비공격 능력 제외
+            // 시나리오: 볼터 공격 → R&G(보너스 부여) → 여기서 화염방사기로 전환 → re-analysis → AoE 공격
+            // 전환 자체가 WeaponSetChangedTrigger로 추가 보너스를 부여하므로 순이익
+            // bonusWeaponSwitch=true면 이미 전환 완료 → 재전환 방지 (탁구 현상 차단)
+            if (situation.WeaponRotationAvailable && situation.HasWeaponSwitchBonus
+                && !bonusWeaponSwitch)
+            {
+                bool hasAnyAttack = situation.AvailableAttacks.Count > 0 || situation.AvailableAoEAttacks.Count > 0;
+                bool allBonusOnly = hasAnyAttack;
+                if (allBonusOnly)
+                {
+                    foreach (var atk in situation.AvailableAttacks)
+                    {
+                        if (!atk.IsOnCooldown || !atk.IsBonusUsage) { allBonusOnly = false; break; }
+                    }
+                }
+                if (allBonusOnly)
+                {
+                    foreach (var atk in situation.AvailableAoEAttacks)
+                    {
+                        if (!atk.IsOnCooldown || !atk.IsBonusUsage) { allBonusOnly = false; break; }
+                    }
+                }
+
+                if (allBonusOnly)
+                {
+                    var switchActions = PlanWeaponSetRotationAttack(situation, ref remainingAP);
+                    if (switchActions.Count > 0)
+                    {
+                        actions.AddRange(switchActions);
+                        // 전략 컨텍스트에 보너스 전환 표시 — Phase 1.55가 되돌리지 않도록
+                        turnState.SetContext(StrategicContextKeys.BonusWeaponSwitch, true);
+                        Main.Log($"[DPS] Phase 1.56: All attacks bonus-only — switching weapon for AoE + trigger bonus");
+                        return new TurnPlan(actions, TurnPriority.DirectAttack, "DPS bonus weapon switch");
+                    }
                 }
             }
 
@@ -1101,8 +1150,14 @@ namespace CompanionAI_v3.Planning.Plans
             // 모든 공격/이동/버프가 끝난 후 AP가 충분히 남으면 무기 전환
             // WeaponSwitch가 플랜의 마지막 액션 → 실행 후 re-analysis에서 새 무기 공격 계획
             // ★ 사거리 체크: 대체 무기가 현재 위치에서 적에게 도달 가능하거나, MP가 남아 이동 가능해야 전환
+            // ★ v3.9.88: 보너스 공격 체크 — PrimaryHandAbilityGroup 공유 쿨다운 때문에
+            //   무기 전환만으로는 추가 공격 불가. WeaponSetChangedTrigger (Versatility 등)가
+            //   ContextActionAddBonusAbilityUsage를 부여해야 쿨다운 우회 가능.
+            // ★ v3.9.90: AP 임계값 완화 — 보너스 공격은 costBonus=-1(무료)이므로
+            //   전환 자체의 AP만 있으면 충분 (PlanWeaponSetRotationAttack 내부에서 < 1f 체크)
             bool weaponSwitchPlanned = false;
-            if (situation.WeaponRotationAvailable && didPlanAttack && remainingAP >= 2f)
+            if (situation.WeaponRotationAvailable && didPlanAttack && remainingAP >= 1f
+                && situation.HasWeaponSwitchBonus)
             {
                 bool shouldSwitch = CanAlternateWeaponReach(situation);
                 if (shouldSwitch)
@@ -1112,13 +1167,18 @@ namespace CompanionAI_v3.Planning.Plans
                     {
                         actions.AddRange(switchActions);
                         weaponSwitchPlanned = true;
-                        Main.Log($"[DPS] Phase 9.5: Switch-After — attacks exhausted, switching for additional damage (AP={remainingAP:F1})");
+                        Main.Log($"[DPS] Phase 9.5: Switch-After — bonus attack available, switching for additional damage (AP={remainingAP:F1})");
                     }
                 }
                 else if (Main.IsDebugEnabled)
                 {
                     Main.LogDebug($"[DPS] Phase 9.5: Skip — alternate weapon can't reach enemies from current position");
                 }
+            }
+            else if (situation.WeaponRotationAvailable && didPlanAttack && remainingAP >= 1f
+                && !situation.HasWeaponSwitchBonus && Main.IsDebugEnabled)
+            {
+                Main.LogDebug($"[DPS] Phase 9.5: Skip — no WeaponSetChangedTrigger, weapon switch won't grant bonus attack");
             }
 
             // ★ v3.5.35: Phase 10 - 턴 종료 스킬 (항상 마지막!)
@@ -1356,6 +1416,13 @@ namespace CompanionAI_v3.Planning.Plans
                     string reason;
                     if (CombatAPI.CanUseAbilityOn(ability, targetWrapper, out reason))
                     {
+                        // ★ v3.9.82: 체인/AoE 아군 안전 체크 (기존 누락 — 일반 공격 경로에서만 체크되고 있었음)
+                        if (!CombatHelpers.IsAttackSafeForTarget(ability, situation.Unit, enemy, situation.Allies))
+                        {
+                            Main.LogDebug($"[DPS] Special ability ally safety blocked: {ability.Name} -> {enemy.CharacterName}");
+                            continue;
+                        }
+
                         remainingAP -= cost;
 
                         string abilityType = AbilityDatabase.IsDOTIntensify(ability) ? "DoT Intensify" :
