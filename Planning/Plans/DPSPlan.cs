@@ -512,11 +512,48 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // ★ v3.10.0: Kill Seq 폴백 — AoE가 경쟁에서 이겼지만 Phase 4.4에서 실행 불가 시
-            // Phase 5 일반 공격이 킬 시퀀스 타겟(BestTarget)을 자연스럽게 공격
+            // ★ v3.13.0: Kill Seq 폴백 — AoE가 경쟁에서 이겼지만 Phase 4.4에서 실행 불가 시
+            // 보류된 킬 시퀀스를 실행하여 확정 킬 보존 (이전: 폐기 → Phase 5 일반 공격으로 격하)
             if (pendingKillSequence != null && !didPlanAttack && !didPlanKillSequence)
             {
-                Main.Log($"[DPS] Phase 3↔4.4: AoE deferred kill seq but AoE also failed — Phase 5 will target {pendingKillSequence.Target?.CharacterName}");
+                Main.Log($"[DPS] Phase 3↔4.4: AoE failed — executing deferred kill sequence for {pendingKillSequence.Target?.CharacterName}");
+
+                string killGroupTag = "KillSeq_" + pendingKillSequence.Target.UniqueId;
+                int actionsBeforeDeferred = actions.Count;
+
+                foreach (var ability in pendingKillSequence.Abilities)
+                {
+                    List<string> unavailReasons;
+                    if (!CombatAPI.IsAbilityAvailable(ability, out unavailReasons))
+                        break;
+
+                    float apCost = ability.CalculateActionPointCost();
+                    if (remainingAP < apCost) break;
+
+                    var timing = AbilityDatabase.GetTiming(ability);
+                    PlannedAction action;
+                    if (timing == AbilityTiming.PreAttackBuff || timing == AbilityTiming.PreCombatBuff)
+                    {
+                        action = PlannedAction.Buff(ability, situation.Unit, "Deferred kill seq buff", apCost);
+                    }
+                    else
+                    {
+                        action = PlannedAction.Attack(ability, pendingKillSequence.Target, "Deferred kill seq attack", apCost);
+                    }
+                    action.GroupTag = killGroupTag;
+                    action.FailurePolicy = GroupFailurePolicy.SkipRemainingInGroup;
+                    actions.Add(action);
+                    remainingAP -= apCost;
+                }
+
+                if (actions.Count > actionsBeforeDeferred)
+                {
+                    didPlanKillSequence = true;
+                    didPlanAttack = true;
+                    killSequenceTarget = pendingKillSequence.Target;
+                    if (killSequenceTarget != null)
+                        plannedTargetIds.Add(killSequenceTarget.UniqueId);
+                }
                 pendingKillSequence = null;
             }
 
@@ -572,16 +609,9 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // Phase 4.7: 위치 버프
+            // ★ v3.14.0: Phase 4.7 — 공통 위치 버프
             var usedPositionalBuffs = new HashSet<string>();
-            int positionalBuffCount = 0;
-            while (positionalBuffCount < MAX_POSITIONAL_BUFFS)
-            {
-                var positionalBuffAction = PlanPositionalBuff(situation, ref remainingAP, usedPositionalBuffs);
-                if (positionalBuffAction == null) break;
-                actions.Add(positionalBuffAction);
-                positionalBuffCount++;
-            }
+            ExecutePositionalBuffPhase(actions, situation, ref remainingAP, usedPositionalBuffs);
 
             // Phase 4.8: Stratagem
             var stratagemAction = PlanStratagem(situation, ref remainingAP);
@@ -831,106 +861,9 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // ★ v3.0.96: Phase 6.5: 공격 불가 시 남은 버프 사용
-            // 이전 버그: Hittable=0이면 버프 사용 못함
-            // ★ v3.1.10: PreAttackBuff, HeroicAct, RighteousFury 제외 (공격 없으면 무의미)
-            // ★ v3.8.98: 근접 MoveOnly 전략 시 fallback 버프 스킵
-            // 근접 캐릭터가 적에게 이동 예정이면 버프를 아껴서 이동 후 replan 때 사용
-            // (이동 후 CombatCache 무효화 → Hittable 감지 → replan → PreAttackBuff + 공격)
-            bool skipFallbackForMelee = !situation.PrefersRanged &&
-                tacticalEval?.ChosenStrategy == TacticalStrategy.MoveOnly &&
-                situation.HasLivingEnemies;
-
-            if (skipFallbackForMelee)
-            {
-                Main.Log($"[DPS] Phase 6.5: Skipping fallback buffs (melee MoveOnly — save for post-move attack)");
-            }
-            else if (!didPlanAttack && remainingAP >= 1f && situation.AvailableBuffs.Count > 0)
-            {
-                Main.Log($"[DPS] Phase 6.5: No attack possible, using remaining buffs (AP={remainingAP:F1})");
-
-                foreach (var buff in situation.AvailableBuffs)
-                {
-                    if (remainingAP < 1f) break;
-
-                    // ★ v3.1.10: 공격 전 버프는 공격이 없으면 의미 없음
-                    // ★ v3.5.22: TurnEnding, SpringAttack 능력도 폴백에서 제외
-                    var timing = AbilityDatabase.GetTiming(buff);
-                    if (timing == AbilityTiming.PreAttackBuff ||
-                        timing == AbilityTiming.HeroicAct ||
-                        timing == AbilityTiming.RighteousFury ||
-                        timing == AbilityTiming.TurnEnding)
-                    {
-                        if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 6.5: Skip {buff.Name} (timing={timing} not suitable for fallback)");
-                        continue;
-                    }
-
-                    // ★ v3.5.22: SpringAttack 능력은 조건 충족 시에만 TurnEnding에서 사용
-                    if (AbilityDatabase.IsSpringAttackAbility(buff))
-                    {
-                        if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 6.5: Skip {buff.Name} (SpringAttack - use in TurnEnding only)");
-                        continue;
-                    }
-
-                    float cost = CombatAPI.GetAbilityAPCost(buff);
-                    if (cost > remainingAP) continue;
-
-                    if (AllyStateCache.HasBuff(situation.Unit, buff)) continue;
-
-                    // ★ Self 또는 Ally 타겟 버프
-                    var bp = buff.Blueprint;
-                    if (bp?.CanTargetSelf != true && bp?.CanTargetFriends != true) continue;
-
-                    // ★ v3.9.44: CanTargetFriends=true면 아군 우선 시도 (자신만 버프하는 문제 수정)
-                    bool usedOnAlly = false;
-                    if (bp?.CanTargetFriends == true && situation.Allies != null)
-                    {
-                        foreach (var ally in situation.Allies)
-                        {
-                            if (ally == null || ally.LifeState.IsDead || ally == situation.Unit) continue;
-                            if (AllyStateCache.HasBuff(ally, buff)) continue;
-                            if (!CombatAPI.NeedsBuffRefresh(ally, buff)) continue;
-
-                            var allyTarget = new TargetWrapper(ally);
-                            string allyReason;
-                            if (CombatAPI.CanUseAbilityOn(buff, allyTarget, out allyReason))
-                            {
-                                remainingAP -= cost;
-                                actions.Add(PlannedAction.Buff(buff, ally, $"Fallback buff ally: {buff.Name}", cost));
-                                Main.Log($"[DPS] Fallback buff (ally): {buff.Name} -> {ally.CharacterName}");
-                                usedOnAlly = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    // 아군에게 사용 못했으면 자기 자신에게
-                    if (!usedOnAlly)
-                    {
-                        var target = new TargetWrapper(situation.Unit);
-                        string reason;
-                        if (CombatAPI.CanUseAbilityOn(buff, target, out reason))
-                        {
-                            remainingAP -= cost;
-                            actions.Add(PlannedAction.Buff(buff, situation.Unit, "Fallback buff - no attack available", cost));
-                            Main.Log($"[DPS] Fallback buff: {buff.Name}");
-                        }
-                    }
-                }
-            }
-
-            // ★ v3.8.84: Phase 6.5 디버프 - 공격 불가 시 유틸리티 디버프 사용
-            // DPS에는 전용 디버프 Phase가 없어서 적 분석(Analyze Enemies) 등이 사용되지 않았음
-            // 공격이 차단되어도 Range=Unlimited 디버프는 팀에 기여할 수 있음
-            if (!didPlanAttack && remainingAP >= 1f && situation.AvailableDebuffs.Count > 0 && situation.NearestEnemy != null)
-            {
-                var debuffAction = PlanDebuff(situation, situation.NearestEnemy, ref remainingAP);
-                if (debuffAction != null)
-                {
-                    actions.Add(debuffAction);
-                    Main.Log($"[DPS] Phase 6.5: Fallback debuff - {debuffAction.Ability?.Name}");
-                }
-            }
+            // ★ v3.14.0: Phase 6.5 — 공통 Fallback Buffs (공격 불가 시 남은 버프/디버프 소진)
+            ExecuteFallbackBuffsPhase(actions, situation, ref remainingAP, didPlanAttack, tacticalEval,
+                tryAllyBuffFirst: true, includeFallbackDebuff: true);
 
             // ★ v3.5.35: Phase 7 (TurnEnding) → 맨 마지막으로 이동
             // TurnEnding 능력은 턴을 종료시키므로 다른 모든 행동 후에 계획해야 함

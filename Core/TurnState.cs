@@ -246,36 +246,32 @@ namespace CompanionAI_v3.Core
                 ConsecutiveFailures = 0;
 
                 // 상태 플래그 업데이트
+                // ★ v3.13.0: RemainingAP 갱신 제거 — [Obsolete] 필드, 읽는 곳 없음
+                //   실시간 AP는 CombatAPI.GetCurrentAP() 사용
                 switch (action.Type)
                 {
                     case ActionType.Move:
                         HasMovedThisTurn = true;
                         MoveCount++;  // ★ v3.0.3: 이동 횟수 추적
-                        // ★ v3.0.10: RemainingMP=0 해킹 제거 - Commands.Empty 체크로 중복 이동 방지
                         break;
                     case ActionType.Attack:
                         HasAttackedThisTurn = true;
                         HasPerformedFirstAction = true;
-                        RemainingAP -= action.APCost;
                         break;
                     case ActionType.Buff:
                         HasBuffedThisTurn = true;
-                        RemainingAP -= action.APCost;
                         break;
                     case ActionType.Reload:
                         HasReloadedThisTurn = true;
                         HasPerformedFirstAction = true;
-                        RemainingAP -= action.APCost;
                         break;
                     case ActionType.Heal:
                         HasHealedThisTurn = true;
-                        RemainingAP -= action.APCost;
                         break;
                     case ActionType.Debuff:
                     case ActionType.Support:
                     case ActionType.Special:
                         HasPerformedFirstAction = true;
-                        RemainingAP -= action.APCost;
                         break;
                     case ActionType.WeaponSwitch:  // ★ v3.9.72: 무기 전환 (0 AP)
                         WeaponSwitchCount++;

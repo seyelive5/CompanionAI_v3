@@ -29,6 +29,19 @@ namespace CompanionAI_v3.GameInterface
     /// </summary>
     public static class CombatCache
     {
+        #region ★ v3.13.0: Cache Overflow Protection
+
+        /// <summary>캐시 크기 상한선 — 초과 시 전체 Clear (LRU보다 단순, 재구축 비용 최소)</summary>
+        private const int MAX_DISTANCE_ENTRIES = 500;
+        private const int MAX_TARGETING_ENTRIES = 1000;
+        private const int MAX_HP_ENTRIES = 200;
+        private const int MAX_HITCHANCE_ENTRIES = 500;
+
+        /// <summary>★ v3.13.0: 턴 내 피크 크기 추적 (디버그 통계)</summary>
+        private static int _peakDistance, _peakTargeting, _peakHP, _peakHitChance;
+
+        #endregion
+
         #region Distance Cache
 
         /// <summary>
@@ -64,6 +77,15 @@ namespace CompanionAI_v3.GameInterface
             DistanceMisses++;
             dist = CombatAPI.GetDistanceInTiles(a, b);  // 타일 단위
             _distanceCache[key] = dist;
+
+            // ★ v3.13.0: 상한선 초과 시 전체 클리어 (재구축은 94% 히트율 환경에서 즉시)
+            if (_distanceCache.Count > MAX_DISTANCE_ENTRIES)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatCache] Distance cache overflow ({_distanceCache.Count}), cleared");
+                _distanceCache.Clear();
+            }
+            if (_distanceCache.Count > _peakDistance) _peakDistance = _distanceCache.Count;
+
             return dist;
         }
 
@@ -119,6 +141,15 @@ namespace CompanionAI_v3.GameInterface
             HPMisses++;
             float hp = CombatAPI.GetHPPercent(unit);
             _hpPercentCache[key] = hp;
+
+            // ★ v3.13.0: 상한선 초과 방지
+            if (_hpPercentCache.Count > MAX_HP_ENTRIES)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatCache] HP cache overflow ({_hpPercentCache.Count}), cleared");
+                _hpPercentCache.Clear();
+            }
+            if (_hpPercentCache.Count > _peakHP) _peakHP = _hpPercentCache.Count;
+
             return hp;
         }
 
@@ -160,7 +191,17 @@ namespace CompanionAI_v3.GameInterface
             HitChanceMisses++;
             var result = CombatAPI.GetHitChance(ability, attacker, target);
             if (result != null)
+            {
                 _hitChanceCache[key] = result;
+
+                // ★ v3.13.0: 상한선 초과 방지
+                if (_hitChanceCache.Count > MAX_HITCHANCE_ENTRIES)
+                {
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[CombatCache] HitChance cache overflow ({_hitChanceCache.Count}), cleared");
+                    _hitChanceCache.Clear();
+                }
+                if (_hitChanceCache.Count > _peakHitChance) _peakHitChance = _hitChanceCache.Count;
+            }
             return result;
         }
 
@@ -206,6 +247,15 @@ namespace CompanionAI_v3.GameInterface
             TargetingMisses++;
             bool canUse = CombatAPI.CanUseAbilityOn(ability, target, out reason);
             _targetingCache[key] = (canUse, reason);
+
+            // ★ v3.13.0: 상한선 초과 방지
+            if (_targetingCache.Count > MAX_TARGETING_ENTRIES)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatCache] Targeting cache overflow ({_targetingCache.Count}), cleared");
+                _targetingCache.Clear();
+            }
+            if (_targetingCache.Count > _peakTargeting) _peakTargeting = _targetingCache.Count;
+
             return canUse;
         }
 
@@ -248,10 +298,10 @@ namespace CompanionAI_v3.GameInterface
                     ? (float)HitChanceHits / (HitChanceHits + HitChanceMisses) * 100f
                     : 0f;
 
-                Main.LogDebug($"[CombatCache] Cleared: Distance({distCount}, {distHitRate:F0}%), " +
-                             $"Targeting({targetCount}, {targetHitRate:F0}%), " +
-                             $"HP({hpCount}, {hpHitRate:F0}%), " +
-                             $"HitChance({hitChanceCount}, {hitChanceHitRate:F0}%)");
+                Main.LogDebug($"[CombatCache] Cleared: Distance({distCount}, peak={_peakDistance}, {distHitRate:F0}%), " +
+                             $"Targeting({targetCount}, peak={_peakTargeting}, {targetHitRate:F0}%), " +
+                             $"HP({hpCount}, peak={_peakHP}, {hpHitRate:F0}%), " +
+                             $"HitChance({hitChanceCount}, peak={_peakHitChance}, {hitChanceHitRate:F0}%)");
             }
 
             ResetStats();
@@ -377,6 +427,11 @@ namespace CompanionAI_v3.GameInterface
             HPMisses = 0;
             HitChanceHits = 0;
             HitChanceMisses = 0;
+            // ★ v3.13.0: 피크 추적 초기화
+            _peakDistance = 0;
+            _peakTargeting = 0;
+            _peakHP = 0;
+            _peakHitChance = 0;
         }
 
         #endregion

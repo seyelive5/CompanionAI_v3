@@ -156,16 +156,9 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // Phase 4.5: 위치 버프
+            // ★ v3.14.0: Phase 4.5 — 공통 위치 버프
             var usedPositionalBuffs = new HashSet<string>();
-            int positionalBuffCount = 0;
-            while (positionalBuffCount < MAX_POSITIONAL_BUFFS)
-            {
-                var positionalBuffAction = PlanPositionalBuff(situation, ref remainingAP, usedPositionalBuffs);
-                if (positionalBuffAction == null) break;
-                actions.Add(positionalBuffAction);
-                positionalBuffCount++;
-            }
+            ExecutePositionalBuffPhase(actions, situation, ref remainingAP, usedPositionalBuffs);
 
             // Phase 4.6: Stratagem
             var stratagemAction = PlanStratagem(situation, ref remainingAP);
@@ -402,62 +395,9 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // ★ v3.0.96: Phase 7.5: 공격 불가 시 남은 버프 사용
-            // ★ v3.1.10: PreAttackBuff, HeroicAct, RighteousFury 제외 (공격 없으면 무의미)
-            // ★ v3.8.98: 근접 MoveOnly 전략 시 fallback 버프 스킵
-            bool skipFallbackForMelee = !situation.PrefersRanged &&
-                tacticalEval?.ChosenStrategy == TacticalStrategy.MoveOnly &&
-                situation.HasLivingEnemies;
-
-            if (skipFallbackForMelee)
-            {
-                Main.Log($"[Support] Phase 7.5: Skipping fallback buffs (melee MoveOnly — save for post-move attack)");
-            }
-            else if (!didPlanAttack && remainingAP >= 1f && situation.AvailableBuffs.Count > 0)
-            {
-                Main.Log($"[Support] Phase 7.5: No attack possible, using remaining buffs (AP={remainingAP:F1})");
-
-                foreach (var buff in situation.AvailableBuffs)
-                {
-                    if (remainingAP < 1f) break;
-
-                    // ★ v3.1.10: 공격 전 버프는 공격이 없으면 의미 없음
-                    // ★ v3.5.22: TurnEnding, SpringAttack 능력도 폴백에서 제외
-                    var timing = AbilityDatabase.GetTiming(buff);
-                    if (timing == AbilityTiming.PreAttackBuff ||
-                        timing == AbilityTiming.HeroicAct ||
-                        timing == AbilityTiming.RighteousFury ||
-                        timing == AbilityTiming.TurnEnding)
-                    {
-                        if (Main.IsDebugEnabled) Main.LogDebug($"[Support] Phase 7.5: Skip {buff.Name} (timing={timing} not suitable for fallback)");
-                        continue;
-                    }
-
-                    // ★ v3.5.22: SpringAttack 능력은 조건 충족 시에만 TurnEnding에서 사용
-                    if (AbilityDatabase.IsSpringAttackAbility(buff))
-                    {
-                        if (Main.IsDebugEnabled) Main.LogDebug($"[Support] Phase 7.5: Skip {buff.Name} (SpringAttack - use in TurnEnding only)");
-                        continue;
-                    }
-
-                    float cost = CombatAPI.GetAbilityAPCost(buff);
-                    if (cost > remainingAP) continue;
-
-                    if (AllyStateCache.HasBuff(situation.Unit, buff)) continue;
-
-                    // ★ Self 또는 Ally 타겟 버프
-                    var bp = buff.Blueprint;
-                    if (bp?.CanTargetSelf != true && bp?.CanTargetFriends != true) continue;
-
-                    var target = new TargetWrapper(situation.Unit);
-                    string reason;
-                    if (CombatAPI.CanUseAbilityOn(buff, target, out reason))
-                    {
-                        remainingAP -= cost;
-                        actions.Add(PlannedAction.Buff(buff, situation.Unit, "Fallback buff - no attack available", cost));
-                        Main.Log($"[Support] Fallback buff: {buff.Name}");
-                    }
-                }
-            }
+            // ★ v3.14.0: Phase 7.5 — 공통 Fallback Buffs (Support: 자기 방어 우선, 아군 시도 안 함)
+            ExecuteFallbackBuffsPhase(actions, situation, ref remainingAP, didPlanAttack, tacticalEval,
+                tryAllyBuffFirst: false, includeFallbackDebuff: false);
 
             // ★ v3.5.35: Phase 8 (TurnEnding) → 맨 마지막으로 이동
             // TurnEnding 능력은 턴을 종료시키므로 다른 모든 행동 후에 계획해야 함

@@ -788,6 +788,9 @@ namespace CompanionAI_v3.Core
             // ★ v3.5.29: 전투 캐시 초기화 (거리/타겟팅)
             CombatCache.ClearAll();
 
+            // ★ v3.13.0: 접근 경로 캐시 턴별 정리 (이전 턴 경로는 적/아군 이동으로 부실)
+            MovementAPI.ClearApproachPathCache();
+
             // ★ v3.8.15: AI 패스파인딩 캐시 초기화 (스터터링 방지)
             MovementAPI.InvalidateAiPathCache();
 

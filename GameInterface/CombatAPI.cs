@@ -746,7 +746,11 @@ namespace CompanionAI_v3.GameInterface
                 var bp = ability.Blueprint;
                 return bp.CanTargetEnemies && !bp.CanTargetFriends;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsOffensiveAbility failed: {ex.Message}");
+                return false;
+            }
         }
 
         #endregion
@@ -767,7 +771,12 @@ namespace CompanionAI_v3.GameInterface
                 if (max <= 0) return 100f;
                 return (float)current / max * 100f;
             }
-            catch { return 100f; }
+            // ★ v3.13.0: 안전한 기본값 — 0f (부상으로 판단 → 방어적 행동 유도)
+            catch (Exception ex)
+            {
+                Main.LogWarning($"[CombatAPI] GetHPPercent failed for {unit?.CharacterName}: {ex.Message}");
+                return 0f;
+            }
         }
 
         /// <summary>
@@ -781,9 +790,15 @@ namespace CompanionAI_v3.GameInterface
             try
             {
                 // ★ Yellow Action Points = 액션 포인트 (능력/공격)
-                return unit.CombatState?.ActionPointsYellow ?? 3f;
+                // ★ v3.13.0: ?? 0f (기존 3f → AP 없으면 EndTurn이 안전)
+                return unit.CombatState?.ActionPointsYellow ?? 0f;
             }
-            catch { return 3f; }
+            // ★ v3.13.0: 안전한 기본값 — 0f (AP 없음 → EndTurn)
+            catch (Exception ex)
+            {
+                Main.LogWarning($"[CombatAPI] GetCurrentAP failed for {unit?.CharacterName}: {ex.Message}");
+                return 0f;
+            }
         }
 
         /// <summary>
@@ -798,21 +813,34 @@ namespace CompanionAI_v3.GameInterface
                 // ★ Blue Action Points = 이동 포인트 (Movement Points)
                 return unit.CombatState?.ActionPointsBlue ?? 0f;
             }
-            catch { return 0f; }
+            // ★ v3.13.0: 로깅 추가 (기본값 0f는 이미 안전)
+            catch (Exception ex)
+            {
+                Main.LogWarning($"[CombatAPI] GetCurrentMP failed for {unit?.CharacterName}: {ex.Message}");
+                return 0f;
+            }
         }
 
         public static bool CanMove(BaseUnitEntity unit)
         {
             if (unit == null) return false;
             try { return unit.State.CanMove; }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] CanMove failed for {unit?.CharacterName}: {ex.Message}");
+                return false;
+            }
         }
 
         public static bool CanAct(BaseUnitEntity unit)
         {
             if (unit == null) return false;
             try { return unit.State.CanActInTurnBased; }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] CanAct failed for {unit?.CharacterName}: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -826,7 +854,11 @@ namespace CompanionAI_v3.GameInterface
             {
                 return unit.Commands.Empty;
             }
-            catch { return true; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsCommandQueueEmpty failed for {unit?.CharacterName}: {ex.Message}");
+                return true;
+            }
         }
 
         /// <summary>
@@ -840,7 +872,11 @@ namespace CompanionAI_v3.GameInterface
             {
                 return unit.Commands.Empty && unit.State.CanActInTurnBased;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsReadyForNextAction failed for {unit?.CharacterName}: {ex.Message}");
+                return false;
+            }
         }
 
         public static float GetDistance(BaseUnitEntity from, BaseUnitEntity to)
@@ -851,7 +887,11 @@ namespace CompanionAI_v3.GameInterface
                 // ★ v3.8.66: 게임 API 기반 (SizeRect 반영) — 미터 단위
                 return (float)from.DistanceToInCells(to) * GridCellSize;
             }
-            catch { return float.MaxValue; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] GetDistance failed: {ex.Message}");
+                return float.MaxValue;
+            }
         }
 
         #endregion
@@ -1014,7 +1054,11 @@ namespace CompanionAI_v3.GameInterface
 
                 return false;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] HasRangedWeapon failed for {unit?.CharacterName}: {ex.Message}");
+                return false;
+            }
         }
 
         public static bool HasMeleeWeapon(BaseUnitEntity unit)
@@ -1030,7 +1074,11 @@ namespace CompanionAI_v3.GameInterface
 
                 return false;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] HasMeleeWeapon failed for {unit?.CharacterName}: {ex.Message}");
+                return false;
+            }
         }
 
         public static bool NeedsReloadAnyRanged(BaseUnitEntity unit)
@@ -1088,7 +1136,11 @@ namespace CompanionAI_v3.GameInterface
 
                 return weapon.CurrentAmmo;
             }
-            catch { return -1; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] GetCurrentAmmo failed for {unit?.CharacterName}: {ex.Message}");
+                return -1;
+            }
         }
 
         public static int GetMaxAmmo(BaseUnitEntity unit)
@@ -1102,7 +1154,11 @@ namespace CompanionAI_v3.GameInterface
 
                 return weapon.Blueprint?.WarhammerMaxAmmo ?? -1;
             }
-            catch { return -1; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] GetMaxAmmo failed for {unit?.CharacterName}: {ex.Message}");
+                return -1;
+            }
         }
 
         #endregion
@@ -1132,7 +1188,11 @@ namespace CompanionAI_v3.GameInterface
                 bool set1HasWeapon = sets[1]?.PrimaryHand?.HasItem == true;
                 return set0HasWeapon && set1HasWeapon;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] HasMultipleWeaponSets failed for {unit?.CharacterName}: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -1162,7 +1222,11 @@ namespace CompanionAI_v3.GameInterface
                 var weapon = sets[setIndex]?.PrimaryHand?.MaybeItem as ItemEntityWeapon;
                 return weapon?.Name;
             }
-            catch { return null; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] GetWeaponNameForSet failed for {unit?.CharacterName}: {ex.Message}");
+                return null;
+            }
         }
 
         /// <summary>
@@ -1183,7 +1247,11 @@ namespace CompanionAI_v3.GameInterface
                 if (weapon0 == null || weapon1 == null) return false;
                 return weapon0 == weapon1;
             }
-            catch { return true; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] AreBothWeaponSetsSame failed for {unit?.CharacterName}: {ex.Message}");
+                return true;
+            }
         }
 
         #endregion
@@ -1672,7 +1740,11 @@ namespace CompanionAI_v3.GameInterface
             {
                 return ability.CalculateActionPointCost();
             }
-            catch { return 1f; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] GetAbilityAPCost failed for {ability?.Name}: {ex.Message}");
+                return 1f;
+            }
         }
 
         /// <summary>
@@ -1695,7 +1767,11 @@ namespace CompanionAI_v3.GameInterface
                 // 쿨다운이지만 IsAvailable=true면 bonus usage 있음
                 return onlyOnCooldown && ability.IsAvailable;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] HasBonusUsage failed for {ability?.Name}: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -1849,7 +1925,11 @@ namespace CompanionAI_v3.GameInterface
                 // 일부 이동 기반 능력은 MP를 사용하지만, 현재는 ClearMPAfterUse만 고려
                 return 0f;
             }
-            catch { return 0f; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] GetAbilityMPCost failed for {ability?.Name}: {ex.Message}");
+                return 0f;
+            }
         }
 
         /// <summary>
@@ -1866,7 +1946,11 @@ namespace CompanionAI_v3.GameInterface
                 if (cached != null) return cached.ClearMPAfterUse;
                 return ability.ClearMPAfterUse;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] AbilityClearsMPAfterUse failed for {ability?.Name}: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -1881,7 +1965,10 @@ namespace CompanionAI_v3.GameInterface
                 if (caster?.Features?.DoNotResetMovementPointsOnAttacks ?? false)
                     return false;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] AbilityClearsMPAfterUse(caster) failed: {ex.Message}");
+            }
             return true;
         }
 
@@ -2312,7 +2399,12 @@ namespace CompanionAI_v3.GameInterface
             {
                 return Game.Instance?.TurnController?.VeilThicknessCounter?.Value ?? 0;
             }
-            catch { return 0; }
+            // ★ v3.13.0: 안전한 기본값 — VEIL_DANGER_THRESHOLD (위험 가정 → 사이킥 차단)
+            catch (Exception ex)
+            {
+                Main.LogWarning($"[CombatAPI] GetVeilThickness failed: {ex.Message}");
+                return VEIL_DANGER_THRESHOLD;
+            }
         }
 
         /// <summary>
@@ -2325,7 +2417,11 @@ namespace CompanionAI_v3.GameInterface
             {
                 return ability.Blueprint?.AbilityParamsSource == WarhammerAbilityParamsSource.PsychicPower;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsPsychicAbility failed for {ability?.Name}: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -2340,7 +2436,11 @@ namespace CompanionAI_v3.GameInterface
                 var bp = ability.Blueprint;
                 return bp != null && IsPsychicAbility(ability) && bp.VeilThicknessPointsToAdd >= 3;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsMajorPsychicAbility failed for {ability?.Name}: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -2356,7 +2456,11 @@ namespace CompanionAI_v3.GameInterface
                 int veilAdd = bp.VeilThicknessPointsToAdd;
                 return veilAdd > 0 && veilAdd < 3;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsMinorPsychicAbility failed for {ability?.Name}: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -2369,7 +2473,12 @@ namespace CompanionAI_v3.GameInterface
             {
                 return ability.Blueprint?.VeilThicknessPointsToAdd ?? 0;
             }
-            catch { return 0; }
+            // ★ v3.13.0: 안전한 기본값 — 3 (Major psychic 수준 → 사용 억제)
+            catch (Exception ex)
+            {
+                Main.LogWarning($"[CombatAPI] GetVeilIncrease failed for {ability?.Name}: {ex.Message}");
+                return 3;
+            }
         }
 
         /// <summary>
@@ -2511,7 +2620,12 @@ namespace CompanionAI_v3.GameInterface
             {
                 return unit.Health?.HitPointsLeft ?? 0;
             }
-            catch { return 0; }
+            // ★ v3.13.0: 안전한 기본값 — 1 (0은 "사망"으로 오판될 위험, 1은 "빈사")
+            catch (Exception ex)
+            {
+                Main.LogWarning($"[CombatAPI] GetActualHP failed for {unit?.CharacterName}: {ex.Message}");
+                return 1;
+            }
         }
 
         /// <summary>
@@ -2524,7 +2638,12 @@ namespace CompanionAI_v3.GameInterface
             {
                 return unit.Health?.MaxHitPoints ?? 0;
             }
-            catch { return 0; }
+            // ★ v3.13.0: 안전한 기본값 — 1 (0으로 나눔 방지, HP% 계산 안전)
+            catch (Exception ex)
+            {
+                Main.LogWarning($"[CombatAPI] GetActualMaxHP failed for {unit?.CharacterName}: {ex.Message}");
+                return 1;
+            }
         }
 
         /// <summary>
@@ -2538,7 +2657,11 @@ namespace CompanionAI_v3.GameInterface
             {
                 return unit.Blueprint.DifficultyType;
             }
-            catch { return UnitDifficultyType.Common; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] GetDifficultyType failed for {unit?.CharacterName}: {ex.Message}");
+                return UnitDifficultyType.Common;
+            }
         }
 
         /// <summary>
@@ -2587,7 +2710,11 @@ namespace CompanionAI_v3.GameInterface
                 // 최소 데미지로도 킬 가능
                 return minDamage >= hp;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] CanKillInOneHit failed: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -2607,7 +2734,11 @@ namespace CompanionAI_v3.GameInterface
                 // 최대 데미지 2번으로 킬 가능
                 return maxDamage * 2 >= hp;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] CanKillInTwoHits failed: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -2649,7 +2780,11 @@ namespace CompanionAI_v3.GameInterface
                 // 3타 이상 필요
                 return 0.1f;
             }
-            catch { return 0f; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] CalculateKillProbability failed: {ex.Message}");
+                return 0f;
+            }
         }
 
         /// <summary>
@@ -2978,7 +3113,12 @@ namespace CompanionAI_v3.GameInterface
                 }
                 return MOMENTUM_START;
             }
-            catch { return MOMENTUM_START; }
+            // ★ v3.13.0: 안전한 기본값 — 0 (모멘텀 불확실 시 Heroic Act 사용 안 함)
+            catch (Exception ex)
+            {
+                Main.LogWarning($"[CombatAPI] GetCurrentMomentum failed: {ex.Message}");
+                return 0;
+            }
         }
 
         /// <summary>
@@ -3143,7 +3283,11 @@ namespace CompanionAI_v3.GameInterface
 
                 return bp.Range == AbilityRange.Unlimited;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsUnlimitedRange failed for {ability?.Name}: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -3363,7 +3507,11 @@ namespace CompanionAI_v3.GameInterface
             {
                 return ability?.GetPatternSettings();
             }
-            catch { return null; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] GetPatternSettings failed for {ability?.Name}: {ex.Message}");
+                return null;
+            }
         }
 
         /// <summary>
@@ -3379,7 +3527,12 @@ namespace CompanionAI_v3.GameInterface
 
                 return ability?.Blueprint?.AoERadius ?? 0f;
             }
-            catch { return 0f; }
+            // ★ v3.13.0: 로깅 추가 (기본값 0f는 이미 보수적 — AoE 무시)
+            catch (Exception ex)
+            {
+                Main.LogWarning($"[CombatAPI] GetAoERadius failed for {ability?.Name}: {ex.Message}");
+                return 0f;
+            }
         }
 
         /// <summary>
@@ -3391,7 +3544,12 @@ namespace CompanionAI_v3.GameInterface
             {
                 return ability?.GetPatternSettings()?.Pattern?.Type;
             }
-            catch { return null; }
+            // ★ v3.13.0: 로깅 추가 (기본값 null은 이미 보수적 — 패턴 불명)
+            catch (Exception ex)
+            {
+                Main.LogWarning($"[CombatAPI] GetPatternType failed for {ability?.Name}: {ex.Message}");
+                return null;
+            }
         }
 
         /// <summary>
@@ -3403,7 +3561,11 @@ namespace CompanionAI_v3.GameInterface
             {
                 return ability?.GetPatternSettings()?.Targets ?? Kingmaker.UnitLogic.Abilities.Components.TargetType.Enemy;
             }
-            catch { return Kingmaker.UnitLogic.Abilities.Components.TargetType.Enemy; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] GetAoETargetType failed for {ability?.Name}: {ex.Message}");
+                return Kingmaker.UnitLogic.Abilities.Components.TargetType.Enemy;
+            }
         }
 
         /// <summary>
@@ -3430,7 +3592,11 @@ namespace CompanionAI_v3.GameInterface
                 // Blueprint AOE 반경 폴백
                 return bp.AoERadius > 0;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsPointTargetAbility failed for {ability?.Name}: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -3525,7 +3691,11 @@ namespace CompanionAI_v3.GameInterface
                     {
                         return pattern.IsDirectional;  // BlueprintAttackPattern.IsDirectional
                     }
-                    catch { return false; }
+                    catch (Exception ex)
+                    {
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] GetActualIsDirectional(custom) failed for {ability?.Name}: {ex.Message}");
+                        return false;
+                    }
                 }
 
                 // Non-Custom 패턴: m_Directional 필드 (Reflection)
@@ -3570,7 +3740,11 @@ namespace CompanionAI_v3.GameInterface
                 // AbilityCustomRam 컴포넌트 체크
                 return bp.GetComponent<Kingmaker.UnitLogic.Abilities.Components.AbilityCustomRam>() != null;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsRamAbility failed for {ability?.Name}: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -3600,7 +3774,11 @@ namespace CompanionAI_v3.GameInterface
 
                 return false;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsRamThroughAbility failed for {ability?.Name}: {ex.Message}");
+                return false;
+            }
         }
 
         #endregion
@@ -3627,7 +3805,11 @@ namespace CompanionAI_v3.GameInterface
                 // DangerousAoE로 분류된 능력만
                 return AbilityDatabase.IsDangerousAoE(ability);
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsSelfTargetedAoEAttack failed for {ability?.Name}: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -3654,7 +3836,11 @@ namespace CompanionAI_v3.GameInterface
 
                 return false;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsMeleeAoEAbility failed for {ability?.Name}: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -3688,7 +3874,11 @@ namespace CompanionAI_v3.GameInterface
 
                 return count;
             }
-            catch { return 0; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] CountAdjacentAllies failed for {unit?.CharacterName}: {ex.Message}");
+                return 0;
+            }
         }
 
         /// <summary>
@@ -3723,7 +3913,11 @@ namespace CompanionAI_v3.GameInterface
 
                 return count;
             }
-            catch { return 0; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] CountAdjacentEnemies failed for {unit?.CharacterName}: {ex.Message}");
+                return 0;
+            }
         }
 
         #endregion
@@ -4545,7 +4739,11 @@ namespace CompanionAI_v3.GameInterface
             {
                 return enemy.CombatState.LastTarget == target;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsTargeting failed: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -4671,7 +4869,11 @@ namespace CompanionAI_v3.GameInterface
             {
                 return unit.GetOptional<UnitPartSpringAttack>() != null;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] HasSpringAttackPart failed for {unit?.CharacterName}: {ex.Message}");
+                return false;
+            }
         }
 
         #endregion
@@ -4714,7 +4916,11 @@ namespace CompanionAI_v3.GameInterface
             {
                 return ability.Blueprint?.GetComponent<Kingmaker.UnitLogic.ActivatableAbilities.Restrictions.AbilityRestrictionStrategist>() != null;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsStrategistZoneAbility failed for {ability?.Name}: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -5037,7 +5243,10 @@ namespace CompanionAI_v3.GameInterface
                         return true;
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] HasPsychicAbilities failed for {unit?.CharacterName}: {ex.Message}");
+            }
             return false;
         }
 
@@ -5071,7 +5280,12 @@ namespace CompanionAI_v3.GameInterface
                 // 대형 유닛(2x2+)에서 center-to-center 대비 1~2타일 차이 보정
                 return (float)a.DistanceToInCells(b);
             }
-            catch { return float.MaxValue; }
+            // ★ v3.13.0: 로깅 추가 (기본값 MaxValue는 이미 보수적 — 도달 불가)
+            catch (Exception ex)
+            {
+                Main.LogWarning($"[CombatAPI] GetDistanceInTiles(unit,unit) failed: {ex.Message}");
+                return float.MaxValue;
+            }
         }
 
         /// <summary>
@@ -5088,7 +5302,12 @@ namespace CompanionAI_v3.GameInterface
                     position, new IntRect(0, 0, 0, 0),
                     unit.Position, unit.SizeRect);
             }
-            catch { return float.MaxValue; }
+            // ★ v3.13.0: 로깅 추가
+            catch (Exception ex)
+            {
+                Main.LogWarning($"[CombatAPI] GetDistanceInTiles(pos,unit) failed: {ex.Message}");
+                return float.MaxValue;
+            }
         }
 
         /// <summary>

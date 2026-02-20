@@ -12,6 +12,9 @@ namespace CompanionAI_v3.Core
     /// </summary>
     public class TurnPlan
     {
+        /// <summary>★ v3.13.0: 게임 AbilityData.UnavailabilityReasonType.NullTarget.ToString() 대응 상수</summary>
+        private const string REASON_NULL_TARGET = "NullTarget";
+
         #region Properties
 
         /// <summary>계획된 행동 큐</summary>
@@ -155,7 +158,7 @@ namespace CompanionAI_v3.Core
                     // stale 참조로 인한 NullTarget은 리플랜 사유가 아님
                     if (nextAction.IsFamiliarTarget)
                     {
-                        var nonTargetReasons = unavailableReasons.Where(r => r != "NullTarget").ToList();
+                        var nonTargetReasons = unavailableReasons.Where(r => r != REASON_NULL_TARGET).ToList();
                         if (nonTargetReasons.Count > 0)
                         {
                             string reasons = string.Join(", ", nonTargetReasons);

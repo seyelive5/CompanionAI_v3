@@ -412,6 +412,140 @@ namespace CompanionAI_v3.Planning.Plans
             return usedWarpRelay;
         }
 
+        /// <summary>
+        /// ★ v3.14.0: 공통 위치 버프 Phase — DPS/Tank/Support/Overseer 동일 while 루프
+        /// MAX_POSITIONAL_BUFFS 만큼 반복하며 PlanPositionalBuff 호출
+        /// </summary>
+        /// <returns>계획된 위치 버프 수</returns>
+        protected int ExecutePositionalBuffPhase(
+            List<PlannedAction> actions,
+            Situation situation,
+            ref float remainingAP,
+            HashSet<string> usedBuffGuids = null)
+        {
+            if (usedBuffGuids == null)
+                usedBuffGuids = new HashSet<string>();
+
+            int positionalBuffCount = 0;
+            while (positionalBuffCount < MAX_POSITIONAL_BUFFS && remainingAP >= 1f)
+            {
+                var positionalBuffAction = PlanPositionalBuff(situation, ref remainingAP, usedBuffGuids);
+                if (positionalBuffAction == null) break;
+                actions.Add(positionalBuffAction);
+                positionalBuffCount++;
+            }
+
+            return positionalBuffCount;
+        }
+
+        /// <summary>
+        /// ★ v3.14.0: 공통 Fallback Buffs Phase — 공격 불가 시 남은 버프 소진
+        /// DPS/Tank: tryAllyBuffFirst=true (아군 우선 시도)
+        /// Support: tryAllyBuffFirst=false (자기 방어 우선)
+        /// </summary>
+        /// <param name="tryAllyBuffFirst">true면 CanTargetFriends 아군 우선 시도</param>
+        /// <param name="includeFallbackDebuff">true면 공격 불가 시 디버프도 시도 (DPS)</param>
+        protected void ExecuteFallbackBuffsPhase(
+            List<PlannedAction> actions,
+            Situation situation,
+            ref float remainingAP,
+            bool didPlanAttack,
+            TacticalEvaluation tacticalEval,
+            bool tryAllyBuffFirst = true,
+            bool includeFallbackDebuff = false)
+        {
+            // ★ v3.8.98: 근접 MoveOnly 전략 시 fallback 버프 스킵
+            bool skipFallbackForMelee = !situation.PrefersRanged &&
+                tacticalEval?.ChosenStrategy == TacticalStrategy.MoveOnly &&
+                situation.HasLivingEnemies;
+
+            if (skipFallbackForMelee)
+            {
+                Main.Log($"[{RoleName}] Fallback buffs: Skipping (melee MoveOnly — save for post-move attack)");
+            }
+            else if (!didPlanAttack && remainingAP >= 1f && situation.AvailableBuffs.Count > 0)
+            {
+                Main.Log($"[{RoleName}] Fallback buffs: No attack possible, using remaining buffs (AP={remainingAP:F1})");
+
+                foreach (var buff in situation.AvailableBuffs)
+                {
+                    if (remainingAP < 1f) break;
+
+                    // 공격 전 버프는 공격이 없으면 의미 없음
+                    var timing = AbilityDatabase.GetTiming(buff);
+                    if (timing == AbilityTiming.PreAttackBuff ||
+                        timing == AbilityTiming.HeroicAct ||
+                        timing == AbilityTiming.RighteousFury ||
+                        timing == AbilityTiming.TurnEnding)
+                    {
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Fallback buffs: Skip {buff.Name} (timing={timing})");
+                        continue;
+                    }
+
+                    if (AbilityDatabase.IsSpringAttackAbility(buff))
+                    {
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Fallback buffs: Skip {buff.Name} (SpringAttack)");
+                        continue;
+                    }
+
+                    float cost = CombatAPI.GetAbilityAPCost(buff);
+                    if (cost > remainingAP) continue;
+
+                    if (AllyStateCache.HasBuff(situation.Unit, buff)) continue;
+
+                    var bp = buff.Blueprint;
+                    if (bp?.CanTargetSelf != true && bp?.CanTargetFriends != true) continue;
+
+                    // 아군 우선 시도 (DPS/Tank)
+                    bool usedOnAlly = false;
+                    if (tryAllyBuffFirst && bp?.CanTargetFriends == true && situation.Allies != null)
+                    {
+                        foreach (var ally in situation.Allies)
+                        {
+                            if (ally == null || ally.LifeState.IsDead || ally == situation.Unit) continue;
+                            if (AllyStateCache.HasBuff(ally, buff)) continue;
+                            if (!CombatAPI.NeedsBuffRefresh(ally, buff)) continue;
+
+                            var allyTarget = new TargetWrapper(ally);
+                            string allyReason;
+                            if (CombatAPI.CanUseAbilityOn(buff, allyTarget, out allyReason))
+                            {
+                                remainingAP -= cost;
+                                actions.Add(PlannedAction.Buff(buff, ally, $"Fallback buff ally: {buff.Name}", cost));
+                                Main.Log($"[{RoleName}] Fallback buff (ally): {buff.Name} -> {ally.CharacterName}");
+                                usedOnAlly = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!usedOnAlly)
+                    {
+                        var target = new TargetWrapper(situation.Unit);
+                        string reason;
+                        if (CombatAPI.CanUseAbilityOn(buff, target, out reason))
+                        {
+                            remainingAP -= cost;
+                            actions.Add(PlannedAction.Buff(buff, situation.Unit, "Fallback buff - no attack available", cost));
+                            Main.Log($"[{RoleName}] Fallback buff: {buff.Name}");
+                        }
+                    }
+                }
+            }
+
+            // DPS 전용: 공격 불가 시 유틸리티 디버프
+            if (includeFallbackDebuff && !didPlanAttack && remainingAP >= 1f
+                && situation.AvailableDebuffs.Count > 0 && situation.NearestEnemy != null)
+            {
+                var debuffAction = PlanDebuff(situation, situation.NearestEnemy, ref remainingAP);
+                if (debuffAction != null)
+                {
+                    actions.Add(debuffAction);
+                    Main.Log($"[{RoleName}] Fallback debuff: {debuffAction.Ability?.Name}");
+                }
+            }
+        }
+
         #endregion
 
         #region Attack - Delegates to AttackPlanner

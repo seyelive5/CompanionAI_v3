@@ -364,17 +364,11 @@ namespace CompanionAI_v3.Planning.Plans
             // ══════════════════════════════════════════════════════════════
             // Phase 4: Support Buffs (위치 버프 등)
             // ══════════════════════════════════════════════════════════════
+            // ★ v3.14.0: Phase 4 — 공통 위치 버프
             var usedBuffGuids = new HashSet<string>();
-            int positionalBuffCount = 0;
-            while (positionalBuffCount < MAX_POSITIONAL_BUFFS && remainingAP >= 1f)
-            {
-                var positionalBuff = PlanPositionalBuff(situation, ref remainingAP, usedBuffGuids);
-                if (positionalBuff == null) break;
-
-                actions.Add(positionalBuff);
-                positionalBuffCount++;
-                Main.Log($"[Overseer] Phase 4: Positional Buff #{positionalBuffCount}");
-            }
+            int positionalBuffCount = ExecutePositionalBuffPhase(actions, situation, ref remainingAP, usedBuffGuids);
+            if (positionalBuffCount > 0)
+                Main.Log($"[Overseer] Phase 4: {positionalBuffCount} Positional Buffs planned");
 
             // Stratagem
             var stratagemAction = PlanStratagem(situation, ref remainingAP);
