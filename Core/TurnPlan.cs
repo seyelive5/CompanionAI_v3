@@ -334,6 +334,22 @@ namespace CompanionAI_v3.Core
         /// </summary>
         public void Cancel(string reason)
         {
+            // ★ v3.11.2: 미실행 액션의 예약 해제 (stale reservation 방지)
+            // 플랜 취소 시 남은 큐의 도발/힐 예약을 해제하여 다른 유닛이 사용 가능하게 함
+            foreach (var action in _actionQueue)
+            {
+                if (action.Type == ActionType.Heal)
+                {
+                    var target = action.Target?.Entity as BaseUnitEntity;
+                    if (target != null)
+                        TeamBlackboard.Instance.ReleaseHeal(target);
+                }
+                else if (action.ReservedTarget != null)
+                {
+                    TeamBlackboard.Instance.ReleaseTaunt(action.ReservedTarget);
+                }
+            }
+
             Main.Log($"[TurnPlan] Cancelled: {reason}");
             _actionQueue.Clear();
         }

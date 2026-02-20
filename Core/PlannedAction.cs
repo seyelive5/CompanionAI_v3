@@ -66,6 +66,13 @@ namespace CompanionAI_v3.Core
         /// </summary>
         public int WeaponSetIndex { get; set; } = -1;
 
+        /// <summary>
+        /// ★ v3.11.2: 이 액션이 성공 시 보호하는 예약 타겟
+        /// 도발: ReserveTaunt(NearestEnemy) 시 해당 적의 참조 저장
+        /// 실행 실패 시 TeamBlackboard.ReleaseTaunt() 호출에 사용
+        /// </summary>
+        public BaseUnitEntity ReservedTarget { get; set; }
+
         /// <summary>실행 완료 여부</summary>
         public bool IsExecuted { get; set; }
 

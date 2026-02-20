@@ -118,24 +118,8 @@ namespace CompanionAI_v3.Planning.Plans
 
         #region Movement - Delegates to MovementPlanner
 
-        protected PlannedAction PlanMoveOrGapCloser(Situation situation, ref float remainingAP)
-            => MovementPlanner.PlanMoveOrGapCloser(situation, ref remainingAP, RoleName);
-
-        // ★ v3.0.89: forceMove 파라미터 오버로드 추가
-        protected PlannedAction PlanMoveOrGapCloser(Situation situation, ref float remainingAP, bool forceMove)
-            => MovementPlanner.PlanMoveOrGapCloser(situation, ref remainingAP, RoleName, forceMove);
-
-        // ★ v3.1.00: bypassCanMoveCheck 파라미터 오버로드 추가
-        // MP 회복 능력 계획 후 예측 MP 기반으로 이동 가능할 때 사용
-        protected PlannedAction PlanMoveOrGapCloser(Situation situation, ref float remainingAP, bool forceMove, bool bypassCanMoveCheck)
-            => MovementPlanner.PlanMoveOrGapCloser(situation, ref remainingAP, RoleName, forceMove, bypassCanMoveCheck);
-
-        // ★ v3.1.01: predictedMP 파라미터 오버로드 추가
-        // MovementAPI에 예측 MP를 전달하여 reachable tiles 계산에 사용
-        protected PlannedAction PlanMoveOrGapCloser(Situation situation, ref float remainingAP, bool forceMove, bool bypassCanMoveCheck, float predictedMP)
-            => MovementPlanner.PlanMoveOrGapCloser(situation, ref remainingAP, RoleName, forceMove, bypassCanMoveCheck, predictedMP);
-
         // ★ v3.8.44: AttackPhaseContext 전달 - 능력 사거리 기반 이동 위치 계산
+        // ★ v3.11.2: 미사용 오버로드 4개 제거 (0~4-param) — 6-param 버전만 유지
         protected PlannedAction PlanMoveOrGapCloser(Situation situation, ref float remainingAP, bool forceMove, bool bypassCanMoveCheck, float predictedMP, AttackPhaseContext attackContext)
             => MovementPlanner.PlanMoveOrGapCloser(situation, ref remainingAP, RoleName, forceMove, bypassCanMoveCheck, predictedMP, attackContext);
 

@@ -9,6 +9,7 @@ using CompanionAI_v3.Analysis;
 using CompanionAI_v3.Planning;
 using CompanionAI_v3.Execution;
 using CompanionAI_v3.GameInterface;
+using CompanionAI_v3.Data;  // ★ v3.11.2: AbilityDatabase.IsTaunt
 
 namespace CompanionAI_v3.Core
 {
@@ -47,9 +48,6 @@ namespace CompanionAI_v3.Core
 
         /// <summary>대기 중인 이동 목적지 (유닛별)</summary>
         private readonly Dictionary<string, UnityEngine.Vector3> _pendingMoveDestinations = new Dictionary<string, UnityEngine.Vector3>();
-
-        /// <summary>턴 종료 결정된 유닛 (안전장치용 - v3.0.72부터 실제 사용 안 함)</summary>
-        private readonly HashSet<string> _pendingEndTurn = new HashSet<string>();
 
         /// <summary>★ v3.5.00: 마지막으로 처리한 라운드 (TeamBlackboard.OnRoundStart 호출용)</summary>
         private int _lastProcessedRound = -1;
@@ -291,7 +289,6 @@ namespace CompanionAI_v3.Core
         /// <summary>
         /// ★ v3.5.36: 턴 시작 전 검증 및 준비
         /// - 새 턴 시 stale 데이터 정리
-        /// - pendingEndTurn 체크
         /// - AP=0 안전장치
         /// </summary>
         /// <returns>null이면 계속 진행, ExecutionResult면 즉시 반환</returns>
@@ -302,22 +299,7 @@ namespace CompanionAI_v3.Core
             // 새 턴 시작 시 이전 턴의 stale 데이터 정리
             if (IsGameTurnStart(unit))
             {
-                if (_pendingEndTurn.Contains(unitId))
-                {
-                    Main.Log($"[Orchestrator] {unitName}: New turn started - clearing stale pendingEndTurn");
-                    _pendingEndTurn.Remove(unitId);
-                }
                 _turnStates.Remove(unitId);
-            }
-
-            // 이미 턴 종료가 결정되었으면 반복 처리 방지
-            bool isPending = _pendingEndTurn.Contains(unitId);
-            Main.LogDebug($"[Orchestrator] {unitName}: pendingEndTurn check - isPending={isPending}, setCount={_pendingEndTurn.Count}");
-
-            if (isPending)
-            {
-                Main.Log($"[Orchestrator] {unitName}: Already pending end turn - skipping");
-                return ExecutionResult.EndTurn("Already pending end turn");
             }
 
             // 턴 상태 가져오기 또는 생성
@@ -506,6 +488,9 @@ namespace CompanionAI_v3.Core
             // 실패 처리
             if (result.Type == ResultType.Failure)
             {
+                // ★ v3.11.2: 실패 시 예약 해제 — stale reservation 방지
+                ReleaseReservationsOnFailure(nextAction);
+
                 return HandleExecutionFailure(unitName, turnState, result);
             }
 
@@ -631,6 +616,29 @@ namespace CompanionAI_v3.Core
             Main.LogWarning($"[Orchestrator] {unitName}: All recovery paths exhausted ({errorType}: {result.Reason}, FallbackReplans={turnState.FallbackReplanCount}) - ending turn");
             turnState.Plan?.Cancel("All recovery exhausted");
             return ExecutionResult.EndTurn($"Execution failed: {result.Reason}");
+        }
+
+        /// <summary>
+        /// ★ v3.11.2: 행동 실패 시 TeamBlackboard 예약 해제
+        /// 도발 또는 힐 액션이 실패하면 다른 유닛이 해당 타겟을 예약할 수 있도록 해제
+        /// - 힐: action.Target == 예약 대상 (동일)
+        /// - 도발: action.Target ≠ 예약 대상 (self/ally/point) → ReservedTarget 사용
+        /// </summary>
+        private void ReleaseReservationsOnFailure(PlannedAction action)
+        {
+            if (action == null) return;
+
+            if (action.Type == ActionType.Heal)
+            {
+                var healTarget = action.Target?.Entity as BaseUnitEntity;
+                if (healTarget != null)
+                    TeamBlackboard.Instance.ReleaseHeal(healTarget);
+            }
+            else if (action.ReservedTarget != null)
+            {
+                // 도발: 예약 대상은 NearestEnemy이므로 ReservedTarget 필드 사용
+                TeamBlackboard.Instance.ReleaseTaunt(action.ReservedTarget);
+            }
         }
 
         #endregion
@@ -768,7 +776,6 @@ namespace CompanionAI_v3.Core
 
             // 이전 턴 상태 정리
             _turnStates.Remove(unitId);
-            _pendingEndTurn.Remove(unitId);
             _pendingMoveDestinations.Remove(unitId);
 
             // 능력 사용 추적 초기화
@@ -842,7 +849,6 @@ namespace CompanionAI_v3.Core
             }
 
             // ★ 턴 종료 상태 정리
-            _pendingEndTurn.Remove(unitId);
             _pendingMoveDestinations.Remove(unitId);
 
             // ★ v3.9.02: 게임 AI 타임아웃 복원
@@ -857,7 +863,6 @@ namespace CompanionAI_v3.Core
             Main.Log("[Orchestrator] Combat ended - clearing all turn states");
             _turnStates.Clear();
             _currentUnitId = null;
-            _pendingEndTurn.Clear();
             _pendingMoveDestinations.Clear();
             _lastProcessedRound = -1;  // ★ v3.5.00: 라운드 추적 초기화
             Planning.TurnPlanner.ClearDetectedRolesCache();  // ★ v3.1.15: 역할 감지 캐시 정리
@@ -986,35 +991,6 @@ namespace CompanionAI_v3.Core
         public bool HasPendingMoveDestination(string unitId)
         {
             return _pendingMoveDestinations.ContainsKey(unitId);
-        }
-
-        #endregion
-
-        #region Pending End Turn
-
-        /// <summary>
-        /// 턴 종료 상태 설정 (FindBetterPlace에서 체크)
-        /// </summary>
-        public void SetPendingEndTurn(string unitId)
-        {
-            _pendingEndTurn.Add(unitId);
-            Main.LogDebug($"[Orchestrator] Pending end turn set for {unitId}");
-        }
-
-        /// <summary>
-        /// 턴 종료가 예정되어 있는지 확인
-        /// </summary>
-        public bool IsPendingEndTurn(string unitId)
-        {
-            return _pendingEndTurn.Contains(unitId);
-        }
-
-        /// <summary>
-        /// 턴 종료 상태 해제
-        /// </summary>
-        public void ClearPendingEndTurn(string unitId)
-        {
-            _pendingEndTurn.Remove(unitId);
         }
 
         #endregion

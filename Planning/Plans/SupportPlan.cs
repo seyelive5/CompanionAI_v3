@@ -197,14 +197,13 @@ namespace CompanionAI_v3.Planning.Plans
 
             // Phase 2: 아군 힐 (사용자 설정 + Confidence 보정)
             // ★ v3.2.15: TeamBlackboard 기반 힐 대상 선택 (팀 전체 최적화)
-            // ★ v3.2.20: 신뢰도가 낮으면 더 빨리 힐, 높으면 늦게 힐
+            // ★ v3.11.2: Curve 기반 연속 보정 (기존 3단계 계단식 -20/0/+20 대체)
+            // defenseNeed: 0.3(압도) ~ 1.5(절망), 1.0 기준 → 0 수정 없음
             // ★ v3.9.46: HealAtHPPercent 사용자 설정 연동 (UI 슬라이더 20-80%)
-            float confidence = GetTeamConfidence();
+            float defenseNeed = GetConfidenceDefenseNeed();  // 0.3 ~ 1.5
             int userHealSetting = situation.CharacterSettings?.HealAtHPPercent ?? 50;
-            // 사용자 설정값 기반 + Confidence 보정 (-20 ~ +20)
-            float confidenceModifier = confidence > 0.7f ? -20f :   // 높은 신뢰도: 좀 더 보수적
-                                       confidence > 0.3f ? 0f :     // 보통: 설정값 그대로
-                                                           20f;    // 낮은 신뢰도: 좀 더 적극적
+            // 사용자 설정값 기반 + Curve 연속 보정 (~-21 ~ +15)
+            float confidenceModifier = (defenseNeed - 1.0f) * 30f;
             float healThreshold = Math.Max(20f, Math.Min(80f, userHealSetting + confidenceModifier));
 
             // ★ v3.7.12: Vitality Signal (Servo-Skull AoE 힐) - 개별 힐보다 우선

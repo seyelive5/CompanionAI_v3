@@ -172,9 +172,10 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // Phase 2: 방어 자세 (Confidence 기반 결정)
-            // ★ v3.2.20: 신뢰도가 낮으면(<0.5) 방어 자세 필수
-            float confidence = GetTeamConfidence();
-            bool needDefense = confidence < 0.5f;
+            // ★ v3.11.2: Curve 기반 연속 판단 (기존 confidence < 0.5f 이진 임계값 대체)
+            // defenseNeed > 1.0 → 방어 필요 (confidence ~0.5 이하에서 부드럽게 전환)
+            float defenseNeed = GetConfidenceDefenseNeed();  // 0.3 ~ 1.5
+            bool needDefense = defenseNeed > 1.0f;
 
             // ★ v3.8.86: ClearMP 방어 자세는 이동 필요 시 Phase 8.9로 연기
             bool tankNeedsMovement = situation.NeedsReposition ||
@@ -186,12 +187,12 @@ namespace CompanionAI_v3.Planning.Plans
                 if (defenseAction != null)
                 {
                     actions.Add(defenseAction);
-                    if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 2: Defense stance (confidence={confidence:F2} < 0.5)");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 2: Defense stance (defenseNeed={defenseNeed:F2} > 1.0)");
                 }
             }
             else if (!needDefense && !situation.HasPerformedFirstAction)
             {
-                if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 2: Skipping defense stance (confidence={confidence:F2} >= 0.5)");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 2: Skipping defense stance (defenseNeed={defenseNeed:F2} <= 1.0)");
             }
 
             // Phase 3: 기타 선제적 버프
@@ -281,10 +282,11 @@ namespace CompanionAI_v3.Planning.Plans
                             remainingAP -= apCost;
 
                             // ★ v3.8.20: AllyTarget 도발 (FightMe 등) - 아군 주변 적 도발
+                            PlannedAction tauntAction;
                             if (bestOption.IsAllyTargetTaunt && bestOption.TargetAlly != null)
                             {
-                                actions.Add(PlannedAction.Buff(bestOption.Ability, bestOption.TargetAlly,
-                                    $"AllyTaunt - protecting {bestOption.TargetAlly.CharacterName} from {bestOption.EnemiesAffected} enemies", apCost));
+                                tauntAction = PlannedAction.Buff(bestOption.Ability, bestOption.TargetAlly,
+                                    $"AllyTaunt - protecting {bestOption.TargetAlly.CharacterName} from {bestOption.EnemiesAffected} enemies", apCost);
                                 Main.Log($"[Tank] AllyTaunt: {bestOption.Ability.Name} -> {bestOption.TargetAlly.CharacterName}");
                             }
                             else if (CombatAPI.IsPointTargetAbility(bestOption.Ability))
@@ -292,16 +294,20 @@ namespace CompanionAI_v3.Planning.Plans
                                 // ★ v3.1.26: AOE 도발 - TargetPoint 사용 (적 중심점)
                                 // Position = 캐스터 이동 위치, TargetPoint = 시전 타겟 위치
                                 // CanTargetSelf=false인 스킬의 경우 적 중심점을 타겟으로 지정
-                                actions.Add(PlannedAction.PositionalBuff(
+                                tauntAction = PlannedAction.PositionalBuff(
                                     bestOption.Ability, bestOption.TargetPoint,
-                                    $"AOE Taunt - {bestOption.EnemiesAffected} enemies ({bestOption.EnemiesTargetingAllies} targeting allies)", apCost));
+                                    $"AOE Taunt - {bestOption.EnemiesAffected} enemies ({bestOption.EnemiesTargetingAllies} targeting allies)", apCost);
                             }
                             else
                             {
                                 // 단일 타겟 도발: 자신에게 시전 (Self-Target 도발)
-                                actions.Add(PlannedAction.Buff(bestOption.Ability, situation.Unit,
-                                    $"Taunt - protecting {bestOption.EnemiesTargetingAllies} allies from threats", apCost));
+                                tauntAction = PlannedAction.Buff(bestOption.Ability, situation.Unit,
+                                    $"Taunt - protecting {bestOption.EnemiesTargetingAllies} allies from threats", apCost);
                             }
+
+                            // ★ v3.11.2: 예약 타겟 추적 (실패 시 ReleaseTaunt에 사용)
+                            tauntAction.ReservedTarget = primaryTauntTarget;
+                            actions.Add(tauntAction);
                         }
                     }
                 }

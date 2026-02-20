@@ -718,6 +718,28 @@ namespace CompanionAI_v3.Core
         }
 
         /// <summary>
+        /// ★ v3.11.2: 도발 예약 해제 (실행 실패 시 호출)
+        /// </summary>
+        public void ReleaseTaunt(BaseUnitEntity target)
+        {
+            if (target == null) return;
+            string id = target.UniqueId ?? target.CharacterName ?? "unknown";
+            if (_reservedTauntTargets.Remove(id))
+                Main.Log($"[Blackboard] Taunt released: {target.CharacterName}");
+        }
+
+        /// <summary>
+        /// ★ v3.11.2: 힐 예약 해제 (실행 실패 시 호출)
+        /// </summary>
+        public void ReleaseHeal(BaseUnitEntity target)
+        {
+            if (target == null) return;
+            string id = target.UniqueId ?? target.CharacterName ?? "unknown";
+            if (_reservedHealTargets.Remove(id))
+                Main.Log($"[Blackboard] Heal released: {target.CharacterName}");
+        }
+
+        /// <summary>
         /// 모든 예약 초기화 (라운드 시작 시)
         /// </summary>
         public void ClearReservations()

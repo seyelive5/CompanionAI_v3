@@ -487,10 +487,11 @@ namespace CompanionAI_v3.Planning.Plans
                 }
                 else
                 {
-                    // 전략 없거나 버프 비추천 — 기존 confidence 체크
-                    float confidence = GetTeamConfidence();
-                    bool veryConfident = confidence > 0.75f;
-                    if (!veryConfident)
+                    // ★ v3.11.2: 전략 없거나 버프 비추천 — Curve 기반 연속 판단
+                    // 기존: confidence > 0.75f 이진 임계값 → 버프 스킵
+                    // 개선: aggression > 1.2f (confidence ~0.7+에서 부드럽게 전환)
+                    float aggression = GetConfidenceAggression();  // 0.3 ~ 1.5
+                    if (aggression <= 1.2f)
                     {
                         var buffAction = PlanAttackBuffWithReservation(situation, ref remainingAP, reservedAP);
                         if (buffAction != null)
@@ -500,7 +501,7 @@ namespace CompanionAI_v3.Planning.Plans
                     }
                     else
                     {
-                        if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 4: Skipping buff (no strategy recommendation, confidence={confidence:F2} > 0.75)");
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 4: Skipping buff (no strategy recommendation, aggression={aggression:F2} > 1.2)");
                     }
                 }
             }

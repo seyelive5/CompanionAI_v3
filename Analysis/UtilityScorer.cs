@@ -22,6 +22,13 @@ namespace CompanionAI_v3.Analysis
     /// </summary>
     public static class UtilityScorer
     {
+        /// <summary>
+        /// ★ v3.11.2: 사용 불가/무효 행동의 가드값
+        /// 정상 점수(양수/소수 음수)와 명확히 구분되는 극단값
+        /// 기존 -1000f 매직넘버를 의미 있는 상수로 대체
+        /// </summary>
+        public const float SCORE_IMPOSSIBLE = float.MinValue;
+
         #region Combat Phase Detection
 
         /// <summary>
@@ -80,7 +87,7 @@ namespace CompanionAI_v3.Analysis
         /// </summary>
         public static float ScoreBuff(AbilityData buff, Situation situation)
         {
-            if (buff == null) return -1000f;
+            if (buff == null) return SCORE_IMPOSSIBLE;
 
             float score = 50f;  // 기본 점수
 
@@ -130,7 +137,7 @@ namespace CompanionAI_v3.Analysis
                     bool hasAvailableAttacks = situation.AvailableAttacks != null && situation.AvailableAttacks.Count > 0;
                     if (!hasAvailableAttacks)
                     {
-                        score = -1000f;  // 사용 불가
+                        score = SCORE_IMPOSSIBLE;  // 사용 불가
                     }
                     else if (situation.HasHittableEnemies)
                     {
@@ -147,7 +154,7 @@ namespace CompanionAI_v3.Analysis
                     bool hasAttacksForHeroic = situation.AvailableAttacks != null && situation.AvailableAttacks.Count > 0;
                     if (!hasAttacksForHeroic)
                     {
-                        score = -1000f;
+                        score = SCORE_IMPOSSIBLE;
                     }
                     else
                     {
@@ -163,7 +170,7 @@ namespace CompanionAI_v3.Analysis
                     bool hasAttacksForFury = situation.AvailableAttacks != null && situation.AvailableAttacks.Count > 0;
                     if (!hasAttacksForFury)
                     {
-                        score = -1000f;
+                        score = SCORE_IMPOSSIBLE;
                     }
                     else if (situation.HasHittableEnemies)
                     {
@@ -506,7 +513,7 @@ namespace CompanionAI_v3.Analysis
         /// </summary>
         public static float ScoreAttack(AbilityData attack, BaseUnitEntity target, Situation situation)
         {
-            if (attack == null || target == null) return -1000f;
+            if (attack == null || target == null) return SCORE_IMPOSSIBLE;
 
             float score = 50f;  // 기본 점수
 
@@ -784,7 +791,7 @@ namespace CompanionAI_v3.Analysis
         /// </summary>
         public static float ScoreTarget(BaseUnitEntity target, Situation situation)
         {
-            if (target == null || target.LifeState.IsDead) return -1000f;
+            if (target == null || target.LifeState.IsDead) return SCORE_IMPOSSIBLE;
 
             float score = 50f;  // 기본 점수
 
@@ -915,7 +922,7 @@ namespace CompanionAI_v3.Analysis
         /// </summary>
         public static float ScoreHeal(AbilityData heal, BaseUnitEntity target, Situation situation)
         {
-            if (heal == null || target == null) return -1000f;
+            if (heal == null || target == null) return SCORE_IMPOSSIBLE;
 
             float score = 0f;
 
