@@ -218,6 +218,200 @@ namespace CompanionAI_v3.Planning.Plans
             }
         }
 
+        /// <summary>
+        /// ★ v3.12.0: 공통 초기 Phase 실행 (Phase 0 ~ 1.5)
+        /// Phase 0: Ultimate (잠재력 초월) — early return 가능
+        /// Phase 0.5: AoE 대피 — early return 가능
+        /// Phase 1: 긴급 자기 힐 — early return 가능
+        /// Phase 1.5: 재장전 — actions에 추가만 (early return 없음)
+        /// </summary>
+        /// <returns>early return이 필요하면 TurnPlan, 아니면 null (계속 진행)</returns>
+        protected TurnPlan ExecuteCommonEarlyPhases(
+            List<PlannedAction> actions,
+            Situation situation,
+            ref float remainingAP)
+        {
+            // Phase 0: Ultimate (잠재력 초월)
+            if (CombatAPI.HasFreeUltimateBuff(situation.Unit))
+            {
+                var ultimateAction = PlanUltimate(situation, ref remainingAP);
+                if (ultimateAction != null)
+                {
+                    actions.Add(ultimateAction);
+                    return new TurnPlan(actions, TurnPriority.Critical,
+                        $"{RoleName} ultimate (Transcend Potential)");
+                }
+                Main.Log($"[{RoleName}] Ultimate failed during Transcend Potential - ending turn");
+                actions.Add(PlannedAction.EndTurn($"{RoleName} no ultimate available"));
+                return new TurnPlan(actions, TurnPriority.EndTurn,
+                    $"{RoleName} ultimate failed (Transcend Potential)");
+            }
+
+            // Phase 0.5: AoE Evacuation
+            if (situation.NeedsAoEEvacuation && situation.CanMove)
+            {
+                var evacAction = PlanAoEEvacuation(situation);
+                if (evacAction != null)
+                {
+                    actions.Add(evacAction);
+                    return new TurnPlan(actions, TurnPriority.Emergency,
+                        $"{RoleName} AoE evacuation");
+                }
+            }
+
+            // Phase 1: Emergency Heal
+            var healAction = PlanEmergencyHeal(situation, ref remainingAP);
+            if (healAction != null)
+            {
+                actions.Add(healAction);
+                return new TurnPlan(actions, TurnPriority.Emergency,
+                    $"{RoleName} emergency heal");
+            }
+
+            // Phase 1.5: Reload (early return 없음 — 이후 Phase 계속 진행)
+            var reloadAction = PlanReload(situation, ref remainingAP);
+            if (reloadAction != null)
+                actions.Add(reloadAction);
+
+            return null; // 계속 진행
+        }
+
+        /// <summary>
+        /// ★ v3.12.0: 공통 Familiar 능력 Phase (Phase 1.75)
+        /// DPS/Tank/Support에서 동일한 사역마 능력 시퀀스 실행
+        /// supportMode=true: 추가 보호 능력(Protect, Screen) + 키스톤 GUID 추적
+        /// </summary>
+        /// <param name="supportMode">true면 Support 전용 능력 + GUID 추적 활성화</param>
+        /// <param name="usedKeystoneGuids">supportMode=true일 때 사용된 키스톤 GUID 반환</param>
+        /// <returns>usedWarpRelay 여부</returns>
+        protected bool ExecuteFamiliarSupportPhase(
+            List<PlannedAction> actions,
+            Situation situation,
+            ref float remainingAP,
+            bool supportMode,
+            out HashSet<string> usedKeystoneGuids)
+        {
+            usedKeystoneGuids = supportMode ? new HashSet<string>() : null;
+            bool usedWarpRelay = false;
+
+            if (!situation.HasFamiliar) return false;
+
+            // 1. Servo-Skull Priority Signal (선제 버프)
+            var prioritySignal = PlanFamiliarPrioritySignal(situation, ref remainingAP);
+            if (prioritySignal != null)
+                actions.Add(prioritySignal);
+
+            // 2. Mastiff Fast (Apprehend 전 이동 버프)
+            var mastiffFast = PlanFamiliarFast(situation, ref remainingAP);
+            if (mastiffFast != null)
+                actions.Add(mastiffFast);
+
+            // 3. Relocate: 사역마 최적 위치로 이동 (Mastiff 제외)
+            var familiarRelocate = PlanFamiliarRelocate(situation, ref remainingAP);
+            if (familiarRelocate != null)
+                actions.Add(familiarRelocate);
+
+            // 4. 키스톤 버프/디버프 루프 (Servo-Skull/Raven)
+            var keystoneActions = PlanAllFamiliarKeystoneBuffs(situation, ref remainingAP);
+            if (keystoneActions.Count > 0)
+            {
+                actions.AddRange(keystoneActions);
+                Main.Log($"[{RoleName}] Phase 1.75: {keystoneActions.Count} keystone abilities planned");
+                usedWarpRelay = situation.FamiliarType == PetType.Raven;
+
+                // Support: 사용된 GUID 추적 (Phase 4 중복 방지용)
+                if (supportMode)
+                {
+                    foreach (var action in keystoneActions)
+                    {
+                        if (action.Ability?.Blueprint != null)
+                        {
+                            string guid = action.Ability.Blueprint.AssetGuid?.ToString();
+                            if (!string.IsNullOrEmpty(guid))
+                                usedKeystoneGuids.Add(guid);
+                        }
+                    }
+                }
+            }
+
+            // 5. Raven Cycle (Warp Relay 후 재시전)
+            if (usedWarpRelay)
+            {
+                var cycle = PlanFamiliarCycle(situation, ref remainingAP, usedWarpRelay);
+                if (cycle != null)
+                    actions.Add(cycle);
+            }
+
+            // 6. Raven Hex (적 디버프)
+            var hex = PlanFamiliarHex(situation, ref remainingAP);
+            if (hex != null)
+                actions.Add(hex);
+
+            // 7. Mastiff: Apprehend → JumpClaws → Claws → Roam (폴백 체인)
+            var familiarApprehend = PlanFamiliarApprehend(situation, ref remainingAP);
+            if (familiarApprehend != null)
+                actions.Add(familiarApprehend);
+            else
+            {
+                var jumpClaws = PlanFamiliarJumpClaws(situation, ref remainingAP);
+                if (jumpClaws != null)
+                    actions.Add(jumpClaws);
+                else
+                {
+                    var mastiffClaws = PlanFamiliarClaws(situation, ref remainingAP);
+                    if (mastiffClaws != null)
+                        actions.Add(mastiffClaws);
+                    else
+                    {
+                        var roam = PlanFamiliarRoam(situation, ref remainingAP);
+                        if (roam != null)
+                            actions.Add(roam);
+                    }
+                }
+            }
+
+            // Support 전용: Mastiff Protect (위협받는 아군 호위)
+            if (supportMode)
+            {
+                var familiarProtect = PlanFamiliarProtect(situation, ref remainingAP);
+                if (familiarProtect != null)
+                    actions.Add(familiarProtect);
+            }
+
+            // 8. Eagle Obstruct (적 시야 방해)
+            var familiarObstruct = PlanFamiliarObstruct(situation, ref remainingAP);
+            if (familiarObstruct != null)
+                actions.Add(familiarObstruct);
+
+            // 9. Eagle Blinding Dive (이동+실명 공격)
+            var blindingDive = PlanFamiliarBlindingDive(situation, ref remainingAP);
+            if (blindingDive != null)
+                actions.Add(blindingDive);
+
+            // Support 전용: Eagle Screen (HP 낮은 아군 보호)
+            if (supportMode)
+            {
+                var familiarScreen = PlanFamiliarScreen(situation, ref remainingAP);
+                if (familiarScreen != null)
+                    actions.Add(familiarScreen);
+            }
+
+            // 10. Eagle Aerial Rush (돌진 공격)
+            var aerialRush = PlanFamiliarAerialRush(situation, ref remainingAP);
+            if (aerialRush != null)
+                actions.Add(aerialRush);
+
+            // 11. Eagle Claws (폴백 근접 공격)
+            if (blindingDive == null && aerialRush == null)
+            {
+                var eagleClaws = PlanFamiliarClaws(situation, ref remainingAP);
+                if (eagleClaws != null)
+                    actions.Add(eagleClaws);
+            }
+
+            return usedWarpRelay;
+        }
+
         #endregion
 
         #region Attack - Delegates to AttackPlanner

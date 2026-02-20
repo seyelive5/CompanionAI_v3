@@ -41,46 +41,9 @@ namespace CompanionAI_v3.Planning.Plans
             bool shouldPrioritizeRetreat = turnState.GetContext<bool>(StrategicContextKeys.DeferredRetreat, false);
             bool bonusWeaponSwitch = turnState.GetContext<bool>(StrategicContextKeys.BonusWeaponSwitch, false);
 
-            // ★ v3.8.41: Phase 0 - 잠재력 초월 궁극기 (최우선)
-            if (CombatAPI.HasFreeUltimateBuff(situation.Unit))
-            {
-                var ultimateAction = PlanUltimate(situation, ref remainingAP);
-                if (ultimateAction != null)
-                {
-                    actions.Add(ultimateAction);
-                    return new TurnPlan(actions, TurnPriority.Critical, "DPS ultimate (Transcend Potential)");
-                }
-                // ★ v3.8.42: 궁극기 실패 시 즉시 EndTurn (WarhammerAbilityRestriction으로 다른 능력 사용 불가)
-                Main.Log("[DPS] Ultimate failed during Transcend Potential - ending turn");
-                actions.Add(PlannedAction.EndTurn("DPS no ultimate available"));
-                return new TurnPlan(actions, TurnPriority.EndTurn, "DPS ultimate failed (Transcend Potential)");
-            }
-
-            // ★ v3.9.70: Phase 0.5 - 긴급 AoE/사이킥 차단 구역 대피
-            if (situation.NeedsAoEEvacuation && situation.CanMove)
-            {
-                var evacAction = PlanAoEEvacuation(situation);
-                if (evacAction != null)
-                {
-                    actions.Add(evacAction);
-                    return new TurnPlan(actions, TurnPriority.Emergency, "DPS AoE evacuation");
-                }
-            }
-
-            // Phase 1: 긴급 자기 힐
-            var healAction = PlanEmergencyHeal(situation, ref remainingAP);
-            if (healAction != null)
-            {
-                actions.Add(healAction);
-                return new TurnPlan(actions, TurnPriority.Emergency, "DPS emergency heal");
-            }
-
-            // Phase 1.5: 재장전
-            var reloadAction = PlanReload(situation, ref remainingAP);
-            if (reloadAction != null)
-            {
-                actions.Add(reloadAction);
-            }
+            // ★ v3.12.0: Phase 0~1.5 공통 처리 (Ultimate, AoE대피, 긴급힐, 재장전)
+            var earlyReturn = ExecuteCommonEarlyPhases(actions, situation, ref remainingAP);
+            if (earlyReturn != null) return earlyReturn;
 
             // ★ v3.9.74: Phase 1.55 — Switch-First: 현재 무기 무용 시 즉시 전환
             // 조건: 무기 로테이션 가능 + Hittable 적 없음 + 현재/대체 무기 타입 다름
@@ -219,96 +182,11 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // ★ v3.7.02: Phase 1.75 - Familiar support (키스톤 확산 포함)
-            // ★ v3.7.12: 모든 사역마 능력 통합
-            bool usedWarpRelay = false;
-
-            if (situation.HasFamiliar)
-            {
-                // ★ v3.7.12: 1. Servo-Skull Priority Signal (선제 버프)
-                var prioritySignal = PlanFamiliarPrioritySignal(situation, ref remainingAP);
-                if (prioritySignal != null)
-                    actions.Add(prioritySignal);
-
-                // ★ v3.7.12: 2. Mastiff Fast (Apprehend 전 이동 버프)
-                var mastiffFast = PlanFamiliarFast(situation, ref remainingAP);
-                if (mastiffFast != null)
-                    actions.Add(mastiffFast);
-
-                // 3. Relocate: 사역마를 최적 위치로 이동 (Mastiff 제외)
-                var familiarRelocate = PlanFamiliarRelocate(situation, ref remainingAP);
-                if (familiarRelocate != null)
-                    actions.Add(familiarRelocate);
-
-                // ★ v3.7.02: 4. 키스톤 버프/디버프 루프 (Servo-Skull/Raven)
-                var keystoneActions = PlanAllFamiliarKeystoneBuffs(situation, ref remainingAP);
-                if (keystoneActions.Count > 0)
-                {
-                    actions.AddRange(keystoneActions);
-                    Main.Log($"[DPS] Phase 1.75: {keystoneActions.Count} keystone abilities planned");
-                    usedWarpRelay = situation.FamiliarType == PetType.Raven;
-                }
-
-                // ★ v3.7.12: 5. Raven Cycle (Warp Relay 후 재시전)
-                if (usedWarpRelay)
-                {
-                    var cycle = PlanFamiliarCycle(situation, ref remainingAP, usedWarpRelay);
-                    if (cycle != null)
-                        actions.Add(cycle);
-                }
-
-                // ★ v3.7.12: 6. Raven Hex (적 디버프)
-                var hex = PlanFamiliarHex(situation, ref remainingAP);
-                if (hex != null)
-                    actions.Add(hex);
-
-                // 7. Mastiff: Apprehend → JumpClaws → Claws → Roam (폴백 체인)
-                // ★ v3.7.14: JumpClaws, Claws 폴백 추가
-                var familiarApprehend = PlanFamiliarApprehend(situation, ref remainingAP);
-                if (familiarApprehend != null)
-                    actions.Add(familiarApprehend);
-                else
-                {
-                    var jumpClaws = PlanFamiliarJumpClaws(situation, ref remainingAP);
-                    if (jumpClaws != null)
-                        actions.Add(jumpClaws);
-                    else
-                    {
-                        var mastiffClaws = PlanFamiliarClaws(situation, ref remainingAP);
-                        if (mastiffClaws != null)
-                            actions.Add(mastiffClaws);
-                        else
-                        {
-                            var roam = PlanFamiliarRoam(situation, ref remainingAP);
-                            if (roam != null)
-                                actions.Add(roam);
-                        }
-                    }
-                }
-
-                // 8. Eagle: 시야 방해 (적 클러스터 교란)
-                var familiarObstruct = PlanFamiliarObstruct(situation, ref remainingAP);
-                if (familiarObstruct != null)
-                    actions.Add(familiarObstruct);
-
-                // ★ v3.7.14: 9. Eagle Blinding Dive: 이동+실명 공격
-                var blindingDive = PlanFamiliarBlindingDive(situation, ref remainingAP);
-                if (blindingDive != null)
-                    actions.Add(blindingDive);
-
-                // 10. Eagle Aerial Rush: 돌진 공격 (경로상 적 타격)
-                var aerialRush = PlanFamiliarAerialRush(situation, ref remainingAP);
-                if (aerialRush != null)
-                    actions.Add(aerialRush);
-
-                // ★ v3.7.14: 11. Eagle Claws: 폴백 근접 공격
-                if (blindingDive == null && aerialRush == null)
-                {
-                    var eagleClaws = PlanFamiliarClaws(situation, ref remainingAP);
-                    if (eagleClaws != null)
-                        actions.Add(eagleClaws);
-                }
-            }
+            // ★ v3.12.0: Phase 1.75 공통 Familiar 처리
+            HashSet<string> _; // DPS는 키스톤 GUID 추적 불필요
+            bool usedWarpRelay = ExecuteFamiliarSupportPhase(
+                actions, situation, ref remainingAP,
+                supportMode: false, out _);
 
             // Phase 2: Heroic Act (Momentum 175+)
             var heroicAction = PlanHeroicAct(situation, ref remainingAP);

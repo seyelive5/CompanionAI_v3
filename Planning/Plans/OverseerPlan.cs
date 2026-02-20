@@ -50,52 +50,9 @@ namespace CompanionAI_v3.Planning.Plans
                 Main.Log($"[Overseer] Reserving {reservedAP:F1} AP for weapon attack");
             }
 
-            // ★ v3.8.41: Phase 0 - 잠재력 초월 궁극기 (최우선)
-            if (CombatAPI.HasFreeUltimateBuff(situation.Unit))
-            {
-                var ultimateAction = PlanUltimate(situation, ref remainingAP);
-                if (ultimateAction != null)
-                {
-                    actions.Add(ultimateAction);
-                    return new TurnPlan(actions, TurnPriority.Critical, "Overseer ultimate (Transcend Potential)");
-                }
-                // ★ v3.8.42: 궁극기 실패 시 즉시 EndTurn (WarhammerAbilityRestriction으로 다른 능력 사용 불가)
-                Main.Log("[Overseer] Ultimate failed during Transcend Potential - ending turn");
-                actions.Add(PlannedAction.EndTurn("Overseer no ultimate available"));
-                return new TurnPlan(actions, TurnPriority.EndTurn, "Overseer ultimate failed (Transcend Potential)");
-            }
-
-            // ══════════════════════════════════════════════════════════════
-            // ★ v3.9.70: Phase 0.5 - 긴급 AoE/사이킥 차단 구역 대피
-            // ══════════════════════════════════════════════════════════════
-            if (situation.NeedsAoEEvacuation && situation.CanMove)
-            {
-                var evacAction = PlanAoEEvacuation(situation);
-                if (evacAction != null)
-                {
-                    actions.Add(evacAction);
-                    return new TurnPlan(actions, TurnPriority.Emergency, "Overseer AoE evacuation");
-                }
-            }
-
-            // ══════════════════════════════════════════════════════════════
-            // Phase 1: Emergency Heal
-            // ══════════════════════════════════════════════════════════════
-            var healAction = PlanEmergencyHeal(situation, ref remainingAP);
-            if (healAction != null)
-            {
-                actions.Add(healAction);
-                return new TurnPlan(actions, TurnPriority.Emergency, "Overseer emergency heal");
-            }
-
-            // ══════════════════════════════════════════════════════════════
-            // Phase 1.5: Reload
-            // ══════════════════════════════════════════════════════════════
-            var reloadAction = PlanReload(situation, ref remainingAP);
-            if (reloadAction != null)
-            {
-                actions.Add(reloadAction);
-            }
+            // ★ v3.12.0: Phase 0~1.5 공통 처리 (Ultimate, AoE대피, 긴급힐, 재장전)
+            var earlyReturn = ExecuteCommonEarlyPhases(actions, situation, ref remainingAP);
+            if (earlyReturn != null) return earlyReturn;
 
             // ══════════════════════════════════════════════════════════════
             // Phase 2: HeroicAct/Overcharge FIRST ★핵심★
