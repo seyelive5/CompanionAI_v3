@@ -29,6 +29,74 @@ namespace CompanionAI_v3.Analysis
         /// </summary>
         public const float SCORE_IMPOSSIBLE = float.MinValue;
 
+        #region Scoring Constants
+
+        // ── ScoreBuff ──
+        private const float BUFF_BASE_SCORE = 50f;
+        private const float ULTIMATE_BUFF_BONUS = 500f;
+        private const float NON_ULTIMATE_PENALTY = 1000f;
+        private const float HEROIC_MANY_ENEMIES_BONUS = 30f;
+        private const float HEROIC_FEW_ENEMIES_PENALTY = 10f;
+        private const float RIGHTEOUS_FURY_BONUS = 20f;
+        private const float SELF_DAMAGE_HP_BONUS = 10f;
+        private const float SELF_DAMAGE_LOW_HP_PENALTY = 30f;
+        private const float POST_ACTION_NEARBY_THRESHOLD = 1.5f;
+        private const float POST_ACTION_NEARBY_BONUS = 40f;
+        private const float POST_ACTION_NO_ENEMY_PENALTY = 50f;
+        private const float BUFF_SYNERGY_FALLBACK = 10f;
+        private const float BUFF_DAMAGE_GAIN_DIVISOR = 3f;
+        private const float BUFF_SYNERGY_MIN = 5f;
+        private const float BUFF_SYNERGY_MAX = 40f;
+        private const float DEFENSIVE_DANGER_BONUS = 25f;
+        private const float DUPLICATE_BUFF_PENALTY = 100f;
+        private const float MULTI_BUFF_TURN_PENALTY = 10f;
+
+        // ── ScoreAttack ──
+        private const float ATTACK_BASE_SCORE = 50f;
+        private const float CLEARMP_PROXIMITY_RATE = 5f;
+        private const float OVERWATCH_PER_ENEMY_PENALTY = 20f;
+        private const float OVERWATCH_SAFE_BONUS = 15f;
+        private const float ONE_HIT_KILL_THRESHOLD = 0.8f;
+        private const float AOO_BASE_PENALTY = 15f;
+        private const float AOO_PER_ENEMY_PENALTY = 10f;
+        private const float AOO_SAFE_BONUS = 5f;
+        private const float FINISHER_VALID_BONUS = 40f;
+        private const float FINISHER_INVALID_PENALTY = 30f;
+        private const float AOE_ALLIES_BLOCK_PENALTY = 1000f;
+        private const float DEFAULT_AOE_CHECK_RADIUS = 3f;
+
+        // ── ScoreTarget ──
+        private const float TARGET_BASE_SCORE = 50f;
+        private const float THREAT_SCORE_MULTIPLIER = 30f;
+        private const float HITTABLE_TARGET_BONUS = 25f;
+        private const float NOT_HITTABLE_PENALTY = 15f;
+        private const float HEALER_TARGET_BONUS = 20f;
+        private const float HEALER_WOUNDED_ALLY_BONUS = 15f;
+        private const float CASTER_TARGET_BONUS = 15f;
+
+        // ── EvaluateThreat ──
+        private const float THREAT_BASE = 0.5f;
+        private const float THREAT_RANGED_BONUS = 0.2f;
+        private const int THREAT_LONG_RANGE_THRESHOLD = 10;
+        private const float THREAT_PROXIMITY_BONUS = 0.2f;
+        private const float THREAT_LOW_HP_REDUCTION = 0.2f;
+
+        // ── ScoreHeal ──
+        private const float HEAL_DESPERATE_BONUS = 30f;
+        private const float HEAL_LOW_AP_BONUS = 10f;
+        private const float HEAL_HIGH_AP_PENALTY = 15f;
+        private const float HEAL_EFFICIENCY_MULTIPLIER = 20f;
+        private const float HEAL_ESTIMATE_FALLBACK = 30f;
+
+        // ── GetRoleSafetyWeight ──
+        private const float SAFETY_WEIGHT_SUPPORT = 0.8f;
+        private const float SAFETY_WEIGHT_DPS = 0.5f;
+        private const float SAFETY_WEIGHT_TANK = 0.2f;
+        private const float SAFETY_WEIGHT_RANGED_AUTO = 0.7f;
+        private const float SAFETY_WEIGHT_MELEE_AUTO = 0.4f;
+
+        #endregion
+
         #region Combat Phase Detection
 
         /// <summary>
@@ -89,7 +157,7 @@ namespace CompanionAI_v3.Analysis
         {
             if (buff == null) return SCORE_IMPOSSIBLE;
 
-            float score = 50f;  // 기본 점수
+            float score = BUFF_BASE_SCORE;
 
             // ★ v3.8.40: 잠재력 초월(FreeUltimateBuff) 활성 시 궁극기 상세 점수 시스템
             bool hasFreeUltimateBuff = CombatAPI.HasFreeUltimateBuff(situation.Unit);
@@ -100,7 +168,7 @@ namespace CompanionAI_v3.Analysis
                 if (isUltimate)
                 {
                     // 궁극기 기본 보너스 (추가 턴은 궁극기 사용을 위한 것)
-                    score += 500f;
+                    score += ULTIMATE_BUFF_BONUS;
 
                     // ★ v3.8.40: 상세 분류 기반 점수
                     score += ScoreUltimateByType(buff, situation);
@@ -108,7 +176,7 @@ namespace CompanionAI_v3.Analysis
                 else
                 {
                     // 궁극기가 아님 = 큰 감점 (WarhammerAbilityRestriction으로 제한될 것)
-                    score -= 1000f;
+                    score -= NON_ULTIMATE_PENALTY;
                     Main.LogDebug($"[UtilityScorer] {buff.Name}: Non-ultimate during FreeUltimate turn - skipped");
                 }
             }
@@ -160,8 +228,8 @@ namespace CompanionAI_v3.Analysis
                     {
                         // 강력한 능력 - 많은 적이 있을 때 유리
                         int enemyCount = situation.Enemies?.Count ?? 0;
-                        if (enemyCount >= 4) score += 30f;
-                        else if (enemyCount <= 2) score -= 10f;
+                        if (enemyCount >= 4) score += HEROIC_MANY_ENEMIES_BONUS;
+                        else if (enemyCount <= 2) score -= HEROIC_FEW_ENEMIES_PENALTY;
                     }
                     break;
 
@@ -174,7 +242,7 @@ namespace CompanionAI_v3.Analysis
                     }
                     else if (situation.HasHittableEnemies)
                     {
-                        score += 20f;
+                        score += RIGHTEOUS_FURY_BONUS;
                     }
                     break;
 
@@ -182,8 +250,8 @@ namespace CompanionAI_v3.Analysis
                     // ★ v3.5.00: ThresholdConfig 적용
                     var selfDmgThresholds = AIConfig.GetThresholds();
                     // HP가 충분할 때만
-                    if (situation.HPPercent >= selfDmgThresholds.SelfDamageMinHP) score += 10f;
-                    else if (situation.HPPercent < selfDmgThresholds.PreAttackBuffMinHP) score -= 30f;
+                    if (situation.HPPercent >= selfDmgThresholds.SelfDamageMinHP) score += SELF_DAMAGE_HP_BONUS;
+                    else if (situation.HPPercent < selfDmgThresholds.PreAttackBuffMinHP) score -= SELF_DAMAGE_LOW_HP_PENALTY;
                     break;
 
                 case AbilityTiming.Emergency:
@@ -206,12 +274,12 @@ namespace CompanionAI_v3.Analysis
                     // ★ v3.6.2: Break Through 등 - 첫 공격 후 0 AP 공격 활성화
                     // 근접 적이 있으면 좋음 (Slash 사용 가능), 없으면 나쁨 (1.5타일 ≈ 2m)
                     bool hasNearbyEnemyForPost = situation.Enemies?.Any(e =>
-                        e != null && CombatCache.GetDistanceInTiles(situation.Unit, e) <= 1.5f) ?? false;
+                        e != null && CombatCache.GetDistanceInTiles(situation.Unit, e) <= POST_ACTION_NEARBY_THRESHOLD) ?? false;
 
                     if (hasNearbyEnemyForPost)
-                        score += 40f;  // Charge와 비슷한 수준으로 보너스
+                        score += POST_ACTION_NEARBY_BONUS;  // Charge와 비슷한 수준으로 보너스
                     else
-                        score -= 50f;  // 적에게 도달 못하면 쓸모없음
+                        score -= POST_ACTION_NO_ENEMY_PENALTY;  // 적에게 도달 못하면 쓸모없음
                     break;
             }
 
@@ -220,7 +288,7 @@ namespace CompanionAI_v3.Analysis
             // 예: +30% 버프 → gainScore=30, +20% 버프 → gainScore=20 (기존: 둘 다 +20)
             if (situation.HasHittableEnemies && IsOffensiveBuff(buff))
             {
-                float gainScore = 10f; // 폴백: 타겟/공격 정보 없을 때 보수적 점수
+                float gainScore = BUFF_SYNERGY_FALLBACK; // 폴백: 타겟/공격 정보 없을 때 보수적 점수
 
                 if (situation.BestTarget != null && situation.PrimaryAttack != null)
                 {
@@ -232,7 +300,7 @@ namespace CompanionAI_v3.Analysis
                         float damageGain = baseDamage * (buffMultiplier - 1f);
 
                         // 데미지 이득을 점수로 변환 (5~40 범위)
-                        gainScore = Mathf.Clamp(damageGain / 3f, 5f, 40f);
+                        gainScore = Mathf.Clamp(damageGain / BUFF_DAMAGE_GAIN_DIVISOR, BUFF_SYNERGY_MIN, BUFF_SYNERGY_MAX);
 
                         if (Main.IsDebugEnabled)
                             Main.LogDebug($"[UtilityScorer] BuffCoupling: {buff.Name} mult={buffMultiplier:F2}, " +
@@ -245,15 +313,15 @@ namespace CompanionAI_v3.Analysis
 
             // ★ 방어 시너지: 위험 상황에서 방어적 버프면 보너스
             if (situation.IsInDanger && IsDefensiveBuff(buff))
-                score += 25f;
+                score += DEFENSIVE_DANGER_BONUS;
 
             // ★ 중복 패널티: 이미 활성화된 버프
             if (AllyStateCache.HasBuff(situation.Unit, buff))
-                score -= 100f;
+                score -= DUPLICATE_BUFF_PENALTY;
 
             // ★ 이미 버프한 턴에는 추가 버프 약간 감점 (한 턴에 너무 많은 버프 방지)
             if (situation.HasBuffedThisTurn)
-                score -= 10f;
+                score -= MULTI_BUFF_TURN_PENALTY;
 
             // ★ 페이즈별 가중치
             switch (phase)
@@ -515,7 +583,7 @@ namespace CompanionAI_v3.Analysis
         {
             if (attack == null || target == null) return SCORE_IMPOSSIBLE;
 
-            float score = 50f;  // 기본 점수
+            float score = ATTACK_BASE_SCORE;
 
             // ★ v3.0.56: ClearMPAfterUse + 위험 상황 = 대폭 감점
             // 이 능력 사용 후 이동 불가 → 위험 상황에서 사용하면 위험
@@ -538,7 +606,7 @@ namespace CompanionAI_v3.Analysis
                 // 근접 적 거리 기반 추가 감점
                 if (situation.NearestEnemyDistance < situation.MinSafeDistance)
                 {
-                    float proximityPenalty = (situation.MinSafeDistance - situation.NearestEnemyDistance) * 5f * safetyWeight;
+                    float proximityPenalty = (situation.MinSafeDistance - situation.NearestEnemyDistance) * CLEARMP_PROXIMITY_RATE * safetyWeight;
                     score -= proximityPenalty;
                 }
             }
@@ -554,7 +622,7 @@ namespace CompanionAI_v3.Analysis
                     if (willTriggerOverwatch)
                     {
                         // 오버워치 1건당 -20점 페널티 (적 무료 공격 1회 = 상당한 위험)
-                        float overwatchPenalty = situation.EnemyOverwatchCount * 20f;
+                        float overwatchPenalty = situation.EnemyOverwatchCount * OVERWATCH_PER_ENEMY_PENALTY;
                         score -= overwatchPenalty;
                         if (Main.IsDebugEnabled)
                             Main.LogDebug($"[UtilityScorer] {attack.Name}: Overwatch trigger penalty={overwatchPenalty:F0} ({situation.EnemyOverwatchCount} overwatchers)");
@@ -562,7 +630,7 @@ namespace CompanionAI_v3.Analysis
                     else
                     {
                         // WillNotCauseAttack 능력 = 오버워치 안전 → 보너스
-                        score += 15f;
+                        score += OVERWATCH_SAFE_BONUS;
                         if (Main.IsDebugEnabled)
                             Main.LogDebug($"[UtilityScorer] {attack.Name}: Overwatch-safe ability bonus=+15");
                     }
@@ -579,7 +647,7 @@ namespace CompanionAI_v3.Analysis
             score += CurvePresets.DamageRatio.Evaluate(damageRatio);
 
             // 1타킬 보너스 (Exponential 곡선, ratio 0.8 이상에서 급격히 상승)
-            if (damageRatio >= 0.8f)
+            if (damageRatio >= ONE_HIT_KILL_THRESHOLD)
             {
                 score += CurvePresets.OneHitKillBonus.Evaluate(damageRatio);
             }
@@ -643,7 +711,7 @@ namespace CompanionAI_v3.Analysis
                 if (aooStatus.WillTriggerAOO)
                 {
                     // AOO 유발 시 감점 (위협하는 적 수에 비례)
-                    float aooPenalty = 15f + (aooStatus.ThreateningEnemyCount * 10f);
+                    float aooPenalty = AOO_BASE_PENALTY + (aooStatus.ThreateningEnemyCount * AOO_PER_ENEMY_PENALTY);
                     score -= aooPenalty;
                     Main.LogDebug($"[UtilityScorer] {attack.Name}: AOO penalty={aooPenalty:F0} " +
                         $"({aooStatus.ThreateningEnemyCount} threatening enemies)");
@@ -651,7 +719,7 @@ namespace CompanionAI_v3.Analysis
                 else if (aooStatus.IsSafe)
                 {
                     // AOO 회피 가능 = 약간의 보너스
-                    score += 5f;
+                    score += AOO_SAFE_BONUS;
                 }
             }
 
@@ -689,8 +757,8 @@ namespace CompanionAI_v3.Analysis
 
             if (timing == AbilityTiming.Finisher)
             {
-                if (targetHPPercent <= attackThresholds.FinisherTargetHP) score += 40f;  // 마무리 대상
-                else score -= 30f;  // 마무리 아니면 비효율
+                if (targetHPPercent <= attackThresholds.FinisherTargetHP) score += FINISHER_VALID_BONUS;  // 마무리 대상
+                else score -= FINISHER_INVALID_PENALTY;  // 마무리 아니면 비효율
             }
 
             // ★ v3.5.85: AOE 보너스 (IsAoE() 대신 패턴 기반 판단)
@@ -730,7 +798,7 @@ namespace CompanionAI_v3.Analysis
 
             if (isPointAoE || isDangerousAoE)
             {
-                float checkRadius = aoeRadius > 0f ? aoeRadius : 3f;
+                float checkRadius = aoeRadius > 0f ? aoeRadius : DEFAULT_AOE_CHECK_RADIUS;
                 int alliesInDanger = 0;
 
                 // ★ v3.8.12: 설정에서 최대 허용 아군 수 가져오기
@@ -768,7 +836,7 @@ namespace CompanionAI_v3.Analysis
                 // ★ v3.8.94: "허용이면 진짜 허용" — 초과 시만 차단, 허용 범위 내 감점 없음
                 if (alliesInDanger > maxAlliesAllowed)
                 {
-                    score -= 1000f;
+                    score -= AOE_ALLIES_BLOCK_PENALTY;
                     if (Main.IsDebugEnabled)
                         Main.LogDebug($"[Scorer] AOE {attack.Name}: {alliesInDanger} allies > max {maxAlliesAllowed} - BLOCKED");
                 }
@@ -793,7 +861,7 @@ namespace CompanionAI_v3.Analysis
         {
             if (target == null || target.LifeState.IsDead) return SCORE_IMPOSSIBLE;
 
-            float score = 50f;  // 기본 점수
+            float score = TARGET_BASE_SCORE;
 
             // ★ v3.1.30: HP → 마무리 우선순위 Response Curve (낮은 HP 우선)
             float hpPercent = CombatCache.GetHPPercent(target);
@@ -814,7 +882,7 @@ namespace CompanionAI_v3.Analysis
 
             // ★ v3.1.30: 위협도 평가 → ThreatByDistance Curve
             float threat = EvaluateThreat(target, situation);
-            score += threat * 30f;  // 기본 위협도 점수 유지
+            score += threat * THREAT_SCORE_MULTIPLIER;  // 기본 위협도 점수 유지
 
             // ★ v3.1.30: 거리 → DistancePenalty Response Curve
             float distance = CombatAPI.GetDistance(situation.Unit, target);
@@ -822,23 +890,23 @@ namespace CompanionAI_v3.Analysis
 
             // ★ 공격 가능 여부
             bool isHittable = situation.HittableEnemies?.Contains(target) ?? false;
-            if (isHittable) score += 25f;
-            else score -= 15f;  // 이동 필요
+            if (isHittable) score += HITTABLE_TARGET_BONUS;
+            else score -= NOT_HITTABLE_PENALTY;  // 이동 필요
 
             // ★ 특수 역할 보너스
             if (IsHealer(target))
             {
                 // 힐러 우선 제거 (아군 치료 방지)
-                score += 20f;
+                score += HEALER_TARGET_BONUS;
                 // 부상 아군이 있으면 더 급함
                 if (situation.MostWoundedAlly != null && CombatCache.GetHPPercent(situation.MostWoundedAlly) < 50f)
-                    score += 15f;
+                    score += HEALER_WOUNDED_ALLY_BONUS;
             }
 
             if (IsCaster(target))
             {
                 // 캐스터 우선 (고데미지 + 약한 방어)
-                score += 15f;
+                score += CASTER_TARGET_BONUS;
             }
 
             return score;
@@ -851,7 +919,7 @@ namespace CompanionAI_v3.Analysis
         private static float EvaluateThreat(BaseUnitEntity target, Situation situation)
         {
             var t = AIConfig.GetThresholds();
-            float threat = 0.5f;  // 기본
+            float threat = THREAT_BASE;
 
             // 데미지 딜러 판단 (대략적)
             try
@@ -860,21 +928,21 @@ namespace CompanionAI_v3.Analysis
                 if (weapon != null)
                 {
                     // 원거리 무기 = 위협
-                    if (!weapon.Blueprint.IsMelee) threat += 0.2f;
+                    if (!weapon.Blueprint.IsMelee) threat += THREAT_RANGED_BONUS;
                     // 데미지 높으면 위협 (AttackRange로 대략 추정)
                     int range = weapon.AttackRange;
-                    if (range > 10) threat += 0.2f;  // 장거리 무기
+                    if (range > THREAT_LONG_RANGE_THRESHOLD) threat += THREAT_RANGED_BONUS;  // 장거리 무기
                 }
             }
             catch { }
 
             // 가까이 있으면 더 위협적
             float distance = CombatAPI.GetDistance(situation.Unit, target);
-            if (distance <= t.ThreatProximity) threat += 0.2f;
+            if (distance <= t.ThreatProximity) threat += THREAT_PROXIMITY_BONUS;
 
             // HP 낮은 적은 덜 위협적 (곧 죽음)
             float hpPercent = CombatCache.GetHPPercent(target);
-            if (hpPercent < t.LowThreatHP) threat -= 0.2f;
+            if (hpPercent < t.LowThreatHP) threat -= THREAT_LOW_HP_REDUCTION;
 
             return Math.Max(0f, Math.Min(1f, threat));
         }
@@ -940,18 +1008,18 @@ namespace CompanionAI_v3.Analysis
             // ★ 위기 상황 보너스
             var phase = DetectPhase(situation);
             if (phase == CombatPhase.Desperate)
-                score += 30f;
+                score += HEAL_DESPERATE_BONUS;
 
             // ★ AP 비용 고려
             float cost = CombatAPI.GetAbilityAPCost(heal);
-            if (cost <= 1f) score += 10f;
-            else if (cost >= 3f) score -= 15f;
+            if (cost <= 1f) score += HEAL_LOW_AP_BONUS;
+            else if (cost >= 3f) score -= HEAL_HIGH_AP_PENALTY;
 
             // ★ 힐 효율: 현재 손실 HP 대비
             float missingHP = 100f - targetHP;
             float expectedHeal = EstimateHealAmount(heal, target);
             float efficiency = Math.Min(expectedHeal / Math.Max(missingHP, 1f), 1f);
-            score += efficiency * 20f;
+            score += efficiency * HEAL_EFFICIENCY_MULTIPLIER;
 
             return score;
         }
@@ -963,13 +1031,13 @@ namespace CompanionAI_v3.Analysis
         /// </summary>
         private static float EstimateHealAmount(AbilityData heal, BaseUnitEntity target)
         {
-            if (heal?.Blueprint == null || target == null) return 30f;
+            if (heal?.Blueprint == null || target == null) return HEAL_ESTIMATE_FALLBACK;
 
             try
             {
                 // ★ v3.8.62: BlueprintCache 캐시 사용 (GetComponent O(n) → O(1))
                 var runAction = BlueprintCache.GetCachedRunAction(heal.Blueprint);
-                if (runAction?.Actions?.Actions == null) return 30f;
+                if (runAction?.Actions?.Actions == null) return HEAL_ESTIMATE_FALLBACK;
 
                 float rawHeal = FindHealAmountInActions(runAction.Actions.Actions);
                 if (rawHeal > 0f)
@@ -988,7 +1056,7 @@ namespace CompanionAI_v3.Analysis
                 Main.LogDebug($"[UtilityScorer] EstimateHealAmount error: {ex.Message}");
             }
 
-            return 30f;  // 폴백: MaxHP의 30% 추정
+            return HEAL_ESTIMATE_FALLBACK;  // 폴백: MaxHP의 30% 추정
         }
 
         /// <summary>
@@ -1265,18 +1333,18 @@ namespace CompanionAI_v3.Analysis
             switch (role)
             {
                 case Settings.AIRole.Support:
-                    return 0.8f;   // 안전 최우선 - 높은 가중치
+                    return SAFETY_WEIGHT_SUPPORT;   // 안전 최우선 - 높은 가중치
                 case Settings.AIRole.DPS:
-                    return 0.5f;   // 균형
+                    return SAFETY_WEIGHT_DPS;   // 균형
                 case Settings.AIRole.Tank:
-                    return 0.2f;   // 안전 무시 - 낮은 가중치
+                    return SAFETY_WEIGHT_TANK;   // 안전 무시 - 낮은 가중치
                 case Settings.AIRole.Auto:
                 default:
                     // ★ v3.0.92: Auto는 RangePreference에 따라 조정
                     if (situation.PrefersRanged)
-                        return 0.7f;  // 원거리 선호 = 안전 중시
+                        return SAFETY_WEIGHT_RANGED_AUTO;  // 원거리 선호 = 안전 중시
                     else
-                        return 0.4f;  // 근접 선호 = 안전 덜 중시
+                        return SAFETY_WEIGHT_MELEE_AUTO;  // 근접 선호 = 안전 덜 중시
             }
         }
 
@@ -1300,7 +1368,7 @@ namespace CompanionAI_v3.Analysis
 
             // 역할별 안전 가중치
             float safetyWeight = GetRoleSafetyWeight(situation);
-            if (safetyWeight < 0.4f) return false;  // Tank는 이동 안 함
+            if (safetyWeight < SAFETY_WEIGHT_MELEE_AUTO) return false;  // Tank는 이동 안 함
 
             // 위험 상황이면 이동 필요
             if (situation.IsInDanger) return true;

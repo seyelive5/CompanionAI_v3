@@ -731,40 +731,66 @@ namespace CompanionAI_v3.Planning.Plans
 
             if (_tempUnits.Count < 2) return null;  // AOE 힐은 2명 이상 필요
 
+            // ★ v3.12.2: ScoreHeal 기반 최적 AoE 힐 선택 (기존 first-available 대체)
+            // 대표 타겟: 가장 부상이 심한 아군 (ScoreHeal 기준점)
+            BaseUnitEntity mostWounded = _tempUnits[0];
+            float lowestHP = CombatCache.GetHPPercent(mostWounded);
+            for (int u = 1; u < _tempUnits.Count; u++)
+            {
+                float hp = CombatCache.GetHPPercent(_tempUnits[u]);
+                if (hp < lowestHP) { lowestHP = hp; mostWounded = _tempUnits[u]; }
+            }
+
+            AbilityData bestAbility = null;
+            float bestScore = float.MinValue;
+            float bestCost = 0f;
+            AoESafetyChecker.AoEScore bestAoEPosition = null;
+
             for (int i = 0; i < _tempAbilities.Count; i++)
             {
                 var ability = _tempAbilities[i];
                 float cost = CombatAPI.GetAbilityAPCost(ability);
                 if (cost > remainingAP) continue;
 
-                var bestPosition = AoESafetyChecker.FindBestAllyAoEPosition(
+                var candidatePosition = AoESafetyChecker.FindBestAllyAoEPosition(
                     ability,
                     situation.Unit,
                     _tempUnits,
                     minAlliesRequired: 2,
                     requiresWounded: true);
 
-                if (bestPosition == null || !bestPosition.IsSafe) continue;
+                if (candidatePosition == null || !candidatePosition.IsSafe) continue;
 
                 string reason;
-                if (!CombatAPI.CanUseAbilityOnPoint(ability, bestPosition.Position, out reason))
+                if (!CombatAPI.CanUseAbilityOnPoint(ability, candidatePosition.Position, out reason))
                 {
                     if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] AOE Heal blocked: {ability.Name} - {reason}");
                     continue;
                 }
 
-                remainingAP -= cost;
-                Main.Log($"[{RoleName}] AOE Heal: {ability.Name} at ({bestPosition.Position.x:F1},{bestPosition.Position.z:F1}) " +
-                    $"- {bestPosition.AlliesHit} allies");
+                float score = UtilityScorer.ScoreHeal(ability, mostWounded, situation);
+                score += candidatePosition.AlliesHit * 15f;  // AoE 보너스: 적중 아군 수
 
-                return PlannedAction.PositionalHeal(
-                    ability,
-                    bestPosition.Position,
-                    $"AOE Heal on {bestPosition.AlliesHit} allies",
-                    cost);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestAbility = ability;
+                    bestCost = cost;
+                    bestAoEPosition = candidatePosition;
+                }
             }
 
-            return null;
+            if (bestAbility == null) return null;
+
+            remainingAP -= bestCost;
+            Main.Log($"[{RoleName}] AOE Heal: {bestAbility.Name} at ({bestAoEPosition.Position.x:F1},{bestAoEPosition.Position.z:F1}) " +
+                $"- {bestAoEPosition.AlliesHit} allies (score={bestScore:F1})");
+
+            return PlannedAction.PositionalHeal(
+                bestAbility,
+                bestAoEPosition.Position,
+                $"AOE Heal on {bestAoEPosition.AlliesHit} allies",
+                bestCost);
         }
 
         /// <summary>

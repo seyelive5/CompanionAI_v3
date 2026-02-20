@@ -50,6 +50,71 @@ namespace CompanionAI_v3.Analysis
 
         #endregion
 
+        #region Scoring Constants
+
+        // ── ScoreEnemy ──
+        private const float ENEMY_BASE_SCORE = 50f;
+        private const float ENEMY_ONE_HIT_KILL_BONUS = 60f;
+        private const float ENEMY_THREAT_MULTIPLIER = 30f;
+        private const float ENEMY_HITTABLE_BONUS = 25f;
+        private const float ENEMY_NOT_HITTABLE_PENALTY = 15f;
+        private const float ENEMY_DEBUFF_BONUS = 20f;
+        private const float ENEMY_HEALER_BONUS = 20f;
+        private const float ENEMY_CASTER_BONUS = 15f;
+        private const float ENEMY_SHARED_TARGET_BONUS = 50f;
+        private const float ENEMY_ALLIES_TARGETING_BONUS = 15f;
+        private const float ENEMY_TANK_PROXIMITY_BONUS = 30f;
+        private const float ENEMY_CONFIRMED_KILL_BASE = 40f;
+        private const float ENEMY_KILL_EFFICIENCY_RATE = 5f;
+        private const float ENEMY_KILL_EFFICIENCY_CAP = 20f;
+        private const float ENEMY_MULTI_KILL_BONUS = 20f;
+        private const float ENEMY_AOE_CLUSTER_BONUS = 10f;
+
+        // ── Hit Chance (ScoreEnemy) ──
+        private const float HIT_VERY_LOW_PENALTY = 25f;
+        private const float HIT_LOW_PENALTY = 15f;
+        private const float HIT_HIGH_BONUS = 10f;
+        private const float OPTIMAL_RANGE_BONUS = 8f;
+        private const float FULL_COVER_PENALTY = 12f;
+        private const float HALF_COVER_PENALTY = 6f;
+
+        // ── ScoreAllyForHealing ──
+        private const float HEAL_CRITICAL_HP_BONUS = 80f;
+        private const float HEAL_HIGH_HP_BONUS = 50f;
+        private const float HEAL_MODERATE_HP_BONUS = 20f;
+        private const float HEAL_UNNEEDED_PENALTY = 30f;
+        private const float HEAL_ALLY_DANGER_BONUS = 25f;
+        private const float HEAL_MISSING_HP_COEFFICIENT = 0.3f;
+
+        // ── Turn Order ──
+        private const float TURN_ALREADY_ACTED_PENALTY = 10f;
+        private const float TURN_URGENCY_BASE = 25f;
+        private const float TURN_URGENCY_POSITION_RATE = 5f;
+        private const float ALLY_IMMINENT_TURN_BONUS = 15f;
+
+        // ── GetBuffPriority ──
+        private const float BUFF_TANK_PRIORITY = 30f;
+        private const float BUFF_DPS_PRIORITY = 20f;
+        private const float BUFF_SUPPORT_PRIORITY = 10f;
+        private const float BUFF_SELF_PENALTY = 5f;
+        private const float BUFF_LOW_HP_BONUS = 15f;
+
+        // ── Frontline (ScoreEnemy) ──
+        private const float FRONTLINE_ISOLATION_THRESHOLD = 15f;
+        private const float FRONTLINE_ISOLATION_RATE = 2f;
+        private const float FRONTLINE_PROXIMITY_BONUS = 10f;
+
+        // ── Difficulty (ScoreEnemy) ──
+        private const float DIFFICULTY_ELITE = 8f;
+        private const float DIFFICULTY_MINIBOSS = 15f;
+        private const float DIFFICULTY_BOSS = 25f;
+        private const float DIFFICULTY_CHAPTER_BOSS = 30f;
+
+        // ── EvaluateThreat Fallback ──
+        private const float THREAT_FALLBACK = 0.5f;
+
+        #endregion
+
         #region Role-based Weight Presets
 
         // DPS: 약한 적 우선, 1타 킬 최우선
@@ -116,17 +181,17 @@ namespace CompanionAI_v3.Analysis
             Situation situation,
             AIRole role)
         {
-            if (target == null) return -1000f;
+            if (target == null) return UtilityScorer.SCORE_IMPOSSIBLE;
 
             try
             {
-                if (target.LifeState?.IsDead == true) return -1000f;
+                if (target.LifeState?.IsDead == true) return UtilityScorer.SCORE_IMPOSSIBLE;
             }
             catch { }
 
             var weights = GetEnemyWeights(role);
             var t = AIConfig.GetThresholds();  // ★ v3.5.00: ThresholdConfig 적용
-            float score = 50f;  // 기본 점수
+            float score = ENEMY_BASE_SCORE;
 
             try
             {
@@ -142,7 +207,7 @@ namespace CompanionAI_v3.Analysis
 
                 // Tank는 근접 보너스 (★ v3.5.00: ThresholdConfig)
                 if (role == AIRole.Tank && distance <= t.ThreatProximity)
-                    distanceScore += 30f;
+                    distanceScore += ENEMY_TANK_PROXIMITY_BONUS;
 
                 score += distanceScore * weights.Distance;
 
@@ -151,25 +216,25 @@ namespace CompanionAI_v3.Analysis
                 {
                     if (CombatAPI.CanKillInOneHit(situation.PrimaryAttack, target))
                     {
-                        score += 60f * weights.CanKill;
+                        score += ENEMY_ONE_HIT_KILL_BONUS * weights.CanKill;
                     }
                 }
 
                 // 4. 위협도 평가
                 float threat = EvaluateThreat(target, situation);
-                score += threat * 30f * weights.Threat;
+                score += threat * ENEMY_THREAT_MULTIPLIER * weights.Threat;
 
                 // 5. Hittable 여부
                 bool isHittable = situation.HittableEnemies?.Contains(target) ?? false;
                 if (isHittable)
-                    score += 25f * weights.Hittable;
+                    score += ENEMY_HITTABLE_BONUS * weights.Hittable;
                 else
-                    score -= 15f;
+                    score -= ENEMY_NOT_HITTABLE_PENALTY;
 
                 // 6. 디버프 상태 (DOT 등)
                 if (HasHarmfulDebuff(target))
                 {
-                    score += 20f * weights.DebuffState;
+                    score += ENEMY_DEBUFF_BONUS * weights.DebuffState;
                 }
 
                 // ★ v3.8.31: 명중률 기반 스코어링 (게임 RuleCalculateHitChances 사용)
@@ -184,50 +249,50 @@ namespace CompanionAI_v3.Analysis
                         // 명중률 기반 점수 조정
                         if (hitInfo.IsVeryLowHitChance)  // < 30%
                         {
-                            score -= 25f;  // 심각한 페널티
-                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: -25 very low hit ({hitInfo.HitChance}%)");
+                            score -= HIT_VERY_LOW_PENALTY;
+                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: -{HIT_VERY_LOW_PENALTY} very low hit ({hitInfo.HitChance}%)");
                         }
                         else if (hitInfo.IsLowHitChance)  // < 50%
                         {
-                            score -= 15f;  // 중간 페널티
-                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: -15 low hit ({hitInfo.HitChance}%)");
+                            score -= HIT_LOW_PENALTY;
+                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: -{HIT_LOW_PENALTY} low hit ({hitInfo.HitChance}%)");
                         }
                         else if (hitInfo.HitChance >= 80)  // 높은 명중률
                         {
-                            score += 10f;  // 보너스
+                            score += HIT_HIGH_BONUS;
                         }
 
                         // 최적 거리 보너스 (DistanceFactor >= 1.0)
                         if (hitInfo.IsInOptimalRange)
                         {
-                            score += 8f;
-                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: +8 optimal range");
+                            score += OPTIMAL_RANGE_BONUS;
+                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: +{OPTIMAL_RANGE_BONUS} optimal range");
                         }
 
                         // 엄폐 페널티 (Full Cover = 높은 페널티)
                         if (hitInfo.CoverType == LosCalculations.CoverType.Full)
                         {
-                            score -= 12f;
-                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: -12 full cover");
+                            score -= FULL_COVER_PENALTY;
+                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: -{FULL_COVER_PENALTY} full cover");
                         }
                         else if (hitInfo.CoverType == LosCalculations.CoverType.Half)
                         {
-                            score -= 6f;
+                            score -= HALF_COVER_PENALTY;
                         }
                     }
                 }
 
                 // 7. 특수 역할 (Healer/Caster)
                 if (IsHealer(target))
-                    score += 20f * weights.SpecialRole;
+                    score += ENEMY_HEALER_BONUS * weights.SpecialRole;
                 if (IsCaster(target))
-                    score += 15f * weights.SpecialRole;
+                    score += ENEMY_CASTER_BONUS * weights.SpecialRole;
 
                 // ★ v3.2.15: TeamBlackboard SharedTarget 보너스 (팀 집중 공격)
                 if (TeamBlackboard.Instance.SharedTarget == target)
                 {
-                    score += 50f;
-                    Main.LogDebug($"[TargetScorer] +50 SharedTarget: {target.CharacterName}");
+                    score += ENEMY_SHARED_TARGET_BONUS;
+                    Main.LogDebug($"[TargetScorer] +{ENEMY_SHARED_TARGET_BONUS} SharedTarget: {target.CharacterName}");
                 }
 
                 // ★ v3.8.46: Target Inertia (타겟 관성)
@@ -245,7 +310,7 @@ namespace CompanionAI_v3.Analysis
                 int alliesTargeting = TeamBlackboard.Instance.CountAlliesTargeting(target);
                 if (alliesTargeting > 0)
                 {
-                    score += alliesTargeting * 15f;
+                    score += alliesTargeting * ENEMY_ALLIES_TARGETING_BONUS;
                 }
 
                 // ★ v3.2.25: 전선 기반 고립 페널티
@@ -255,9 +320,9 @@ namespace CompanionAI_v3.Analysis
                     float frontlineDist = situation.InfluenceMap.GetFrontlineDistance(target.Position);
 
                     // 전선 너머 15m 이상 = 추격 위험
-                    if (frontlineDist > 15f)
+                    if (frontlineDist > FRONTLINE_ISOLATION_THRESHOLD)
                     {
-                        float isolationPenalty = (frontlineDist - 15f) * 2f;
+                        float isolationPenalty = (frontlineDist - FRONTLINE_ISOLATION_THRESHOLD) * FRONTLINE_ISOLATION_RATE;
                         score -= isolationPenalty;
                         Main.LogDebug($"[TargetScorer] {target.CharacterName}: -{isolationPenalty:F0} isolation (frontline+{frontlineDist:F1}m)");
                     }
@@ -265,7 +330,7 @@ namespace CompanionAI_v3.Analysis
                     // 전선 근처 적 우선 (도달 용이, 팀 지원 가능)
                     if (frontlineDist >= -5f && frontlineDist <= 5f)
                     {
-                        score += 10f;
+                        score += FRONTLINE_PROXIMITY_BONUS;
                     }
                 }
 
@@ -276,10 +341,10 @@ namespace CompanionAI_v3.Analysis
                 float difficultyScore = 0f;
                 switch (difficultyType)
                 {
-                    case UnitDifficultyType.Elite:       difficultyScore = 8f;  break;
-                    case UnitDifficultyType.MiniBoss:    difficultyScore = 15f; break;
-                    case UnitDifficultyType.Boss:        difficultyScore = 25f; break;
-                    case UnitDifficultyType.ChapterBoss: difficultyScore = 30f; break;
+                    case UnitDifficultyType.Elite:       difficultyScore = DIFFICULTY_ELITE;        break;
+                    case UnitDifficultyType.MiniBoss:    difficultyScore = DIFFICULTY_MINIBOSS;     break;
+                    case UnitDifficultyType.Boss:        difficultyScore = DIFFICULTY_BOSS;         break;
+                    case UnitDifficultyType.ChapterBoss: difficultyScore = DIFFICULTY_CHAPTER_BOSS; break;
                     // Swarm/Common/Hard = 0 (기본 적)
                 }
                 if (difficultyScore > 0f)
@@ -297,7 +362,7 @@ namespace CompanionAI_v3.Analysis
                     {
                         // 확정 킬 가능 타겟에 높은 보너스
                         // 효율이 높을수록 (낮은 AP로 킬) 추가 보너스
-                        float killBonus = 40f + Math.Min(killSequence.Efficiency * 5f, 20f);
+                        float killBonus = ENEMY_CONFIRMED_KILL_BASE + Math.Min(killSequence.Efficiency * ENEMY_KILL_EFFICIENCY_RATE, ENEMY_KILL_EFFICIENCY_CAP);
 
                         // ★ v3.5.83: AOE 다중 킬 보너스
                         // AOE 1능력으로 킬 가능하면, 패턴 내 다른 적까지 동시 킬 가능성 평가
@@ -314,7 +379,7 @@ namespace CompanionAI_v3.Analysis
                             if (additionalTargets > 0)
                             {
                                 // 추가 킬당 +20점 보너스
-                                float multiKillBonus = additionalTargets * 20f;
+                                float multiKillBonus = additionalTargets * ENEMY_MULTI_KILL_BONUS;
                                 killBonus += multiKillBonus;
                                 Main.LogDebug($"[TargetScorer] {target.CharacterName}: +{multiKillBonus:F0} AOE multi-kill ({additionalTargets} additional targets)");
                             }
@@ -348,7 +413,7 @@ namespace CompanionAI_v3.Analysis
                         Main.LogDebug($"[TargetScorer] AOE: {attack.Name} -> {target.CharacterName}: {enemiesInPattern} enemies in pattern");
 
                         int additionalEnemies = enemiesInPattern - 1;
-                        float attackAoEBonus = additionalEnemies * 10f;  // 타겟 선택용 보너스 (+10/적)
+                        float attackAoEBonus = additionalEnemies * ENEMY_AOE_CLUSTER_BONUS;  // 타겟 선택용 보너스
 
                         if (attackAoEBonus > aoeClusterBonus)
                             aoeClusterBonus = attackAoEBonus;
@@ -439,11 +504,11 @@ namespace CompanionAI_v3.Analysis
             BaseUnitEntity ally,
             Situation situation)
         {
-            if (ally == null) return -1000f;
+            if (ally == null) return UtilityScorer.SCORE_IMPOSSIBLE;
 
             try
             {
-                if (ally.LifeState?.IsDead == true) return -1000f;
+                if (ally.LifeState?.IsDead == true) return UtilityScorer.SCORE_IMPOSSIBLE;
             }
             catch { }
 
@@ -457,10 +522,10 @@ namespace CompanionAI_v3.Analysis
 
                 // 1. HP% (낮을수록 힐 우선) - ★ v3.5.00: 다단계 임계값
                 float hpPercent = CombatCache.GetHPPercent(ally);
-                if (hpPercent < healThresholds[0]) score += 80f * weights.HPPercent;       // 최우선 (기본 25%)
-                else if (hpPercent < healThresholds[1]) score += 50f * weights.HPPercent;  // 높음 (기본 50%)
-                else if (hpPercent < healThresholds[2]) score += 20f * weights.HPPercent;  // 보통 (기본 75%)
-                else score -= 30f;  // 힐 불필요
+                if (hpPercent < healThresholds[0]) score += HEAL_CRITICAL_HP_BONUS * weights.HPPercent;       // 최우선 (기본 25%)
+                else if (hpPercent < healThresholds[1]) score += HEAL_HIGH_HP_BONUS * weights.HPPercent;  // 높음 (기본 50%)
+                else if (hpPercent < healThresholds[2]) score += HEAL_MODERATE_HP_BONUS * weights.HPPercent;  // 보통 (기본 75%)
+                else score -= HEAL_UNNEEDED_PENALTY;  // 힐 불필요
 
                 // 2. 거리 패널티
                 // ★ v3.5.29: 캐시된 거리 사용
@@ -486,12 +551,12 @@ namespace CompanionAI_v3.Analysis
                 float allyNearestEnemyDist = GetNearestEnemyDistance(ally, situation);
                 if (allyNearestEnemyDist < t.ThreatProximity)
                 {
-                    score += 25f * weights.InDanger;
+                    score += HEAL_ALLY_DANGER_BONUS * weights.InDanger;
                 }
 
                 // 5. 손실 HP 양
                 float missingHP = 100f - hpPercent;
-                score += missingHP * 0.3f * weights.MissingHP;
+                score += missingHP * HEAL_MISSING_HP_COEFFICIENT * weights.MissingHP;
             }
             catch (Exception ex)
             {
@@ -650,14 +715,14 @@ namespace CompanionAI_v3.Analysis
 
                 // 이미 행동한 적 = 이번 라운드 위협 낮음
                 if (target.Initiative?.ActedThisRound == true)
-                    return -10f;
+                    return -TURN_ALREADY_ACTED_PENALTY;
 
                 // 남은 턴 순서에서 위치 찾기
                 int position = _cachedTurnOrder.IndexOf(target);
                 if (position < 0) return 0f;  // 목록에 없음 (인터럽트 등 특수 상황)
 
                 // 가까울수록 높은 보너스: 0번째=+25, 1번째=+20, ..., 5번째=+0
-                float bonus = Math.Max(0f, 25f - position * 5f);
+                float bonus = Math.Max(0f, TURN_URGENCY_BASE - position * TURN_URGENCY_POSITION_RATE);
 
                 if (bonus > 0f && Main.IsDebugEnabled)
                 {
@@ -687,11 +752,11 @@ namespace CompanionAI_v3.Analysis
                     return 0f;
 
                 if (ally.Initiative?.ActedThisRound == true)
-                    return -10f;  // 이미 행동 완료 → 버프 우선순위 낮춤
+                    return -TURN_ALREADY_ACTED_PENALTY;  // 이미 행동 완료 → 버프 우선순위 낮춤
 
                 int position = _cachedTurnOrder.IndexOf(ally);
                 if (position >= 0 && position <= 2)
-                    return 15f;  // 곧 행동할 아군 → 버프 즉시 활용
+                    return ALLY_IMMINENT_TURN_BONUS;  // 곧 행동할 아군 → 버프 즉시 활용
 
                 return 0f;
             }
@@ -755,7 +820,7 @@ namespace CompanionAI_v3.Analysis
             catch (Exception ex)
             {
                 Main.LogDebug($"[TargetScorer] EvaluateThreat error: {ex.Message}");
-                return 0.5f;  // 폴백: 중간 위협도
+                return THREAT_FALLBACK;  // 폴백: 중간 위협도
             }
 
             return Math.Max(0f, Math.Min(1f, threat));
@@ -890,19 +955,19 @@ namespace CompanionAI_v3.Analysis
 
                 switch (role)
                 {
-                    case AIRole.Tank: priority += 30f; break;
-                    case AIRole.DPS: priority += 20f; break;
-                    case AIRole.Support: priority += 10f; break;
+                    case AIRole.Tank: priority += BUFF_TANK_PRIORITY; break;
+                    case AIRole.DPS: priority += BUFF_DPS_PRIORITY; break;
+                    case AIRole.Support: priority += BUFF_SUPPORT_PRIORITY; break;
                 }
 
                 // 본인은 약간 낮은 우선순위
                 if (ally == situation.Unit)
-                    priority -= 5f;
+                    priority -= BUFF_SELF_PENALTY;
 
                 // 낮은 HP = 높은 우선순위 (보호 필요) - ★ v3.5.00: ThresholdConfig
                 float hpPercent = CombatCache.GetHPPercent(ally);
                 if (hpPercent < t.PreAttackBuffMinHP)
-                    priority += 15f;
+                    priority += BUFF_LOW_HP_BONUS;
 
                 // ★ v3.9.16: 턴 순서 기반 버프 우선순위
                 // 곧 행동할 아군에게 버프 → 즉시 활용 / 이미 행동한 아군 → 다음 라운드 대기

@@ -24,22 +24,36 @@ namespace CompanionAI_v3.Planning.Planners
             if (situation.HPPercent >= 30f) return null;
             if (situation.HasHealedThisTurn) return null;
 
-            foreach (var heal in situation.AvailableHeals)
+            // ★ v3.12.2: ScoreHeal 기반 최적 힐 선택 (기존 first-available 대체)
+            var selfTarget = new TargetWrapper(situation.Unit);
+            AbilityData bestHeal = null;
+            float bestScore = float.MinValue;
+            float bestCost = 0f;
+
+            for (int i = 0; i < situation.AvailableHeals.Count; i++)
             {
+                var heal = situation.AvailableHeals[i];
                 float cost = CombatAPI.GetAbilityAPCost(heal);
                 if (cost > remainingAP) continue;
 
-                var target = new TargetWrapper(situation.Unit);
                 string reason;
-                if (CombatAPI.CanUseAbilityOn(heal, target, out reason))
+                if (!CombatAPI.CanUseAbilityOn(heal, selfTarget, out reason)) continue;
+
+                float score = UtilityScorer.ScoreHeal(heal, situation.Unit, situation);
+                if (score > bestScore)
                 {
-                    remainingAP -= cost;
-                    return PlannedAction.Heal(heal, situation.Unit,
-                        $"Emergency heal (HP={situation.HPPercent:F0}%)", cost);
+                    bestScore = score;
+                    bestHeal = heal;
+                    bestCost = cost;
                 }
             }
 
-            return null;
+            if (bestHeal == null) return null;
+
+            remainingAP -= bestCost;
+            Main.Log($"[{roleName}] Emergency heal: {bestHeal.Name} (score={bestScore:F1}, HP={situation.HPPercent:F0}%)");
+            return PlannedAction.Heal(bestHeal, situation.Unit,
+                $"Emergency heal (HP={situation.HPPercent:F0}%)", bestCost);
         }
 
         /// <summary>
@@ -58,26 +72,38 @@ namespace CompanionAI_v3.Planning.Planners
                 return null;
             }
 
+            // ★ v3.12.2: ScoreHeal 기반 최적 힐 선택 (기존 first-available 대체)
             var targetWrapper = new TargetWrapper(ally);
+            AbilityData bestHeal = null;
+            float bestScore = float.MinValue;
+            float bestCost = 0f;
 
-            foreach (var heal in situation.AvailableHeals)
+            for (int i = 0; i < situation.AvailableHeals.Count; i++)
             {
+                var heal = situation.AvailableHeals[i];
                 float cost = CombatAPI.GetAbilityAPCost(heal);
                 if (cost > remainingAP) continue;
 
                 string reason;
-                if (CombatAPI.CanUseAbilityOn(heal, targetWrapper, out reason))
-                {
-                    // ★ v3.5.10: 힐 대상 예약
-                    TeamBlackboard.Instance.ReserveHeal(ally);
+                if (!CombatAPI.CanUseAbilityOn(heal, targetWrapper, out reason)) continue;
 
-                    remainingAP -= cost;
-                    Main.Log($"[{roleName}] Heal ally: {heal.Name} -> {ally.CharacterName}");
-                    return PlannedAction.Heal(heal, ally, $"Heal {ally.CharacterName}", cost);
+                float score = UtilityScorer.ScoreHeal(heal, ally, situation);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestHeal = heal;
+                    bestCost = cost;
                 }
             }
 
-            return null;
+            if (bestHeal == null) return null;
+
+            // ★ v3.5.10: 힐 대상 예약
+            TeamBlackboard.Instance.ReserveHeal(ally);
+
+            remainingAP -= bestCost;
+            Main.Log($"[{roleName}] Heal ally: {bestHeal.Name} -> {ally.CharacterName} (score={bestScore:F1})");
+            return PlannedAction.Heal(bestHeal, ally, $"Heal {ally.CharacterName}", bestCost);
         }
 
         /// <summary>

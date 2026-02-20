@@ -669,27 +669,41 @@ namespace CompanionAI_v3.Planning.Plans
 
         #region Support-Specific Methods
 
+        /// <summary>
+        /// ★ v3.12.2: ScoreHeal 기반 최적 힐 선택 (기존 first-available 대체)
+        /// </summary>
         private PlannedAction PlanAllyHeal(Situation situation, BaseUnitEntity ally, ref float remainingAP)
         {
             if (situation.AvailableHeals.Count == 0) return null;
 
             var targetWrapper = new TargetWrapper(ally);
+            AbilityData bestHeal = null;
+            float bestScore = float.MinValue;
+            float bestCost = 0f;
 
-            foreach (var heal in situation.AvailableHeals)
+            for (int i = 0; i < situation.AvailableHeals.Count; i++)
             {
+                var heal = situation.AvailableHeals[i];
                 float cost = CombatAPI.GetAbilityAPCost(heal);
                 if (cost > remainingAP) continue;
 
                 string reason;
-                if (CombatAPI.CanUseAbilityOn(heal, targetWrapper, out reason))
+                if (!CombatAPI.CanUseAbilityOn(heal, targetWrapper, out reason)) continue;
+
+                float score = UtilityScorer.ScoreHeal(heal, ally, situation);
+                if (score > bestScore)
                 {
-                    remainingAP -= cost;
-                    Main.Log($"[Support] Heal ally: {heal.Name} -> {ally.CharacterName}");
-                    return PlannedAction.Heal(heal, ally, $"Heal {ally.CharacterName}", cost);
+                    bestScore = score;
+                    bestHeal = heal;
+                    bestCost = cost;
                 }
             }
 
-            return null;
+            if (bestHeal == null) return null;
+
+            remainingAP -= bestCost;
+            Main.Log($"[Support] Heal ally: {bestHeal.Name} -> {ally.CharacterName} (score={bestScore:F1})");
+            return PlannedAction.Heal(bestHeal, ally, $"Heal {ally.CharacterName}", bestCost);
         }
 
         /// <summary>
@@ -732,10 +746,12 @@ namespace CompanionAI_v3.Planning.Plans
             if (tiles == null || tiles.Count == 0) return null;
 
             // ★ v3.9.66: 타일 검색 — Chebyshev 거리 + LOS 검증
+            // ★ v3.12.2: ScoreHeal 기반 최적 힐 선택 (기존 cheapest 대체)
             UnityEngine.Vector3? bestPos = null;
             float bestDist = float.MaxValue;
             AbilityData bestHeal = null;
-            float bestHealCost = float.MaxValue;
+            float bestHealCost = 0f;
+            float bestTileScore = float.MinValue;
 
             foreach (var kvp in tiles)
             {
@@ -748,18 +764,18 @@ namespace CompanionAI_v3.Planning.Plans
                 var pos = node.Vector3Position;
 
                 // ★ v3.9.66: 게임 API 그리드 거리 (Chebyshev + SizeRect)
-                // 기존: MetersToTiles(Vector3.Distance) → 대각선 1.414배 과대 계산
                 float distToAlly = CombatAPI.GetDistanceInTiles(pos, woundedAlly);
                 if (distToAlly > maxHealRange) continue;
 
-                // 이 위치에서 사용 가능한 가장 저렴한 힐 탐색
+                // ★ v3.12.2: 이 위치에서 최고 점수 힐 탐색 (기존: 최저 비용)
                 AbilityData tileHeal = null;
-                float tileCost = float.MaxValue;
+                float tileScore = float.MinValue;
+                float tileCost = 0f;
 
                 foreach (var heal in situation.AvailableHeals)
                 {
                     float cost = CombatAPI.GetAbilityAPCost(heal);
-                    if (cost > remainingAP || cost >= tileCost) continue;
+                    if (cost > remainingAP) continue;
 
                     int range = CombatAPI.GetAbilityRangeInTiles(heal);
                     if (distToAlly > range) continue;
@@ -767,19 +783,25 @@ namespace CompanionAI_v3.Planning.Plans
                     // ★ v3.9.66: LOS 검증 — 해당 위치에서 힐 시전 가능 확인
                     if (!CombatAPI.CanReachTargetFromPosition(heal, pos, woundedAlly)) continue;
 
-                    tileCost = cost;
-                    tileHeal = heal;
+                    float score = UtilityScorer.ScoreHeal(heal, woundedAlly, situation);
+                    if (score > tileScore)
+                    {
+                        tileScore = score;
+                        tileHeal = heal;
+                        tileCost = cost;
+                    }
                 }
 
                 if (tileHeal == null) continue;
 
-                // 가장 가까운 유효 타일 (같은 거리면 비용 최소)
-                if (distToAlly < bestDist || (distToAlly == bestDist && tileCost < bestHealCost))
+                // ★ v3.12.2: 가장 가까운 유효 타일 (같은 거리면 점수 최대)
+                if (distToAlly < bestDist || (distToAlly == bestDist && tileScore > bestTileScore))
                 {
                     bestDist = distToAlly;
                     bestPos = pos;
                     bestHeal = tileHeal;
                     bestHealCost = tileCost;
+                    bestTileScore = tileScore;
                 }
             }
 
