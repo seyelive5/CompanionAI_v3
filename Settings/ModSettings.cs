@@ -304,10 +304,10 @@ namespace CompanionAI_v3.Settings
                 { Language.Japanese, "武器セットローテーション" }
             },
             ["EnableWeaponSetRotationDesc"] = new() {
-                { Language.English, "Use both weapon sets in a single turn.\nSwitches weapons (0 AP) to use attacks from the alternate set." },
-                { Language.Korean, "한 턴에 양쪽 무기 세트를 모두 사용합니다.\n무기 전환(0 AP)으로 대체 세트의 공격을 활용합니다." },
-                { Language.Russian, "Использовать оба комплекта оружия за один ход.\nПереключает оружие (0 AP) для атак из альтернативного комплекта." },
-                { Language.Japanese, "1ターンで両方の武器セットを使用します。\n武器切替(0 AP)で代替セットの攻撃を活用します。" }
+                { Language.English, "Use both weapon sets in a single turn.\nSwitches weapons (0 AP) to use attacks from the alternate set.\n⚠️ This feature is under development and may not work as intended." },
+                { Language.Korean, "한 턴에 양쪽 무기 세트를 모두 사용합니다.\n무기 전환(0 AP)으로 대체 세트의 공격을 활용합니다.\n⚠️ 이 기능은 개발 중이며 의도대로 동작하지 않을 수 있습니다." },
+                { Language.Russian, "Использовать оба комплекта оружия за один ход.\nПереключает оружие (0 AP) для атак из альтернативного комплекта.\n⚠️ Эта функция находится в разработке и может работать не так, как задумано." },
+                { Language.Japanese, "1ターンで両方の武器セットを使用します。\n武器切替(0 AP)で代替セットの攻撃を活用します。\n⚠️ この機能は開発中であり、意図した通りに動作しない場合があります。" }
             },
 
             // ★ v3.5.13: Advanced Settings UI
@@ -1271,10 +1271,10 @@ namespace CompanionAI_v3.Settings
                 { Language.Japanese, "武器ローテーション設定" }
             },
             ["WeaponRotationWarning"] = new() {
-                { Language.English, "⚠️ Controls weapon set switching behavior during combat." },
-                { Language.Korean, "⚠️ 전투 중 무기 세트 전환 동작을 조절합니다." },
-                { Language.Russian, "⚠️ Управляет переключением комплектов оружия в бою." },
-                { Language.Japanese, "⚠️ 戦闘中の武器セット切り替え動作を制御します。" }
+                { Language.English, "⚠️ This feature is under development and may not work as intended.\nControls weapon set switching behavior during combat." },
+                { Language.Korean, "⚠️ 이 기능은 개발 중이며 의도대로 동작하지 않을 수 있습니다.\n전투 중 무기 세트 전환 동작을 조절합니다." },
+                { Language.Russian, "⚠️ Эта функция находится в разработке и может работать не так, как задумано.\nУправляет переключением комплектов оружия в бою." },
+                { Language.Japanese, "⚠️ この機能は開発中であり、意図した通りに動作しない場合があります。\n戦闘中の武器セット切り替え動作を制御します。" }
             },
             ["ResetWeaponRotationToDefault"] = new() {
                 { Language.English, "Reset Weapon Rotation to Default" },

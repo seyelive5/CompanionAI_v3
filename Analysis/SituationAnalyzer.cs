@@ -781,18 +781,27 @@ namespace CompanionAI_v3.Analysis
 
                     case AbilityTiming.PreCombatBuff:
                     case AbilityTiming.PreAttackBuff:
-                        // 이미 활성화된 버프 제외
-                        if (!AllyStateCache.HasBuff(unit, ability))
+                        // ★ v3.18.20: HP 임계값 체크 (OathOfVengeance 등 wound 소모 버프)
                         {
-                            situation.AvailableBuffs.Add(ability);
-                            // ★ v3.9.20: PreCombatBuff 공격/방어 자동 분류 (진단 + 캐시 워밍)
-                            if (timing == AbilityTiming.PreCombatBuff)
+                            float hpThreshold = AbilityDatabase.GetHPThreshold(ability);
+                            if (hpThreshold > 0 && situation.HPPercent < hpThreshold)
                             {
-                                bool isDef = AbilityDatabase.IsDefensiveBuff(ability);
-                                bool isOff = AbilityDatabase.IsOffensiveBuff(ability);
-                                string buffType = isDef && isOff ? "Mixed"
-                                    : isDef ? "Defensive" : isOff ? "Offensive" : "Unclassified";
-                                Main.LogDebug($"[Analyzer] BuffClassify: {ability.Name} → {buffType}");
+                                Main.LogDebug($"[Analyzer] Blocked {timing} {ability.Name}: HP {situation.HPPercent:F0}% < threshold {hpThreshold}%");
+                                break;
+                            }
+                            // 이미 활성화된 버프 제외
+                            if (!AllyStateCache.HasBuff(unit, ability))
+                            {
+                                situation.AvailableBuffs.Add(ability);
+                                // ★ v3.9.20: PreCombatBuff 공격/방어 자동 분류 (진단 + 캐시 워밍)
+                                if (timing == AbilityTiming.PreCombatBuff)
+                                {
+                                    bool isDef = AbilityDatabase.IsDefensiveBuff(ability);
+                                    bool isOff = AbilityDatabase.IsOffensiveBuff(ability);
+                                    string buffType = isDef && isOff ? "Mixed"
+                                        : isDef ? "Defensive" : isOff ? "Offensive" : "Unclassified";
+                                    Main.LogDebug($"[Analyzer] BuffClassify: {ability.Name} → {buffType}");
+                                }
                             }
                         }
                         break;
@@ -988,6 +997,21 @@ namespace CompanionAI_v3.Analysis
                 {
                     situation.AvailableAoEAttacks.Add(attack);
                 }
+            }
+
+            // ★ v3.19.2: 능력 프로파일 계산 — Phase 간 교차 인식의 기초
+            // "이 유닛이 뭘 할 수 있는지" 사전 분석
+            foreach (var attack in situation.AvailableAttacks)
+            {
+                if (AbilityDatabase.IsGapCloser(attack))
+                    situation.HasGapCloser = true;
+                if (CombatAPI.IsSelfTargetedAoEAttack(attack))
+                    situation.HasSelfAoE = true;
+            }
+            foreach (var buff in situation.AvailableBuffs)
+            {
+                if (AbilityDatabase.GetTiming(buff) == AbilityTiming.TurnEnding)
+                    situation.HasTurnEndingAbility = true;
             }
 
             // ★ v3.0.20: 분류 결과 요약 로깅
@@ -1254,23 +1278,80 @@ namespace CompanionAI_v3.Analysis
                     AllyStateCache.Refresh(unit, situation.Allies);
                 }
 
-                // 7. 최적 위치 계산 (Relocate 범위 제한 적용)
+                // ★ v3.18.14: 키스톤 능력의 실제 AoE 반경으로 포지셔닝
+                // FamiliarAbilities는 사역마 고유 능력만 포함 (재배치, Hex 등)
+                // 실제 Warp Relay/Extrapolation 대상 능력(허약 AoE=2 등)은
+                // AvailableBuffs/AvailableDebuffs에 있으므로 함께 검사
+                float familiarEffectRadius = FamiliarPositioner.EFFECT_RADIUS_TILES;
+                float minAoE = float.MaxValue;
+                // 1. FamiliarAbilities 스캔 (사역마 고유 능력)
+                for (int i = 0; i < situation.FamiliarAbilities.Count; i++)
+                {
+                    var fa = situation.FamiliarAbilities[i];
+                    if (FamiliarAbilities.IsRelocateAbility(fa)) continue;
+                    float r = CombatAPI.GetAoERadius(fa);
+                    if (r > 0 && r < minAoE) minAoE = r;
+                }
+                // 2. AvailableBuffs/AvailableDebuffs/AvailableAttacks 스캔 (Warp Relay/Extrapolation 대상)
+                bool isRaven = situation.FamiliarType == PetType.Raven;
+                bool isServo = situation.FamiliarType == PetType.ServoskullSwarm;
+                if (isRaven || isServo)
+                {
+                    for (int i = 0; i < situation.AvailableBuffs.Count; i++)
+                    {
+                        var buff = situation.AvailableBuffs[i];
+                        if (isRaven && !FamiliarAbilities.IsWarpRelayTarget(buff)) continue;
+                        if (isServo && !FamiliarAbilities.IsExtrapolationTarget(buff)) continue;
+                        float r = CombatAPI.GetAoERadius(buff);
+                        if (r > 0 && r < minAoE) minAoE = r;
+                    }
+                    if (isRaven && situation.AvailableDebuffs != null)
+                    {
+                        for (int i = 0; i < situation.AvailableDebuffs.Count; i++)
+                        {
+                            if (!FamiliarAbilities.IsWarpRelayTarget(situation.AvailableDebuffs[i])) continue;
+                            float r = CombatAPI.GetAoERadius(situation.AvailableDebuffs[i]);
+                            if (r > 0 && r < minAoE) minAoE = r;
+                        }
+                    }
+                    if (isRaven && situation.AvailableAttacks != null)
+                    {
+                        for (int i = 0; i < situation.AvailableAttacks.Count; i++)
+                        {
+                            var atk = situation.AvailableAttacks[i];
+                            if (!FamiliarAbilities.IsWarpRelayTarget(atk)) continue;
+                            if (atk.Blueprint?.CanTargetEnemies != true) continue;
+                            float r = CombatAPI.GetAoERadius(atk);
+                            if (r > 0 && r < minAoE) minAoE = r;
+                        }
+                    }
+                }
+                if (minAoE < float.MaxValue)
+                {
+                    familiarEffectRadius = minAoE;
+                    Main.LogDebug($"[Analyzer] Familiar effect radius from keystone abilities: {familiarEffectRadius} tiles (min AoE)");
+                }
+                situation.FamiliarEffectRadius = familiarEffectRadius;
+
+                // 7. 최적 위치 계산 (Relocate 범위 제한 + 실제 AoE 반경 적용)
                 situation.OptimalFamiliarPosition = FamiliarPositioner.FindOptimalPosition(
                     unit,
                     situation.FamiliarType.Value,
                     situation.Allies,
                     situation.Enemies,
-                    relocateRangeMeters);
+                    relocateRangeMeters,
+                    familiarEffectRadius);
 
                 // 8. ★ v3.7.22: 현재 위치의 커버리지 계산 (ShouldRelocate에 전달)
                 var validAllies = situation.Allies?.Where(a => a != null && a.IsConscious && !FamiliarAPI.IsFamiliar(a)).ToList()
                     ?? new List<BaseUnitEntity>();
                 var validEnemies = situation.Enemies?.Where(e => e != null && e.IsConscious).ToList()
                     ?? new List<BaseUnitEntity>();
+                // ★ v3.18.12: 실제 AoE 반경 사용 (하드코딩 EFFECT_RADIUS_TILES 제거)
                 int currentAlliesInRange = FamiliarAPI.CountAlliesInRadius(
-                    situation.FamiliarPosition, FamiliarPositioner.EFFECT_RADIUS_TILES, validAllies);
+                    situation.FamiliarPosition, familiarEffectRadius, validAllies);
                 int currentEnemiesInRange = FamiliarAPI.CountEnemiesInRadius(
-                    situation.FamiliarPosition, FamiliarPositioner.EFFECT_RADIUS_TILES, validEnemies);
+                    situation.FamiliarPosition, familiarEffectRadius, validEnemies);
 
                 // 9. Relocate 필요 여부 판단 (커버리지 비교 기반)
                 float currentDist = Vector3.Distance(

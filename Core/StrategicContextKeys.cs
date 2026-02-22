@@ -37,5 +37,15 @@ namespace CompanionAI_v3.Core
 
         /// <summary>string - 킬 시퀀스 타겟 UniqueId (재계획 시 동일 타겟 우선)</summary>
         public const string KillSequenceTargetId = "KillSeqTargetId";
+
+        // ── ★ v3.19.2: 전략 집중 타겟 / 턴 의도 ──
+
+        /// <summary>★ v3.19.2: string - 전략 평가 시 기준이 된 타겟 UniqueId
+        /// Replan 시 동일 타겟이 유효하면 전략 재사용, 무효하면 재평가</summary>
+        public const string FocusTargetId = "FocusTargetId";
+
+        /// <summary>★ v3.19.2: string - 현재 턴의 전술적 의도 ("Kill", "AoE", "Support", "Retreat")
+        /// Replan 시 의도 연속성 보존 — 의도가 유효하면 전략 힌트로 활용</summary>
+        public const string TacticalObjective = "TacticalObjective";
     }
 }

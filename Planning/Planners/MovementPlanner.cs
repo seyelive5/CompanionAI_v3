@@ -382,7 +382,8 @@ namespace CompanionAI_v3.Planning.Planners
                 : CombatCache.GetDistanceInTiles(unit, target);
 
             // ★ v3.5.98: 적이 너무 멀면 갭클로저 사용 안 함
-            float meleeAttackRange = 2f;  // 타일
+            // ★ v3.18.16: 하드코딩 2f → 실제 무기 근접 사거리 사용
+            float meleeAttackRange = GetUnitMeleeRange(unit);
             float maxEffectiveRange = abilityRange + meleeAttackRange;
             if (targetDistance > maxEffectiveRange)
             {
@@ -414,6 +415,28 @@ namespace CompanionAI_v3.Planning.Planners
 
             // ★ v3.6.11: 게임 로직 기반 - 적 주변 1타일에서 착지 위치 찾기
             // GridAreaHelper.GetNodesSpiralAround 사용
+            // ★ v3.18.18: DamagingAoE 회피 — 안전한 유닛이 AoE 안으로 착지하지 않도록
+            bool avoidHazardZones = situation != null ? !situation.NeedsAoEEvacuation : !CombatAPI.IsUnitInHazardZone(unit);
+
+            // ★ v3.18.24 / v3.19.2: Self-AoE 보유 여부 + 반경 검출 (칼날춤 등)
+            // try 블록 밖에 선언하여 폴백 경로에서도 사용 가능
+            bool hasSelfAoE = false;
+            float selfAoERadius = 1f; // BladeDance 기본값 (InRangeInCells 1 타일)
+            if (situation?.AvailableAttacks != null)
+            {
+                for (int i = 0; i < situation.AvailableAttacks.Count; i++)
+                {
+                    if (CombatAPI.IsSelfTargetedAoEAttack(situation.AvailableAttacks[i]))
+                    {
+                        hasSelfAoE = true;
+                        float r = CombatAPI.GetAoERadius(situation.AvailableAttacks[i]);
+                        if (r > selfAoERadius) selfAoERadius = r;
+                    }
+                }
+                if (hasSelfAoE && Main.IsDebugEnabled)
+                    Main.LogDebug($"[MovementPlanner] GapCloser: Self-AoE detected, radius={selfAoERadius:F1} — will penalize ally-adjacent positions");
+            }
+
             try
             {
                 var targetNode = target.CurrentUnwalkableNode;
@@ -431,7 +454,7 @@ namespace CompanionAI_v3.Planning.Planners
                 );
 
                 Vector3? bestLandingPos = null;
-                float bestDistance = float.MaxValue;
+                float bestScore = float.MinValue;
 
                 foreach (var node in nodesAroundTarget)
                 {
@@ -453,6 +476,13 @@ namespace CompanionAI_v3.Planning.Planners
 
                     Vector3 nodePos = node.Vector3Position;
 
+                    // ★ v3.18.18: DamagingAoE 안 착지 방지
+                    if (avoidHazardZones && CombatAPI.IsPositionInHazardZone(nodePos, unit))
+                    {
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] GapCloser node ({nodePos.x:F1},{nodePos.z:F1}) in damaging AoE — skipped");
+                        continue;
+                    }
+
                     // ★ 능력 사거리 체크 (캐스터 → 착지 위치)
                     // ★ v3.16.6: 오버라이드 위치 기반 거리 계산
                     float distFromCaster = CombatAPI.MetersToTiles(Vector3.Distance(effectiveCasterPos, nodePos));
@@ -462,17 +492,35 @@ namespace CompanionAI_v3.Planning.Planners
                         continue;
                     }
 
-                    // 캐스터에서 가장 가까운 위치 선택
-                    if (distFromCaster < bestDistance)
+                    // ★ v3.18.24: 스코어 기반 선택 — Self-AoE 아군 근접 페널티
+                    float candidateScore = -distFromCaster; // 기본: 가까울수록 높은 점수 (거리 차이 ~0-2)
+
+                    if (hasSelfAoE && situation.Allies != null)
                     {
-                        bestDistance = distFromCaster;
+                        int nearbyAllies = 0;
+                        for (int a = 0; a < situation.Allies.Count; a++)
+                        {
+                            var ally = situation.Allies[a];
+                            if (ally == null || ally == unit) continue;
+                            float allyDist = CombatAPI.MetersToTiles(Vector3.Distance(nodePos, ally.Position));
+                            if (allyDist <= selfAoERadius)
+                                nearbyAllies++;
+                        }
+                        candidateScore -= nearbyAllies * 100f; // 아군 1명당 -100 (거리 차이를 압도)
+                        if (Main.IsDebugEnabled && nearbyAllies > 0)
+                            Main.LogDebug($"[MovementPlanner] GapCloser node ({nodePos.x:F1},{nodePos.z:F1}): {nearbyAllies} allies within selfAoE range {selfAoERadius:F1}, score={candidateScore:F1}");
+                    }
+
+                    if (candidateScore > bestScore)
+                    {
+                        bestScore = candidateScore;
                         bestLandingPos = nodePos;
                     }
                 }
 
                 if (bestLandingPos.HasValue)
                 {
-                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] FindGapCloserLanding: found landing at ({bestLandingPos.Value.x:F1},{bestLandingPos.Value.z:F1}), dist={bestDistance:F1} tiles from caster");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] FindGapCloserLanding: found landing at ({bestLandingPos.Value.x:F1},{bestLandingPos.Value.z:F1}), score={bestScore:F1}");
                     return bestLandingPos;
                 }
 
@@ -484,26 +532,63 @@ namespace CompanionAI_v3.Planning.Planners
             }
 
             // ★ 폴백: MovementAPI 사용 (기존 로직)
+            // ★ v3.18.16: 하드코딩 2f → 실제 무기 근접 사거리 + 착지→타겟 거리 검증
             AIRole role = situation?.CharacterSettings?.Role ?? AIRole.Auto;
             // ★ v3.8.50: 근접 AOE 스플래시 보너스 전달
             var bestMeleeAoE = situation?.AvailableAttacks != null
                 ? CombatHelpers.GetBestMeleeAoEAbility(situation.AvailableAttacks)
                 : null;
             var meleePosition = MovementAPI.FindMeleeAttackPositionSync(
-                unit, target, 2f, 0f,
+                unit, target, meleeAttackRange, 0f,
                 situation?.InfluenceMap,
                 role,
                 situation?.PredictiveThreatMap,
                 bestMeleeAoE,
                 situation?.Enemies);
 
+            // ★ v3.18.18: 폴백 착지 위치도 DamagingAoE 체크
+            if (meleePosition != null && avoidHazardZones && CombatAPI.IsPositionInHazardZone(meleePosition.Position, unit))
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] FindGapCloserLanding (fallback): melee position in damaging AoE — rejected");
+                meleePosition = null;
+            }
+
+            // ★ v3.19.2: 폴백 착지 위치에도 Self-AoE 아군 안전성 적용
+            // 기존: spiral search만 self-AoE 페널티 적용 → 폴백은 아군 밀집 지역에 착지 가능
+            // 수정: Self-AoE 보유 시, 폴백 위치 근처에 아군 2+ → 경고 로그 (착지 후 BladeDance 불가)
+            if (meleePosition != null && hasSelfAoE && situation?.Allies != null)
+            {
+                int nearbyAllies = 0;
+                for (int a = 0; a < situation.Allies.Count; a++)
+                {
+                    var ally = situation.Allies[a];
+                    if (ally == null || ally == unit) continue;
+                    float allyDist = CombatAPI.MetersToTiles(Vector3.Distance(meleePosition.Position, ally.Position));
+                    if (allyDist <= selfAoERadius)
+                        nearbyAllies++;
+                }
+                if (nearbyAllies >= 2)
+                {
+                    Main.Log($"[MovementPlanner] GapCloser fallback: WARNING — {nearbyAllies} allies within selfAoE range {selfAoERadius:F1} at landing position. Self-AoE after landing may hit allies.");
+                    // Self-AoE 유닛이 아군 밀집 지역에 착지하면 BladeDance 사용이 위험
+                    // 하지만 갭클로저의 주 목적(적에게 도달)은 유효하므로 착지는 허용
+                    // Phase 5.7(Self-AoE)에서 AoESafetyChecker가 최종 차단
+                }
+            }
+
             if (meleePosition != null)
             {
                 float distToLandingTiles = CombatAPI.MetersToTiles(Vector3.Distance(effectiveCasterPos, meleePosition.Position));
-                if (distToLandingTiles <= abilityRange)
+                // ★ v3.18.16: 착지→타겟 거리도 검증 (착지 후 실제로 공격 가능한지)
+                float distLandingToTarget = CombatAPI.MetersToTiles(Vector3.Distance(meleePosition.Position, target.Position));
+                if (distToLandingTiles <= abilityRange && distLandingToTarget <= meleeAttackRange + 0.5f)
                 {
-                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] FindGapCloserLanding (fallback): melee position at dist={distToLandingTiles:F1} tiles");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] FindGapCloserLanding (fallback): melee position at caster-dist={distToLandingTiles:F1}, target-dist={distLandingToTarget:F1} tiles (meleeRange={meleeAttackRange:F0})");
                     return meleePosition.Position;
+                }
+                else if (Main.IsDebugEnabled)
+                {
+                    Main.LogDebug($"[MovementPlanner] FindGapCloserLanding (fallback): rejected — caster-dist={distToLandingTiles:F1} (max={abilityRange:F1}), target-dist={distLandingToTarget:F1} (max={meleeAttackRange + 0.5f:F1})");
                 }
             }
 
@@ -675,18 +760,8 @@ namespace CompanionAI_v3.Planning.Planners
                 // 기존: target.Position (적의 점유된 타일) → 도달 불가
                 // 수정: 적에게 인접한 공격 가능 타일 찾기
 
-                float meleeRange = 2f;  // 기본 근접 사거리
-                try
-                {
-                    var primaryHand = unit.Body?.PrimaryHand;
-                    if (primaryHand?.HasWeapon == true && primaryHand.Weapon.Blueprint.IsMelee)
-                    {
-                        int attackRange = primaryHand.Weapon.AttackRange;
-                        if (attackRange > 0 && attackRange < 100)
-                            meleeRange = attackRange;
-                    }
-                }
-                catch (Exception ex) { if (Main.IsDebugEnabled) Main.LogDebug($"[MovePlanner] {ex.Message}"); }
+                // ★ v3.18.16: GetUnitMeleeRange 헬퍼 사용
+                float meleeRange = GetUnitMeleeRange(unit);
 
                 // ★ v3.1.01: predictedMP 전달
                 // ★ v3.2.00: influenceMap 전달
@@ -706,15 +781,31 @@ namespace CompanionAI_v3.Planning.Planners
                     situation.Enemies
                 );
 
+                // ★ v3.18.16: 근접 위치가 DamagingAoE 안이면 거부 (현재 안전할 때만)
+                if (bestPosition != null && !situation.NeedsAoEEvacuation &&
+                    CombatAPI.IsPositionInHazardZone(bestPosition.Position, unit))
+                {
+                    Main.Log($"[{roleName}] PlanMoveToEnemy: Melee position REJECTED — in damaging AoE ({bestPosition.Position.x:F1},{bestPosition.Position.z:F1})");
+                    bestPosition = null;  // 폴백으로 넘어감
+                }
+
                 if (bestPosition == null)
                 {
                     // ★ v3.9.52: FindBestApproachPosition 사용 (벽 뒤 적에게 A* 경로 기반 우회 접근)
                     // 게임 네이티브 AI처럼 도달 가능한 셀 중 타겟에 가장 가까운 위치로 이동
+                    // ★ v3.18.16: FindBestApproachPosition 내부에서도 DamagingAoE 필터링
                     var approachPosition = MovementAPI.FindBestApproachPosition(unit, target, effectiveMP);
                     if (approachPosition != null)
                     {
                         Main.Log($"[{roleName}] PlanMoveToEnemy: No melee position, approach via pathfinding ({approachPosition.Position.x:F1},{approachPosition.Position.z:F1})");
                         return PlannedAction.Move(approachPosition.Position, $"Approach {target.CharacterName}");
+                    }
+
+                    // ★ v3.18.16: 최후 폴백에서도 DamagingAoE 체크
+                    if (!situation.NeedsAoEEvacuation && CombatAPI.IsPositionInHazardZone(target.Position, unit))
+                    {
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanMoveToEnemy: Target position in damaging AoE — staying put");
+                        return null;
                     }
 
                     // 최후 폴백: 적 위치 직접 사용 (FindBestApproachPosition도 실패한 경우)
@@ -943,6 +1034,9 @@ namespace CompanionAI_v3.Planning.Planners
                 Vector3? bestPosition = null;
                 float bestScore = float.MinValue;
 
+                // ★ v3.18.18: DamagingAoE 회피 — 안전한 유닛이 AoE 안으로 대시하지 않도록
+                bool avoidHazardZones = !situation.NeedsAoEEvacuation;
+
                 foreach (var node in nodesInRange)
                 {
                     if (node == null || !node.Walkable)
@@ -957,6 +1051,10 @@ namespace CompanionAI_v3.Planning.Planners
                         continue;
 
                     Vector3 nodePos = node.Vector3Position;
+
+                    // ★ v3.18.18: DamagingAoE 안 착지 방지
+                    if (avoidHazardZones && CombatAPI.IsPositionInHazardZone(nodePos, unit))
+                        continue;
 
                     // 대시 범위 내인지 확인
                     float distFromUnit = CombatAPI.MetersToTiles(Vector3.Distance(unit.Position, nodePos));
@@ -1173,6 +1271,27 @@ namespace CompanionAI_v3.Planning.Planners
         }
 
         #region Helper Methods
+
+        /// <summary>
+        /// ★ v3.18.16: 유닛의 실제 근접 무기 사거리 (타일)
+        /// PrimaryHand의 IsMelee 무기 AttackRange 사용, 폴백 2f
+        /// </summary>
+        private static float GetUnitMeleeRange(BaseUnitEntity unit)
+        {
+            float meleeRange = 2f;  // 기본 근접 사거리
+            try
+            {
+                var primaryHand = unit.Body?.PrimaryHand;
+                if (primaryHand?.HasWeapon == true && primaryHand.Weapon.Blueprint.IsMelee)
+                {
+                    int attackRange = primaryHand.Weapon.AttackRange;
+                    if (attackRange > 0 && attackRange < 100)
+                        meleeRange = attackRange;
+                }
+            }
+            catch (Exception ex) { if (Main.IsDebugEnabled) Main.LogDebug($"[MovePlanner] GetUnitMeleeRange: {ex.Message}"); }
+            return meleeRange;
+        }
 
         // ★ v3.9.24: GetWeaponRange() 삭제 — CombatAPI.GetWeaponRangeProfile()로 중앙집중화
 

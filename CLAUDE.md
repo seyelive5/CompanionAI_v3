@@ -230,6 +230,13 @@ PatternType.Circle → 1.6m | PatternType.Ray/Cone/Sector → 0.3m (Directional)
 
 ---
 
+## ⚠️ 세션 시작 필수 확인
+
+**매 세션 시작 시 반드시 [WORK_TRACKER.md](WORK_TRACKER.md)를 읽을 것.**
+- 미완성 항목을 사용자에게 먼저 보고
+- "완료"라고 말하기 전에 체크리스트 전항목 통과 확인
+- 기능 구현 시 "완료 판정 기준" 5개 항목 점검
+
 ## 금지 사항
 
 - 임시방편/땜빵 코드
@@ -240,6 +247,7 @@ PatternType.Circle → 1.6m | PatternType.Ray/Cone/Sector → 0.3m (Directional)
 - 다 끝나지 않았는데 다 된 것처럼 잘난척 금지
 - 거짓말 금지
 - 부분 수정 대신 완전하고 전체적인 해결
+- **부분 구현 후 "완료" 선언 금지** — 전 Role, 전 경로, Replan 포함 검증 필수
 
 ## 행동 원칙
 

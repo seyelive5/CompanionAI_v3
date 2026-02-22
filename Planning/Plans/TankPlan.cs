@@ -33,15 +33,81 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.0.55: MP 추적 - AP처럼 계획 단계에서 MP도 추적
             float remainingMP = situation.CurrentMP;
 
-            float reservedAP = CalculateReservedAPForPostMoveAttack(situation);
-            if (reservedAP > 0)
+            // ★ v3.19.4: 통합 AP 예산 — CreateAPBudget 팩토리 + EffectiveReserved 자동 속성
+            var budget = CreateAPBudget(situation, remainingAP);
+            if (budget.PostMoveReserved > 0 || budget.TurnEndingReserved > 0)
             {
-                Main.Log($"[Tank] Reserving {reservedAP:F1} AP for post-move attack");
+                Main.Log($"[Tank] {budget}");
+            }
+
+            // ★ v3.19.0: 전략적 시퀀스 평가 — Tank Role용 (시드 0,2,4,6만 평가)
+            // ★ v3.19.2: Replan 시 FocusTarget 유효성 검증 + 전략 재사용
+            TurnStrategy strategy = turnState.GetContext<TurnStrategy>(
+                StrategicContextKeys.TurnStrategyKey, default(TurnStrategy));
+
+            bool previousStrategyValid = strategy != null
+                && situation.HasHittableEnemies
+                && situation.BestTarget != null
+                && strategy.ExpectedTotalDamage > 0;
+
+            if (previousStrategyValid)
+            {
+                string focusTargetId = turnState.GetContext<string>(StrategicContextKeys.FocusTargetId, null);
+                if (focusTargetId != null)
+                {
+                    bool found = false;
+                    for (int i = 0; i < situation.HittableEnemies.Count; i++)
+                    {
+                        if (situation.HittableEnemies[i].UniqueId == focusTargetId) { found = true; break; }
+                    }
+                    if (!found)
+                    {
+                        previousStrategyValid = false;
+                        Main.Log($"[Tank] Strategy: Previous FocusTarget no longer hittable — re-evaluating");
+                    }
+                }
+            }
+
+            if (previousStrategyValid)
+            {
+                budget.StrategyPostActionReserved = strategy.ReservedAPForPostAction;
+                Main.Log($"[Tank] Strategy: Reusing previous ({strategy.Sequence}, dmg={strategy.ExpectedTotalDamage:F0})");
+            }
+            else if (situation.HasHittableEnemies &&
+                TeamBlackboard.Instance.CurrentTactic != TacticalSignal.Retreat)
+            {
+                strategy = TurnStrategyPlanner.Evaluate(situation, Settings.AIRole.Tank);
+                if (strategy != null)
+                {
+                    turnState.SetContext(StrategicContextKeys.TurnStrategyKey, strategy);
+                    if (situation.BestTarget != null)
+                        turnState.SetContext(StrategicContextKeys.FocusTargetId, situation.BestTarget.UniqueId);
+                    budget.StrategyPostActionReserved = strategy.ReservedAPForPostAction;
+                    Main.Log($"[Tank] Strategy: {strategy.Sequence} (dmg={strategy.ExpectedTotalDamage:F0})");
+                }
+            }
+            else
+            {
+                strategy = null;
             }
 
             // ★ v3.12.0: Phase 0~1.5 공통 처리 (Ultimate, AoE대피, 긴급힐, 재장전)
             var earlyReturn = ExecuteCommonEarlyPhases(actions, situation, ref remainingAP);
             if (earlyReturn != null) return earlyReturn;
+
+            // ★ v3.19.0: Phase 1.55 — 무기 전환 (현재 무기 무용/비효율 시)
+            if (situation.WeaponRotationAvailable
+                && (!situation.HasHittableEnemies || ShouldSwitchForEffectiveness(situation))
+                && ShouldSwitchFirst(situation))
+            {
+                var switchActions = PlanWeaponSetRotationAttack(situation, ref remainingAP);
+                if (switchActions.Count > 0)
+                {
+                    actions.AddRange(switchActions);
+                    Main.Log($"[Tank] Phase 1.55: Switch-First — switching weapon for better effectiveness");
+                    return new TurnPlan(actions, TurnPriority.DirectAttack, "Tank weapon switch-first");
+                }
+            }
 
             // ★ v3.12.0: Phase 1.75 공통 Familiar 처리
             HashSet<string> _; // Tank는 키스톤 GUID 추적 불필요
@@ -61,7 +127,7 @@ namespace CompanionAI_v3.Planning.Plans
 
             if (!situation.HasPerformedFirstAction && needDefense)
             {
-                var defenseAction = PlanDefensiveStanceWithReservation(situation, ref remainingAP, reservedAP, tankNeedsMovement);
+                var defenseAction = PlanDefensiveStanceWithReservation(situation, ref remainingAP, budget.EffectiveReserved, tankNeedsMovement);
                 if (defenseAction != null)
                 {
                     actions.Add(defenseAction);
@@ -76,7 +142,7 @@ namespace CompanionAI_v3.Planning.Plans
             // Phase 3: 기타 선제적 버프
             if (!situation.HasBuffedThisTurn && !situation.HasPerformedFirstAction)
             {
-                var buffAction = PlanBuffWithReservation(situation, ref remainingAP, reservedAP);
+                var buffAction = PlanBuffWithReservation(situation, ref remainingAP, budget.EffectiveReserved);
                 if (buffAction != null)
                 {
                     actions.Add(buffAction);
@@ -147,10 +213,19 @@ namespace CompanionAI_v3.Planning.Plans
                         // 이동이 필요하면 먼저 이동 계획
                         if (bestOption.RequiresMove)
                         {
-                            var moveAction = PlannedAction.Move(bestOption.Position, "Move for smart taunt");
-                            actions.Add(moveAction);
-                            remainingMP -= bestOption.MoveCost;
-                            Main.Log($"[Tank] SmartTaunt: Moving to taunt position (cost={bestOption.MoveCost:F1} MP)");
+                            // ★ v3.19.8: 도발 위치가 위험 구역이면 이동 취소 (현재 안전할 때만)
+                            if (!situation.NeedsAoEEvacuation &&
+                                CombatAPI.IsPositionInHazardZone(bestOption.Position, situation.Unit))
+                            {
+                                Main.Log($"[Tank] SmartTaunt: Taunt position REJECTED — in hazard zone");
+                            }
+                            else
+                            {
+                                var moveAction = PlannedAction.Move(bestOption.Position, "Move for smart taunt");
+                                actions.Add(moveAction);
+                                remainingMP -= bestOption.MoveCost;
+                                Main.Log($"[Tank] SmartTaunt: Moving to taunt position (cost={bestOption.MoveCost:F1} MP)");
+                            }
                         }
 
                         // 도발 액션 추가
@@ -265,13 +340,20 @@ namespace CompanionAI_v3.Planning.Plans
 
             // ★ v3.5.37: Phase 4.8c: AOE 공격 (모든 AoE 타입)
             // ★ v3.8.96: AvailableAoEAttacks 캐시 사용 + Unit-targeted AoE 추가
+            // ★ v3.19.0: 전략이 AoE 추천 시 클러스터 검증 바이패스
             if (!didPlanAttack && situation.HasLivingEnemies && situation.HasAoEAttacks)
             {
                 bool useAoEOptimization = situation.CharacterSettings?.UseAoEOptimization ?? true;
                 int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
                 bool hasAoEOpportunity = false;
 
-                if (useAoEOptimization)
+                // ★ v3.19.0: 전략이 AoE를 추천하면 클러스터 검증 스킵
+                if (strategy?.ShouldPrioritizeAoE == true)
+                {
+                    hasAoEOpportunity = true;
+                    Main.Log($"[Tank] Phase 4.8c: Strategy recommends AoE — bypassing cluster check");
+                }
+                else if (useAoEOptimization)
                 {
                     // ★ v3.8.96: 캐시된 AvailableAoEAttacks 사용 (인라인 LINQ 제거)
                     foreach (var aoEAbility in situation.AvailableAoEAttacks)
@@ -367,6 +449,7 @@ namespace CompanionAI_v3.Planning.Plans
                             // ★ v3.16.6: Walk+Jump 콤보 시 사전 이동 추가
                             if (gcPreMove != null) actions.Add(gcPreMove);
                             actions.Add(gcAction);
+                            didPlanAttack = true;  // ★ v3.18.16: Phase 4.9 갭클로저 추적
                             Main.Log($"[Tank] Phase 4.9: GapCloser replaces MoveToAttack{(gcPreMove != null ? " (walk+jump)" : "")}");
                             var landingPos = gcAction.MoveDestination ?? gcAction.Target?.Point;
                             if (landingPos.HasValue)
@@ -395,6 +478,7 @@ namespace CompanionAI_v3.Planning.Plans
                     {
                         if (gcPreMove != null) actions.Add(gcPreMove);
                         actions.Add(gcAction);
+                        didPlanAttack = true;  // ★ v3.18.16: Phase 4.9 갭클로저 추적
                         Main.Log($"[Tank] Phase 4.9: GapCloser as last resort{(gcPreMove != null ? " (walk+jump)" : "")}");
                         var landingPos = gcAction.MoveDestination ?? gcAction.Target?.Point;
                         if (landingPos.HasValue)
@@ -408,8 +492,8 @@ namespace CompanionAI_v3.Planning.Plans
             var plannedTargetIds = new HashSet<string>();
             var plannedAbilityGuids = new HashSet<string>();
 
-            // ★ v3.6.14: AP >= 0 으로 완화 (bonus usage 공격은 0 AP로 사용 가능)
-            while (remainingAP >= 0f && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
+            // ★ v3.19.2: APBudget.CanAfford()로 강제 — TurnEnding + Strategy 예약을 중앙 검증
+            while (budget.CanAfford(0, remainingAP) && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
             {
                 // ★ v3.1.21: Tank 가중치로 최적 타겟 선택 (거리 + 위협도 중시)
                 // ★ v3.9.10: LINQ → for loop (GC 할당 제거)
@@ -479,6 +563,9 @@ namespace CompanionAI_v3.Planning.Plans
                         plannedAbilityGuids.Add(guid);
                 }
             }
+
+            // ★ v3.18.22: TurnEnding AP 복원
+            // ★ v3.19.2: TurnEnding AP 복원 불필요 — budget.CanAfford()가 예약을 내부 처리
 
             // ★ v3.8.72: Hittable mismatch 사후 보정
             HandleHittableMismatch(situation, didPlanAttack, attackContext);
@@ -581,7 +668,7 @@ namespace CompanionAI_v3.Planning.Plans
                     hasMoveInPlan = true;
 
                     // ★ v3.1.24: 이동 목적지 추출하여 Post-move 공격에 전달
-                    if (reservedAP > 0 && situation.NearestEnemy != null)
+                    if (budget.PostMoveReserved > 0 && situation.NearestEnemy != null)
                     {
                         UnityEngine.Vector3? moveDestination = moveOrGapCloser.Target?.Point;
                         var postMoveAttack = PlanPostMoveAttack(situation, situation.NearestEnemy, ref remainingAP, moveDestination);
@@ -652,7 +739,7 @@ namespace CompanionAI_v3.Planning.Plans
             // Phase 2에서 ClearMPAfterUse로 연기된 방어 능력을 이동 완료 후 사용
             if (tankNeedsMovement && !situation.HasPerformedFirstAction && remainingAP >= 1f)
             {
-                var deferredDefense = PlanDefensiveStanceWithReservation(situation, ref remainingAP, reservedAP, movementStillNeeded: false);
+                var deferredDefense = PlanDefensiveStanceWithReservation(situation, ref remainingAP, budget.EffectiveReserved, movementStillNeeded: false);
                 if (deferredDefense != null)
                 {
                     actions.Add(deferredDefense);

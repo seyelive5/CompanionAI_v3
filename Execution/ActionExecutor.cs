@@ -146,20 +146,23 @@ namespace CompanionAI_v3.Execution
                 {
                     // ★ v3.8.55: Warp Relay 디버프/공격 실행 전 Raven 주변 적 수 재확인
                     // 재배치 실패 시 Raven이 아군 근처에 머물 → 디버프 낭비 방지
-                    // ★ v3.8.56: 적 1명이라도 있으면 실행 허용 (사람처럼 일단 뭐라도 하기)
+                    // ★ v3.18.10: 능력의 실제 AoE 반경 사용 (EFFECT_RADIUS_TILES는 포지셔닝용 범용 반경)
                     if (action.Type == ActionType.Attack || action.Type == ActionType.Debuff)
                     {
                         var validEnemies = situation?.Enemies?.FindAll(e => e != null && e.IsConscious);
+                        float abilityAoE = CombatAPI.GetAoERadius(ability);
+                        float checkRadius = (abilityAoE > 0) ? abilityAoE : FamiliarPositioner.EFFECT_RADIUS_TILES;
                         int enemiesNearRaven = validEnemies != null
-                            ? FamiliarAPI.CountEnemiesInRadius(freshFamiliar.Position, FamiliarPositioner.EFFECT_RADIUS_TILES, validEnemies)
+                            ? FamiliarAPI.CountEnemiesInRadius(freshFamiliar.Position, checkRadius, validEnemies)
                             : 0;
 
                         if (enemiesNearRaven < 1)
                         {
-                            Main.Log($"[Executor] ★ v3.8.56: Warp Relay debuff SKIPPED - Raven at ({freshFamiliar.Position.x:F1}, {freshFamiliar.Position.z:F1}) has 0 enemies nearby");
+                            Main.Log($"[Executor] ★ Warp Relay SKIPPED - Raven at ({freshFamiliar.Position.x:F1}, {freshFamiliar.Position.z:F1}) " +
+                                $"has 0 enemies in range ({checkRadius:F1} tiles" + (abilityAoE > 0 ? $", AoE={abilityAoE:F1}" : ", generic") + ")");
                             return ExecutionResult.Failure("No enemies near familiar for Warp Relay");
                         }
-                        Main.LogDebug($"[Executor] Warp Relay check OK: {enemiesNearRaven} enemies near Raven");
+                        Main.LogDebug($"[Executor] Warp Relay check OK: {enemiesNearRaven} enemies near Raven (radius={checkRadius:F1} tiles)");
                     }
 
                     // ★ v3.7.78: Point 타겟 능력 여부 체크

@@ -1278,6 +1278,9 @@ namespace CompanionAI_v3.Planning.Planners
             float worstScore = float.MaxValue;
             int worstIndex = 0;
 
+            // ★ v3.19.8: 현재 안전한 유닛이 위험 구역으로 리포지션하지 않도록
+            bool avoidHazardZones = !CombatAPI.IsUnitInHazardZone(unit);
+
             foreach (var kvp in reachableTiles)
             {
                 var node = kvp.Key as Kingmaker.Pathfinding.CustomGridNodeBase;
@@ -1293,6 +1296,10 @@ namespace CompanionAI_v3.Planning.Planners
                 // Walkable + 점유 가능 확인
                 if (!Analysis.BattlefieldGrid.Instance.IsValid ||
                     !Analysis.BattlefieldGrid.Instance.CanUnitStandOn(unit, node))
+                    continue;
+
+                // ★ v3.19.8: 위험 구역 필터링 (DamagingAoE + PsychicNullZone)
+                if (avoidHazardZones && CombatAPI.IsPositionInHazardZone(pos, unit))
                     continue;
 
                 // 현재 위치와 같으면 스킵 (이미 Phase 4.4에서 시도했음)

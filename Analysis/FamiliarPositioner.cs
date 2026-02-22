@@ -77,32 +77,37 @@ namespace CompanionAI_v3.Analysis
         /// <summary>
         /// 사역마 타입별 최적 위치 계산
         /// ★ v3.7.22: maxRangeMeters 파라미터 추가 - Relocate 사거리 제한
+        /// ★ v3.18.12: effectRadiusTiles 파라미터 추가 - 실제 능력 AoE 반경
         /// </summary>
         public static PositionScore FindOptimalPosition(
             BaseUnitEntity master,
             PetType familiarType,
             List<BaseUnitEntity> allies,
             List<BaseUnitEntity> enemies,
-            float maxRangeMeters = 0f)
+            float maxRangeMeters = 0f,
+            float effectRadiusTiles = 0f)
         {
             if (master == null)
                 return CreateDefaultPosition(master?.Position ?? Vector3.zero);
+
+            // ★ v3.18.12: 0이면 기본값 사용
+            if (effectRadiusTiles <= 0f) effectRadiusTiles = EFFECT_RADIUS_TILES;
 
             try
             {
                 return familiarType switch
                 {
                     // 버프 확산형: 아군 중심
-                    PetType.ServoskullSwarm => FindBuffCenterPosition(master, allies, enemies, maxRangeMeters),
+                    PetType.ServoskullSwarm => FindBuffCenterPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles),
                     // ★ v3.7.90: Raven은 페이즈 기반 위치 결정
-                    PetType.Raven => FindRavenOptimalPosition(master, allies, enemies, maxRangeMeters),
+                    PetType.Raven => FindRavenOptimalPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles),
 
                     // 적 제어형: 위협적 적 근처
-                    PetType.Mastiff => FindApprehendPosition(master, allies, enemies, maxRangeMeters),
-                    PetType.Eagle => FindDisruptPosition(master, allies, enemies, maxRangeMeters),
+                    PetType.Mastiff => FindApprehendPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles),
+                    PetType.Eagle => FindDisruptPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles),
 
                     // 기본값
-                    _ => FindBuffCenterPosition(master, allies, enemies, maxRangeMeters)
+                    _ => FindBuffCenterPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles)
                 };
             }
             catch (Exception ex)
@@ -184,7 +189,8 @@ namespace CompanionAI_v3.Analysis
             BaseUnitEntity master,
             List<BaseUnitEntity> allies,
             List<BaseUnitEntity> enemies,
-            float maxRangeMeters = 0f)
+            float maxRangeMeters = 0f,
+            float effectRadiusTiles = 0f)
         {
             // ★ v3.9.10: LINQ → FillWhere (GC 할당 제거)
             CollectionHelper.FillWhere(allies, _sharedValidAllies, a => a != null && a.IsConscious && !FamiliarAPI.IsFamiliar(a));
@@ -203,7 +209,8 @@ namespace CompanionAI_v3.Analysis
                 validAllies,
                 enemies ?? new List<BaseUnitEntity>(),
                 prioritizeAllies: true,
-                maxRangeMeters: maxRangeMeters);
+                maxRangeMeters: maxRangeMeters,
+                effectRadiusTiles: effectRadiusTiles);
 
             Main.LogDebug($"[FamiliarPositioner] BuffCenter: {bestPosition}");
             return bestPosition;
@@ -219,7 +226,8 @@ namespace CompanionAI_v3.Analysis
             BaseUnitEntity master,
             List<BaseUnitEntity> allies,
             List<BaseUnitEntity> enemies,
-            float maxRangeMeters = 0f)
+            float maxRangeMeters = 0f,
+            float effectRadiusTiles = 0f)
         {
             // ★ v3.9.10: LINQ → FillWhere (GC 할당 제거)
             CollectionHelper.FillWhere(allies, _sharedValidAllies, a => a != null && a.IsConscious && !FamiliarAPI.IsFamiliar(a));
@@ -240,7 +248,7 @@ namespace CompanionAI_v3.Analysis
             if (isBuffPhase)
             {
                 Main.LogDebug($"[FamiliarPositioner] Raven BUFF PHASE: coverage={buffCoverage:P0} ({totalBuffTypes} WR buff types, {Core.AllyStateCache.AllyCount} allies)");
-                var buffPos = FindBuffCenterPosition(master, allies, enemies, maxRangeMeters);
+                var buffPos = FindBuffCenterPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles);
                 buffPos.Reason = $"Buff phase (psychic coverage={buffCoverage:P0})";
                 buffPos.IsBuffPhase = true;  // ★ v3.8.52: 턴 단위 페이즈 전달
                 return buffPos;
@@ -257,7 +265,8 @@ namespace CompanionAI_v3.Analysis
                     float supportRangeMeters = FamiliarAPI.GetRavenSupportRangeMeters(familiar);
                     Vector3? ravenPos = familiar?.Position;
 
-                    var enemyClusterCenter = FindEnemyClusterCenter(validEnemies);
+                    // ★ v3.18.14: 마스터 위치 전달 → 마스터가 도달 가능한 클러스터 우선
+                    var enemyClusterCenter = FindEnemyClusterCenter(validEnemies, effectRadiusTiles, (Vector3?)master.Position);
                     var attackPos = FindBestPositionAroundPoint(
                         enemyClusterCenter,
                         master,
@@ -266,7 +275,8 @@ namespace CompanionAI_v3.Analysis
                         prioritizeAllies: false,  // 적 우선
                         maxRangeMeters: maxRangeMeters,
                         familiarPos: ravenPos,
-                        familiarRangeMeters: supportRangeMeters);
+                        familiarRangeMeters: supportRangeMeters,
+                        effectRadiusTiles: effectRadiusTiles);
 
                     attackPos.Reason = $"Attack phase - enemy cluster ({attackPos.EnemiesInRange} enemies)";
                     attackPos.IsBuffPhase = false;  // ★ v3.8.52: 공격/디버프 페이즈
@@ -284,7 +294,7 @@ namespace CompanionAI_v3.Analysis
                 }
 
                 // 적이 없으면 아군 위치 유지
-                var fallbackPos = FindBuffCenterPosition(master, allies, enemies, maxRangeMeters);
+                var fallbackPos = FindBuffCenterPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles);
                 fallbackPos.IsBuffPhase = false;  // ★ v3.8.52: 커버리지 충분하지만 적 없음
                 return fallbackPos;
             }
@@ -298,7 +308,8 @@ namespace CompanionAI_v3.Analysis
             BaseUnitEntity master,
             List<BaseUnitEntity> allies,
             List<BaseUnitEntity> enemies,
-            float maxRangeMeters = 0f)
+            float maxRangeMeters = 0f,
+            float effectRadiusTiles = 0f)
         {
             // ★ v3.9.10: LINQ → FillWhere + 수동 top-3 (GC 할당 제거)
             CollectionHelper.FillWhere(enemies, _sharedValidEnemies, e => e != null && e.IsConscious);
@@ -343,7 +354,8 @@ namespace CompanionAI_v3.Analysis
                 allies ?? new List<BaseUnitEntity>(),
                 validEnemies,
                 prioritizeAllies: false,
-                maxRangeMeters: maxRangeMeters);
+                maxRangeMeters: maxRangeMeters,
+                effectRadiusTiles: effectRadiusTiles);
 
             bestPosition.Reason = $"Near threatening enemies ({threateningEnemies.Count})";
             Main.LogDebug($"[FamiliarPositioner] Apprehend: {bestPosition}");
@@ -358,7 +370,8 @@ namespace CompanionAI_v3.Analysis
             BaseUnitEntity master,
             List<BaseUnitEntity> allies,
             List<BaseUnitEntity> enemies,
-            float maxRangeMeters = 0f)
+            float maxRangeMeters = 0f,
+            float effectRadiusTiles = 0f)
         {
             // ★ v3.9.10: LINQ → FillWhere (GC 할당 제거)
             CollectionHelper.FillWhere(enemies, _sharedValidEnemies, e => e != null && e.IsConscious);
@@ -367,8 +380,8 @@ namespace CompanionAI_v3.Analysis
             if (validEnemies.Count == 0)
                 return CreateDefaultPosition(master.Position);
 
-            // 적 밀집 지역 찾기
-            var bestClusterCenter = FindEnemyClusterCenter(validEnemies);
+            // ★ v3.18.14: 적 밀집 지역 찾기 (마스터 근접성 고려)
+            var bestClusterCenter = FindEnemyClusterCenter(validEnemies, effectRadiusTiles, (Vector3?)master.Position);
 
             // 해당 위치 근처에서 최적 위치 탐색
             var bestPosition = FindBestPositionAroundPoint(
@@ -377,7 +390,8 @@ namespace CompanionAI_v3.Analysis
                 allies ?? new List<BaseUnitEntity>(),
                 validEnemies,
                 prioritizeAllies: false,
-                maxRangeMeters: maxRangeMeters);
+                maxRangeMeters: maxRangeMeters,
+                effectRadiusTiles: effectRadiusTiles);
 
             bestPosition.Reason = "Enemy cluster center";
             Main.LogDebug($"[FamiliarPositioner] Disrupt: {bestPosition}");
@@ -454,7 +468,8 @@ namespace CompanionAI_v3.Analysis
             bool prioritizeAllies,
             float maxRangeMeters = 0f,
             Vector3? familiarPos = null,
-            float familiarRangeMeters = 0f)
+            float familiarRangeMeters = 0f,
+            float effectRadiusTiles = 0f)
         {
             PositionScore best = null;
             float bestScore = float.MinValue;
@@ -489,7 +504,9 @@ namespace CompanionAI_v3.Analysis
                         continue;
                 }
 
-                var score = EvaluatePosition(pos, allies, enemies, prioritizeAllies);
+                // ★ v3.18.14: 적 우선 모드에서만 masterPos 전달 (마스터+사역마 연계 유도)
+                var score = EvaluatePosition(pos, allies, enemies, prioritizeAllies, effectRadiusTiles,
+                    prioritizeAllies ? null : (Vector3?)masterPos);
                 if (score.Score > bestScore)
                 {
                     bestScore = score.Score;
@@ -510,15 +527,20 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>
         /// 위치 점수 평가
+        /// ★ v3.18.12: effectRadiusTiles 파라미터 추가 — 실제 능력 AoE 반경 사용
+        /// ★ v3.18.14: masterPos 파라미터 추가 — 적 우선 모드에서 마스터 근접성 보너스
         /// </summary>
         private static PositionScore EvaluatePosition(
             Vector3 position,
             List<BaseUnitEntity> allies,
             List<BaseUnitEntity> enemies,
-            bool prioritizeAllies)
+            bool prioritizeAllies,
+            float effectRadiusTiles = 0f,
+            Vector3? masterPos = null)
         {
-            int alliesInRange = FamiliarAPI.CountAlliesInRadius(position, EFFECT_RADIUS_TILES, allies);
-            int enemiesInRange = FamiliarAPI.CountEnemiesInRadius(position, EFFECT_RADIUS_TILES, enemies);
+            float radius = effectRadiusTiles > 0f ? effectRadiusTiles : EFFECT_RADIUS_TILES;
+            int alliesInRange = FamiliarAPI.CountAlliesInRadius(position, radius, allies);
+            int enemiesInRange = FamiliarAPI.CountEnemiesInRadius(position, radius, enemies);
 
             float score;
             if (prioritizeAllies)
@@ -536,6 +558,15 @@ namespace CompanionAI_v3.Analysis
 
                 // 2명 이상 적이면 보너스
                 if (enemiesInRange >= 2) score += 40f;
+
+                // ★ v3.18.14: 마스터 근접성 — 마스터가 도달 가능한 적 클러스터 우선
+                // 사역마와 마스터가 같은 적을 상대하도록 유도 (따로 노는 문제 방지)
+                // 가중치: 타일당 1.5점 → 20타일 거리 = -30점 (적 1명 분량)
+                if (masterPos.HasValue)
+                {
+                    float distTiles = CombatAPI.MetersToTiles(Vector3.Distance(position, masterPos.Value));
+                    score -= distTiles * 1.5f;
+                }
             }
 
             return new PositionScore
@@ -573,28 +604,46 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>
         /// 적 클러스터 중심 찾기
+        /// ★ v3.18.12: effectRadiusTiles 파라미터 추가
+        /// ★ v3.18.14: masterPos 파라미터 추가 — 마스터와 가까운 클러스터 우선
+        /// 같은 수의 적이면 마스터와 가까운 클러스터를 선택하여 사역마+마스터 연계 유도
         /// </summary>
-        private static Vector3 FindEnemyClusterCenter(List<BaseUnitEntity> enemies)
+        private static Vector3 FindEnemyClusterCenter(
+            List<BaseUnitEntity> enemies,
+            float effectRadiusTiles = 0f,
+            Vector3? masterPos = null)
         {
             if (enemies == null || enemies.Count == 0)
                 return Vector3.zero;
 
+            float radius = effectRadiusTiles > 0f ? effectRadiusTiles : EFFECT_RADIUS_TILES;
+
             // 가장 많은 적이 모인 위치 찾기
+            // ★ v3.18.14: 마스터 근접성 고려 — 동일 적 수일 때 가까운 클러스터 우선
             Vector3 bestCenter = enemies[0].Position;
-            int bestCount = 0;
+            float bestScore = float.MinValue;
 
             foreach (var enemy in enemies)
             {
-                int count = FamiliarAPI.CountEnemiesInRadius(enemy.Position, EFFECT_RADIUS_TILES, enemies);
-                if (count > bestCount)
+                int count = FamiliarAPI.CountEnemiesInRadius(enemy.Position, radius, enemies);
+                float score = count * 10f;
+
+                // 마스터와 가까울수록 보너스 (적 수 차이가 1명이면 ~20타일 거리와 등가)
+                if (masterPos.HasValue)
                 {
-                    bestCount = count;
+                    float distTiles = CombatAPI.MetersToTiles(Vector3.Distance(enemy.Position, masterPos.Value));
+                    score -= distTiles * 0.5f;
+                }
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
                     bestCenter = enemy.Position;
                 }
             }
 
             // 해당 적 주변 적들의 중심점 반환
-            var nearbyEnemies = FamiliarAPI.GetEnemiesInRadius(bestCenter, EFFECT_RADIUS_TILES, enemies);
+            var nearbyEnemies = FamiliarAPI.GetEnemiesInRadius(bestCenter, radius, enemies);
             return CalculateCentroid(nearbyEnemies);
         }
 

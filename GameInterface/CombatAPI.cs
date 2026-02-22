@@ -5183,6 +5183,44 @@ namespace CompanionAI_v3.GameInterface
         public static void ClearDamagingAoECache()
         {
             _damagingAoECache.Clear();
+            _lastHazardCheckUnit = null;
+        }
+
+        // ── ★ v3.19.8: Unified Hazard Zone Detection ──
+        // DamagingAoE + PsychicNullZone(사이커 전용)을 단일 메서드로 통합
+        // 모든 이동 계획에서 일관된 위험 회피 보장
+
+        private static BaseUnitEntity _lastHazardCheckUnit;
+        private static bool _lastHazardCheckIsPsychic;
+
+        /// <summary>
+        /// ★ v3.19.8: 특정 위치가 위험 구역(DamagingAoE + PsychicNullZone) 안인지 통합 판별
+        /// 모든 이동 후보 타일 평가에서 IsPositionInDamagingAoE 대신 사용
+        /// 사이커 여부는 유닛별 캐시 — 타일 루프에서 반복 호출 시 O(1)
+        /// </summary>
+        public static bool IsPositionInHazardZone(Vector3 position, BaseUnitEntity unit)
+        {
+            if (IsPositionInDamagingAoE(position, unit)) return true;
+
+            // 사이커 여부 캐시 (같은 유닛이면 재계산 안 함)
+            if (unit != _lastHazardCheckUnit)
+            {
+                _lastHazardCheckUnit = unit;
+                _lastHazardCheckIsPsychic = HasPsychicAbilities(unit);
+            }
+            if (_lastHazardCheckIsPsychic && IsPositionInPsychicNullZone(position)) return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// ★ v3.19.8: 유닛이 현재 위험 구역 안에 있는지 통합 판별
+        /// </summary>
+        public static bool IsUnitInHazardZone(BaseUnitEntity unit)
+        {
+            if (IsUnitInDamagingAoE(unit)) return true;
+            if (HasPsychicAbilities(unit) && IsUnitInPsychicNullZone(unit)) return true;
+            return false;
         }
 
         /// <summary>

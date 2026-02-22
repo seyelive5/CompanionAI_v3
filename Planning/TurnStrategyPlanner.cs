@@ -49,6 +49,12 @@ namespace CompanionAI_v3.Planning
         /// <summary>디버프 기본 유틸리티 점수</summary>
         private const float DEBUFF_UTILITY = 8f;
 
+        /// <summary>★ v3.19.6: 비-DPS 역할의 복합 시드(버프/킬/디버프) 가중치
+        /// 1.0=동일, 0.85=15% 감소 — 유의미한 이득이 있을 때만 복합 시드 선택
+        /// Tank는 AP를 도발/방어에, Support는 힐/팀버프에, Overseer는 사역마에 우선 배분
+        /// → 복합 공격 시드는 그 이득이 확연할 때만 채택</summary>
+        private const float NON_DPS_COMPLEX_SEED_WEIGHT = 0.85f;
+
         // ══════════════════════════════════════════════════════════════
         // 구조체 정의
         // ══════════════════════════════════════════════════════════════
@@ -90,12 +96,14 @@ namespace CompanionAI_v3.Planning
         /// <summary>
         /// 현재 상황에서 최적 전략 평가
         /// </summary>
+        /// <param name="situation">전투 상황</param>
+        /// <param name="role">★ v3.19.6: AI 역할 — 전 역할 10개 시드 평가, 비-DPS는 복합 시드에 가중치 감소</param>
         /// <returns>최적 전략 (타겟 없음/공격 불가 시 null)</returns>
-        public static TurnStrategy Evaluate(Situation situation)
+        public static TurnStrategy Evaluate(Situation situation, Settings.AIRole role = Settings.AIRole.DPS)
         {
             try
             {
-                return EvaluateInternal(situation);
+                return EvaluateInternal(situation, role);
             }
             catch (Exception ex)
             {
@@ -108,7 +116,7 @@ namespace CompanionAI_v3.Planning
         // 핵심 평가 로직
         // ══════════════════════════════════════════════════════════════
 
-        private static TurnStrategy EvaluateInternal(Situation situation)
+        private static TurnStrategy EvaluateInternal(Situation situation, Settings.AIRole role = Settings.AIRole.DPS)
         {
             _candidates.Clear();
 
@@ -215,6 +223,10 @@ namespace CompanionAI_v3.Planning
                     });
                 }
             }
+
+            // ★ v3.19.6: 전 역할 10개 시드 평가 — 비-DPS는 Step 4에서 가중치 적용
+            // 기존: isDPS 게이트로 6개 시드 차단 → 비-DPS에 버프/킬 능력 있어도 미평가
+            // 개선: 능력 존재 조건(hasBuff, hasKillSeq 등)이 자연 필터 역할, 가중치로 우선순위 조절
 
             // ── 시드 1: BuffedAttack (Buff → Attack×(N-1)) ──
             if (hasBuff)
@@ -425,26 +437,37 @@ namespace CompanionAI_v3.Planning
 
             // ══════════════════════════════════════════════════════════════
             // Step 4: 최적 후보 선택
+            // ★ v3.19.6: 비-DPS 역할의 복합 시드(버프/킬/디버프)에 가중치 적용
+            // 역할 본연의 임무(탱킹/힐/사역마)에 AP 우선 배분하되,
+            // 복합 공격이 확연히 유리하면(15%+ 이상 점수 차) 채택
             // ══════════════════════════════════════════════════════════════
 
             if (_candidates.Count == 0) return null;
 
+            bool isPrimaryDPS = role == Settings.AIRole.DPS || role == Settings.AIRole.Auto;
+
             CandidateScore best = _candidates[0];
+            float bestScore = GetWeightedScore(_candidates[0], isPrimaryDPS);
             for (int i = 1; i < _candidates.Count; i++)
             {
-                if (_candidates[i].Score > best.Score)
+                float score = GetWeightedScore(_candidates[i], isPrimaryDPS);
+                if (score > bestScore)
+                {
                     best = _candidates[i];
+                    bestScore = score;
+                }
             }
 
-            Main.Log($"[Strategy] {unit.CharacterName}: Selected {best.Type} \u2014 {best.Description}" +
-                $" (score={best.Score:F0}, candidates={_candidates.Count})");
+            Main.Log($"[Strategy] {unit.CharacterName} ({role}): Selected {best.Type} \u2014 {best.Description}" +
+                $" (score={best.Score:F0}{(isPrimaryDPS ? "" : $", weighted={bestScore:F0}")}, candidates={_candidates.Count})");
 
             if (Main.IsDebugEnabled)
             {
                 for (int i = 0; i < _candidates.Count; i++)
                 {
                     var c = _candidates[i];
-                    Main.LogDebug($"[Strategy]   #{i} {c.Type}: dmg={c.TotalDamage:F0} + kill={c.KillBonus:F1} + util={c.UtilityBonus:F1} = {c.Score:F0} \u2014 {c.Description}");
+                    float ws = GetWeightedScore(c, isPrimaryDPS);
+                    Main.LogDebug($"[Strategy]   #{i} {c.Type}: dmg={c.TotalDamage:F0} + kill={c.KillBonus:F1} + util={c.UtilityBonus:F1} = {c.Score:F0}{(isPrimaryDPS ? "" : $" (w={ws:F0})")} \u2014 {c.Description}");
                 }
             }
 
@@ -604,6 +627,30 @@ namespace CompanionAI_v3.Planning
             if (targetHP <= 0) return 0f;
             float killProgress = Math.Min(1f, dmgOnPrimary / targetHP);
             return killProgress * MAX_KILL_BONUS;
+        }
+
+        /// <summary>
+        /// ★ v3.19.6: 역할 기반 가중치 적용 점수
+        /// 복합 시드(버프/킬/디버프)는 비-DPS 역할에서 가중치 감소
+        /// → 역할 본연 임무 우선, 확연한 이득이 있을 때만 복합 시드 채택
+        /// </summary>
+        private static float GetWeightedScore(CandidateScore c, bool isPrimaryDPS)
+        {
+            if (isPrimaryDPS) return c.Score;
+
+            // 복합 시드: 버프 포함, 킬 시퀀스, 디버프 포함
+            switch (c.Type)
+            {
+                case SequenceType.BuffedAttack:
+                case SequenceType.BuffedRnGChain:
+                case SequenceType.BuffedAoE:
+                case SequenceType.BuffedRnGAoE:
+                case SequenceType.KillSequence:
+                case SequenceType.DebuffedAttack:
+                    return c.Score * NON_DPS_COMPLEX_SEED_WEIGHT;
+                default:
+                    return c.Score;
+            }
         }
     }
 }

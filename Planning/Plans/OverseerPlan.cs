@@ -43,30 +43,78 @@ namespace CompanionAI_v3.Planning.Plans
             if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] CreatePlan: AP={remainingAP:F1}, MP={remainingMP:F1}, " +
                 $"FamiliarType={situation.FamiliarType}, HasFamiliar={situation.HasFamiliar}");
 
-            // ★ v3.8.13: AP 예약 (다른 Role처럼 무기 공격용 AP 확보)
-            float reservedAP = CalculateReservedAPForPostMoveAttack(situation);
-            if (reservedAP > 0)
+            // ★ v3.19.4: 통합 AP 예산 — CreateAPBudget 팩토리 + CalculateMasterMinAttackAP
+            var budget = CreateAPBudget(situation, remainingAP, CalculateMasterMinAttackAP(situation));
+            Main.Log($"[Overseer] {budget}");
+
+            // ★ v3.19.0: 전략적 시퀀스 평가 — Overseer Role용 (시드 0,2,4,6만 평가)
+            // ★ v3.19.2: Replan 시 FocusTarget 유효성 검증 + 전략 재사용
+            TurnStrategy strategy = turnState.GetContext<TurnStrategy>(
+                StrategicContextKeys.TurnStrategyKey, default(TurnStrategy));
+
+            bool previousStrategyValid = strategy != null
+                && situation.HasHittableEnemies
+                && situation.BestTarget != null
+                && strategy.ExpectedTotalDamage > 0;
+
+            if (previousStrategyValid)
             {
-                Main.Log($"[Overseer] Reserving {reservedAP:F1} AP for weapon attack");
+                string focusTargetId = turnState.GetContext<string>(StrategicContextKeys.FocusTargetId, null);
+                if (focusTargetId != null)
+                {
+                    bool found = false;
+                    for (int i = 0; i < situation.HittableEnemies.Count; i++)
+                    {
+                        if (situation.HittableEnemies[i].UniqueId == focusTargetId) { found = true; break; }
+                    }
+                    if (!found)
+                    {
+                        previousStrategyValid = false;
+                        Main.Log($"[Overseer] Strategy: Previous FocusTarget no longer hittable — re-evaluating");
+                    }
+                }
             }
 
-            // ★ v3.18.0: 마스터 공격 최소 AP 예약 — Phase 4.5 아군 버프가 AP 전부 소모 방지
-            float masterMinAttackAP = 0f;
-            if (situation.AvailableAttacks != null && situation.AvailableAttacks.Count > 0)
+            if (previousStrategyValid)
             {
-                masterMinAttackAP = float.MaxValue;
-                for (int i = 0; i < situation.AvailableAttacks.Count; i++)
-                {
-                    float cost = CombatAPI.GetAbilityAPCost(situation.AvailableAttacks[i]);
-                    if (cost < masterMinAttackAP) masterMinAttackAP = cost;
-                }
-                if (masterMinAttackAP == float.MaxValue) masterMinAttackAP = 0f;
+                budget.StrategyPostActionReserved = strategy.ReservedAPForPostAction;
+                Main.Log($"[Overseer] Strategy: Reusing previous ({strategy.Sequence}, dmg={strategy.ExpectedTotalDamage:F0})");
             }
-            Main.Log($"[Overseer] AP Budget: masterMinAttackAP={masterMinAttackAP:F1}, totalAP={situation.CurrentAP:F1}");
+            else if (situation.HasHittableEnemies &&
+                TeamBlackboard.Instance.CurrentTactic != TacticalSignal.Retreat)
+            {
+                strategy = TurnStrategyPlanner.Evaluate(situation, Settings.AIRole.Overseer);
+                if (strategy != null)
+                {
+                    turnState.SetContext(StrategicContextKeys.TurnStrategyKey, strategy);
+                    if (situation.BestTarget != null)
+                        turnState.SetContext(StrategicContextKeys.FocusTargetId, situation.BestTarget.UniqueId);
+                    budget.StrategyPostActionReserved = strategy.ReservedAPForPostAction;
+                    Main.Log($"[Overseer] Strategy: {strategy.Sequence} (dmg={strategy.ExpectedTotalDamage:F0})");
+                }
+            }
+            else
+            {
+                strategy = null;
+            }
 
             // ★ v3.12.0: Phase 0~1.5 공통 처리 (Ultimate, AoE대피, 긴급힐, 재장전)
             var earlyReturn = ExecuteCommonEarlyPhases(actions, situation, ref remainingAP);
             if (earlyReturn != null) return earlyReturn;
+
+            // ★ v3.19.0: Phase 1.55 — 무기 전환 (현재 무기 무용/비효율 시)
+            if (situation.WeaponRotationAvailable
+                && (!situation.HasHittableEnemies || ShouldSwitchForEffectiveness(situation))
+                && ShouldSwitchFirst(situation))
+            {
+                var switchActions = PlanWeaponSetRotationAttack(situation, ref remainingAP);
+                if (switchActions.Count > 0)
+                {
+                    actions.AddRange(switchActions);
+                    Main.Log($"[Overseer] Phase 1.55: Switch-First — switching weapon for better effectiveness");
+                    return new TurnPlan(actions, TurnPriority.DirectAttack, "Overseer weapon switch-first");
+                }
+            }
 
             // ══════════════════════════════════════════════════════════════
             // Phase 2: HeroicAct/Overcharge FIRST ★핵심★
@@ -140,36 +188,61 @@ namespace CompanionAI_v3.Planning.Plans
                 // ★ v3.10.0: Phase 3.2.5 - Pre-relocate Keystone Buffs (DEBUFF mode)
                 // 디버프 모드에서 Raven은 3.3에서 적 클러스터로 이동 → 아군과 멀어짐
                 // 이동 전에 현재 위치(아군 근처)에서 버프를 먼저 전달해야 함
+                // ★ v3.18.12: 디버프/공격은 재배치 후에 실행해야 함 (적이 있는 위치로 이동 후)
                 // ────────────────────────────────────────────────────────────
                 bool preRelocateKeystoneDone = false;
+                List<PlannedAction> postRelocateDebuffs = null;
                 if (!isRavenBuffPhase && situation.FamiliarType == PetType.Raven && situation.Familiar != null)
                 {
                     var preKeystoneActions = PlanAllFamiliarKeystoneBuffs(situation, ref remainingAP, heroicActPlanned,
                         overrideCheckPosition: situation.Familiar.Position);
                     if (preKeystoneActions.Count > 0)
                     {
+                        // ★ v3.18.12: 버프와 디버프/공격을 분리
+                        // 버프: 재배치 전에 실행 (아군 근처에서 확산)
+                        // 디버프/공격: 재배치 후에 실행 (적 근처로 이동 후 확산)
+                        var preRelocateBuffs = new List<PlannedAction>();
+                        postRelocateDebuffs = new List<PlannedAction>();
+                        foreach (var ka in preKeystoneActions)
+                        {
+                            if (ka.Type == ActionType.Attack || ka.Type == ActionType.Debuff)
+                                postRelocateDebuffs.Add(ka);
+                            else
+                                preRelocateBuffs.Add(ka);
+                        }
+
                         // ★ v3.8.86: Raven + HeroicAct → WarpRelay 콤보 그룹 태깅
                         if (heroicActPlanned)
                         {
-                            foreach (var ka in preKeystoneActions)
+                            foreach (var ka in preRelocateBuffs)
+                                ka.GroupTag = "OverseerHeroicWarp";
+                            foreach (var ka in postRelocateDebuffs)
                                 ka.GroupTag = "OverseerHeroicWarp";
                         }
 
-                        actions.AddRange(preKeystoneActions);
-                        preRelocateKeystoneDone = true;
-                        Main.Log($"[Overseer] Phase 3.2.5: {preKeystoneActions.Count} keystone buffs delivered BEFORE relocate (DEBUFF MODE)");
-
-                        foreach (var action in preKeystoneActions)
+                        if (preRelocateBuffs.Count > 0)
                         {
-                            if (action.Ability?.Blueprint != null)
+                            actions.AddRange(preRelocateBuffs);
+                            Main.Log($"[Overseer] Phase 3.2.5: {preRelocateBuffs.Count} keystone BUFFS delivered BEFORE relocate");
+
+                            foreach (var action in preRelocateBuffs)
                             {
-                                string guid = action.Ability.Blueprint.AssetGuid?.ToString();
-                                if (!string.IsNullOrEmpty(guid))
-                                    usedKeystoneAbilityGuids.Add(guid);
+                                if (action.Ability?.Blueprint != null)
+                                {
+                                    string guid = action.Ability.Blueprint.AssetGuid?.ToString();
+                                    if (!string.IsNullOrEmpty(guid))
+                                        usedKeystoneAbilityGuids.Add(guid);
+                                }
                             }
+                            usedWarpRelay = true;
                         }
 
-                        usedWarpRelay = true;
+                        if (postRelocateDebuffs.Count > 0)
+                        {
+                            Main.Log($"[Overseer] Phase 3.2.5: {postRelocateDebuffs.Count} keystone DEBUFFS deferred to after relocate");
+                        }
+
+                        preRelocateKeystoneDone = true;
                     }
                 }
 
@@ -181,6 +254,25 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     actions.Add(familiarRelocate);
                     Main.Log($"[Overseer] Phase 3.3: Familiar Relocate");
+                }
+
+                // ★ v3.18.12: Phase 3.3.5 - Post-relocate Debuffs
+                // 재배치 후 적 근처에서 디버프/공격 실행
+                if (postRelocateDebuffs != null && postRelocateDebuffs.Count > 0)
+                {
+                    actions.AddRange(postRelocateDebuffs);
+                    Main.Log($"[Overseer] Phase 3.3.5: {postRelocateDebuffs.Count} keystone DEBUFFS after relocate");
+
+                    foreach (var action in postRelocateDebuffs)
+                    {
+                        if (action.Ability?.Blueprint != null)
+                        {
+                            string guid = action.Ability.Blueprint.AssetGuid?.ToString();
+                            if (!string.IsNullOrEmpty(guid))
+                                usedKeystoneAbilityGuids.Add(guid);
+                        }
+                    }
+                    usedWarpRelay = true;
                 }
 
                 // ────────────────────────────────────────────────────────────
@@ -445,8 +537,9 @@ namespace CompanionAI_v3.Planning.Plans
             var plannedBuffTargetPairs = new HashSet<string>();   // ★ v3.8.51: (buffGuid:targetId) 쌍 추적
             var plannedAbilityUseCounts = new Dictionary<string, int>();  // ★ v3.14.2: 능력별 계획 횟수 (과다 계획 방지)
             int allyBuffCount = 0;
-            // ★ v3.18.0: 마스터 공격 1회분 AP 보장 (masterMinAttackAP + 버프 최소 비용 1f)
-            while (remainingAP > masterMinAttackAP + 1f)
+            // ★ v3.18.0/v3.18.22: 마스터 공격 + TurnEnding AP 보장
+            // ★ v3.19.4: budget.MasterMinAttackReserved + TurnEndingReserved로 통합
+            while (remainingAP > budget.MasterMinAttackReserved + budget.TurnEndingReserved + 1f)
             {
                 var allyBuffAction = PlanAllyBuff(situation, ref remainingAP, keystoneOnlyGuids, plannedTurnGrantTargets, plannedBuffTargetPairs, plannedAbilityUseCounts);
                 if (allyBuffAction == null) break;
@@ -491,6 +584,8 @@ namespace CompanionAI_v3.Planning.Plans
             // Phase 4.9: 전략 옵션 평가 (마스터 공격 전 이동 필요 여부 결정)
             // ★ v3.8.76: TacticalOptionEvaluator - 사역마 Phase는 영향 없음
             // ══════════════════════════════════════════════════════════════
+            // ★ v3.18.16: Phase 4.9 갭클로저 추적 → Phase 5.6 중복 방지
+            bool didPlanGapCloserPhase49 = false;
             TacticalEvaluation tacticalEval = EvaluateTacticalOptions(situation);
             if (tacticalEval != null && tacticalEval.WasEvaluated)
             {
@@ -513,6 +608,7 @@ namespace CompanionAI_v3.Planning.Plans
                             // ★ v3.16.6: Walk+Jump 콤보 시 사전 이동 추가
                             if (gcPreMove != null) actions.Add(gcPreMove);
                             actions.Add(gcAction);
+                            didPlanGapCloserPhase49 = true;  // ★ v3.18.16
                             Main.Log($"[Overseer] Phase 4.9: GapCloser replaces MoveToAttack{(gcPreMove != null ? " (walk+jump)" : "")}");
                             var landingPos = gcAction.MoveDestination ?? gcAction.Target?.Point;
                             if (landingPos.HasValue)
@@ -541,6 +637,7 @@ namespace CompanionAI_v3.Planning.Plans
                     {
                         if (gcPreMove != null) actions.Add(gcPreMove);
                         actions.Add(gcAction);
+                        didPlanGapCloserPhase49 = true;  // ★ v3.18.16
                         Main.Log($"[Overseer] Phase 4.9: GapCloser as last resort{(gcPreMove != null ? " (walk+jump)" : "")}");
                         var landingPos = gcAction.MoveDestination ?? gcAction.Target?.Point;
                         if (landingPos.HasValue)
@@ -581,9 +678,11 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // Phase 4.97: Point-target AoE + Unit-targeted AoE (근접/원거리 공통)
+            // ★ v3.19.0: 전략이 AoE 추천 시 적 수 조건 완화
             int minEnemiesForAoE = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+            bool strategyRecommendsAoE = strategy?.ShouldPrioritizeAoE == true;
             if (!didPlanAoE && remainingAP >= 1f && situation.HasAoEAttacks &&
-                situation.Enemies.Count >= minEnemiesForAoE)
+                (strategyRecommendsAoE || situation.Enemies.Count >= minEnemiesForAoE))
             {
                 var aoE = PlanAoEAttack(situation, ref remainingAP);
                 if (aoE != null)
@@ -608,7 +707,7 @@ namespace CompanionAI_v3.Planning.Plans
             // Phase 5: Master Attack (SECONDARY)
             // ★ v3.18.0: "안전한 원거리 공격만" → 근접/원거리 공통 공격
             // ══════════════════════════════════════════════════════════════
-            bool didPlanAttack = didPlanAoE;  // ★ v3.18.0: AoE가 공격으로 인정
+            bool didPlanAttack = didPlanAoE || didPlanGapCloserPhase49;  // ★ v3.18.0: AoE가 공격으로 인정 | ★ v3.18.16: Phase 4.9 갭클로저 중복 방지
             // ★ v3.8.44: 공격 실패 이유 추적 (이동 Phase에 전달)
             var attackContext = new AttackPhaseContext();
             // ★ v3.9.28: 이동이 이미 계획됨 → AttackPlanner에 pending move 알림
@@ -620,7 +719,8 @@ namespace CompanionAI_v3.Planning.Plans
             var plannedAbilityGuids = new HashSet<string>(usedKeystoneAbilityGuids);
             int attacksPlanned = 0;
 
-            while (remainingAP >= 0f && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
+            // ★ v3.19.2: APBudget.CanAfford()로 강제 — TurnEnding + Strategy 예약을 중앙 검증
+            while (budget.CanAfford(0, remainingAP) && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
             {
                 // ★ v3.8.44: attackContext 전달 - 실패 이유 기록
                 var attackAction = PlanAttack(situation, ref remainingAP, attackContext,
@@ -653,6 +753,8 @@ namespace CompanionAI_v3.Planning.Plans
                         plannedAbilityGuids.Add(guid);
                 }
             }
+
+            // ★ v3.19.2: TurnEnding AP 복원 불필요 — budget.CanAfford()가 예약을 내부 처리
 
             if (didPlanAttack)
             {
@@ -942,6 +1044,9 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.8.13: 현재 위치에서 가장 가까운 적과의 거리 (후퇴 효과 검증용)
             float currentNearestEnemyDist = situation.NearestEnemyDistance;
 
+            // ★ v3.18.18: DamagingAoE 회피
+            bool avoidHazardZones = !situation.NeedsAoEEvacuation;
+
             // ★ v3.7.98: 사역마 쪽으로 이동하는 폴백 위치도 추적
             Vector3? closestToFamiliarPos = null;
             float closestToFamiliarDist = float.MaxValue;
@@ -971,6 +1076,10 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     continue;
                 }
+
+                // ★ v3.18.18: DamagingAoE 위치 필터링
+                if (avoidHazardZones && CombatAPI.IsPositionInHazardZone(pos, situation.Unit))
+                    continue;
 
                 // ★ v3.7.99: 스코어 계산 (엄폐/안전 포함)
                 float score = 0f;
@@ -1095,6 +1204,9 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.8.13: 현재 위치 점수 계산 (진동 방지용)
             float currentPosScore = CalculatePositionScore(currentPos, situation, maxFamiliarRange, needsAttackPosition);
 
+            // ★ v3.18.18: DamagingAoE 회피
+            bool avoidHazardZonesMove = !situation.NeedsAoEEvacuation;
+
             // ★ v3.7.98: 사역마 쪽으로 이동하는 폴백 위치도 추적
             Vector3? closestToFamiliarPos = null;
             float closestToFamiliarDist = float.MaxValue;
@@ -1124,6 +1236,10 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     continue;
                 }
+
+                // ★ v3.18.18: DamagingAoE 위치 필터링
+                if (avoidHazardZonesMove && CombatAPI.IsPositionInHazardZone(pos, situation.Unit))
+                    continue;
 
                 // ★ v3.7.99: 스코어 계산 (엄폐/안전 포함)
                 float score = 0f;
@@ -1275,8 +1391,9 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.8.51: skipCoverageCheck=true면 커버리지 무시 (Phase 4.6 - 버프 완료 후)
             if (!skipCoverageCheck)
             {
+                // ★ v3.18.14: situation.FamiliarEffectRadius 사용 (실제 키스톤 AoE 반경)
                 int alliesInRavenRange = FamiliarAPI.CountAlliesInRadius(
-                    raven.Position, FamiliarPositioner.EFFECT_RADIUS_TILES, validAllies);
+                    raven.Position, situation.FamiliarEffectRadius, validAllies);
 
                 float buffCoverage = validAllies.Count > 0 ? (float)alliesInRavenRange / validAllies.Count : 0f;
 
@@ -1355,15 +1472,20 @@ namespace CompanionAI_v3.Planning.Plans
                 if (distFromRaven > MAX_RAVEN_RELOCATE_METERS)
                     continue;
 
-                // 적 커버리지 계산
+                // ★ v3.18.14: 적 커버리지 계산 (실제 키스톤 AoE 반경)
+                float effectRadius = situation.FamiliarEffectRadius;
                 int enemiesInRange = FamiliarAPI.CountEnemiesInRadius(
-                    pos, FamiliarPositioner.EFFECT_RADIUS_TILES, validEnemies);
+                    pos, effectRadius, validEnemies);
                 int alliesInRange = FamiliarAPI.CountAlliesInRadius(
-                    pos, FamiliarPositioner.EFFECT_RADIUS_TILES, validAllies);
+                    pos, effectRadius, validAllies);
 
                 // 적 중심 점수 (적 우선, 아군 보너스)
                 float score = enemiesInRange * 30f + alliesInRange * 5f;
                 if (enemiesInRange >= 2) score += 40f;
+
+                // ★ v3.18.14: 마스터 근접성 — 마스터가 도달 가능한 적 클러스터 우선
+                float distFromMasterTiles = CombatAPI.MetersToTiles(Vector3.Distance(pos, unitPos));
+                score -= distFromMasterTiles * 1.5f;
 
                 if (score > bestScore)
                 {

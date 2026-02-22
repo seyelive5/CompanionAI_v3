@@ -247,15 +247,18 @@ namespace CompanionAI_v3.Planning.Plans
                 GraphNode bestNode = null;
                 float bestDist = float.MaxValue;
 
+                // ★ v3.18.16: 그리드 노드 비교로 "Already at destination" 루프 방지
+                var currentNode = unit.Position.GetNearestNodeXZ();
+
                 foreach (var kvp in reachableTiles)
                 {
                     var node = kvp.Key as CustomGridNodeBase;
                     if (node == null) continue;
 
-                    var pos = node.Vector3Position;
+                    // ★ v3.18.16: 같은 그리드 노드면 스킵 (기존 1m 체크 대체)
+                    if (node == currentNode) continue;
 
-                    // 현재 위치와 동일하면 스킵
-                    if (Vector3.Distance(pos, unit.Position) < 1f) continue;
+                    var pos = node.Vector3Position;
 
                     // ★ 핵심: 이 타일이 모든 위험 구역 밖인지 확인
                     if (inDamage && CombatAPI.IsPositionInDamagingAoE(pos, unit)) continue;
@@ -854,6 +857,85 @@ namespace CompanionAI_v3.Planning.Plans
             {
                 if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] ShouldSwitchFirst: same type but current unhittable, alt range {altRange:F0} >= enemy dist {situation.NearestEnemyDistance:F1}");
                 return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// ★ v3.19.0: 현재 무기가 공격 가능하지만 대체 무기가 확연히 더 효율적인지 판단
+        /// Phase 1.55 조건 완화용 — HasHittableEnemies=true일 때만 호출
+        ///
+        /// 전환 조건 (보수적):
+        /// 1. 근접 전용인데 대체 세트에 원거리 있고, 원거리 적이 많음
+        /// 2. 현재 무기 사거리가 짧아서 1명만 공격 가능, 대체 무기는 여러 적 공격 가능
+        /// </summary>
+        protected bool ShouldSwitchForEffectiveness(Situation situation)
+        {
+            if (situation.WeaponSetData == null || !situation.HasHittableEnemies)
+                return false;
+
+            int currentIdx = situation.CurrentWeaponSetIndex;
+            int altIdx = currentIdx == 0 ? 1 : 0;
+            if (currentIdx >= situation.WeaponSetData.Length || altIdx >= situation.WeaponSetData.Length)
+                return false;
+
+            var currentSet = situation.WeaponSetData[currentIdx];
+            var altSet = situation.WeaponSetData[altIdx];
+
+            if (!altSet.HasWeapons) return false;
+
+            // Case 1: 현재 근접 전용 + Hittable 1명 이하 + 대체에 원거리 무기
+            // 근접으로 1명만 때릴 수 있지만, 원거리로 전환하면 여러 적 공격 가능
+            if (currentSet.HasMeleeWeapon && !currentSet.HasRangedWeapon
+                && altSet.HasRangedWeapon
+                && situation.HittableEnemies.Count <= 1
+                && situation.Enemies.Count >= 3)
+            {
+                // 대체 무기 사거리 내 적 수 확인
+                float altRange = altSet.PrimaryWeaponRange;
+                if (altRange > 0)
+                {
+                    int enemiesInAltRange = 0;
+                    for (int i = 0; i < situation.Enemies.Count; i++)
+                    {
+                        var enemy = situation.Enemies[i];
+                        if (enemy != null && enemy.IsConscious &&
+                            CombatCache.GetDistanceInTiles(situation.Unit, enemy) <= altRange)
+                            enemiesInAltRange++;
+                    }
+
+                    if (enemiesInAltRange >= 3)
+                    {
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] ShouldSwitchForEffectiveness: " +
+                            $"melee hittable={situation.HittableEnemies.Count}, alt ranged can hit {enemiesInAltRange} enemies");
+                        return true;
+                    }
+                }
+            }
+
+            // Case 2: 현재 원거리인데 Hittable 0~1명, 대체 근접이 더 많은 적을 때릴 수 있을 때
+            // (적이 가까이 모여있는데 현재 원거리 무기로는 사선/안전 문제로 적중 불가)
+            if (currentSet.HasRangedWeapon && !currentSet.HasMeleeWeapon
+                && altSet.HasMeleeWeapon
+                && situation.HittableEnemies.Count <= 1)
+            {
+                float meleeReach = altSet.PrimaryWeaponRange > 0 ? altSet.PrimaryWeaponRange : 2f;
+                int enemiesInMeleeRange = 0;
+                for (int i = 0; i < situation.Enemies.Count; i++)
+                {
+                    var enemy = situation.Enemies[i];
+                    if (enemy != null && enemy.IsConscious &&
+                        CombatCache.GetDistanceInTiles(situation.Unit, enemy) <= meleeReach)
+                        enemiesInMeleeRange++;
+                }
+
+                if (enemiesInMeleeRange >= 2)
+                {
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] ShouldSwitchForEffectiveness: " +
+                        $"ranged hittable={situation.HittableEnemies.Count}, alt melee can hit {enemiesInMeleeRange} enemies in melee range");
+                    return true;
+                }
             }
 
             return false;
@@ -1586,7 +1668,11 @@ namespace CompanionAI_v3.Planning.Plans
         /// </summary>
         protected PlannedAction PlanFinalAPUtilization(Situation situation, ref float remainingAP)
         {
-            if (remainingAP < 1f) return null;
+            // ★ v3.18.22: TurnEnding AP 예약 — Phase 10 곡예술 등을 위한 AP 보존
+            float turnEndingReservedAP = CalculateTurnEndingReservedAP(situation);
+            float spendableAP = remainingAP - turnEndingReservedAP;
+
+            if (spendableAP < 1f) return null;
 
             string unitId = situation.Unit.UniqueId;
             float currentAP = remainingAP;  // 람다에서 사용하기 위해 로컬 변수에 복사
@@ -1595,7 +1681,7 @@ namespace CompanionAI_v3.Planning.Plans
             foreach (var buff in situation.AvailableBuffs)
             {
                 float cost = CombatAPI.GetAbilityAPCost(buff);
-                if (cost > remainingAP) continue;
+                if (cost > spendableAP) continue;
 
                 string abilityId = buff.Blueprint?.AssetGuid?.ToString();
                 if (string.IsNullOrEmpty(abilityId)) continue;
@@ -1631,7 +1717,7 @@ namespace CompanionAI_v3.Planning.Plans
                 foreach (var debuff in situation.AvailableDebuffs)
                 {
                     float cost = CombatAPI.GetAbilityAPCost(debuff);
-                    if (cost > remainingAP) continue;
+                    if (cost > spendableAP) continue;
 
                     string abilityId = debuff.Blueprint?.AssetGuid?.ToString();
                     if (string.IsNullOrEmpty(abilityId)) continue;
@@ -1665,7 +1751,7 @@ namespace CompanionAI_v3.Planning.Plans
                 foreach (var marker in situation.AvailableMarkers)
                 {
                     float cost = CombatAPI.GetAbilityAPCost(marker);
-                    if (cost > remainingAP) continue;
+                    if (cost > spendableAP) continue;
 
                     string abilityId = marker.Blueprint?.AssetGuid?.ToString();
                     if (string.IsNullOrEmpty(abilityId)) continue;
@@ -1872,6 +1958,68 @@ namespace CompanionAI_v3.Planning.Plans
         }
 
         /// <summary>
+        /// ★ v3.18.22: TurnEnding 능력에 필요한 AP 예약량 계산
+        /// 곡예술 등 턴 종료 시 사용하는 능력의 최소 AP 비용을 반환
+        /// Phase 4.5 아군 버프 루프, Phase 5 공격 루프, Phase 9 잔여 AP 활용에서 이 AP를 보존해야 함
+        /// ★ SpringAttack 조건은 체크하지 않음 — 계획 시점엔 미이동 상태이나 실행 시점엔 충족 가능
+        /// </summary>
+        protected float CalculateTurnEndingReservedAP(Situation situation)
+        {
+            if (situation.AvailableBuffs == null || situation.AvailableBuffs.Count == 0)
+                return 0f;
+
+            float minCost = float.MaxValue;
+            for (int i = 0; i < situation.AvailableBuffs.Count; i++)
+            {
+                var buff = situation.AvailableBuffs[i];
+                if (!AbilityDatabase.IsTurnEnding(buff)) continue;
+                if (CombatAPI.IsAbilityOnCooldownWithGroups(buff)) continue;
+                // ★ SpringAttack 조건 미체크: 계획 시점엔 이동 전이라 조건 미충족이지만,
+                // Phase 10 실행 시점엔 이동 완료로 충족 가능. 낙관적 예약.
+                // Phase 10에서 PlanTurnEndingAbility가 최종 조건 체크를 수행.
+
+                float cost = CombatAPI.GetAbilityAPCost(buff);
+                if (cost < minCost) minCost = cost;
+            }
+
+            return minCost == float.MaxValue ? 0f : minCost;
+        }
+
+        /// <summary>
+        /// ★ v3.19.4: APBudget 팩토리 — 레거시 예약 계산을 단일 생성 지점으로 통합
+        /// 4개 Plan에서 반복되던 10줄 budget 생성 블록 + effectiveReservedAP 수동 계산을 대체
+        /// effectiveReservedAP는 budget.EffectiveReserved 자동 속성으로 대체
+        /// </summary>
+        protected APBudget CreateAPBudget(Situation situation, float remainingAP, float masterMinAttackAP = 0f)
+        {
+            return new APBudget
+            {
+                TotalAP = remainingAP,
+                PostMoveReserved = CalculateReservedAPForPostMoveAttack(situation),
+                TurnEndingReserved = CalculateTurnEndingReservedAP(situation),
+                MasterMinAttackReserved = masterMinAttackAP
+            };
+        }
+
+        /// <summary>
+        /// ★ v3.19.4: 마스터 최소 공격 AP 계산 (Overseer 전용)
+        /// Phase 4.5 아군 버프가 전체 AP를 소모하지 않도록 최소 공격 AP 예약
+        /// </summary>
+        protected float CalculateMasterMinAttackAP(Situation situation)
+        {
+            if (situation.AvailableAttacks == null || situation.AvailableAttacks.Count == 0)
+                return 0f;
+
+            float minCost = float.MaxValue;
+            for (int i = 0; i < situation.AvailableAttacks.Count; i++)
+            {
+                float cost = CombatAPI.GetAbilityAPCost(situation.AvailableAttacks[i]);
+                if (cost < minCost) minCost = cost;
+            }
+            return minCost == float.MaxValue ? 0f : minCost;
+        }
+
+        /// <summary>
         /// 주변 적 수 계산
         /// </summary>
         protected int CountNearbyEnemies(Situation situation, float range)
@@ -2046,9 +2194,10 @@ namespace CompanionAI_v3.Planning.Plans
             CollectionHelper.FillWhere(situation.Allies, _tempUnits,
                 a => a.IsConscious && !FamiliarAPI.IsFamiliar(a));
             Vector3 checkPosition = overrideCheckPosition ?? optimalPos.Position;
+            // ★ v3.18.14: 실제 키스톤 AoE 반경 사용 (EFFECT_RADIUS_TILES=4 → 실제 능력 AoE)
             var alliesInRange = FamiliarAPI.GetAlliesInRadius(
                 checkPosition,
-                FamiliarPositioner.EFFECT_RADIUS_TILES,
+                situation.FamiliarEffectRadius,
                 _tempUnits);
 
             // ★ v3.10.0: 스냅샷(optimalPos.AlliesInRange) 대신 fresh 계산(alliesInRange.Count) 사용
@@ -2173,25 +2322,28 @@ namespace CompanionAI_v3.Planning.Plans
             //   - 재배치 없이 optimalPos만 보면 Raven이 아군 근처인데 디버프가 계획되는 버그 발생
             int actualEnemiesNearRaven = 0;
             bool hasEnoughEnemiesForDebuff = false;
+            bool willRelocateForDebuff = false;     // ★ v3.18.10: 디버프 루프에서 사용 (hoisted)
+            Vector3 ravenPosForDebuff = default;    // ★ v3.18.10: per-ability AoE 체크용 (hoisted)
             if (!isRavenBuffPhase && keystoneDebuffs.Count > 0 && situation.Familiar != null)
             {
-                var ravenCurrentPos = situation.Familiar.Position;
+                ravenPosForDebuff = situation.Familiar.Position;
                 // ★ v3.8.78: LINQ → CollectionHelper (0 할당)
                 CollectionHelper.FillWhere(situation.Enemies, _tempUnits,
                     e => e.IsConscious);
+                // ★ v3.18.14: 실제 키스톤 AoE 반경 사용
                 actualEnemiesNearRaven = FamiliarAPI.CountEnemiesInRadius(
-                    ravenCurrentPos, FamiliarPositioner.EFFECT_RADIUS_TILES, _tempUnits);
+                    ravenPosForDebuff, situation.FamiliarEffectRadius, _tempUnits);
 
                 // ★ v3.8.53: 재배치 예정 여부에 따라 적 수 판단
                 // NeedsFamiliarRelocate=true → Phase 3.3에서 최적 위치로 이동 예정 → optimalPos 기준 사용 가능
                 // NeedsFamiliarRelocate=false → Raven은 현재 위치에 머물 → 현재 위치 기준만 사용
-                bool willRelocate = situation.NeedsFamiliarRelocate;
-                int effectiveEnemyEstimate = willRelocate
+                willRelocateForDebuff = situation.NeedsFamiliarRelocate;
+                int effectiveEnemyEstimate = willRelocateForDebuff
                     ? Math.Max(actualEnemiesNearRaven, optimalPos.EnemiesInRange)
                     : actualEnemiesNearRaven;
 
                 if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Keystone Debuff: Enemies near Raven current={actualEnemiesNearRaven}, " +
-                    $"optimal={optimalPos.EnemiesInRange}, willRelocate={willRelocate}, effective={effectiveEnemyEstimate}");
+                    $"optimal={optimalPos.EnemiesInRange}, willRelocate={willRelocateForDebuff}, effective={effectiveEnemyEstimate}");
                 // ★ v3.8.56: 적 1명이라도 있으면 디버프 허용 (사람처럼 일단 뭐라도 하기)
                 hasEnoughEnemiesForDebuff = effectiveEnemyEstimate >= 1;
             }
@@ -2202,7 +2354,10 @@ namespace CompanionAI_v3.Planning.Plans
 
             if (keystoneDebuffs.Count > 0 && hasEnoughEnemiesForDebuff)
             {
-                int effectiveEnemyCount = Math.Max(actualEnemiesNearRaven, optimalPos.EnemiesInRange);
+                // ★ v3.18.10: willRelocate 기반 정확한 적 수 (로그/설명용)
+                int baseEffectiveEnemyCount = willRelocateForDebuff
+                    ? Math.Max(actualEnemiesNearRaven, optimalPos.EnemiesInRange)
+                    : actualEnemiesNearRaven;
                 foreach (var debuff in keystoneDebuffs)
                 {
                     if (remainingAP < 1f) break;
@@ -2213,6 +2368,26 @@ namespace CompanionAI_v3.Planning.Plans
 
                     float cost = CombatAPI.GetAbilityAPCost(debuff);
                     if (cost > remainingAP) continue;
+
+                    // ★ v3.18.14: Per-ability AoE 반경으로 실제 적중 가능 적 수 검증
+                    // FamiliarEffectRadius로 이미 min AoE 기반 적 수 계산됨
+                    // 개별 능력 AoE가 더 작으면 → 능력 범위 내 적만 유효
+                    int debuffEnemyCount = baseEffectiveEnemyCount;
+                    if (!willRelocateForDebuff)
+                    {
+                        float debuffAoE = CombatAPI.GetAoERadius(debuff);
+                        if (debuffAoE > 0)
+                        {
+                            debuffEnemyCount = FamiliarAPI.CountEnemiesInRadius(
+                                ravenPosForDebuff, debuffAoE, _tempUnits);
+                            if (debuffEnemyCount < 1)
+                            {
+                                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Keystone Debuff: {debuff.Name} skipped - " +
+                                    $"0 enemies in actual AoE ({debuffAoE:F1} tiles, effectRadius={situation.FamiliarEffectRadius:F1})");
+                                continue;
+                            }
+                        }
+                    }
 
                     // 디버프를 Raven에게 시전 가능한지 확인
                     string reason;
@@ -2227,12 +2402,12 @@ namespace CompanionAI_v3.Planning.Plans
                         usedAbilityGuids.Add(guid);
 
                     Main.Log($"[{RoleName}] ★ Familiar Keystone Debuff: {debuff.Name} on {typeName} " +
-                        $"({effectiveEnemyCount} enemies in range) - Warp Relay spread");
+                        $"({debuffEnemyCount} enemies in range) - Warp Relay spread");
 
                     var debuffAction = PlannedAction.Attack(
                         debuff,
                         situation.Familiar,
-                        $"Warp Relay debuff: {debuff.Name} ({effectiveEnemyCount} enemies)",
+                        $"Warp Relay debuff: {debuff.Name} ({debuffEnemyCount} enemies)",
                         cost);
                     debuffAction.IsFamiliarTarget = true;
                     actions.Add(debuffAction);
@@ -2272,6 +2447,26 @@ namespace CompanionAI_v3.Planning.Plans
                     float cost = CombatAPI.GetAbilityAPCost(attack);
                     if (cost > remainingAP) continue;
 
+                    // ★ v3.18.10: Per-ability AoE 반경으로 실제 적 수 검증
+                    int attackEnemyCount = willRelocateForDebuff
+                        ? Math.Max(actualEnemiesNearRaven, optimalPos.EnemiesInRange)
+                        : actualEnemiesNearRaven;
+                    if (!willRelocateForDebuff)
+                    {
+                        float attackAoE = CombatAPI.GetAoERadius(attack);
+                        if (attackAoE > 0)
+                        {
+                            attackEnemyCount = FamiliarAPI.CountEnemiesInRadius(
+                                ravenPosForDebuff, attackAoE, _tempUnits);
+                            if (attackEnemyCount < 1)
+                            {
+                                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Warp Relay Attack: {attack.Name} skipped - " +
+                                    $"0 enemies in actual AoE ({attackAoE:F1} tiles)");
+                                continue;
+                            }
+                        }
+                    }
+
                     // Raven에게 시전 가능한지 확인
                     string reason;
                     if (!CombatAPI.CanUseAbilityOn(attack, familiarTarget, out reason))
@@ -2285,12 +2480,12 @@ namespace CompanionAI_v3.Planning.Plans
                         usedAbilityGuids.Add(guid);
 
                     Main.Log($"[{RoleName}] ★ Warp Relay Psychic Attack: {attack.Name} on {typeName} " +
-                        $"({optimalPos.EnemiesInRange} enemies) - Momentum active, damage spreads!");
+                        $"({attackEnemyCount} enemies) - Momentum active, damage spreads!");
 
                     var attackAction = PlannedAction.Attack(
                         attack,
                         situation.Familiar,
-                        $"Warp Relay attack: {attack.Name} ({optimalPos.EnemiesInRange} enemies)",
+                        $"Warp Relay attack: {attack.Name} ({attackEnemyCount} enemies)",
                         cost);
                     attackAction.IsFamiliarTarget = true;
                     actions.Add(attackAction);
@@ -3019,6 +3214,15 @@ namespace CompanionAI_v3.Planning.Plans
             if (masterMoveNode != null)
             {
                 Vector3 masterMovePos = (Vector3)masterMoveNode.Vector3Position;
+
+                // ★ v3.19.8: 이동 위치가 위험 구역이면 Aerial Rush 취소
+                if (!situation.NeedsAoEEvacuation &&
+                    CombatAPI.IsPositionInHazardZone(masterMovePos, situation.Unit))
+                {
+                    Main.Log($"[{RoleName}] Aerial Rush move position in hazard zone — cancelled");
+                    return null;
+                }
+
                 Main.Log($"[{RoleName}] ★ Eagle Aerial Rush requires movement: " +
                     $"Master moves to ({masterMovePos.x:F1},{masterMovePos.z:F1}) first, " +
                     $"then will use Point1({point1.x:F1},{point1.z:F1}) -> Point2({point2.x:F1},{point2.z:F1}) " +
@@ -3484,12 +3688,13 @@ namespace CompanionAI_v3.Planning.Plans
             float apCost = CombatAPI.GetAbilityAPCost(signal);
             if (remainingAP < apCost) return null;
 
-            // ★ v3.8.48: LINQ → CollectionHelper (0 할당)
-            // 범위 내 부상 아군 수 계산 (4타일 = 약 5.4m)
+            // ★ v3.18.14: 능력 실제 AoE 반경 사용 (EFFECT_RADIUS_TILES 하드코딩 제거)
+            float signalRadius = CombatAPI.GetAoERadius(signal);
+            float signalCheckRadius = signalRadius > 0 ? signalRadius : situation.FamiliarEffectRadius;
             int woundedInRange = situation.Familiar != null
                 ? CollectionHelper.CountWhere(situation.Allies, a =>
                     a.IsConscious && CombatCache.GetHPPercent(a) < 70f &&
-                    CombatCache.GetDistanceInTiles(situation.Familiar, a) <= 4f)
+                    CombatCache.GetDistanceInTiles(situation.Familiar, a) <= signalCheckRadius)
                 : 0;
 
             // 2명 이상 부상 아군이 범위 내 있어야 의미

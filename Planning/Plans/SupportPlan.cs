@@ -31,11 +31,81 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.0.55: MP 추적 - AP처럼 계획 단계에서 MP도 추적
             float remainingMP = situation.CurrentMP;
 
-            float reservedAP = CalculateReservedAPForPostMoveAttack(situation);
+            // ★ v3.19.4: 통합 AP 예산 — CreateAPBudget 팩토리 + EffectiveReserved 자동 속성
+            var budget = CreateAPBudget(situation, remainingAP);
+            if (budget.PostMoveReserved > 0 || budget.TurnEndingReserved > 0)
+            {
+                Main.Log($"[Support] {budget}");
+            }
+
+            // ★ v3.19.0: 전략적 시퀀스 평가 — Support Role용 (시드 0,2,4,6만 평가)
+            // ★ v3.19.2: Replan 시 FocusTarget 유효성 검증 + 전략 재사용
+            TurnStrategy strategy = turnState.GetContext<TurnStrategy>(
+                StrategicContextKeys.TurnStrategyKey, default(TurnStrategy));
+
+            bool previousStrategyValid = strategy != null
+                && situation.HasHittableEnemies
+                && situation.BestTarget != null
+                && strategy.ExpectedTotalDamage > 0;
+
+            if (previousStrategyValid)
+            {
+                string focusTargetId = turnState.GetContext<string>(StrategicContextKeys.FocusTargetId, null);
+                if (focusTargetId != null)
+                {
+                    bool found = false;
+                    for (int i = 0; i < situation.HittableEnemies.Count; i++)
+                    {
+                        if (situation.HittableEnemies[i].UniqueId == focusTargetId) { found = true; break; }
+                    }
+                    if (!found)
+                    {
+                        previousStrategyValid = false;
+                        Main.Log($"[Support] Strategy: Previous FocusTarget no longer hittable — re-evaluating");
+                    }
+                }
+            }
+
+            if (previousStrategyValid)
+            {
+                budget.StrategyPostActionReserved = strategy.ReservedAPForPostAction;
+                Main.Log($"[Support] Strategy: Reusing previous ({strategy.Sequence}, dmg={strategy.ExpectedTotalDamage:F0})");
+            }
+            else if (situation.HasHittableEnemies &&
+                TeamBlackboard.Instance.CurrentTactic != TacticalSignal.Retreat)
+            {
+                strategy = TurnStrategyPlanner.Evaluate(situation, Settings.AIRole.Support);
+                if (strategy != null)
+                {
+                    turnState.SetContext(StrategicContextKeys.TurnStrategyKey, strategy);
+                    if (situation.BestTarget != null)
+                        turnState.SetContext(StrategicContextKeys.FocusTargetId, situation.BestTarget.UniqueId);
+                    budget.StrategyPostActionReserved = strategy.ReservedAPForPostAction;
+                    Main.Log($"[Support] Strategy: {strategy.Sequence} (dmg={strategy.ExpectedTotalDamage:F0})");
+                }
+            }
+            else
+            {
+                strategy = null;
+            }
 
             // ★ v3.12.0: Phase 0~1.5 공통 처리 (Ultimate, AoE대피, 긴급힐, 재장전)
             var earlyReturn = ExecuteCommonEarlyPhases(actions, situation, ref remainingAP);
             if (earlyReturn != null) return earlyReturn;
+
+            // ★ v3.19.0: Phase 1.55 — 무기 전환 (현재 무기 무용/비효율 시)
+            if (situation.WeaponRotationAvailable
+                && (!situation.HasHittableEnemies || ShouldSwitchForEffectiveness(situation))
+                && ShouldSwitchFirst(situation))
+            {
+                var switchActions = PlanWeaponSetRotationAttack(situation, ref remainingAP);
+                if (switchActions.Count > 0)
+                {
+                    actions.AddRange(switchActions);
+                    Main.Log($"[Support] Phase 1.55: Switch-First — switching weapon for better effectiveness");
+                    return new TurnPlan(actions, TurnPriority.DirectAttack, "Support weapon switch-first");
+                }
+            }
 
             // ★ v3.12.0: Phase 1.75 공통 Familiar 처리 (Support: GUID 추적 + 보호 능력 포함)
             HashSet<string> usedKeystoneAbilityGuids;
@@ -112,7 +182,7 @@ namespace CompanionAI_v3.Planning.Plans
             // Phase 3: 선제적 자기 버프
             if (!situation.HasBuffedThisTurn && !situation.HasPerformedFirstAction)
             {
-                var selfBuffAction = PlanBuffWithReservation(situation, ref remainingAP, reservedAP);
+                var selfBuffAction = PlanBuffWithReservation(situation, ref remainingAP, budget.EffectiveReserved);
                 if (selfBuffAction != null)
                 {
                     actions.Add(selfBuffAction);
@@ -208,7 +278,13 @@ namespace CompanionAI_v3.Planning.Plans
                 int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
                 bool hasAoEOpportunity = false;
 
-                if (useAoEOptimization)
+                // ★ v3.19.0: 전략이 AoE를 추천하면 클러스터 검증 스킵
+                if (strategy?.ShouldPrioritizeAoE == true)
+                {
+                    hasAoEOpportunity = true;
+                    Main.Log($"[Support] Phase 5.5: Strategy recommends AoE — bypassing cluster check");
+                }
+                else if (useAoEOptimization)
                 {
                     // ★ v3.8.96: 캐시된 AvailableAoEAttacks 사용 (인라인 LINQ 제거)
                     foreach (var aoEAbility in situation.AvailableAoEAttacks)
@@ -333,8 +409,8 @@ namespace CompanionAI_v3.Planning.Plans
             var plannedTargetIds = new HashSet<string>();
             var plannedAbilityGuids = new HashSet<string>();
 
-            // ★ v3.6.14: AP >= 0 으로 완화 (bonus usage 공격은 0 AP로 사용 가능)
-            while (remainingAP >= 0f && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
+            // ★ v3.19.2: APBudget.CanAfford()로 강제 — TurnEnding + Strategy 예약을 중앙 검증
+            while (budget.CanAfford(0, remainingAP) && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
             {
                 var attackAction = PlanSafeRangedAttackFallback(situation, ref remainingAP, ref remainingMP,
                     excludeTargetIds: plannedTargetIds, excludeAbilityGuids: plannedAbilityGuids);
@@ -366,6 +442,8 @@ namespace CompanionAI_v3.Planning.Plans
                         plannedAbilityGuids.Add(guid);
                 }
             }
+
+            // ★ v3.19.2: TurnEnding AP 복원 불필요 — budget.CanAfford()가 예약을 내부 처리
 
             // ★ v3.8.44: 공격 실패 시 context 수집 (이동 Phase에서 활용)
             if (!didPlanAttack)
@@ -519,7 +597,7 @@ namespace CompanionAI_v3.Planning.Plans
                     hasMoveInPlan = true;
 
                     // ★ v3.1.24: 이동 목적지 추출하여 Post-move 공격에 전달
-                    if (reservedAP > 0 && situation.NearestEnemy != null)
+                    if (budget.PostMoveReserved > 0 && situation.NearestEnemy != null)
                     {
                         UnityEngine.Vector3? moveDestination = moveOrGapCloser.Target?.Point;
                         var postMoveAttack = PlanPostMoveAttack(situation, situation.NearestEnemy, ref remainingAP, moveDestination);
@@ -699,6 +777,9 @@ namespace CompanionAI_v3.Planning.Plans
             float bestHealCost = 0f;
             float bestTileScore = float.MinValue;
 
+            // ★ v3.18.18: DamagingAoE 회피
+            bool avoidHazardZonesHeal = !situation.NeedsAoEEvacuation;
+
             foreach (var kvp in tiles)
             {
                 var cell = kvp.Value;
@@ -708,6 +789,10 @@ namespace CompanionAI_v3.Planning.Plans
                 if (node == null) continue;
 
                 var pos = node.Vector3Position;
+
+                // ★ v3.18.18: DamagingAoE 위치 필터링
+                if (avoidHazardZonesHeal && CombatAPI.IsPositionInHazardZone(pos, unit))
+                    continue;
 
                 // ★ v3.9.66: 게임 API 그리드 거리 (Chebyshev + SizeRect)
                 float distToAlly = CombatAPI.GetDistanceInTiles(pos, woundedAlly);
@@ -906,6 +991,9 @@ namespace CompanionAI_v3.Planning.Plans
             UnityEngine.Vector3? bestPos = null;
             float bestDist = currentDist;  // 현재보다 가까워야 함
 
+            // ★ v3.18.18: DamagingAoE 회피
+            bool avoidHazardZones = !situation.NeedsAoEEvacuation;
+
             foreach (var kvp in tiles)
             {
                 var cell = kvp.Value;
@@ -915,6 +1003,11 @@ namespace CompanionAI_v3.Planning.Plans
                 if (node == null) continue;
 
                 var pos = node.Vector3Position;
+
+                // ★ v3.18.18: DamagingAoE 위치 필터링
+                if (avoidHazardZones && CombatAPI.IsPositionInHazardZone(pos, unit))
+                    continue;
+
                 float dist = UnityEngine.Vector3.Distance(pos, targetPos);
 
                 // 현재보다 가깝고, 지금까지 중 최고면 선택

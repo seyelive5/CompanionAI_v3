@@ -269,6 +269,26 @@ namespace CompanionAI_v3.Analysis
         /// <summary>★ v3.8.96: AoE 가능 공격이 있는가?</summary>
         public bool HasAoEAttacks => AvailableAoEAttacks?.Count > 0;
 
+        #endregion
+
+        #region Ability Profile (v3.19.2)
+
+        /// <summary>★ v3.19.2: 갭클로저 능력 보유 여부</summary>
+        public bool HasGapCloser { get; set; }
+
+        /// <summary>★ v3.19.2: Self-AoE 능력 보유 여부 (BladeDance 등)</summary>
+        public bool HasSelfAoE { get; set; }
+
+        /// <summary>★ v3.19.2: TurnEnding 능력 보유 여부 (곡예술 등)</summary>
+        public bool HasTurnEndingAbility { get; set; }
+
+        /// <summary>★ v3.19.2: Run & Gun 보유 여부</summary>
+        public bool HasRunAndGun => RunAndGunAbility != null;
+
+        /// <summary>★ v3.19.2: GapCloser + Self-AoE 콤보 가능 여부
+        /// 갭클로저로 적 밀집 지역에 착지 후 Self-AoE 사용 가능</summary>
+        public bool HasGapCloserCombo => HasGapCloser && HasSelfAoE;
+
         /// <summary>재장전 능력</summary>
         public AbilityData ReloadAbility { get; set; }
 
@@ -362,6 +382,10 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>★ v3.7.00: 사역마 관련 능력 목록 (Relocate, Keystone 등)</summary>
         public List<AbilityData> FamiliarAbilities { get; set; } = new List<AbilityData>();
+
+        /// <summary>★ v3.18.14: Warp Relay/Extrapolation 실제 효과 반경 (타일).
+        /// FamiliarPositioner 포지셔닝, 키스톤 범위 체크, 공격적 재배치 등에 사용.</summary>
+        public float FamiliarEffectRadius { get; set; } = FamiliarPositioner.EFFECT_RADIUS_TILES;
 
         /// <summary>★ v3.7.00: 사역마 Relocate 필요 여부</summary>
         public bool NeedsFamiliarRelocate { get; set; }
@@ -461,6 +485,11 @@ namespace CompanionAI_v3.Analysis
             AllowPostAttackMove = false;
             AllowChaseMove = false;
 
+            // Ability Profile
+            HasGapCloser = false;
+            HasSelfAoE = false;
+            HasTurnEndingAbility = false;
+
             // Familiar
             HasFamiliar = false;
             Familiar = null;
@@ -468,6 +497,7 @@ namespace CompanionAI_v3.Analysis
             FamiliarPosition = default;
             OptimalFamiliarPosition = null;
             FamiliarAbilities.Clear();
+            FamiliarEffectRadius = FamiliarPositioner.EFFECT_RADIUS_TILES;
             NeedsFamiliarRelocate = false;
             IsFamiliarUnit = false;
         }

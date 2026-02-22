@@ -1012,6 +1012,8 @@ namespace CompanionAI_v3.GameInterface
 
             // ★ v3.8.13: 이제 AI 셀에 실제 경로 위협 데이터가 포함됨
             // BattlefieldGrid 검증만 추가로 수행
+            // ★ v3.18.18: DamagingAoE 회피 — 안전한 유닛이 AoE 안으로 이동하지 않도록
+            bool avoidHazardZones = !CombatAPI.IsUnitInHazardZone(unit);
             var aiCells = new Dictionary<GraphNode, WarhammerPathAiCell>();
             foreach (var kvp in tiles)
             {
@@ -1021,6 +1023,10 @@ namespace CompanionAI_v3.GameInterface
 
                 // ★ v3.7.62: BattlefieldGrid 검증 - Walkable/점유 체크
                 if (!BattlefieldGrid.Instance.ValidateNode(unit, node))
+                    continue;
+
+                // ★ v3.18.18: DamagingAoE 위치 필터링
+                if (avoidHazardZones && CombatAPI.IsPositionInHazardZone(node.Vector3Position, unit))
                     continue;
 
                 aiCells[kvp.Key] = aiCell;
@@ -1192,6 +1198,9 @@ namespace CompanionAI_v3.GameInterface
             // 적 뒤쪽 방향 (플랭킹 보너스용)
             var flankDir = (targetPos - unitPos).normalized;
 
+            // ★ v3.18.18: DamagingAoE 회피 — 안전한 유닛이 AoE 안으로 이동하지 않도록
+            bool avoidHazardZones = !CombatAPI.IsUnitInHazardZone(unit);
+
             var candidates = new List<PositionScore>();
 
             foreach (var kvp in tiles)
@@ -1205,6 +1214,10 @@ namespace CompanionAI_v3.GameInterface
                     continue;
 
                 var pos = node.Vector3Position;
+
+                // ★ v3.18.18: DamagingAoE 위치 필터링
+                if (avoidHazardZones && CombatAPI.IsPositionInHazardZone(pos, unit))
+                    continue;
 
                 // ★ v3.9.24: 게임과 동일한 거리 계산 (Chebyshev 기반 edge-to-edge + SizeRect)
                 // 이전: Vector3.Distance (중심-중심 유클리드) + SizeRect.Width*0.5 보정
@@ -1374,6 +1387,9 @@ namespace CompanionAI_v3.GameInterface
             // ★ v3.8.70: 현재 위치 제외 — "Already at destination" 루프 방지
             var currentNode = unit.Position.GetNearestNodeXZ();
 
+            // ★ v3.18.18: DamagingAoE 회피 — 안전한 유닛이 AoE 안으로 후퇴하지 않도록
+            bool avoidHazardZones = !CombatAPI.IsUnitInHazardZone(unit);
+
             var candidates = new List<PositionScore>();
 
             foreach (var kvp in tiles)
@@ -1388,6 +1404,10 @@ namespace CompanionAI_v3.GameInterface
                     continue;
 
                 var pos = node.Vector3Position;
+
+                // ★ v3.18.18: DamagingAoE 위치 필터링
+                if (avoidHazardZones && CombatAPI.IsPositionInHazardZone(pos, unit))
+                    continue;
 
                 // ★ v3.6.1: 모든 적과의 최소 거리 계산 (타일 단위)
                 // ★ v3.8.78: LOS 기반 hittable count 동시 계산 (CountHittableEnemiesFromPosition 제거)
@@ -1550,6 +1570,10 @@ namespace CompanionAI_v3.GameInterface
 
                     var pos = node.Vector3Position;
 
+                    // ★ v3.18.18: 폴백에서도 DamagingAoE 회피
+                    if (avoidHazardZones && CombatAPI.IsPositionInHazardZone(pos, unit))
+                        continue;
+
                     // 적들로부터의 최소 거리
                     float nearestEnemyDist = float.MaxValue;
                     foreach (var enemy in enemies)
@@ -1624,14 +1648,26 @@ namespace CompanionAI_v3.GameInterface
 
             var targetPos = target.Position;
 
+            // ★ v3.18.16: 현재 안전한데 DamagingAoE 안으로 접근하는 것 방지
+            // 게임 PathAiCell.StepsInsideDamagingAoE가 감지 못하는 AoE도 CombatAPI로 체크
+            bool avoidHazardZones = !CombatAPI.IsUnitInHazardZone(unit);
+
             // ★ v3.9.38: A* 경로 기반 접근 위치 선택
             // 유클리드 거리가 아닌 실제 A* 경로를 따라 가장 먼 도달 가능 지점 선택
             // 벽/장애물을 올바르게 돌아가는 다중 턴 이동이 가능
             var pathResult = FindApproachAlongPath(unit, targetPos, tiles);
             if (pathResult != null)
             {
-                Main.Log($"[MovementAPI] {unit.CharacterName}: A* approach to ({pathResult.Position.x:F1},{pathResult.Position.z:F1}) dist={Vector3.Distance(pathResult.Position, targetPos):F1}m, pathRisk={pathResult.PathRiskScore:F1} to {target.CharacterName}");
-                return pathResult;
+                // ★ v3.18.16: A* 접근 목적지가 DamagingAoE 안이면 거부
+                if (avoidHazardZones && CombatAPI.IsPositionInHazardZone(pathResult.Position, unit))
+                {
+                    Main.Log($"[MovementAPI] {unit.CharacterName}: A* approach REJECTED — destination in damaging AoE ({pathResult.Position.x:F1},{pathResult.Position.z:F1})");
+                }
+                else
+                {
+                    Main.Log($"[MovementAPI] {unit.CharacterName}: A* approach to ({pathResult.Position.x:F1},{pathResult.Position.z:F1}) dist={Vector3.Distance(pathResult.Position, targetPos):F1}m, pathRisk={pathResult.PathRiskScore:F1} to {target.CharacterName}");
+                    return pathResult;
+                }
             }
 
             // ★ 폴백: A* 경로 실패 시 기존 유클리드 방식 사용
@@ -1648,6 +1684,10 @@ namespace CompanionAI_v3.GameInterface
                 if (node == null || !aiCell.IsCanStand) continue;
 
                 var pos = node.Vector3Position;
+
+                // ★ v3.18.16: DamagingAoE 타일 필터링 (현재 안전한 경우만)
+                if (avoidHazardZones && CombatAPI.IsPositionInHazardZone(pos, unit)) continue;
+
                 float distToTarget = Vector3.Distance(pos, targetPos);
 
                 float pathRisk = aiCell.ProvokedAttacks * WEIGHT_AOO + aiCell.EnteredAoE * WEIGHT_AOE_ENTRY + aiCell.StepsInsideDamagingAoE * WEIGHT_DAMAGING_AOE_STEP;

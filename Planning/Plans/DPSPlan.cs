@@ -29,10 +29,11 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.0.55: MP 추적 - AP처럼 계획 단계에서 MP도 추적
             float remainingMP = situation.CurrentMP;
 
-            float reservedAP = CalculateReservedAPForPostMoveAttack(situation);
-            if (reservedAP > 0)
+            // ★ v3.19.4: 통합 AP 예산 — CreateAPBudget 팩토리 + EffectiveReserved 자동 속성
+            var budget = CreateAPBudget(situation, remainingAP);
+            if (budget.PostMoveReserved > 0 || budget.TurnEndingReserved > 0)
             {
-                Main.Log($"[DPS] Reserving {reservedAP:F1} AP for post-move attack");
+                Main.Log($"[DPS] {budget}");
             }
 
             // ★ v3.8.86: 재계획 시 이전 전략 컨텍스트 소비
@@ -45,13 +46,14 @@ namespace CompanionAI_v3.Planning.Plans
             var earlyReturn = ExecuteCommonEarlyPhases(actions, situation, ref remainingAP);
             if (earlyReturn != null) return earlyReturn;
 
-            // ★ v3.9.74: Phase 1.55 — Switch-First: 현재 무기 무용 시 즉시 전환
-            // 조건: 무기 로테이션 가능 + Hittable 적 없음 + 현재/대체 무기 타입 다름
-            // 현재 무기로 공격할 수 없는 상황에서 대체 무기가 도움이 되면 즉시 전환
+            // ★ v3.9.74: Phase 1.55 — Switch-First: 현재 무기 무용/비효율 시 즉시 전환
+            // 조건: 무기 로테이션 가능 + (Hittable 적 없음 OR 대체 무기가 더 효율적)
+            // 현재 무기로 공격할 수 없거나 비효율적인 상황에서 대체 무기가 도움이 되면 즉시 전환
             // 전환 후 re-analysis에서 새 무기로 전체 계획 생성
             // ★ v3.9.92: Phase 1.56이 보너스 공격을 위해 전환한 경우 억제
-            // MP가 남아 이동 가능하면 이동→재분석으로 새 무기 사용 기회 제공
-            if (situation.WeaponRotationAvailable && !situation.HasHittableEnemies
+            // ★ v3.19.0: 조건 완화 — 적이 공격 가능해도 대체 무기가 확연히 유리하면 전환
+            if (situation.WeaponRotationAvailable
+                && (!situation.HasHittableEnemies || ShouldSwitchForEffectiveness(situation))
                 && ShouldSwitchFirst(situation))
             {
                 if (bonusWeaponSwitch && situation.CanMove)
@@ -112,15 +114,72 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.11.0: 전략적 시퀀스 평가 — Phase들에게 가이드 제공
             // 10가지 시드 템플릿(Standard~BuffedRnGAoE)을 시뮬레이션하여
             // TotalDamage + KillBonus + UtilityBonus 통합 스코어로 최적 전략 선택
-            TurnStrategy strategy = null;
-            if (situation.HasHittableEnemies &&
+            // ★ v3.19.0: Replan 시 이전 전략 재사용 — 유효하면 재평가 생략
+            // ★ v3.19.2: FocusTargetId로 이전 타겟 유효성 검증 추가
+            TurnStrategy strategy = turnState.GetContext<TurnStrategy>(
+                StrategicContextKeys.TurnStrategyKey, default(TurnStrategy));
+
+            bool previousStrategyValid = strategy != null
+                && situation.HasHittableEnemies
+                && situation.BestTarget != null
+                && strategy.ExpectedTotalDamage > 0;
+
+            // ★ v3.19.2: 이전 전략의 FocusTarget이 사망/공격불가면 전략 무효화
+            if (previousStrategyValid)
+            {
+                string focusTargetId = turnState.GetContext<string>(StrategicContextKeys.FocusTargetId, null);
+                if (focusTargetId != null)
+                {
+                    bool focusTargetStillValid = false;
+                    for (int i = 0; i < situation.HittableEnemies.Count; i++)
+                    {
+                        if (situation.HittableEnemies[i].UniqueId == focusTargetId)
+                        {
+                            focusTargetStillValid = true;
+                            break;
+                        }
+                    }
+                    if (!focusTargetStillValid)
+                    {
+                        previousStrategyValid = false;
+                        Main.Log($"[DPS] Strategy: Previous FocusTarget {focusTargetId} no longer hittable — re-evaluating");
+                    }
+                }
+            }
+
+            if (previousStrategyValid)
+            {
+                Main.Log($"[DPS] Strategy: Reusing previous strategy ({strategy.Sequence}, dmg={strategy.ExpectedTotalDamage:F0})");
+            }
+            else if (situation.HasHittableEnemies &&
                 TeamBlackboard.Instance.CurrentTactic != TacticalSignal.Retreat)
             {
                 strategy = TurnStrategyPlanner.Evaluate(situation);
                 if (strategy != null)
                 {
                     turnState.SetContext(StrategicContextKeys.TurnStrategyKey, strategy);
+                    // ★ v3.19.2: FocusTargetId 저장 — Replan 시 유효성 검증에 사용
+                    if (situation.BestTarget != null)
+                    {
+                        turnState.SetContext(StrategicContextKeys.FocusTargetId, situation.BestTarget.UniqueId);
+                    }
+                    // ★ v3.19.2: TacticalObjective 저장 — 턴 의도 보존
+                    string objective = strategy.PrioritizesKillSequence ? "Kill"
+                        : strategy.ShouldPrioritizeAoE ? "AoE"
+                        : "Attack";
+                    turnState.SetContext(StrategicContextKeys.TacticalObjective, objective);
+                    Main.Log($"[DPS] Strategy: Fresh evaluation — {strategy.Sequence} (dmg={strategy.ExpectedTotalDamage:F0}, target={situation.BestTarget?.CharacterName}, objective={objective})");
                 }
+            }
+            else
+            {
+                strategy = null; // 공격 불가 상황 — 전략 무효화
+            }
+
+            // ★ v3.19.0: 전략 R&G AP 예약을 APBudget에 반영
+            if (strategy != null)
+            {
+                budget.StrategyPostActionReserved = strategy.ReservedAPForPostAction;
             }
 
             // ══════════════════════════════════════════════════════════════
@@ -399,8 +458,8 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     // ★ v3.10.0: 전략이 버프 추천 — confidence 무시, 추천 버프 우선
                     var buffAction = strategy.RecommendedBuff != null
-                        ? PlanSpecificBuff(situation, strategy.RecommendedBuff, ref remainingAP, reservedAP)
-                        : PlanAttackBuffWithReservation(situation, ref remainingAP, reservedAP);
+                        ? PlanSpecificBuff(situation, strategy.RecommendedBuff, ref remainingAP, budget.EffectiveReserved)
+                        : PlanAttackBuffWithReservation(situation, ref remainingAP, budget.EffectiveReserved);
                     if (buffAction != null)
                     {
                         actions.Add(buffAction);
@@ -415,7 +474,7 @@ namespace CompanionAI_v3.Planning.Plans
                     float aggression = GetConfidenceAggression();  // 0.3 ~ 1.5
                     if (aggression <= 1.2f)
                     {
-                        var buffAction = PlanAttackBuffWithReservation(situation, ref remainingAP, reservedAP);
+                        var buffAction = PlanAttackBuffWithReservation(situation, ref remainingAP, budget.EffectiveReserved);
                         if (buffAction != null)
                         {
                             actions.Add(buffAction);
@@ -685,6 +744,18 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.19.0: Phase 4.95 — 전략이 디버프 우선 추천 시, 공격 전에 디버프 적용
+            if (strategy?.ShouldDebuffBeforeAttack == true && remainingAP >= 2f &&
+                situation.AvailableDebuffs.Count > 0 && situation.NearestEnemy != null)
+            {
+                var preAttackDebuff = PlanDebuff(situation, situation.BestTarget ?? situation.NearestEnemy, ref remainingAP);
+                if (preAttackDebuff != null)
+                {
+                    actions.Add(preAttackDebuff);
+                    Main.Log($"[DPS] Phase 4.95: Strategy debuff-before-attack — {preAttackDebuff.Ability?.Name}");
+                }
+            }
+
             // Phase 5: 공격 - 약한 적 우선
             // ★ v3.1.16: didPlanAttack은 Phase 4.4에서 이미 선언됨
             // ★ v3.1.22: 콤보 선행 능력(comboPrereqAbility) 우선 계획
@@ -704,9 +775,9 @@ namespace CompanionAI_v3.Planning.Plans
 
             // ★ v3.6.14: AP >= 0 으로 완화 (bonus usage 공격은 0 AP로 사용 가능)
             // AttackPlanner.PlanAttack()이 GetEffectiveAPCost()로 AP 체크하므로 안전
-            // ★ v3.10.0: 전략이 R&G를 계획하면 AP 하한을 R&G 비용으로 설정
-            float strategyAPFloor = strategy?.ReservedAPForPostAction ?? 0f;
-            while (remainingAP >= strategyAPFloor && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
+            // ★ v3.19.2: APBudget.CanAfford()로 강제 — TurnEnding + Strategy 예약을 중앙 검증
+            // 기존 수동 remainingAP -= turnEndingReservedAP 패턴 → CanAfford() 단일 체크로 교체
+            while (budget.CanAfford(0, remainingAP) && situation.HasHittableEnemies && attacksPlanned < MAX_ATTACKS_PER_PLAN)
             {
                 var weakestEnemy = FindWeakestEnemy(situation, plannedTargetIds);
                 var preferTarget = weakestEnemy ?? situation.BestTarget;
@@ -796,6 +867,8 @@ namespace CompanionAI_v3.Planning.Plans
                         plannedAbilityGuids.Add(guid);
                 }
             }
+
+            // ★ v3.19.2: TurnEnding AP 복원 불필요 — budget.CanAfford()가 예약을 내부 처리
 
             // ★ v3.0.87: Phase 5 종료 후 상태 로깅
             if (!didPlanAttack)
@@ -898,7 +971,8 @@ namespace CompanionAI_v3.Planning.Plans
 
             // Phase 6: PostFirstAction
             // ★ v3.5.80: didPlanAttack 전달하여 공격이 계획됨도 런앤건 허용
-            if (situation.HasPerformedFirstAction || didPlanAttack)
+            // ★ v3.19.0: 전략이 R&G를 계획하면 공격 미계획 시에도 R&G 시도
+            if (situation.HasPerformedFirstAction || didPlanAttack || strategy?.PlansPostAction == true)
             {
                 var postAction = PlanPostAction(situation, ref remainingAP, didPlanAttack);
                 if (postAction != null)
@@ -999,7 +1073,7 @@ namespace CompanionAI_v3.Planning.Plans
                         hasMoveInPlan = true;
 
                         // ★ v3.1.24: 이동 목적지 추출하여 Post-move 공격에 전달
-                        if (reservedAP > 0 && situation.NearestEnemy != null)
+                        if (budget.PostMoveReserved > 0 && situation.NearestEnemy != null)
                         {
                             UnityEngine.Vector3? moveDestination = moveOrGapCloser.Target?.Point;
                             var postMoveAttack = PlanPostMoveAttack(situation, situation.NearestEnemy, ref remainingAP, moveDestination);
