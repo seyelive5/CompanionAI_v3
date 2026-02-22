@@ -37,6 +37,9 @@ namespace CompanionAI_v3.GameInterface
         private const int MAX_HP_ENTRIES = 200;
         private const int MAX_HITCHANCE_ENTRIES = 500;
 
+        /// <summary>★ v3.18.0: Point 타겟 캐시 키 접두사 — 문자열 매칭 대신 상수 참조</summary>
+        private const string POINT_TARGET_PREFIX = "point_";
+
         /// <summary>★ v3.13.0: 턴 내 피크 크기 추적 (디버그 통계)</summary>
         private static int _peakDistance, _peakTargeting, _peakHP, _peakHitChance;
 
@@ -234,7 +237,7 @@ namespace CompanionAI_v3.GameInterface
             // 키 생성: 능력 UniqueId + 타겟 Id
             // ★ v3.5.36: Point 좌표를 F1(0.1m 단위)로 반올림하여 캐시 히트율 향상
             string abilityId = ability.UniqueId ?? ability.Blueprint?.name ?? "unknown";
-            string targetId = target.Entity?.UniqueId ?? $"point_{target.Point.x:F1}_{target.Point.z:F1}";
+            string targetId = target.Entity?.UniqueId ?? $"{POINT_TARGET_PREFIX}{target.Point.x:F1}_{target.Point.z:F1}";
             var key = (abilityId, targetId);
 
             if (_targetingCache.TryGetValue(key, out var cached))
@@ -340,7 +343,7 @@ namespace CompanionAI_v3.GameInterface
             _keysToRemove.Clear();
             foreach (var key in _targetingCache.Keys)
             {
-                if (key.Item2 == targetId || key.Item2.StartsWith("point_"))
+                if (key.Item2 == targetId || key.Item2.StartsWith(POINT_TARGET_PREFIX))
                     _keysToRemove.Add(key);
             }
             for (int i = 0; i < _keysToRemove.Count; i++)

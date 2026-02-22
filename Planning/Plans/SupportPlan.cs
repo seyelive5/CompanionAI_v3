@@ -94,6 +94,7 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // ★ v3.1.17: Phase 2.5 - AOE 힐 (부상 아군 2명 이상)
+            // ★ v3.18.6: Allies 사용 — AoE는 범위 내 모든 유닛에 영향, 사역마 포함 카운트
             var woundedAlliesForAoe = situation.Allies
                 .Where(a => a != null && a.IsConscious)
                 .Where(a => CombatCache.GetHPPercent(a) < 70f)
@@ -125,9 +126,10 @@ namespace CompanionAI_v3.Planning.Plans
             var keystoneOnlyGuids = new HashSet<string>(usedKeystoneAbilityGuids);  // ★ v3.8.51: 키스톤 GUID만
             var plannedTurnGrantTargets = new HashSet<string>();  // ★ v3.8.16: 턴 부여 대상 추적
             var plannedBuffTargetPairs = new HashSet<string>();   // ★ v3.8.51: (buffGuid:targetId) 쌍
+            var plannedAbilityUseCounts = new Dictionary<string, int>();  // ★ v3.14.2: 능력별 계획 횟수 (과다 계획 방지)
             while (remainingAP >= 1f)
             {
-                var allyBuffAction = PlanAllyBuff(situation, ref remainingAP, keystoneOnlyGuids, plannedTurnGrantTargets, plannedBuffTargetPairs);
+                var allyBuffAction = PlanAllyBuff(situation, ref remainingAP, keystoneOnlyGuids, plannedTurnGrantTargets, plannedBuffTargetPairs, plannedAbilityUseCounts);
                 if (allyBuffAction == null) break;
 
                 // ★ v3.8.51: (버프, 타겟) 쌍 추적
@@ -137,12 +139,16 @@ namespace CompanionAI_v3.Planning.Plans
                 if (!string.IsNullOrEmpty(buffGuid))
                 {
                     plannedBuffTargetPairs.Add($"{buffGuid}:{targetId}");
+                    // ★ v3.14.2: 능력별 계획 횟수 증가
+                    plannedAbilityUseCounts.TryGetValue(buffGuid, out int count);
+                    plannedAbilityUseCounts[buffGuid] = count + 1;
                 }
 
                 actions.Add(allyBuffAction);
             }
 
             // ★ v3.6.2: Phase 4.3 - AOE 버프 (아군 2명 이상 근처, 6타일 ≈ 8m)
+            // ★ v3.18.6: Allies 사용 — AoE 트리거 카운트에 사역마 포함 (범위 효과 수혜 가능)
             int nearbyAllies = situation.Allies.Count(a =>
                 a != null && a.IsConscious &&
                 CombatCache.GetDistanceInTiles(situation.Unit, a) <= 6f);
@@ -864,6 +870,7 @@ namespace CompanionAI_v3.Planning.Plans
                 var typeName = FamiliarAPI.GetFamiliarTypeName(situation.FamiliarType);
                 moveReason = $"Move toward {typeName} for buff range";
             }
+            // ★ v3.18.6: Allies 사용 — 이동 중심점 계산에 사역마 포함 (정확한 위치 계산)
             else if (situation.Allies != null && situation.Allies.Any(a => a != null && !a.LifeState.IsDead))
             {
                 // 아군 밀집 중심점 계산

@@ -263,7 +263,7 @@ namespace CompanionAI_v3.Settings
         /// 이 수를 초과하면 AOE 사용 거부
         /// </summary>
         [JsonProperty("maxPlayerAlliesHit")]
-        public int MaxPlayerAlliesHit { get; set; } = 1;
+        public int MaxPlayerAlliesHit { get; set; } = 0;
 
         /// <summary>
         /// ★ v3.8.94: MaxPlayerAlliesHit로 통합 — 별도 Self-AoE 제한 불필요
@@ -611,6 +611,16 @@ namespace CompanionAI_v3.Settings
             {
                 Main.LogError($"[AIConfig] Failed to save default: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// ★ v3.18.8: 모든 AI 로직 설정을 기본값으로 초기화 + 저장
+        /// </summary>
+        public static void ResetToDefault()
+        {
+            Instance = CreateDefault();
+            Save();
+            Main.Log("[AIConfig] All settings reset to defaults");
         }
 
         /// <summary>

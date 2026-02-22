@@ -466,6 +466,846 @@ namespace CompanionAI_v3.Settings
                 { Language.Russian, "Сбросить настройки AOE" },
                 { Language.Japanese, "AOE設定をリセット" }
             },
+
+            // ★ v3.16.2: aiconfig.json 전체 설정 UI 노출
+            // ═══════════════════════════════════════════════════
+            // 상위 그룹: AI 로직 설정
+            // ═══════════════════════════════════════════════════
+            ["LogicSettings"] = new() {
+                { Language.English, "⚠ AI Logic Settings" },
+                { Language.Korean, "⚠ AI 로직 설정" },
+                { Language.Russian, "⚠ Настройки логики ИИ" },
+                { Language.Japanese, "⚠ AIロジック設定" }
+            },
+            ["LogicSettingsWarning"] = new() {
+                { Language.English, "⚠️ WARNING: These are internal AI decision parameters.\nChanging values without understanding may cause unpredictable AI behavior.\nUse Reset buttons to restore defaults if issues occur." },
+                { Language.Korean, "⚠️ 경고: AI 내부 의사결정 파라미터입니다.\n이해 없이 변경하면 예측할 수 없는 AI 행동이 발생할 수 있습니다.\n문제 발생 시 리셋 버튼으로 기본값을 복원하세요." },
+                { Language.Russian, "⚠️ ВНИМАНИЕ: Это внутренние параметры решений ИИ.\nИзменение без понимания может вызвать непредсказуемое поведение ИИ.\nИспользуйте кнопки сброса для восстановления значений по умолчанию." },
+                { Language.Japanese, "⚠️ 警告：AI内部の意思決定パラメータです。\n理解なく変更すると予測不能なAI動作が発生する可能性があります。\n問題が発生した場合はリセットボタンでデフォルトに復元してください。" }
+            },
+            // ★ v3.18.8: 통합 리셋 버튼
+            ["ResetAllLogicToDefault"] = new() {
+                { Language.English, "Reset ALL Logic Settings to Default" },
+                { Language.Korean, "AI 로직 설정 전체 기본값으로" },
+                { Language.Russian, "Сбросить ВСЕ настройки логики" },
+                { Language.Japanese, "AIロジック設定を全てリセット" }
+            },
+            ["ResetAllLogicConfirm"] = new() {
+                { Language.English, "All AI logic settings have been reset to defaults." },
+                { Language.Korean, "모든 AI 로직 설정이 기본값으로 초기화되었습니다." },
+                { Language.Russian, "Все настройки логики ИИ сброшены." },
+                { Language.Japanese, "全てのAIロジック設定がリセットされました。" }
+            },
+
+            // ═══════════════════════════════════════════════════
+            // 전투 임계값 (Threshold Settings)
+            // ═══════════════════════════════════════════════════
+            ["ThresholdSettings"] = new() {
+                { Language.English, "Combat Thresholds" },
+                { Language.Korean, "전투 임계값 설정" },
+                { Language.Russian, "Боевые пороги" },
+                { Language.Japanese, "戦闘閾値設定" }
+            },
+            ["ThresholdWarning"] = new() {
+                { Language.English, "⚠️ Controls when AI triggers heals, buffs, retreats, and finishers. Changes apply immediately." },
+                { Language.Korean, "⚠️ AI가 힐, 버프, 후퇴, 마무리를 언제 실행할지 조절합니다. 변경 즉시 적용." },
+                { Language.Russian, "⚠️ Управляет моментами лечения, баффов, отступлений и добиваний ИИ. Изменения применяются немедленно." },
+                { Language.Japanese, "⚠️ AIが回復・バフ・撤退・トドメを実行するタイミングを制御します。変更は即座に適用。" }
+            },
+            ["ResetThresholdToDefault"] = new() {
+                { Language.English, "Reset Thresholds to Default" },
+                { Language.Korean, "임계값 기본값으로" },
+                { Language.Russian, "Сбросить пороги" },
+                { Language.Japanese, "閾値をリセット" }
+            },
+            ["EmergencyHealHP"] = new() {
+                { Language.English, "Emergency Heal HP%" },
+                { Language.Korean, "긴급 힐 HP%" },
+                { Language.Russian, "Экстренное лечение HP%" },
+                { Language.Japanese, "緊急回復HP%" }
+            },
+            ["EmergencyHealHPDesc"] = new() {
+                { Language.English, "Below this HP%, trigger emergency heal first.\nHigher = heal earlier, Lower = prioritize attacks" },
+                { Language.Korean, "이 HP% 이하면 긴급 힐 우선 실행.\n높으면 일찍 힐, 낮으면 공격 우선" },
+                { Language.Russian, "Ниже этого HP% — экстренное лечение.\nВыше = лечить раньше, Ниже = приоритет атак" },
+                { Language.Japanese, "このHP%以下で緊急回復を優先実行。\n高い=早めに回復、低い=攻撃優先" }
+            },
+            ["HealPriorityHP"] = new() {
+                { Language.English, "Heal Priority HP%" },
+                { Language.Korean, "힐 우선순위 HP%" },
+                { Language.Russian, "Приоритет лечения HP%" },
+                { Language.Japanese, "回復優先HP%" }
+            },
+            ["HealPriorityHPDesc"] = new() {
+                { Language.English, "Prioritize healing allies below this HP%.\nHigher = heal more often, Lower = attack more" },
+                { Language.Korean, "이 HP% 이하 아군에게 힐 우선.\n높으면 힐 자주, 낮으면 공격 우선" },
+                { Language.Russian, "Приоритет лечения союзников ниже этого HP%.\nВыше = чаще лечить, Ниже = больше атаковать" },
+                { Language.Japanese, "このHP%以下の味方を回復優先。\n高い=回復頻度増、低い=攻撃優先" }
+            },
+            ["FinisherTargetHP"] = new() {
+                { Language.English, "Finisher Target HP%" },
+                { Language.Korean, "마무리 대상 HP%" },
+                { Language.Russian, "HP% для добивания" },
+                { Language.Japanese, "トドメ対象HP%" }
+            },
+            ["FinisherTargetHPDesc"] = new() {
+                { Language.English, "Prioritize finishing enemies below this HP%.\nHigher = more aggressive finishers" },
+                { Language.Korean, "적 HP가 이 이하면 마무리 우선.\n높으면 마무리 더 적극적" },
+                { Language.Russian, "Добивать врагов ниже этого HP%.\nВыше = агрессивнее добивания" },
+                { Language.Japanese, "敵HPがこれ以下ならトドメ優先。\n高い=より積極的なトドメ" }
+            },
+            ["SkipBuffBelowHP"] = new() {
+                { Language.English, "Skip Buff Below HP%" },
+                { Language.Korean, "버프 스킵 HP%" },
+                { Language.Russian, "Пропуск баффов ниже HP%" },
+                { Language.Japanese, "バフスキップHP%" }
+            },
+            ["SkipBuffBelowHPDesc"] = new() {
+                { Language.English, "Skip buffs when own HP is below this %.\nHigher = less buffing, more survival focus" },
+                { Language.Korean, "내 HP가 이 이하면 버프 스킵하고 공격/힐.\n높으면 버프 자제, 생존 우선" },
+                { Language.Russian, "Пропускать баффы при HP ниже этого %.\nВыше = меньше баффов, больше выживания" },
+                { Language.Japanese, "自分のHPがこの%以下ならバフスキップ。\n高い=バフ控えめ、生存優先" }
+            },
+            ["PreAttackBuffMinHP"] = new() {
+                { Language.English, "Pre-Attack Buff Min HP%" },
+                { Language.Korean, "공격 전 버프 최소 HP%" },
+                { Language.Russian, "Мин. HP% для предатакового баффа" },
+                { Language.Japanese, "攻撃前バフ最小HP%" }
+            },
+            ["PreAttackBuffMinHPDesc"] = new() {
+                { Language.English, "Only use pre-attack buffs above this HP%.\nHigher = only buff when safe" },
+                { Language.Korean, "이 HP% 이상일 때만 공격 전 버프 사용.\n높으면 안전할 때만 버프" },
+                { Language.Russian, "Использовать предатаковые баффы только выше этого HP%.\nВыше = баффы только в безопасности" },
+                { Language.Japanese, "このHP%以上でのみ攻撃前バフ使用。\n高い=安全時のみバフ" }
+            },
+            ["SelfDamageMinHP"] = new() {
+                { Language.English, "Self-Damage Min HP%" },
+                { Language.Korean, "자해 스킬 최소 HP%" },
+                { Language.Russian, "Мин. HP% для самоповреждения" },
+                { Language.Japanese, "自傷スキル最小HP%" }
+            },
+            ["SelfDamageMinHPDesc"] = new() {
+                { Language.English, "Min HP% to use self-damaging skills (Blade Dance etc).\nHigher = more cautious" },
+                { Language.Korean, "자해 스킬(Blade Dance 등) 사용 최소 HP%.\n높으면 더 신중하게 사용" },
+                { Language.Russian, "Мин. HP% для навыков с самоповреждением.\nВыше = осторожнее" },
+                { Language.Japanese, "自傷スキル(ブレードダンス等)使用最小HP%。\n高い=より慎重に使用" }
+            },
+            ["DesperatePhaseHP"] = new() {
+                { Language.English, "Desperate Phase (Team HP%)" },
+                { Language.Korean, "절박 모드 (팀 HP%)" },
+                { Language.Russian, "Критическая фаза (HP% команды)" },
+                { Language.Japanese, "絶望モード(チームHP%)" }
+            },
+            ["DesperatePhaseHPDesc"] = new() {
+                { Language.English, "Team avg HP% below this = desperate mode (defense priority).\nHigher = enter defensive mode earlier" },
+                { Language.Korean, "팀 평균 HP%가 이 이하면 절박 모드 (방어 우선).\n높으면 방어 모드 일찍 진입" },
+                { Language.Russian, "Средний HP% команды ниже этого = критическая фаза (приоритет защиты).\nВыше = раньше перейти в защиту" },
+                { Language.Japanese, "チーム平均HP%がこれ以下=絶望モード(防御優先)。\n高い=早めに防御モード移行" }
+            },
+            ["DesperateSelfHP"] = new() {
+                { Language.English, "Desperate Phase (Self HP%)" },
+                { Language.Korean, "절박 모드 (자신 HP%)" },
+                { Language.Russian, "Критическая фаза (свой HP%)" },
+                { Language.Japanese, "絶望モード(自分HP%)" }
+            },
+            ["DesperateSelfHPDesc"] = new() {
+                { Language.English, "Own HP% below this = desperate mode.\nHigher = play safer earlier" },
+                { Language.Korean, "자신 HP%가 이 이하면 절박 모드.\n높으면 더 일찍 방어적으로 행동" },
+                { Language.Russian, "Свой HP% ниже этого = критическая фаза.\nВыше = раньше играть осторожнее" },
+                { Language.Japanese, "自分HP%がこれ以下=絶望モード。\n高い=早めに防御的行動" }
+            },
+            ["CfgSafeDistance"] = new() {
+                { Language.English, "Safe Distance (tiles)" },
+                { Language.Korean, "안전 거리 (타일)" },
+                { Language.Russian, "Безопасная дистанция (тайлы)" },
+                { Language.Japanese, "安全距離(タイル)" }
+            },
+            ["CfgSafeDistanceDesc"] = new() {
+                { Language.English, "Safe distance for ranged characters (tiles).\nHigher = retreat further from enemies" },
+                { Language.Korean, "원거리 캐릭터의 안전 거리 (타일).\n높으면 적에게서 더 멀리 후퇴" },
+                { Language.Russian, "Безопасная дистанция для стрелков (тайлы).\nВыше = дальше отступать от врагов" },
+                { Language.Japanese, "遠距離キャラの安全距離(タイル)。\n高い=敵からより遠くに撤退" }
+            },
+            ["DangerDistance"] = new() {
+                { Language.English, "Danger Distance (tiles)" },
+                { Language.Korean, "위험 거리 (타일)" },
+                { Language.Russian, "Опасная дистанция (тайлы)" },
+                { Language.Japanese, "危険距離(タイル)" }
+            },
+            ["DangerDistanceDesc"] = new() {
+                { Language.English, "Enemies within this distance = danger.\nHigher = more cautious positioning" },
+                { Language.Korean, "이 거리 내 적이 있으면 위험 판정.\n높으면 더 신중하게 위치 선정" },
+                { Language.Russian, "Враги в этом радиусе = опасность.\nВыше = осторожнее позиционирование" },
+                { Language.Japanese, "この距離内の敵=危険判定。\n高い=より慎重な位置取り" }
+            },
+            ["OneHitKillRatio"] = new() {
+                { Language.English, "One-Hit Kill Ratio" },
+                { Language.Korean, "1타킬 비율" },
+                { Language.Russian, "Коэффициент убийства с одного удара" },
+                { Language.Japanese, "一撃キル比率" }
+            },
+            ["OneHitKillRatioDesc"] = new() {
+                { Language.English, "Damage/HP ratio for one-hit kill detection.\nLower = more aggressive kill attempts" },
+                { Language.Korean, "데미지/HP 비율이 이 이상이면 1타킬 판정.\n낮으면 더 적극적으로 킬 시도" },
+                { Language.Russian, "Соотношение урона/HP для обнаружения одного удара.\nНиже = агрессивнее попытки убийства" },
+                { Language.Japanese, "ダメージ/HP比率による一撃キル判定。\n低い=より積極的なキル試行" }
+            },
+            ["TwoHitKillRatio"] = new() {
+                { Language.English, "Two-Hit Kill Ratio" },
+                { Language.Korean, "2타킬 비율" },
+                { Language.Russian, "Коэффициент убийства с двух ударов" },
+                { Language.Japanese, "二撃キル比率" }
+            },
+            ["TwoHitKillRatioDesc"] = new() {
+                { Language.English, "Damage/HP ratio for two-hit kill detection.\nLower = more aggressive" },
+                { Language.Korean, "데미지/HP 비율이 이 이상이면 2타킬 판정.\n낮으면 더 적극적" },
+                { Language.Russian, "Соотношение урона/HP для убийства двумя ударами.\nНиже = агрессивнее" },
+                { Language.Japanese, "ダメージ/HP比率による二撃キル判定。\n低い=より積極的" }
+            },
+            ["CleanupEnemyCount"] = new() {
+                { Language.English, "Cleanup Enemy Count" },
+                { Language.Korean, "정리 단계 적 수" },
+                { Language.Russian, "Кол-во врагов для фазы зачистки" },
+                { Language.Japanese, "掃討段階敵数" }
+            },
+            ["CleanupEnemyCountDesc"] = new() {
+                { Language.English, "When enemies ≤ this = cleanup phase (less buffing, more attacks).\nHigher = enter cleanup earlier" },
+                { Language.Korean, "남은 적이 이 이하면 정리 단계 (버프 축소, 공격 집중).\n높으면 일찍 정리 모드 진입" },
+                { Language.Russian, "Когда врагов ≤ этого = фаза зачистки (меньше баффов, больше атак).\nВыше = раньше начать зачистку" },
+                { Language.Japanese, "残り敵がこれ以下=掃討段階(バフ減、攻撃集中)。\n高い=早めに掃討モード" }
+            },
+            ["OpeningPhaseMinAP"] = new() {
+                { Language.English, "Opening Phase Min AP" },
+                { Language.Korean, "개막 최소 AP" },
+                { Language.Russian, "Мин. AP для начальной фазы" },
+                { Language.Japanese, "開幕最小AP" }
+            },
+            ["OpeningPhaseMinAPDesc"] = new() {
+                { Language.English, "Min AP for opening phase buffs on first turn.\nHigher = need more AP to use opening buffs" },
+                { Language.Korean, "전투 첫 턴에 이 AP 이상이면 개막 버프 사용.\n높으면 개막 버프 조건 엄격" },
+                { Language.Russian, "Мин. AP для баффов начальной фазы.\nВыше = нужно больше AP для начальных баффов" },
+                { Language.Japanese, "開幕バフ使用に必要な最小AP。\n高い=開幕バフ条件が厳しい" }
+            },
+            ["LowThreatHP"] = new() {
+                { Language.English, "Low Threat HP%" },
+                { Language.Korean, "약한 적 HP%" },
+                { Language.Russian, "HP% низкой угрозы" },
+                { Language.Japanese, "低脅威HP%" }
+            },
+            ["LowThreatHPDesc"] = new() {
+                { Language.English, "Enemies below this HP% have reduced threat.\nHigher = ignore more wounded enemies" },
+                { Language.Korean, "적 HP가 이 이하면 위협도 감소 (거의 죽은 적).\n높으면 부상 적 무시" },
+                { Language.Russian, "Враги ниже этого HP% менее опасны.\nВыше = игнорировать больше раненых" },
+                { Language.Japanese, "敵HPがこれ以下なら脅威度低下。\n高い=負傷した敵をより無視" }
+            },
+
+            // ═══════════════════════════════════════════════════
+            // 위협 평가 (Threat Evaluation)
+            // ═══════════════════════════════════════════════════
+            ["ThreatSettings"] = new() {
+                { Language.English, "Threat Evaluation" },
+                { Language.Korean, "위협 평가 가중치" },
+                { Language.Russian, "Оценка угроз" },
+                { Language.Japanese, "脅威評価" }
+            },
+            ["ThreatWarning"] = new() {
+                { Language.English, "⚠️ Controls how AI evaluates which enemies are most dangerous. Changes apply immediately." },
+                { Language.Korean, "⚠️ AI가 어떤 적이 가장 위험한지 평가하는 방식을 조절합니다. 변경 즉시 적용." },
+                { Language.Russian, "⚠️ Управляет оценкой ИИ наиболее опасных врагов. Изменения применяются немедленно." },
+                { Language.Japanese, "⚠️ AIがどの敵が最も危険かを評価する方法を制御します。変更は即座に適用。" }
+            },
+            ["ResetThreatToDefault"] = new() {
+                { Language.English, "Reset Threat to Default" },
+                { Language.Korean, "위협 평가 기본값으로" },
+                { Language.Russian, "Сбросить оценку угроз" },
+                { Language.Japanese, "脅威評価をリセット" }
+            },
+            ["LethalityWeight"] = new() {
+                { Language.English, "Lethality Weight" },
+                { Language.Korean, "치명도 가중치" },
+                { Language.Russian, "Вес летальности" },
+                { Language.Japanese, "致死性ウェイト" }
+            },
+            ["LethalityWeightDesc"] = new() {
+                { Language.English, "Weight for enemy HP-based threat.\nHigher = full HP enemies seen as more threatening" },
+                { Language.Korean, "적 HP 기반 위협도 가중치.\n높으면 만피 적이 더 위협적" },
+                { Language.Russian, "Вес угрозы по HP врага.\nВыше = враги с полным HP опаснее" },
+                { Language.Japanese, "敵HP基準の脅威度ウェイト。\n高い=満HPの敵がより脅威的" }
+            },
+            ["ProximityWeight"] = new() {
+                { Language.English, "Proximity Weight" },
+                { Language.Korean, "근접성 가중치" },
+                { Language.Russian, "Вес близости" },
+                { Language.Japanese, "近接性ウェイト" }
+            },
+            ["ProximityWeightDesc"] = new() {
+                { Language.English, "Weight for distance-based threat.\nHigher = closer enemies seen as more threatening" },
+                { Language.Korean, "거리 기반 위협도 가중치.\n높으면 가까운 적이 더 위협적" },
+                { Language.Russian, "Вес угрозы по расстоянию.\nВыше = ближайшие враги опаснее" },
+                { Language.Japanese, "距離基準の脅威度ウェイト。\n高い=近い敵がより脅威的" }
+            },
+            ["HealerRoleBonus"] = new() {
+                { Language.English, "Healer Role Bonus" },
+                { Language.Korean, "힐러 적 보너스" },
+                { Language.Russian, "Бонус за хилера" },
+                { Language.Japanese, "ヒーラーボーナス" }
+            },
+            ["HealerRoleBonusDesc"] = new() {
+                { Language.English, "Extra threat for enemy healers.\nHigher = prioritize killing enemy healers" },
+                { Language.Korean, "힐러 적 추가 위협도.\n높으면 적 힐러 우선 처치" },
+                { Language.Russian, "Доп. угроза от вражеских хилеров.\nВыше = приоритет убийства хилеров" },
+                { Language.Japanese, "敵ヒーラーの追加脅威度。\n高い=敵ヒーラー優先撃破" }
+            },
+            ["CasterRoleBonus"] = new() {
+                { Language.English, "Caster Role Bonus" },
+                { Language.Korean, "캐스터 적 보너스" },
+                { Language.Russian, "Бонус за кастера" },
+                { Language.Japanese, "キャスターボーナス" }
+            },
+            ["CasterRoleBonusDesc"] = new() {
+                { Language.English, "Extra threat for enemy casters.\nHigher = prioritize killing enemy casters" },
+                { Language.Korean, "캐스터 적 추가 위협도.\n높으면 적 캐스터 우선 처치" },
+                { Language.Russian, "Доп. угроза от вражеских кастеров.\nВыше = приоритет убийства кастеров" },
+                { Language.Japanese, "敵キャスターの追加脅威度。\n高い=敵キャスター優先撃破" }
+            },
+            ["RangedWeaponBonus"] = new() {
+                { Language.English, "Ranged Weapon Bonus" },
+                { Language.Korean, "원거리 무기 보너스" },
+                { Language.Russian, "Бонус за дальнобойное" },
+                { Language.Japanese, "遠距離武器ボーナス" }
+            },
+            ["RangedWeaponBonusDesc"] = new() {
+                { Language.English, "Extra threat for enemies with ranged weapons.\nHigher = prioritize ranged enemies" },
+                { Language.Korean, "원거리 무기 적 추가 위협도.\n높으면 원거리 적 우선 처치" },
+                { Language.Russian, "Доп. угроза от врагов с дальнобойным оружием.\nВыше = приоритет дальнобойных" },
+                { Language.Japanese, "遠距離武器持ち敵の追加脅威度。\n高い=遠距離敵優先" }
+            },
+            ["ThreatMaxDistance"] = new() {
+                { Language.English, "Threat Max Distance (tiles)" },
+                { Language.Korean, "위협 최대 거리 (타일)" },
+                { Language.Russian, "Макс. дистанция угрозы (тайлы)" },
+                { Language.Japanese, "脅威最大距離(タイル)" }
+            },
+            ["ThreatMaxDistanceDesc"] = new() {
+                { Language.English, "Max distance for threat evaluation. Enemies beyond this are ignored.\nHigher = consider more distant enemies" },
+                { Language.Korean, "위협 평가 최대 거리. 이 너머의 적은 무시.\n높으면 먼 적도 위협으로 고려" },
+                { Language.Russian, "Макс. дистанция для оценки угроз. Дальше = игнорировать.\nВыше = учитывать более далёких врагов" },
+                { Language.Japanese, "脅威評価の最大距離。これ以上の敵は無視。\n高い=遠い敵も脅威として考慮" }
+            },
+
+            // ═══════════════════════════════════════════════════
+            // AoE 세부 설정 (확장)
+            // ═══════════════════════════════════════════════════
+            ["EnemyHitScore"] = new() {
+                { Language.English, "Enemy Hit Score" },
+                { Language.Korean, "적 타격 기본 점수" },
+                { Language.Russian, "Очки за попадание по врагу" },
+                { Language.Japanese, "敵命中基本スコア" }
+            },
+            ["EnemyHitScoreDesc"] = new() {
+                { Language.English, "Base score per enemy hit by AoE.\nHigher = AI uses AoE more aggressively" },
+                { Language.Korean, "AoE 적 1명당 기본 점수.\n높으면 AoE 더 적극적 사용" },
+                { Language.Russian, "Базовые очки за каждого поражённого врага.\nВыше = ИИ агрессивнее использует AOE" },
+                { Language.Japanese, "AoEで敵1体あたりの基本スコア。\n高い=AoEをより積極的に使用" }
+            },
+            ["PlayerAllyPenaltyMult"] = new() {
+                { Language.English, "Ally Penalty Multiplier" },
+                { Language.Korean, "아군 피격 페널티 배수" },
+                { Language.Russian, "Множитель штрафа за союзников" },
+                { Language.Japanese, "味方被弾ペナルティ倍率" }
+            },
+            ["PlayerAllyPenaltyMultDesc"] = new() {
+                { Language.English, "Penalty multiplier when AoE hits allies.\nHigher = avoid hitting allies more" },
+                { Language.Korean, "AoE가 아군을 맞출 때 페널티 배수.\n높으면 아군 피격 더 기피" },
+                { Language.Russian, "Множитель штрафа при попадании AOE по союзникам.\nВыше = больше избегать попаданий" },
+                { Language.Japanese, "AoEが味方に当たる時のペナルティ倍率。\n高い=味方被弾をより回避" }
+            },
+            ["NpcAllyPenaltyMult"] = new() {
+                { Language.English, "NPC Ally Penalty Multiplier" },
+                { Language.Korean, "NPC 아군 페널티 배수" },
+                { Language.Russian, "Множитель штрафа за NPC" },
+                { Language.Japanese, "NPC味方ペナルティ倍率" }
+            },
+            ["NpcAllyPenaltyMultDesc"] = new() {
+                { Language.English, "Penalty multiplier when AoE hits NPC allies.\nHigher = protect NPCs more" },
+                { Language.Korean, "AoE가 NPC 아군을 맞출 때 페널티 배수.\n높으면 NPC 아군 보호 강화" },
+                { Language.Russian, "Множитель штрафа при попадании по NPC союзникам.\nВыше = больше защищать NPC" },
+                { Language.Japanese, "AoEがNPC味方に当たる時のペナルティ倍率。\n高い=NPC味方保護強化" }
+            },
+            ["CasterSelfPenaltyMult"] = new() {
+                { Language.English, "Caster Self Penalty" },
+                { Language.Korean, "캐스터 자기 피격 배수" },
+                { Language.Russian, "Штраф за самопопадание" },
+                { Language.Japanese, "キャスター自己被弾倍率" }
+            },
+            ["CasterSelfPenaltyMultDesc"] = new() {
+                { Language.English, "Penalty multiplier when caster hits self with AoE.\nHigher = avoid self-damage more" },
+                { Language.Korean, "캐스터가 자기 AoE에 맞을 때 페널티 배수.\n높으면 자기 피격 더 기피" },
+                { Language.Russian, "Множитель штрафа при самопопадании AOE.\nВыше = больше избегать самоповреждения" },
+                { Language.Japanese, "キャスターが自身のAoEに当たる時のペナルティ倍率。\n高い=自傷をより回避" }
+            },
+            ["CfgMinClusterSize"] = new() {
+                { Language.English, "Min Cluster Size" },
+                { Language.Korean, "클러스터 최소 크기" },
+                { Language.Russian, "Мин. размер скопления" },
+                { Language.Japanese, "最小クラスターサイズ" }
+            },
+            ["CfgMinClusterSizeDesc"] = new() {
+                { Language.English, "Min enemies in a group for AoE targeting.\n1 = single enemies are valid AoE targets" },
+                { Language.Korean, "AoE 타겟팅 유효 클러스터 최소 적 수.\n1이면 단일 적도 AoE 대상" },
+                { Language.Russian, "Мин. врагов в группе для наведения AOE.\n1 = даже одиночные враги — цели AOE" },
+                { Language.Japanese, "AoEターゲティング有効クラスター最小敵数。\n1=単体敵もAoE対象" }
+            },
+            ["ClusterNpcAllyPenalty"] = new() {
+                { Language.English, "Cluster NPC Ally Penalty" },
+                { Language.Korean, "클러스터 NPC 감점" },
+                { Language.Russian, "Штраф за NPC в скоплении" },
+                { Language.Japanese, "クラスターNPCペナルティ" }
+            },
+            ["ClusterNpcAllyPenaltyDesc"] = new() {
+                { Language.English, "Score penalty for NPC allies in AoE cluster.\nHigher = protect NPCs in clusters more" },
+                { Language.Korean, "클러스터 내 NPC 아군 감점.\n높으면 NPC 보호 강화" },
+                { Language.Russian, "Штрафные очки за NPC союзников в скоплении.\nВыше = больше защищать NPC" },
+                { Language.Japanese, "AoEクラスター内NPC味方の減点。\n高い=NPC保護強化" }
+            },
+
+            // ═══════════════════════════════════════════════════
+            // 스코어링 가중치 (Scoring Weights)
+            // ═══════════════════════════════════════════════════
+            ["ScoringSettings"] = new() {
+                { Language.English, "Scoring Weights" },
+                { Language.Korean, "스코어링 가중치" },
+                { Language.Russian, "Весовые коэффициенты" },
+                { Language.Japanese, "スコアリングウェイト" }
+            },
+            ["ScoringWarning"] = new() {
+                { Language.English, "⚠️ Fine-tune AI decision scoring. Higher values increase that factor's importance." },
+                { Language.Korean, "⚠️ AI 의사결정 점수를 세밀하게 조절합니다. 높은 값 = 해당 요소의 중요도 증가." },
+                { Language.Russian, "⚠️ Тонкая настройка оценки решений ИИ. Выше = больше важность этого фактора." },
+                { Language.Japanese, "⚠️ AI判断スコアの微調整。高い値=その要素の重要度増加。" }
+            },
+            ["ResetScoringToDefault"] = new() {
+                { Language.English, "Reset Scoring to Default" },
+                { Language.Korean, "스코어링 기본값으로" },
+                { Language.Russian, "Сбросить коэффициенты" },
+                { Language.Japanese, "スコアリングをリセット" }
+            },
+            ["ScoringGroup_BuffMult"] = new() {
+                { Language.English, "— Buff Multipliers —" },
+                { Language.Korean, "— 버프 배율 —" },
+                { Language.Russian, "— Множители баффов —" },
+                { Language.Japanese, "— バフ倍率 —" }
+            },
+            ["OpeningPhaseBuffMult"] = new() {
+                { Language.English, "Opening Phase Buff Mult" },
+                { Language.Korean, "개막 버프 배율" },
+                { Language.Russian, "Множитель начальных баффов" },
+                { Language.Japanese, "開幕バフ倍率" }
+            },
+            ["OpeningPhaseBuffMultDesc"] = new() {
+                { Language.English, "Buff score multiplier in opening phase.\nHigher = buff more on first turns" },
+                { Language.Korean, "개막 단계 버프 점수 배율.\n높으면 첫 턴 버프 적극적" },
+                { Language.Russian, "Множитель баффов в начальной фазе.\nВыше = больше баффов в первых ходах" },
+                { Language.Japanese, "開幕段階のバフスコア倍率。\n高い=最初のターンでバフ積極的" }
+            },
+            ["CleanupPhaseBuffMult"] = new() {
+                { Language.English, "Cleanup Phase Buff Mult" },
+                { Language.Korean, "정리 단계 버프 배율" },
+                { Language.Russian, "Множитель баффов в фазе зачистки" },
+                { Language.Japanese, "掃討段階バフ倍率" }
+            },
+            ["CleanupPhaseBuffMultDesc"] = new() {
+                { Language.English, "Buff score multiplier in cleanup phase.\nHigher = still buff during cleanup" },
+                { Language.Korean, "정리 단계 버프 점수 배율.\n높으면 정리 시에도 버프 사용" },
+                { Language.Russian, "Множитель баффов в фазе зачистки.\nВыше = баффы даже при зачистке" },
+                { Language.Japanese, "掃討段階のバフスコア倍率。\n高い=掃討中もバフ使用" }
+            },
+            ["DesperateNonDefMult"] = new() {
+                { Language.English, "Desperate Non-Defense Mult" },
+                { Language.Korean, "위기시 비방어 배율" },
+                { Language.Russian, "Множитель незащитных в кризисе" },
+                { Language.Japanese, "危機時非防御倍率" }
+            },
+            ["DesperateNonDefMultDesc"] = new() {
+                { Language.English, "Non-defensive buff multiplier in desperate phase.\nHigher = still use offensive buffs in crisis" },
+                { Language.Korean, "위기시 비방어 버프 배율.\n높으면 위기에도 공격 버프 사용" },
+                { Language.Russian, "Множитель незащитных баффов в кризисе.\nВыше = наступательные баффы даже в кризисе" },
+                { Language.Japanese, "危機時の非防御バフ倍率。\n高い=危機でも攻撃バフ使用" }
+            },
+            ["ScoringGroup_Timing"] = new() {
+                { Language.English, "— Timing Bonuses —" },
+                { Language.Korean, "— 타이밍 보너스 —" },
+                { Language.Russian, "— Бонусы за тайминг —" },
+                { Language.Japanese, "— タイミングボーナス —" }
+            },
+            ["PreCombatOpeningBonus"] = new() {
+                { Language.English, "Pre-Combat Opening Bonus" },
+                { Language.Korean, "선제 버프 개막 보너스" },
+                { Language.Russian, "Бонус начальных пребоевых баффов" },
+                { Language.Japanese, "戦前バフ開幕ボーナス" }
+            },
+            ["PreCombatOpeningBonusDesc"] = new() {
+                { Language.English, "Bonus score for pre-combat buffs at battle start" },
+                { Language.Korean, "전투 시작 시 선제 버프 보너스 점수" },
+                { Language.Russian, "Бонусные очки за пребоевые баффы в начале боя" },
+                { Language.Japanese, "戦闘開始時の戦前バフボーナススコア" }
+            },
+            ["PreCombatCleanupPenalty"] = new() {
+                { Language.English, "Pre-Combat Cleanup Penalty" },
+                { Language.Korean, "선제 버프 정리 감점" },
+                { Language.Russian, "Штраф пребоевых в фазе зачистки" },
+                { Language.Japanese, "戦前バフ掃討ペナルティ" }
+            },
+            ["PreCombatCleanupPenaltyDesc"] = new() {
+                { Language.English, "Penalty for pre-combat buffs during cleanup" },
+                { Language.Korean, "정리 단계에서 선제 버프 감점" },
+                { Language.Russian, "Штраф за пребоевые баффы в фазе зачистки" },
+                { Language.Japanese, "掃討段階での戦前バフペナルティ" }
+            },
+            ["PreAttackHittableBonus"] = new() {
+                { Language.English, "Pre-Attack Hittable Bonus" },
+                { Language.Korean, "공격전 버프 적 보너스" },
+                { Language.Russian, "Бонус за атакуемых" },
+                { Language.Japanese, "攻撃前バフ敵ボーナス" }
+            },
+            ["PreAttackHittableBonusDesc"] = new() {
+                { Language.English, "Bonus for pre-attack buffs when enemies are in range" },
+                { Language.Korean, "적이 사거리 내일 때 공격 전 버프 보너스" },
+                { Language.Russian, "Бонус за предатаковые баффы при врагах в зоне досягаемости" },
+                { Language.Japanese, "敵が射程内にいる時の攻撃前バフボーナス" }
+            },
+            ["PreAttackNoEnemyPenalty"] = new() {
+                { Language.English, "Pre-Attack No Enemy Penalty" },
+                { Language.Korean, "적 부재 버프 감점" },
+                { Language.Russian, "Штраф без врагов" },
+                { Language.Japanese, "敵不在バフペナルティ" }
+            },
+            ["PreAttackNoEnemyPenaltyDesc"] = new() {
+                { Language.English, "Penalty for pre-attack buffs with no enemies in range" },
+                { Language.Korean, "적 부재 시 공격 전 버프 감점" },
+                { Language.Russian, "Штраф за предатаковые баффы без врагов" },
+                { Language.Japanese, "敵不在時の攻撃前バフペナルティ" }
+            },
+            ["EmergencyDesperateBonus"] = new() {
+                { Language.English, "Emergency Desperate Bonus" },
+                { Language.Korean, "긴급 위기 보너스" },
+                { Language.Russian, "Бонус экстренных в кризисе" },
+                { Language.Japanese, "緊急危機ボーナス" }
+            },
+            ["EmergencyDesperateBonusDesc"] = new() {
+                { Language.English, "Bonus for emergency buffs in desperate situations" },
+                { Language.Korean, "위기 상황에서 긴급 버프 보너스" },
+                { Language.Russian, "Бонус за экстренные баффы в кризисе" },
+                { Language.Japanese, "危機状況での緊急バフボーナス" }
+            },
+            ["EmergencyNonDesperatePenalty"] = new() {
+                { Language.English, "Emergency Non-Desperate Penalty" },
+                { Language.Korean, "비위기 긴급 감점" },
+                { Language.Russian, "Штраф экстренных без кризиса" },
+                { Language.Japanese, "非危機緊急ペナルティ" }
+            },
+            ["EmergencyNonDesperatePenaltyDesc"] = new() {
+                { Language.English, "Penalty for emergency buffs in non-desperate situations" },
+                { Language.Korean, "비위기 시 긴급 버프 감점" },
+                { Language.Russian, "Штраф за экстренные баффы без кризиса" },
+                { Language.Japanese, "非危機時の緊急バフペナルティ" }
+            },
+            ["TauntNearEnemiesBonus"] = new() {
+                { Language.English, "Taunt Near Enemies Bonus" },
+                { Language.Korean, "도발 근접 적 보너스" },
+                { Language.Russian, "Бонус провокации рядом с врагами" },
+                { Language.Japanese, "挑発近接敵ボーナス" }
+            },
+            ["TauntNearEnemiesBonusDesc"] = new() {
+                { Language.English, "Bonus for taunts with many nearby enemies" },
+                { Language.Korean, "도발 시 근접 적 다수 보너스" },
+                { Language.Russian, "Бонус за провокацию при множестве ближних врагов" },
+                { Language.Japanese, "挑発時に近くの敵が多い場合のボーナス" }
+            },
+            ["TauntFewEnemiesPenalty"] = new() {
+                { Language.English, "Taunt Few Enemies Penalty" },
+                { Language.Korean, "도발 적 부족 감점" },
+                { Language.Russian, "Штраф провокации при малом числе врагов" },
+                { Language.Japanese, "挑発敵不足ペナルティ" }
+            },
+            ["TauntFewEnemiesPenaltyDesc"] = new() {
+                { Language.English, "Penalty for taunts with few nearby enemies" },
+                { Language.Korean, "도발 시 적 부족 감점" },
+                { Language.Russian, "Штраф за провокацию при малом числе врагов" },
+                { Language.Japanese, "挑発時に近くの敵が少ない場合のペナルティ" }
+            },
+            ["ScoringGroup_Synergy"] = new() {
+                { Language.English, "— Synergy Bonuses —" },
+                { Language.Korean, "— 시너지 보너스 —" },
+                { Language.Russian, "— Бонусы синергии —" },
+                { Language.Japanese, "— シナジーボーナス —" }
+            },
+            ["BuffAttackSynergy"] = new() {
+                { Language.English, "Buff + Attack Synergy" },
+                { Language.Korean, "버프+공격 시너지" },
+                { Language.Russian, "Синергия бафф+атака" },
+                { Language.Japanese, "バフ+攻撃シナジー" }
+            },
+            ["BuffAttackSynergyDesc"] = new() {
+                { Language.English, "Bonus when attack buff + attack are planned together" },
+                { Language.Korean, "공격 버프 + 공격 조합 보너스" },
+                { Language.Russian, "Бонус за комбинацию бафф атаки + атака" },
+                { Language.Japanese, "攻撃バフ+攻撃の組み合わせボーナス" }
+            },
+            ["MoveAttackSynergy"] = new() {
+                { Language.English, "Move + Attack Synergy" },
+                { Language.Korean, "이동+공격 시너지" },
+                { Language.Russian, "Синергия движение+атака" },
+                { Language.Japanese, "移動+攻撃シナジー" }
+            },
+            ["MoveAttackSynergyDesc"] = new() {
+                { Language.English, "Bonus for move + attack combos (gap closers)" },
+                { Language.Korean, "이동 + 공격 조합 보너스 (갭클로저)" },
+                { Language.Russian, "Бонус за комбо движение+атака (сближение)" },
+                { Language.Japanese, "移動+攻撃コンボボーナス(ギャップクローザー)" }
+            },
+            ["MultiAttackPerAttack"] = new() {
+                { Language.English, "Multi-Attack Bonus" },
+                { Language.Korean, "연속 공격 보너스" },
+                { Language.Russian, "Бонус мультиатаки" },
+                { Language.Japanese, "連続攻撃ボーナス" }
+            },
+            ["MultiAttackPerAttackDesc"] = new() {
+                { Language.English, "Bonus per additional attack in a turn" },
+                { Language.Korean, "공격당 추가 점수 (연속 공격)" },
+                { Language.Russian, "Бонус за каждую дополнительную атаку за ход" },
+                { Language.Japanese, "ターン内追加攻撃ごとのボーナス" }
+            },
+            ["DefenseRetreatSynergy"] = new() {
+                { Language.English, "Defense + Retreat Synergy" },
+                { Language.Korean, "방어+후퇴 시너지" },
+                { Language.Russian, "Синергия защита+отступление" },
+                { Language.Japanese, "防御+撤退シナジー" }
+            },
+            ["DefenseRetreatSynergyDesc"] = new() {
+                { Language.English, "Bonus for defense buff + retreat combo" },
+                { Language.Korean, "방어 버프 + 후퇴 조합 보너스" },
+                { Language.Russian, "Бонус за комбо защитный бафф+отступление" },
+                { Language.Japanese, "防御バフ+撤退コンボボーナス" }
+            },
+            ["KillConfirmSynergy"] = new() {
+                { Language.English, "Kill Confirm Synergy" },
+                { Language.Korean, "킬 확정 시너지" },
+                { Language.Russian, "Синергия подтверждённого убийства" },
+                { Language.Japanese, "キル確定シナジー" }
+            },
+            ["KillConfirmSynergyDesc"] = new() {
+                { Language.English, "Bonus when planned damage ≥ target HP (confirmed kill)" },
+                { Language.Korean, "킬 확정 시 보너스 (데미지 ≥ HP)" },
+                { Language.Russian, "Бонус при планируемом уроне ≥ HP цели (подтверждённое убийство)" },
+                { Language.Japanese, "計画ダメージ≧対象HP時のボーナス(確定キル)" }
+            },
+            ["AlmostKillSynergy"] = new() {
+                { Language.English, "Almost Kill Synergy" },
+                { Language.Korean, "거의 킬 시너지" },
+                { Language.Russian, "Синергия почти убийства" },
+                { Language.Japanese, "ほぼキルシナジー" }
+            },
+            ["AlmostKillSynergyDesc"] = new() {
+                { Language.English, "Bonus when planned damage ≥ 90% of target HP" },
+                { Language.Korean, "거의 킬 시 보너스 (데미지 ≥ 90% HP)" },
+                { Language.Russian, "Бонус при планируемом уроне ≥ 90% HP цели" },
+                { Language.Japanese, "計画ダメージ≧対象HP90%時のボーナス" }
+            },
+            ["ScoringGroup_Other"] = new() {
+                { Language.English, "— Other Scoring —" },
+                { Language.Korean, "— 기타 점수 —" },
+                { Language.Russian, "— Прочие очки —" },
+                { Language.Japanese, "— その他スコア —" }
+            },
+            ["ClearMPDangerBase"] = new() {
+                { Language.English, "ClearMP Danger Penalty" },
+                { Language.Korean, "MP소모+위험 감점" },
+                { Language.Russian, "Штраф за расход MP в опасности" },
+                { Language.Japanese, "MP消費+危険ペナルティ" }
+            },
+            ["ClearMPDangerBaseDesc"] = new() {
+                { Language.English, "Penalty for using MP-clearing abilities in danger" },
+                { Language.Korean, "위험 상황에서 MP 소모 스킬 사용 시 기본 감점" },
+                { Language.Russian, "Штраф за использование навыков с расходом MP в опасности" },
+                { Language.Japanese, "危険状況でMP消費スキル使用時の基本ペナルティ" }
+            },
+            ["AoEBonusPerEnemy"] = new() {
+                { Language.English, "AoE Bonus Per Enemy" },
+                { Language.Korean, "AoE 적당 보너스" },
+                { Language.Russian, "Бонус AOE за врага" },
+                { Language.Japanese, "AoE敵あたりボーナス" }
+            },
+            ["AoEBonusPerEnemyDesc"] = new() {
+                { Language.English, "Score bonus per additional enemy in AoE" },
+                { Language.Korean, "AoE에 추가 적 1명당 보너스" },
+                { Language.Russian, "Бонусные очки за каждого дополнительного врага в AOE" },
+                { Language.Japanese, "AoE内追加敵1体あたりのボーナス" }
+            },
+            ["InertiaBonus"] = new() {
+                { Language.English, "Target Inertia Bonus" },
+                { Language.Korean, "타겟 관성 보너스" },
+                { Language.Russian, "Бонус инерции цели" },
+                { Language.Japanese, "ターゲット慣性ボーナス" }
+            },
+            ["InertiaBonusDesc"] = new() {
+                { Language.English, "Bonus for attacking same target as last turn.\nHigher = focus fire on one target" },
+                { Language.Korean, "이전 턴 동일 타겟 공격 보너스.\n높으면 한 타겟 집중 공격" },
+                { Language.Russian, "Бонус за атаку той же цели, что и в прошлый ход.\nВыше = фокус огня на одной цели" },
+                { Language.Japanese, "前ターンと同じ対象を攻撃する際のボーナス。\n高い=1体に集中攻撃" }
+            },
+            ["HardCCExploitBonus"] = new() {
+                { Language.English, "Hard CC Exploit Bonus" },
+                { Language.Korean, "CC 활용 보너스" },
+                { Language.Russian, "Бонус за использование CC" },
+                { Language.Japanese, "ハードCC活用ボーナス" }
+            },
+            ["HardCCExploitBonusDesc"] = new() {
+                { Language.English, "Bonus for attacking stunned/immobilized enemies" },
+                { Language.Korean, "기절/고정된 적 공격 보너스" },
+                { Language.Russian, "Бонус за атаку оглушённых/обездвиженных врагов" },
+                { Language.Japanese, "気絶/固定された敵攻撃ボーナス" }
+            },
+            ["DOTFollowUpBonus"] = new() {
+                { Language.English, "DoT Follow-Up Bonus" },
+                { Language.Korean, "DoT 후속 보너스" },
+                { Language.Russian, "Бонус за продолжение по DoT" },
+                { Language.Japanese, "DoT追撃ボーナス" }
+            },
+            ["DOTFollowUpBonusDesc"] = new() {
+                { Language.English, "Bonus for attacking enemies with active DoTs" },
+                { Language.Korean, "DoT(출혈/독/화상) 걸린 적 후속 공격 보너스" },
+                { Language.Russian, "Бонус за атаку врагов с активным DoT" },
+                { Language.Japanese, "DoT(出血/毒/火傷)が付いた敵への追撃ボーナス" }
+            },
+
+            // ═══════════════════════════════════════════════════
+            // 역할별 타겟 가중치 (Role Target Weights)
+            // ═══════════════════════════════════════════════════
+            ["RoleWeightSettings"] = new() {
+                { Language.English, "Role Target Weights" },
+                { Language.Korean, "역할별 타겟 가중치" },
+                { Language.Russian, "Весовые коэффициенты ролей" },
+                { Language.Japanese, "役割別ターゲットウェイト" }
+            },
+            ["RoleWeightWarning"] = new() {
+                { Language.English, "⚠️ Controls how each role selects attack targets. Changes apply immediately." },
+                { Language.Korean, "⚠️ 각 역할이 공격 대상을 선택하는 방식을 조절합니다. 변경 즉시 적용." },
+                { Language.Russian, "⚠️ Управляет выбором целей для атаки каждой роли. Изменения применяются немедленно." },
+                { Language.Japanese, "⚠️ 各役割の攻撃対象選択方法を制御します。変更は即座に適用。" }
+            },
+            ["ResetRoleWeightToDefault"] = new() {
+                { Language.English, "Reset Role Weights to Default" },
+                { Language.Korean, "역할 가중치 기본값으로" },
+                { Language.Russian, "Сбросить весовые коэффициенты ролей" },
+                { Language.Japanese, "役割ウェイトをリセット" }
+            },
+            ["RW_HPPercent"] = new() {
+                { Language.English, "Low HP Priority" },
+                { Language.Korean, "낮은 HP 우선" },
+                { Language.Russian, "Приоритет низкого HP" },
+                { Language.Japanese, "低HP優先" }
+            },
+            ["RW_HPPercentDesc"] = new() {
+                { Language.English, "Weight for targeting low HP enemies.\nHigher = focus on wounded enemies" },
+                { Language.Korean, "낮은 HP 적 우선 가중치.\n높으면 빈사 적 집중" },
+                { Language.Russian, "Вес для приоритета целей с низким HP.\nВыше = фокус на раненых" },
+                { Language.Japanese, "低HP敵の優先ウェイト。\n高い=負傷した敵に集中" }
+            },
+            ["RW_Threat"] = new() {
+                { Language.English, "Threat Priority" },
+                { Language.Korean, "위협도 우선" },
+                { Language.Russian, "Приоритет угрозы" },
+                { Language.Japanese, "脅威度優先" }
+            },
+            ["RW_ThreatDesc"] = new() {
+                { Language.English, "Weight for targeting threatening enemies.\nHigher = focus on dangerous enemies" },
+                { Language.Korean, "위협적인 적 우선 가중치.\n높으면 위험한 적 먼저" },
+                { Language.Russian, "Вес для приоритета угрожающих целей.\nВыше = фокус на опасных" },
+                { Language.Japanese, "脅威的な敵の優先ウェイト。\n高い=危険な敵を優先" }
+            },
+            ["RW_Distance"] = new() {
+                { Language.English, "Distance Priority" },
+                { Language.Korean, "거리 우선" },
+                { Language.Russian, "Приоритет расстояния" },
+                { Language.Japanese, "距離優先" }
+            },
+            ["RW_DistanceDesc"] = new() {
+                { Language.English, "Weight for targeting closer enemies.\nHigher = attack nearest enemies first" },
+                { Language.Korean, "가까운 적 우선 가중치.\n높으면 가까운 적 집중" },
+                { Language.Russian, "Вес для приоритета ближайших целей.\nВыше = атаковать ближайших первыми" },
+                { Language.Japanese, "近い敵の優先ウェイト。\n高い=近い敵を優先攻撃" }
+            },
+            ["RW_FinisherBonus"] = new() {
+                { Language.English, "Finisher Bonus" },
+                { Language.Korean, "마무리 보너스" },
+                { Language.Russian, "Бонус добивания" },
+                { Language.Japanese, "トドメボーナス" }
+            },
+            ["RW_FinisherBonusDesc"] = new() {
+                { Language.English, "Multiplier for finishable targets.\nHigher = prioritize finishing off enemies" },
+                { Language.Korean, "마무리 가능 적 보너스 배수.\n높으면 마무리 적극적" },
+                { Language.Russian, "Множитель для добиваемых целей.\nВыше = приоритет добивания" },
+                { Language.Japanese, "トドメ可能な対象のボーナス倍率。\n高い=トドメを積極的に" }
+            },
+            ["RW_OneHitKillBonus"] = new() {
+                { Language.English, "One-Hit Kill Bonus" },
+                { Language.Korean, "1타킬 보너스" },
+                { Language.Russian, "Бонус убийства одним ударом" },
+                { Language.Japanese, "一撃キルボーナス" }
+            },
+            ["RW_OneHitKillBonusDesc"] = new() {
+                { Language.English, "Multiplier for one-hit-killable targets.\nHigher = prioritize easy kills" },
+                { Language.Korean, "1타킬 가능 적 보너스 배수.\n높으면 쉬운 킬 우선" },
+                { Language.Russian, "Множитель для целей, убиваемых одним ударом.\nВыше = приоритет лёгких убийств" },
+                { Language.Japanese, "一撃キル可能な対象のボーナス倍率。\n高い=簡単なキルを優先" }
+            },
+
+            // ═══════════════════════════════════════════════════
+            // 무기 로테이션 (Weapon Rotation)
+            // ═══════════════════════════════════════════════════
+            ["WeaponRotationSettings"] = new() {
+                { Language.English, "Weapon Rotation Settings" },
+                { Language.Korean, "무기 로테이션 설정" },
+                { Language.Russian, "Настройки ротации оружия" },
+                { Language.Japanese, "武器ローテーション設定" }
+            },
+            ["WeaponRotationWarning"] = new() {
+                { Language.English, "⚠️ Controls weapon set switching behavior during combat." },
+                { Language.Korean, "⚠️ 전투 중 무기 세트 전환 동작을 조절합니다." },
+                { Language.Russian, "⚠️ Управляет переключением комплектов оружия в бою." },
+                { Language.Japanese, "⚠️ 戦闘中の武器セット切り替え動作を制御します。" }
+            },
+            ["ResetWeaponRotationToDefault"] = new() {
+                { Language.English, "Reset Weapon Rotation to Default" },
+                { Language.Korean, "무기 로테이션 기본값으로" },
+                { Language.Russian, "Сбросить ротацию оружия" },
+                { Language.Japanese, "武器ローテーションをリセット" }
+            },
+            ["MaxSwitchesPerTurn"] = new() {
+                { Language.English, "Max Switches Per Turn" },
+                { Language.Korean, "턴당 최대 전환 횟수" },
+                { Language.Russian, "Макс. переключений за ход" },
+                { Language.Japanese, "ターンあたり最大切り替え回数" }
+            },
+            ["MaxSwitchesPerTurnDesc"] = new() {
+                { Language.English, "Max weapon set switches per turn.\nHigher = more weapon variety per turn" },
+                { Language.Korean, "턴당 최대 무기 전환 횟수.\n높으면 한 턴에 더 다양한 무기 사용" },
+                { Language.Russian, "Макс. переключений оружия за ход.\nВыше = больше разнообразия оружия" },
+                { Language.Japanese, "ターンあたりの最大武器切り替え回数。\n高い=1ターンでより多様な武器使用" }
+            },
+            ["MinEnemiesForAlternateAoE"] = new() {
+                { Language.English, "Min Enemies for Alt. AoE" },
+                { Language.Korean, "대체 AoE 최소 적 수" },
+                { Language.Russian, "Мин. врагов для альт. AOE" },
+                { Language.Japanese, "代替AoE最小敵数" }
+            },
+            ["MinEnemiesForAlternateAoEDesc"] = new() {
+                { Language.English, "Min enemies to switch to alternate weapon set for AoE.\nLower = switch more often for AoE" },
+                { Language.Korean, "대체 무기 세트 AoE 사용 최소 적 수.\n낮으면 AoE 위해 더 자주 전환" },
+                { Language.Russian, "Мин. врагов для переключения на альт. комплект для AOE.\nНиже = чаще переключаться" },
+                { Language.Japanese, "AoEのために代替武器セットに切り替える最小敵数。\n低い=AoEのためにより頻繁に切り替え" }
+            },
         };
 
         public static string Get(string key)

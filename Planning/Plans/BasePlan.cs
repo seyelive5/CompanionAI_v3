@@ -130,6 +130,76 @@ namespace CompanionAI_v3.Planning.Plans
         protected PlannedAction PlanGapCloser(Situation situation, BaseUnitEntity target, ref float remainingAP, ref float remainingMP)
             => MovementPlanner.PlanGapCloser(situation, target, ref remainingAP, ref remainingMP, RoleName);
 
+        // ★ v3.16.6: Walk+Jump 콤보 지원 버전 (preMoveAction 출력)
+        protected PlannedAction PlanGapCloser(Situation situation, BaseUnitEntity target, ref float remainingAP, ref float remainingMP, out PlannedAction preMoveAction)
+            => MovementPlanner.PlanGapCloser(situation, target, ref remainingAP, ref remainingMP, RoleName, out preMoveAction);
+
+        /// <summary>
+        /// ★ v3.16.0: 갭클로저를 MoveToAttack 대안으로 평가
+        /// ★ v3.16.6: Walk+Jump 콤보 지원 — preMoveAction 출력 추가
+        /// TacticalEval이 MoveToAttack을 선택했을 때, 갭클로저가 더 효율적인지 비교
+        /// </summary>
+        protected PlannedAction EvaluateGapCloserAsAttack(
+            Situation situation,
+            ref float remainingAP,
+            ref float remainingMP,
+            out PlannedAction preMoveAction)
+        {
+            preMoveAction = null;
+
+            // 원거리 선호 유닛은 갭클로저 불필요
+            if (situation.PrefersRanged) return null;
+
+            var attacks = situation.AvailableAttacks;
+            if (attacks == null || attacks.Count == 0) return null;
+
+            BaseUnitEntity bestTarget = situation.BestTarget ?? situation.NearestEnemy;
+            if (bestTarget == null) return null;
+
+            AbilityData bestGapCloser = null;
+            float bestScore = 0f;  // 양수만 허용
+
+            for (int i = 0; i < attacks.Count; i++)
+            {
+                var attack = attacks[i];
+                if (!AbilityDatabase.IsGapCloser(attack)) continue;
+
+                float apCost = CombatAPI.GetAbilityAPCost(attack);
+                if (apCost > remainingAP) continue;
+
+                // ScoreAttack으로 점수 산출 (10-A의 갭클로저 aware 스코어링 적용)
+                float score = UtilityScorer.ScoreAttack(attack, bestTarget, situation);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestGapCloser = attack;
+                }
+            }
+
+            if (bestGapCloser == null) return null;
+
+            // MovementPlanner.PlanGapCloser()에 위임 — 경로 검증, CanUseAbilityOn 등 전부 처리
+            // ★ v3.16.6: Walk+Jump 콤보 지원 (preMoveAction 출력)
+            float tempAP = remainingAP;
+            float tempMP = remainingMP;
+            PlannedAction preMove;
+            var action = MovementPlanner.PlanGapCloser(
+                situation, bestTarget, ref tempAP, ref tempMP, RoleName, out preMove);
+
+            if (action == null) return null;
+
+            // AP/MP 차감
+            remainingAP = tempAP;
+            remainingMP = tempMP;
+            preMoveAction = preMove;
+
+            Main.Log($"[{RoleName}] ★ GapCloser as attack: {bestGapCloser.Name} -> " +
+                $"{bestTarget.CharacterName} (score={bestScore:F0}, dist={CombatCache.GetDistanceInTiles(situation.Unit, bestTarget):F1}" +
+                (preMove != null ? ", walk+jump combo" : "") + ")");
+
+            return action;
+        }
+
         protected PlannedAction PlanMoveToEnemy(Situation situation)
             => MovementPlanner.PlanMoveToEnemy(situation, RoleName);
 
@@ -498,9 +568,10 @@ namespace CompanionAI_v3.Planning.Plans
 
                     // 아군 우선 시도 (DPS/Tank)
                     bool usedOnAlly = false;
-                    if (tryAllyBuffFirst && bp?.CanTargetFriends == true && situation.Allies != null)
+                    // ★ v3.18.4: CombatantAllies 사용 (사역마 제외)
+                    if (tryAllyBuffFirst && bp?.CanTargetFriends == true && situation.CombatantAllies != null)
                     {
-                        foreach (var ally in situation.Allies)
+                        foreach (var ally in situation.CombatantAllies)
                         {
                             if (ally == null || ally.LifeState.IsDead || ally == situation.Unit) continue;
                             if (AllyStateCache.HasBuff(ally, buff)) continue;
@@ -855,7 +926,7 @@ namespace CompanionAI_v3.Planning.Plans
 
             if (_tempAbilities.Count == 0) return null;
 
-            // 부상 아군 필터링 (HP < 80%)
+            // ★ v3.18.6: Allies 사용 — AoE 힐은 범위 내 모든 유닛에 영향, 사역마 포함
             CollectionHelper.FillWhere(situation.Allies, _tempUnits,
                 a => a.IsConscious && CombatCache.GetHPPercent(a) < 80f);
 
@@ -939,7 +1010,7 @@ namespace CompanionAI_v3.Planning.Plans
 
             if (_tempAbilities.Count == 0) return null;
 
-            // 모든 살아있는 아군 (자신 포함)
+            // ★ v3.18.6: Allies 사용 — AoE 버프는 범위 내 모든 유닛에 영향, 사역마 포함
             CollectionHelper.FillWhere(situation.Allies, _tempUnits,
                 a => a.IsConscious);
             _tempUnits.Add(situation.Unit);
@@ -1069,8 +1140,9 @@ namespace CompanionAI_v3.Planning.Plans
         /// <param name="usedKeystoneGuids">키스톤 루프에서 이미 사용된 버프 GUID (중복 방지)</param>
         /// <param name="plannedTurnGrantTargetIds">★ v3.8.16: 이미 턴 부여가 계획된 대상 ID (중복 방지)</param>
         /// <param name="plannedBuffTargetPairs">★ v3.8.51: 이미 계획된 (버프GUID:타겟ID) 쌍 (같은 버프를 다른 아군에게 사용 허용)</param>
+        /// <param name="plannedAbilityUseCounts">★ v3.14.2: 능력별 계획 횟수 추적 (GetAvailableForCastCount 초과 방지)</param>
         /// <returns>아군 버프 행동 또는 null</returns>
-        protected PlannedAction PlanAllyBuff(Situation situation, ref float remainingAP, HashSet<string> usedKeystoneGuids = null, HashSet<string> plannedTurnGrantTargetIds = null, HashSet<string> plannedBuffTargetPairs = null)
+        protected PlannedAction PlanAllyBuff(Situation situation, ref float remainingAP, HashSet<string> usedKeystoneGuids = null, HashSet<string> plannedTurnGrantTargetIds = null, HashSet<string> plannedBuffTargetPairs = null, Dictionary<string, int> plannedAbilityUseCounts = null)
         {
             // ★ v3.2.15: 팀 전술에 따라 버프 대상 우선순위 조정
             var tactic = TeamBlackboard.Instance.CurrentTactic;
@@ -1089,8 +1161,9 @@ namespace CompanionAI_v3.Planning.Plans
             else if (tactic == TacticalSignal.Attack)
             {
                 // ★ v3.8.78: .Where() LINQ 제거 → inline 가드
+                // ★ v3.18.4: CombatantAllies 사용 (사역마 제외)
                 // 공격: DPS 우선 버프 (HP 50% 이상인 DPS)
-                foreach (var ally in situation.Allies)
+                foreach (var ally in situation.CombatantAllies)
                 {
                     if (ally == null || ally.LifeState.IsDead) continue;
                     var settings = ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
@@ -1105,9 +1178,10 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.18.4: CombatantAllies 사용 (사역마에게 버프 낭비 방지)
             // 기본 우선순위 (Defend 또는 위에서 대상 없을 때): Tank > DPS > 본인 > 기타
             // 1. Tank 역할 먼저
-            foreach (var ally in situation.Allies)
+            foreach (var ally in situation.CombatantAllies)
             {
                 if (ally == null || ally.LifeState.IsDead) continue;
                 var settings = ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
@@ -1116,7 +1190,7 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // 2. DPS 역할
-            foreach (var ally in situation.Allies)
+            foreach (var ally in situation.CombatantAllies)
             {
                 if (ally == null || ally.LifeState.IsDead) continue;
                 var settings = ModSettings.Instance?.GetOrCreateSettings(ally.UniqueId, ally.CharacterName);
@@ -1129,7 +1203,7 @@ namespace CompanionAI_v3.Planning.Plans
                 prioritizedTargets.Add(situation.Unit);
 
             // 4. 나머지 아군
-            foreach (var ally in situation.Allies)
+            foreach (var ally in situation.CombatantAllies)
             {
                 if (ally == null || ally.LifeState.IsDead) continue;
                 if (!prioritizedTargets.Contains(ally))
@@ -1150,6 +1224,26 @@ namespace CompanionAI_v3.Planning.Plans
 
                 float cost = CombatAPI.GetAbilityAPCost(buff);
                 if (cost > remainingAP) continue;
+
+                // ★ v3.14.2: 이미 계획된 횟수가 사용 가능 횟수 이상이면 스킵
+                // 게임 API GetAvailableForCastCount()로 실제 사용 가능 횟수 확인
+                if (plannedAbilityUseCounts != null && !string.IsNullOrEmpty(buffGuid))
+                {
+                    plannedAbilityUseCounts.TryGetValue(buffGuid, out int plannedUses);
+                    if (plannedUses > 0)
+                    {
+                        try
+                        {
+                            int availableCasts = buff.GetAvailableForCastCount();
+                            if (availableCasts > 0 && plannedUses >= availableCasts)
+                            {
+                                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Skip {buff.Name}: already planned {plannedUses}/{availableCasts} casts");
+                                continue;
+                            }
+                        }
+                        catch { }
+                    }
+                }
 
                 // ★ v3.7.87: 턴 전달 능력인지 확인 (쳐부숴라 등)
                 bool isTurnGrant = AbilityDatabase.IsTurnGrantAbility(buff);
@@ -1548,6 +1642,13 @@ namespace CompanionAI_v3.Planning.Plans
                     string reason;
                     if (CombatAPI.CanUseAbilityOn(debuff, target, out reason))
                     {
+                        // ★ v3.18.4: AoE 안전성 체크 (아군 피해 방지)
+                        if (!CombatHelpers.IsAttackSafeForTarget(debuff, situation.Unit, situation.NearestEnemy, situation.Allies))
+                        {
+                            Main.Log($"[{RoleName}] Phase 9: Final debuff SKIPPED (AoE unsafe): {debuff.Name} -> {situation.NearestEnemy.CharacterName}");
+                            continue;
+                        }
+
                         remainingAP -= cost;
                         Main.Log($"[{RoleName}] Phase 9: Final debuff - {debuff.Name} -> {situation.NearestEnemy.CharacterName}");
                         return PlannedAction.Attack(debuff, situation.NearestEnemy, "Final AP debuff", cost);
@@ -1584,6 +1685,13 @@ namespace CompanionAI_v3.Planning.Plans
                     string reason;
                     if (CombatAPI.CanUseAbilityOn(marker, target, out reason))
                     {
+                        // ★ v3.18.4: AoE 안전성 체크 (아군 피해 방지)
+                        if (!CombatHelpers.IsAttackSafeForTarget(marker, situation.Unit, situation.NearestEnemy, situation.Allies))
+                        {
+                            Main.Log($"[{RoleName}] Phase 9: Final marker SKIPPED (AoE unsafe): {marker.Name} -> {situation.NearestEnemy.CharacterName}");
+                            continue;
+                        }
+
                         remainingAP -= cost;
                         Main.Log($"[{RoleName}] Phase 9: Final marker - {marker.Name} -> {situation.NearestEnemy.CharacterName}");
                         return PlannedAction.Buff(marker, situation.NearestEnemy, "Final AP marker", cost);
@@ -3471,6 +3579,61 @@ namespace CompanionAI_v3.Planning.Plans
 
             return PlannedAction.Attack(hex, target,
                 $"Hex on {target.CharacterName}", apCost);
+        }
+
+        /// <summary>
+        /// ★ v3.18.0: 레이븐 정화방전 (Purification Discharge) 계획
+        /// 4타일 내 가장 가까운 적 3명에게 (Psy Rating × WP bonus) 충격 데미지
+        /// Overcharge 없이 사용 시 레이븐 자해 → 반드시 Overcharge 확인 필수
+        /// </summary>
+        protected PlannedAction PlanFamiliarPurificationDischarge(Situation situation, ref float remainingAP)
+        {
+            if (situation.FamiliarType != PetType.Raven) return null;
+            if (situation.Familiar == null || !situation.Familiar.IsConscious) return null;
+
+            // 안전 체크: Overcharge(HeroicAct) 활성 시에만 사용
+            if (!FamiliarAPI.CanRavenUseAttackAbilities(situation.Unit)) return null;
+
+            // 사역마 능력 중 정화방전 찾기
+            var abilities = situation.FamiliarAbilities;
+            if (abilities == null) return null;
+
+            AbilityData discharge = null;
+            for (int i = 0; i < abilities.Count; i++)
+            {
+                if (FamiliarAbilities.IsPurificationDischarge(abilities[i]))
+                {
+                    discharge = abilities[i];
+                    break;
+                }
+            }
+            if (discharge == null) return null;
+
+            float apCost = CombatAPI.GetAbilityAPCost(discharge);
+            if (apCost > remainingAP) return null;
+
+            // 레이븐 주변 4타일 내 적 존재 확인
+            int enemiesNearRaven = 0;
+            float ravenEffectRadius = CombatAPI.TilesToMeters(4);
+            for (int i = 0; i < situation.Enemies.Count; i++)
+            {
+                var enemy = situation.Enemies[i];
+                if (enemy == null || !enemy.IsConscious) continue;
+                float dist = Vector3.Distance(situation.Familiar.Position, enemy.Position);
+                if (dist <= ravenEffectRadius) enemiesNearRaven++;
+            }
+            if (enemiesNearRaven == 0) return null;
+
+            // 사용 가능 여부 최종 확인
+            List<string> unavailReasons;
+            if (!CombatAPI.IsAbilityAvailable(discharge, out unavailReasons)) return null;
+            if (discharge.IsRestricted) return null;
+
+            remainingAP -= apCost;
+            Main.Log($"[{RoleName}] ★ Purification Discharge: {enemiesNearRaven} enemies near Raven");
+
+            return PlannedAction.Buff(discharge, situation.Familiar,
+                $"Purification Discharge ({enemiesNearRaven} enemies)", apCost);
         }
 
         /// <summary>

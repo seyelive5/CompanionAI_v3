@@ -535,18 +535,18 @@ namespace CompanionAI_v3.Core
         private void CaptureStrategicContext(TurnState turnState, PlannedAction action)
         {
             // 킬 시퀀스 진행 추적
-            if (action.GroupTag.StartsWith("KillSeq_"))
+            if (action.GroupTag.StartsWith(PlannedAction.GROUP_KILL_SEQUENCE))
             {
-                string targetId = action.GroupTag.Substring("KillSeq_".Length);
+                string targetId = action.GroupTag.Substring(PlannedAction.GROUP_KILL_SEQUENCE.Length);
                 turnState.SetContext(StrategicContextKeys.KillSequenceTargetId, targetId);
             }
 
             // 콤보 전제 추적
-            if (action.GroupTag.StartsWith("Combo_"))
+            if (action.GroupTag.StartsWith(PlannedAction.GROUP_COMBO))
             {
                 turnState.SetContext(StrategicContextKeys.ComboPrereqApplied, true);
                 // 콤보 후속 GUID 저장 (GroupTag에서 추출)
-                string abilityGuid = action.GroupTag.Substring("Combo_".Length);
+                string abilityGuid = action.GroupTag.Substring(PlannedAction.GROUP_COMBO.Length);
                 turnState.SetContext(StrategicContextKeys.ComboFollowUpGuid, abilityGuid);
                 var targetEntity = action.Target?.Entity as BaseUnitEntity;
                 if (targetEntity != null)

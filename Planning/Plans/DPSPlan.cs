@@ -145,8 +145,52 @@ namespace CompanionAI_v3.Planning.Plans
 
                 if (tacticalMoveAction != null)
                 {
-                    // MoveToAttack: 공격 전 이동 액션 추가
-                    actions.Add(tacticalMoveAction);
+                    // ★ v3.16.0: MoveToAttack이면 갭클로저와 비교
+                    if (tacticalEval.ChosenStrategy == TacticalStrategy.MoveToAttack)
+                    {
+                        PlannedAction gcPreMove;
+                        var gcAction = EvaluateGapCloserAsAttack(
+                            situation, ref remainingAP, ref remainingMP, out gcPreMove);
+
+                        if (gcAction != null)
+                        {
+                            // ★ v3.16.6: Walk+Jump 콤보 시 사전 이동 추가
+                            if (gcPreMove != null) actions.Add(gcPreMove);
+                            actions.Add(gcAction);
+                            Main.Log($"[DPS] Phase 1.6: GapCloser replaces MoveToAttack{(gcPreMove != null ? " (walk+jump)" : "")}");
+
+                            // 착지점에서 HittableEnemies 재계산
+                            var landingPos = gcAction.MoveDestination ?? gcAction.Target?.Point;
+                            if (landingPos.HasValue)
+                                RecalculateHittableFromDestination(situation, landingPos.Value);
+                        }
+                        else
+                        {
+                            actions.Add(tacticalMoveAction);
+                        }
+                    }
+                    else
+                    {
+                        actions.Add(tacticalMoveAction);
+                    }
+                }
+                else if (!situation.HasHittableEnemies)
+                {
+                    // ★ v3.16.4: 모든 전략 불가능 (MP=0, LOS 없음 등) → 갭클로저로 돌파
+                    PlannedAction gcPreMove;
+                    var gcAction = EvaluateGapCloserAsAttack(
+                        situation, ref remainingAP, ref remainingMP, out gcPreMove);
+
+                    if (gcAction != null)
+                    {
+                        if (gcPreMove != null) actions.Add(gcPreMove);
+                        actions.Add(gcAction);
+                        Main.Log($"[DPS] Phase 1.6: GapCloser as last resort{(gcPreMove != null ? " (walk+jump)" : "")}");
+
+                        var landingPos = gcAction.MoveDestination ?? gcAction.Target?.Point;
+                        if (landingPos.HasValue)
+                            RecalculateHittableFromDestination(situation, landingPos.Value);
+                    }
                 }
 
                 // AttackFromCurrent + 후퇴 필요: 즉시 후퇴 (기존 로직 유지)
@@ -262,7 +306,7 @@ namespace CompanionAI_v3.Planning.Plans
                         int actionsBeforeKillSeq = actions.Count;
 
                         // ★ v3.8.86: 킬 시퀀스 그룹 태그 (실패 시 나머지 스킵)
-                        string killGroupTag = "KillSeq_" + killSequence.Target.UniqueId;
+                        string killGroupTag = PlannedAction.GROUP_KILL_SEQUENCE + killSequence.Target.UniqueId;
 
                         foreach (var ability in killSequence.Abilities)
                         {
@@ -407,6 +451,14 @@ namespace CompanionAI_v3.Planning.Plans
             if (CollectionHelper.Any(actions, a => a.Type == ActionType.Move))
                 attackContext.HasPendingMove = true;
 
+            // ★ v3.16.0: Phase 1.6에서 갭클로저가 공격으로 사용되었는지 확인
+            if (CollectionHelper.Any(actions, a =>
+                a.Type == ActionType.Attack && a.Ability != null &&
+                AbilityDatabase.IsGapCloser(a.Ability)))
+            {
+                didPlanAttack = true;
+            }
+
             // ★ v3.9.22: Phase 4.3 Self-AoE(BladeDance) → Phase 5.7로 이동
             // BladeDance는 clearMPInsteadOfEndingTurn=true (MP 전부 소모)
             // 일반 공격을 먼저 소진한 후 피니셔로 사용하는 것이 효율적
@@ -518,7 +570,7 @@ namespace CompanionAI_v3.Planning.Plans
             {
                 Main.Log($"[DPS] Phase 3↔4.4: AoE failed — executing deferred kill sequence for {pendingKillSequence.Target?.CharacterName}");
 
-                string killGroupTag = "KillSeq_" + pendingKillSequence.Target.UniqueId;
+                string killGroupTag = PlannedAction.GROUP_KILL_SEQUENCE + pendingKillSequence.Target.UniqueId;
                 int actionsBeforeDeferred = actions.Count;
 
                 foreach (var ability in pendingKillSequence.Abilities)
@@ -692,7 +744,7 @@ namespace CompanionAI_v3.Planning.Plans
                     {
                         usedComboPrereq = true;
                         // ★ v3.8.86: 콤보 그룹 태깅 (전제 실패 시 후속도 스킵)
-                        attackAction.GroupTag = "Combo_" + (comboPrereqAbility.Blueprint?.AssetGuid?.ToString() ?? "prereq");
+                        attackAction.GroupTag = PlannedAction.GROUP_COMBO + (comboPrereqAbility.Blueprint?.AssetGuid?.ToString() ?? "prereq");
                         attackAction.FailurePolicy = GroupFailurePolicy.SkipRemainingInGroup;
                         Main.Log($"[DPS] Phase 5: Used combo prerequisite {comboPrereqAbility.Name}");
                     }
@@ -783,7 +835,7 @@ namespace CompanionAI_v3.Planning.Plans
                             var followUpAction = PlannedAction.Attack(comboFollowUpAbility, enemy,
                                 $"Combo followup: {comboFollowUpAbility.Name}", followUpCost);
                             // ★ v3.8.86: 같은 콤보 그룹 태그 (전제 실패 시 자동 스킵)
-                            followUpAction.GroupTag = "Combo_" + (comboPrereqAbility.Blueprint?.AssetGuid?.ToString() ?? "prereq");
+                            followUpAction.GroupTag = PlannedAction.GROUP_COMBO + (comboPrereqAbility.Blueprint?.AssetGuid?.ToString() ?? "prereq");
                             actions.Add(followUpAction);
                             Main.Log($"[DPS] Phase 5.5: Combo followup {comboFollowUpAbility.Name} -> {enemy.CharacterName}");
                             break;
@@ -820,12 +872,15 @@ namespace CompanionAI_v3.Planning.Plans
             {
                 Main.Log($"[DPS] Phase 5.6: Trying GapCloser as fallback (attack failed)");
                 // ★ v3.5.34: MP 비용 예측 버전 사용
-                var gapCloserAction = PlanGapCloser(situation, situation.NearestEnemy, ref remainingAP, ref remainingMP);
+                // ★ v3.16.6: Walk+Jump 콤보 지원
+                PlannedAction gapCloserPreMove;
+                var gapCloserAction = PlanGapCloser(situation, situation.NearestEnemy, ref remainingAP, ref remainingMP, out gapCloserPreMove);
                 if (gapCloserAction != null)
                 {
+                    if (gapCloserPreMove != null) actions.Add(gapCloserPreMove);
                     actions.Add(gapCloserAction);
                     didPlanAttack = true;  // GapCloser도 공격으로 취급
-                    Main.Log($"[DPS] GapCloser fallback: {gapCloserAction.Ability?.Name}");
+                    Main.Log($"[DPS] GapCloser fallback: {gapCloserAction.Ability?.Name}{(gapCloserPreMove != null ? " (walk+jump)" : "")}");
                 }
                 else
                 {

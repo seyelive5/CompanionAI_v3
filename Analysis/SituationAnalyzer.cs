@@ -213,6 +213,14 @@ namespace CompanionAI_v3.Analysis
             // 아군 목록
             situation.Allies = CombatAPI.GetAllies(unit);
 
+            // ★ v3.18.4: 사역마 제외 아군 목록 (버프/힐/서포트 타겟팅용)
+            situation.CombatantAllies.Clear();
+            for (int i = 0; i < situation.Allies.Count; i++)
+            {
+                if (!FamiliarAPI.IsFamiliar(situation.Allies[i]))
+                    situation.CombatantAllies.Add(situation.Allies[i]);
+            }
+
             // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
             // ★ v3.5.29: 캐시된 거리 사용
             situation.NearestEnemy = CollectionHelper.MinByWhere(situation.Enemies,
@@ -224,8 +232,8 @@ namespace CompanionAI_v3.Analysis
                 : float.MaxValue;
 
             // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
-            // 가장 부상당한 아군
-            situation.MostWoundedAlly = CollectionHelper.MinByWhere(situation.Allies,
+            // ★ v3.18.4: 사역마 제외 (CombatantAllies 사용)
+            situation.MostWoundedAlly = CollectionHelper.MinByWhere(situation.CombatantAllies,
                 a => !a.LifeState.IsDead && a != unit,
                 a => CombatCache.GetHPPercent(a));
 

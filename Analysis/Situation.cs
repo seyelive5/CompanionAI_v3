@@ -105,8 +105,11 @@ namespace CompanionAI_v3.Analysis
         /// <summary>모든 적</summary>
         public List<BaseUnitEntity> Enemies { get; set; } = new List<BaseUnitEntity>();
 
-        /// <summary>모든 아군</summary>
+        /// <summary>모든 아군 (사역마 포함 — AoE 안전성 체크, 영향력 맵 등에 사용)</summary>
         public List<BaseUnitEntity> Allies { get; set; } = new List<BaseUnitEntity>();
+
+        /// <summary>★ v3.18.4: 전투원 아군 (사역마 제외) — 버프/힐/서포트 타겟팅용</summary>
+        public List<BaseUnitEntity> CombatantAllies { get; set; } = new List<BaseUnitEntity>();
 
         /// <summary>가장 가까운 적과의 거리</summary>
         public float NearestEnemyDistance { get; set; }
@@ -405,6 +408,7 @@ namespace CompanionAI_v3.Analysis
             // Battlefield
             Enemies.Clear();
             Allies.Clear();
+            CombatantAllies.Clear();
             NearestEnemyDistance = 0f;
             NearestEnemy = null;
             MostWoundedAlly = null;

@@ -13,6 +13,10 @@ namespace CompanionAI_v3.Core
     /// </summary>
     public class PlannedAction
     {
+        // ★ v3.18.0: GroupTag prefix 상수 — 문자열 매칭 대신 상수 참조로 안전성 확보
+        public const string GROUP_KILL_SEQUENCE = "KillSeq_";
+        public const string GROUP_COMBO = "Combo_";
+
         /// <summary>행동 유형</summary>
         public ActionType Type { get; set; }
 

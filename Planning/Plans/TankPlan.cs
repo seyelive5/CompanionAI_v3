@@ -355,8 +355,51 @@ namespace CompanionAI_v3.Planning.Plans
 
                 if (tacticalMoveAction != null)
                 {
-                    actions.Add(tacticalMoveAction);
-                    Main.Log($"[Tank] Phase 4.9: Tactical pre-attack move");
+                    // ★ v3.16.0: MoveToAttack이면 갭클로저와 비교
+                    if (tacticalEval.ChosenStrategy == TacticalStrategy.MoveToAttack)
+                    {
+                        PlannedAction gcPreMove;
+                        var gcAction = EvaluateGapCloserAsAttack(
+                            situation, ref remainingAP, ref remainingMP, out gcPreMove);
+
+                        if (gcAction != null)
+                        {
+                            // ★ v3.16.6: Walk+Jump 콤보 시 사전 이동 추가
+                            if (gcPreMove != null) actions.Add(gcPreMove);
+                            actions.Add(gcAction);
+                            Main.Log($"[Tank] Phase 4.9: GapCloser replaces MoveToAttack{(gcPreMove != null ? " (walk+jump)" : "")}");
+                            var landingPos = gcAction.MoveDestination ?? gcAction.Target?.Point;
+                            if (landingPos.HasValue)
+                                RecalculateHittableFromDestination(situation, landingPos.Value);
+                        }
+                        else
+                        {
+                            actions.Add(tacticalMoveAction);
+                            Main.Log($"[Tank] Phase 4.9: Tactical pre-attack move");
+                        }
+                    }
+                    else
+                    {
+                        actions.Add(tacticalMoveAction);
+                        Main.Log($"[Tank] Phase 4.9: Tactical pre-attack move");
+                    }
+                }
+                else if (!situation.HasHittableEnemies)
+                {
+                    // ★ v3.16.4: 모든 전략 불가능 → 갭클로저로 돌파
+                    PlannedAction gcPreMove;
+                    var gcAction = EvaluateGapCloserAsAttack(
+                        situation, ref remainingAP, ref remainingMP, out gcPreMove);
+
+                    if (gcAction != null)
+                    {
+                        if (gcPreMove != null) actions.Add(gcPreMove);
+                        actions.Add(gcAction);
+                        Main.Log($"[Tank] Phase 4.9: GapCloser as last resort{(gcPreMove != null ? " (walk+jump)" : "")}");
+                        var landingPos = gcAction.MoveDestination ?? gcAction.Target?.Point;
+                        if (landingPos.HasValue)
+                            RecalculateHittableFromDestination(situation, landingPos.Value);
+                    }
                 }
             }
 

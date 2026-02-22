@@ -658,8 +658,30 @@ namespace CompanionAI_v3.Analysis
             score += CurvePresets.APEfficiency.Evaluate(damagePerAP);
 
             // ★ v3.6.2: 거리 적합성 - 타일 단위로 통일
+            // ★ v3.16.0: 피해 갭클로저는 거리 페널티 면제 + AP 효율 보너스
             float distanceTiles = CombatCache.GetDistanceInTiles(situation.Unit, target);
-            if (attack.IsMelee)
+            bool isDamagingGapCloser = AbilityDatabase.IsGapCloser(attack) && estimatedDamage > 0;
+
+            if (isDamagingGapCloser)
+            {
+                float abilityRange = CombatAPI.GetAbilityRangeInTiles(attack);
+                if (distanceTiles <= 1.5f)
+                {
+                    // 이미 근접: 일반 공격이 효율적 → 갭클로저 약간 감점
+                    score -= 5f;
+                }
+                else if (distanceTiles <= abilityRange || abilityRange <= 0)
+                {
+                    // 사거리 내: 걸어가는 대신 돌격 → 거리 비례 보너스 (최대 +20)
+                    score += Math.Min(distanceTiles * 2f, 20f);
+                }
+                else
+                {
+                    // 사거리 초과: 도달 불가
+                    score -= distanceTiles * 2f;
+                }
+            }
+            else if (attack.IsMelee)
             {
                 if (distanceTiles <= 1.5f)  // 1.5타일 ≈ 2m
                     score += 15f;   // 근접 범위 = 좋음

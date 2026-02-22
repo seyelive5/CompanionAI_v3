@@ -504,7 +504,7 @@ namespace CompanionAI_v3.GameInterface
                 }
 
                 var aoeConfig = AIConfig.GetAoEConfig();
-                int maxAlliesAllowed = aoeConfig?.MaxPlayerAlliesHit ?? 0;
+                int maxAlliesAllowed = aoeConfig?.MaxPlayerAlliesHit ?? 1;  // ★ v3.14.2: ?? 0 → ?? 1 (다른 AoE 체크와 일관성)
 
                 if (alliesHit > maxAlliesAllowed)
                 {

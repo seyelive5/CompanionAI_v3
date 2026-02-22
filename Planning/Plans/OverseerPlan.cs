@@ -50,6 +50,20 @@ namespace CompanionAI_v3.Planning.Plans
                 Main.Log($"[Overseer] Reserving {reservedAP:F1} AP for weapon attack");
             }
 
+            // ★ v3.18.0: 마스터 공격 최소 AP 예약 — Phase 4.5 아군 버프가 AP 전부 소모 방지
+            float masterMinAttackAP = 0f;
+            if (situation.AvailableAttacks != null && situation.AvailableAttacks.Count > 0)
+            {
+                masterMinAttackAP = float.MaxValue;
+                for (int i = 0; i < situation.AvailableAttacks.Count; i++)
+                {
+                    float cost = CombatAPI.GetAbilityAPCost(situation.AvailableAttacks[i]);
+                    if (cost < masterMinAttackAP) masterMinAttackAP = cost;
+                }
+                if (masterMinAttackAP == float.MaxValue) masterMinAttackAP = 0f;
+            }
+            Main.Log($"[Overseer] AP Budget: masterMinAttackAP={masterMinAttackAP:F1}, totalAP={situation.CurrentAP:F1}");
+
             // ★ v3.12.0: Phase 0~1.5 공통 처리 (Ultimate, AoE대피, 긴급힐, 재장전)
             var earlyReturn = ExecuteCommonEarlyPhases(actions, situation, ref remainingAP);
             if (earlyReturn != null) return earlyReturn;
@@ -76,6 +90,8 @@ namespace CompanionAI_v3.Planning.Plans
 
             // 이번 턴 WarpRelay 사용 여부 추적
             bool usedWarpRelay = false;
+            // ★ v3.18.0: Phase 3.5.5 공격적 재배치 여부 (Phase 4.6 문자열 매칭 대체)
+            bool didAggressiveRelocate = false;
 
             // ★ v3.8.52: 턴 단위 Raven 페이즈 판단
             // FamiliarPositioner가 아군 버프 커버리지 기반으로 결정 (커버리지 < 60% → 버프 페이즈)
@@ -206,8 +222,10 @@ namespace CompanionAI_v3.Planning.Plans
 
                 // ────────────────────────────────────────────────────────────
                 // 3.5: Raven Cycle (WarpRelay 후 재시전)
+                // ★ v3.18.8: BUFF 모드 Raven은 Phase 3.4 결과와 무관하게 시도
+                //   (Phase 3.4에서 근처 아군이 이미 버프됐어도 Cycle에서 다른 버프 시도 가능)
                 // ────────────────────────────────────────────────────────────
-                if (usedWarpRelay)
+                if (usedWarpRelay || (isRavenBuffPhase && situation.FamiliarType == PetType.Raven))
                 {
                     var cycle = PlanFamiliarCycle(situation, ref remainingAP, usedWarpRelay);
                     if (cycle != null)
@@ -218,22 +236,32 @@ namespace CompanionAI_v3.Planning.Plans
                 }
 
                 // ────────────────────────────────────────────────────────────
+                // ★ v3.18.2: BUFF → DEBUFF 턴 중 전환
+                // 버프 모드에서 WarpRelay 전달 완료 → 남은 턴은 디버프 모드로 전환
+                // 사람 플레이어: 아군 버프 전달 → 즉시 적에게 이동하여 Hex/공격
+                // ────────────────────────────────────────────────────────────
+                if (isRavenBuffPhase && usedWarpRelay && situation.FamiliarType == PetType.Raven)
+                {
+                    isRavenBuffPhase = false;
+                    Main.Log($"[Overseer] ★ Raven BUFF→DEBUFF transition: WarpRelay delivered to allies, switching to enemy positioning");
+                }
+
+                // ────────────────────────────────────────────────────────────
                 // 3.5.5: Raven Aggressive Relocate (WarpRelay 직후 즉시 재배치)
                 // ★ v3.8.52: 버프 페이즈에서는 스킵 (Raven은 아군 근처에 있어야 함)
                 //            공격 페이즈에서만 적 밀집 지역으로 이동
+                // ★ v3.18.2: BUFF→DEBUFF 전환 후에는 항상 실행 (skipCoverageCheck)
                 // ────────────────────────────────────────────────────────────
                 if (usedWarpRelay && situation.FamiliarType == PetType.Raven && !isRavenBuffPhase)
                 {
-                    var aggressiveRelocate = PlanRavenAggressiveRelocate(situation, ref remainingAP);
+                    // ★ v3.18.2: 버프 전달 직후 전환된 경우, 커버리지 체크 불필요 (이미 버프 완료)
+                    var aggressiveRelocate = PlanRavenAggressiveRelocate(situation, ref remainingAP, skipCoverageCheck: true);
                     if (aggressiveRelocate != null)
                     {
                         actions.Add(aggressiveRelocate);
+                        didAggressiveRelocate = true;  // ★ v3.18.0
                         Main.Log($"[Overseer] Phase 3.5.5: Raven aggressive relocate to enemy cluster (DEBUFF MODE)");
                     }
-                }
-                else if (usedWarpRelay && situation.FamiliarType == PetType.Raven && isRavenBuffPhase)
-                {
-                    if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] Phase 3.5.5: Skipped - Raven in BUFF MODE (stay near allies)");
                 }
 
                 // ────────────────────────────────────────────────────────────
@@ -247,6 +275,22 @@ namespace CompanionAI_v3.Planning.Plans
                     {
                         actions.Add(hex);
                         Main.Log($"[Overseer] Phase 3.6: Raven Hex (DEBUFF MODE)");
+                    }
+                }
+
+                // ────────────────────────────────────────────────────────────
+                // ★ v3.18.0: Phase 3.6.5 — 정화방전 (Overcharge 필수 AoE 공격)
+                // 디버프 모드 + Overcharge(HeroicAct) 활성 → 레이븐 AoE 공격
+                // ────────────────────────────────────────────────────────────
+                if (situation.FamiliarType == PetType.Raven && !isRavenBuffPhase && heroicActPlanned)
+                {
+                    var purification = PlanFamiliarPurificationDischarge(situation, ref remainingAP);
+                    if (purification != null)
+                    {
+                        purification.GroupTag = "OverseerHeroicWarp";
+                        purification.FailurePolicy = GroupFailurePolicy.SkipRemainingInGroup;
+                        actions.Add(purification);
+                        Main.Log($"[Overseer] Phase 3.6.5: Purification Discharge (Overcharge active)");
                     }
                 }
 
@@ -399,10 +443,12 @@ namespace CompanionAI_v3.Planning.Plans
             var keystoneOnlyGuids = new HashSet<string>(usedKeystoneAbilityGuids);  // ★ v3.8.51: 키스톤 GUID만 (버프 제외 아님)
             var plannedTurnGrantTargets = new HashSet<string>();  // ★ v3.8.16: 턴 부여 대상 추적
             var plannedBuffTargetPairs = new HashSet<string>();   // ★ v3.8.51: (buffGuid:targetId) 쌍 추적
+            var plannedAbilityUseCounts = new Dictionary<string, int>();  // ★ v3.14.2: 능력별 계획 횟수 (과다 계획 방지)
             int allyBuffCount = 0;
-            while (remainingAP >= 1f)
+            // ★ v3.18.0: 마스터 공격 1회분 AP 보장 (masterMinAttackAP + 버프 최소 비용 1f)
+            while (remainingAP > masterMinAttackAP + 1f)
             {
-                var allyBuffAction = PlanAllyBuff(situation, ref remainingAP, keystoneOnlyGuids, plannedTurnGrantTargets, plannedBuffTargetPairs);
+                var allyBuffAction = PlanAllyBuff(situation, ref remainingAP, keystoneOnlyGuids, plannedTurnGrantTargets, plannedBuffTargetPairs, plannedAbilityUseCounts);
                 if (allyBuffAction == null) break;
 
                 // ★ v3.8.51: (버프, 타겟) 쌍 추적 → 같은 버프를 다른 아군에게는 허용
@@ -412,6 +458,9 @@ namespace CompanionAI_v3.Planning.Plans
                 if (!string.IsNullOrEmpty(buffGuid))
                 {
                     plannedBuffTargetPairs.Add($"{buffGuid}:{targetId}");
+                    // ★ v3.14.2: 능력별 계획 횟수 증가
+                    plannedAbilityUseCounts.TryGetValue(buffGuid, out int count);
+                    plannedAbilityUseCounts[buffGuid] = count + 1;
                 }
 
                 actions.Add(allyBuffAction);
@@ -426,18 +475,8 @@ namespace CompanionAI_v3.Planning.Plans
             // ══════════════════════════════════════════════════════════════
             if (situation.FamiliarType == PetType.Raven && situation.HasFamiliar && remainingAP >= 1f && !isRavenBuffPhase)
             {
-                // Phase 3.5.5에서 이미 relocate 했는지 확인
-                bool alreadyRelocated = false;
-                for (int i = 0; i < actions.Count; i++)
-                {
-                    if (actions[i].Reason != null && actions[i].Reason.Contains("enemy cluster"))
-                    {
-                        alreadyRelocated = true;
-                        break;
-                    }
-                }
-
-                if (!alreadyRelocated)
+                // ★ v3.18.0: 문자열 매칭 제거 → didAggressiveRelocate 불리언 플래그
+                if (!didAggressiveRelocate)
                 {
                     var postBuffRelocate = PlanRavenAggressiveRelocate(situation, ref remainingAP, skipCoverageCheck: true);
                     if (postBuffRelocate != null)
@@ -462,8 +501,51 @@ namespace CompanionAI_v3.Planning.Plans
 
                 if (tacticalMoveAction != null)
                 {
-                    actions.Add(tacticalMoveAction);
-                    Main.Log($"[Overseer] Phase 4.9: Tactical pre-attack move");
+                    // ★ v3.16.4: MoveToAttack이면 갭클로저와 비교
+                    if (tacticalEval.ChosenStrategy == TacticalStrategy.MoveToAttack)
+                    {
+                        PlannedAction gcPreMove;
+                        var gcAction = EvaluateGapCloserAsAttack(
+                            situation, ref remainingAP, ref remainingMP, out gcPreMove);
+
+                        if (gcAction != null)
+                        {
+                            // ★ v3.16.6: Walk+Jump 콤보 시 사전 이동 추가
+                            if (gcPreMove != null) actions.Add(gcPreMove);
+                            actions.Add(gcAction);
+                            Main.Log($"[Overseer] Phase 4.9: GapCloser replaces MoveToAttack{(gcPreMove != null ? " (walk+jump)" : "")}");
+                            var landingPos = gcAction.MoveDestination ?? gcAction.Target?.Point;
+                            if (landingPos.HasValue)
+                                RecalculateHittableFromDestination(situation, landingPos.Value);
+                        }
+                        else
+                        {
+                            actions.Add(tacticalMoveAction);
+                            Main.Log($"[Overseer] Phase 4.9: Tactical pre-attack move");
+                        }
+                    }
+                    else
+                    {
+                        actions.Add(tacticalMoveAction);
+                        Main.Log($"[Overseer] Phase 4.9: Tactical pre-attack move");
+                    }
+                }
+                else if (!situation.HasHittableEnemies)
+                {
+                    // ★ v3.16.4: 모든 전략 불가능 (MP=0, LOS 없음 등) → 갭클로저로 돌파
+                    PlannedAction gcPreMove;
+                    var gcAction = EvaluateGapCloserAsAttack(
+                        situation, ref remainingAP, ref remainingMP, out gcPreMove);
+
+                    if (gcAction != null)
+                    {
+                        if (gcPreMove != null) actions.Add(gcPreMove);
+                        actions.Add(gcAction);
+                        Main.Log($"[Overseer] Phase 4.9: GapCloser as last resort{(gcPreMove != null ? " (walk+jump)" : "")}");
+                        var landingPos = gcAction.MoveDestination ?? gcAction.Target?.Point;
+                        if (landingPos.HasValue)
+                            RecalculateHittableFromDestination(situation, landingPos.Value);
+                    }
                 }
             }
 
@@ -481,10 +563,52 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // ══════════════════════════════════════════════════════════════
-            // Phase 5: Safe Ranged Attack (SECONDARY)
-            // 사역마가 주력이므로 마스터는 안전한 원거리 공격만
+            // ★ v3.18.0: Phase 4.96~4.97: AoE 공격 (마스터 직접 공격)
+            // DPSPlan Phase 4.3b/4.4에 해당 — 오버시어도 마스터 AoE 활용
             // ══════════════════════════════════════════════════════════════
-            bool didPlanAttack = false;
+            bool didPlanAoE = false;
+
+            // Phase 4.96: Melee AoE (근접 오버시어만)
+            if (!situation.PrefersRanged && remainingAP >= 1f)
+            {
+                var meleeAoE = PlanMeleeAoE(situation, ref remainingAP);
+                if (meleeAoE != null)
+                {
+                    actions.Add(meleeAoE);
+                    didPlanAoE = true;
+                    Main.Log($"[Overseer] Phase 4.96: Melee AoE planned");
+                }
+            }
+
+            // Phase 4.97: Point-target AoE + Unit-targeted AoE (근접/원거리 공통)
+            int minEnemiesForAoE = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+            if (!didPlanAoE && remainingAP >= 1f && situation.HasAoEAttacks &&
+                situation.Enemies.Count >= minEnemiesForAoE)
+            {
+                var aoE = PlanAoEAttack(situation, ref remainingAP);
+                if (aoE != null)
+                {
+                    actions.Add(aoE);
+                    didPlanAoE = true;
+                    Main.Log($"[Overseer] Phase 4.97: Point-target AoE planned");
+                }
+                if (!didPlanAoE)
+                {
+                    var unitAoE = PlanUnitTargetedAoE(situation, ref remainingAP);
+                    if (unitAoE != null)
+                    {
+                        actions.Add(unitAoE);
+                        didPlanAoE = true;
+                        Main.Log($"[Overseer] Phase 4.97b: Unit-targeted AoE planned");
+                    }
+                }
+            }
+
+            // ══════════════════════════════════════════════════════════════
+            // Phase 5: Master Attack (SECONDARY)
+            // ★ v3.18.0: "안전한 원거리 공격만" → 근접/원거리 공통 공격
+            // ══════════════════════════════════════════════════════════════
+            bool didPlanAttack = didPlanAoE;  // ★ v3.18.0: AoE가 공격으로 인정
             // ★ v3.8.44: 공격 실패 이유 추적 (이동 Phase에 전달)
             var attackContext = new AttackPhaseContext();
             // ★ v3.9.28: 이동이 이미 계획됨 → AttackPlanner에 pending move 알림
@@ -537,6 +661,41 @@ namespace CompanionAI_v3.Planning.Plans
 
             // ★ v3.8.72: Hittable mismatch 사후 보정
             HandleHittableMismatch(situation, didPlanAttack, attackContext);
+
+            // ══════════════════════════════════════════════════════════════
+            // ★ v3.18.0: Phase 5.6 — GapCloser 폴백 (근접 오버시어)
+            // DPSPlan Phase 5.6 대응 — 일반 공격 실패 시 갭클로저로 돌파
+            // ══════════════════════════════════════════════════════════════
+            if (!didPlanAttack && !situation.PrefersRanged && situation.NearestEnemy != null)
+            {
+                Main.Log($"[Overseer] Phase 5.6: Trying GapCloser fallback");
+                PlannedAction gcPreMove;
+                var gc = PlanGapCloser(situation, situation.NearestEnemy,
+                    ref remainingAP, ref remainingMP, out gcPreMove);
+                if (gc != null)
+                {
+                    if (gcPreMove != null) actions.Add(gcPreMove);
+                    actions.Add(gc);
+                    didPlanAttack = true;
+                    Main.Log($"[Overseer] Phase 5.6: GapCloser fallback success" +
+                        (gcPreMove != null ? " (walk+jump)" : ""));
+                }
+            }
+
+            // ══════════════════════════════════════════════════════════════
+            // ★ v3.18.0: Phase 5.7 — Self-AoE 피니셔 (BladeDance 등)
+            // ClearMP이므로 공격 후 사용. 근접/원거리 공통.
+            // ══════════════════════════════════════════════════════════════
+            if (remainingAP >= 1f)
+            {
+                var selfAoE = PlanSelfTargetedAoE(situation, ref remainingAP);
+                if (selfAoE != null)
+                {
+                    actions.Add(selfAoE);
+                    didPlanAttack = true;
+                    Main.Log($"[Overseer] Phase 5.7: Self-AoE finisher");
+                }
+            }
 
             // ══════════════════════════════════════════════════════════════
             // Phase 6: PostAction (Run and Gun 등)
@@ -672,11 +831,12 @@ namespace CompanionAI_v3.Planning.Plans
 
                 if (needsSafeRetreat)
                 {
-                    var safeRetreatAction = PlanPostActionSafeRetreat(situation);
+                    // ★ v3.18.0: PlanOverseerRetreat 사용 → 사역마 사거리 내 후퇴
+                    var safeRetreatAction = PlanOverseerRetreat(situation, remainingMP);
                     if (safeRetreatAction != null)
                     {
                         actions.Add(safeRetreatAction);
-                        Main.Log($"[Overseer] Phase 8.5: Post-action safe retreat: {retreatReason}");
+                        Main.Log($"[Overseer] Phase 8.5: Safe retreat within familiar range: {retreatReason}");
                     }
                 }
             }

@@ -138,6 +138,11 @@ namespace CompanionAI_v3.Core
                     // 버프만 (CanTargetFriends) — 디버프(감각 박탈 등)는 coverage에서 제외
                     if (!abilityData.Blueprint.CanTargetFriends) continue;
 
+                    // ★ v3.18.8: CanTargetEnemies=true → 디버프 (허약 등) → coverage에서 제외
+                    // 허약: CanTargetFriends=true, CanTargetEnemies=true → 적 대상 AoE 디버프
+                    // 강철 팔: CanTargetFriends=true, CanTargetEnemies=false → 아군 버프
+                    if (abilityData.Blueprint.CanTargetEnemies) continue;
+
                     // Warp Relay 대상인지 확인 (사이킨 + 비피해 + 유닛 타겟)
                     if (!FamiliarAbilities.IsWarpRelayTarget(abilityData)) continue;
 

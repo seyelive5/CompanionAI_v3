@@ -113,8 +113,9 @@ namespace CompanionAI_v3.Planning.Planners
         /// ★ v3.1.24: 첫 타겟 실패 시 다른 적 타겟도 시도
         /// ★ v3.5.34: MP 비용 예측 추가 - 실제 타일 경로 기반 계산
         /// </summary>
-        public static PlannedAction PlanGapCloser(Situation situation, BaseUnitEntity target, ref float remainingAP, ref float remainingMP, string roleName)
+        public static PlannedAction PlanGapCloser(Situation situation, BaseUnitEntity target, ref float remainingAP, ref float remainingMP, string roleName, out PlannedAction preMoveAction)
         {
+            preMoveAction = null;
             // ★ v3.0.87: 진입 로깅
             if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanGapCloser: target={target?.CharacterName}, AP={remainingAP:F1}, MP={remainingMP:F1}, attacks={situation.AvailableAttacks?.Count ?? 0}");
 
@@ -264,17 +265,97 @@ namespace CompanionAI_v3.Planning.Planners
                 }
             }
 
+            // ★ v3.16.6: Walk + GapCloser 콤보 — 직접 점프 실패 시, 걸어가서 점프 시도
+            // Death from Above (range=3) 같은 단거리 갭클로저가 먼 적에게 도달하는 핵심 경로
+            if (gapClosers.Count > 0 && remainingMP > 0 && situation.CurrentMP > 0)
+            {
+                foreach (var gapCloser in gapClosers)
+                {
+                    float cost = CombatAPI.GetAbilityAPCost(gapCloser);
+                    if (cost > remainingAP) continue;
+
+                    var info = AbilityDatabase.GetInfo(gapCloser);
+                    bool isPointTarget = info != null && (info.Flags & AbilityFlags.PointTarget) != 0;
+                    if (!isPointTarget) continue;  // Walk+Jump은 PointTarget 전용
+
+                    float gcRange = CombatAPI.GetAbilityRangeInTiles(gapCloser);
+                    float maxReachWithWalk = gcRange + remainingMP + 1;  // +1 for adjacency
+
+                    foreach (var candidateTarget in situation.Enemies)
+                    {
+                        if (candidateTarget == null || !candidateTarget.IsConscious) continue;
+                        float dist = CombatCache.GetDistanceInTiles(situation.Unit, candidateTarget);
+
+                        // 직접 점프로 도달 가능했으면 이미 위에서 처리됨
+                        if (dist <= gcRange + 2) continue;
+                        // Walk+Jump으로도 도달 불가
+                        if (dist > maxReachWithWalk) continue;
+
+                        // 적에게서 gcRange+1 타일 거리의 접근 위치 찾기
+                        float approachRange = gcRange + 1;
+                        AIRole role = situation.CharacterSettings?.Role ?? AIRole.Auto;
+                        var walkDest = MovementAPI.FindMeleeAttackPositionSync(
+                            situation.Unit, candidateTarget, approachRange, 0f,
+                            situation.InfluenceMap, role,
+                            situation.PredictiveThreatMap, null, situation.Enemies);
+
+                        if (walkDest == null) continue;
+
+                        // 도보 거리 검증
+                        float walkDist = CombatAPI.MetersToTiles(Vector3.Distance(situation.Unit.Position, walkDest.Position));
+                        if (walkDist > remainingMP) continue;
+
+                        // 접근 위치에서 착지 지점 찾기 (casterOverridePosition 사용)
+                        var landing = FindGapCloserLandingPosition(
+                            situation.Unit, candidateTarget, gapCloser, situation, walkDest.Position);
+
+                        if (!landing.HasValue) continue;
+
+                        // 성공! Walk + GapCloser 콤보 생성
+                        preMoveAction = PlannedAction.Move(walkDest.Position, $"Approach for {gapCloser.Name}");
+                        remainingAP -= cost;
+                        remainingMP -= walkDist;
+                        if (remainingMP < 0) remainingMP = 0;
+
+                        Main.Log($"[{roleName}] ★ Walk+GapCloser: walk {walkDist:F1} tiles → {gapCloser.Name} → near {candidateTarget.CharacterName} (dist={dist:F1}, gcRange={gcRange:F0})");
+                        return PlannedAction.PositionalAttack(gapCloser, landing.Value, $"Jump to {candidateTarget.CharacterName} after walk", cost);
+                    }
+                }
+            }
+
             if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanGapCloser: All GapClosers failed on all targets");
             return null;
         }
 
         /// <summary>
         /// ★ v3.5.34: PlanGapCloser 오버로드 (remainingMP 없는 버전 - 레거시 호환)
+        /// ★ v3.16.6: out preMoveAction 추가
         /// </summary>
         public static PlannedAction PlanGapCloser(Situation situation, BaseUnitEntity target, ref float remainingAP, string roleName)
         {
             float remainingMP = situation.CurrentMP;
-            return PlanGapCloser(situation, target, ref remainingAP, ref remainingMP, roleName);
+            PlannedAction preMove;
+            return PlanGapCloser(situation, target, ref remainingAP, ref remainingMP, roleName, out preMove);
+        }
+
+        /// <summary>
+        /// ★ v3.16.6: 5-param overload (Walk+Jump 미지원 — PlanMoveOrGapCloser 등에서 사용)
+        /// Walk+Jump 콤보 결과는 무시하고 직접 점프만 반환
+        /// </summary>
+        public static PlannedAction PlanGapCloser(Situation situation, BaseUnitEntity target, ref float remainingAP, ref float remainingMP, string roleName)
+        {
+            float savedAP = remainingAP;
+            float savedMP = remainingMP;
+            PlannedAction preMove;
+            var result = PlanGapCloser(situation, target, ref remainingAP, ref remainingMP, roleName, out preMove);
+            if (preMove != null)
+            {
+                // Walk+Jump combo는 이 오버로드에서 미지원 — AP/MP 복원 후 null 반환
+                remainingAP = savedAP;
+                remainingMP = savedMP;
+                return null;
+            }
+            return result;
         }
 
         /// <summary>
@@ -285,14 +366,20 @@ namespace CompanionAI_v3.Planning.Planners
         /// 핵심: DeathFromAbove 등 Point 타겟 GapCloser는 적 위치가 아닌
         /// 적 주변 1타일 바깥의 빈 셀에 착지해야 함
         /// </summary>
-        private static Vector3? FindGapCloserLandingPosition(BaseUnitEntity unit, BaseUnitEntity target, AbilityData gapCloserAbility, Situation situation = null)
+        private static Vector3? FindGapCloserLandingPosition(BaseUnitEntity unit, BaseUnitEntity target, AbilityData gapCloserAbility, Situation situation = null, Vector3? casterOverridePosition = null)
         {
             // ★ v3.5.98: 능력 범위 확인 (타일 단위)
             float abilityRange = CombatAPI.GetAbilityRangeInTiles(gapCloserAbility);
             if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] FindGapCloserLanding: ability={gapCloserAbility.Name}, range={abilityRange:F1} tiles");
 
+            // ★ v3.16.6: 캐스터 위치 오버라이드 (Walk+Jump 콤보용)
+            Vector3 effectiveCasterPos = casterOverridePosition ?? unit.Position;
+
             // ★ v3.5.98: 타일 단위로 변환
-            float targetDistance = CombatCache.GetDistanceInTiles(unit, target);
+            // ★ v3.16.6: 오버라이드 위치 기반 거리 계산
+            float targetDistance = casterOverridePosition.HasValue
+                ? CombatAPI.MetersToTiles(Vector3.Distance(effectiveCasterPos, target.Position))
+                : CombatCache.GetDistanceInTiles(unit, target);
 
             // ★ v3.5.98: 적이 너무 멀면 갭클로저 사용 안 함
             float meleeAttackRange = 2f;  // 타일
@@ -355,6 +442,11 @@ namespace CompanionAI_v3.Planning.Planners
                     if (node.TryGetUnit(out var occupant) && occupant != null && occupant.IsConscious && occupant != unit)
                         continue;
 
+                    // ★ v3.16.6: 캐스터 자신이 점유한 노드 제외 (AbilityTargetEmptyCell 충돌 방지)
+                    // 캐스터가 이미 서 있는 위치에는 착지 불가 (게임 제한: 빈 셀만 타겟 가능)
+                    if (!casterOverridePosition.HasValue && unit.GetOccupiedNodes().Contains(node))
+                        continue;
+
                     // ★ v3.7.63: BattlefieldGrid 검증 추가
                     if (!BattlefieldGrid.Instance.ValidateNode(unit, node))
                         continue;
@@ -362,7 +454,8 @@ namespace CompanionAI_v3.Planning.Planners
                     Vector3 nodePos = node.Vector3Position;
 
                     // ★ 능력 사거리 체크 (캐스터 → 착지 위치)
-                    float distFromCaster = CombatAPI.MetersToTiles(Vector3.Distance(unit.Position, nodePos));
+                    // ★ v3.16.6: 오버라이드 위치 기반 거리 계산
+                    float distFromCaster = CombatAPI.MetersToTiles(Vector3.Distance(effectiveCasterPos, nodePos));
                     if (distFromCaster > abilityRange)
                     {
                         if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] Node at ({nodePos.x:F1},{nodePos.z:F1}) out of ability range ({distFromCaster:F1} > {abilityRange:F1})");
@@ -406,7 +499,7 @@ namespace CompanionAI_v3.Planning.Planners
 
             if (meleePosition != null)
             {
-                float distToLandingTiles = CombatAPI.MetersToTiles(Vector3.Distance(unit.Position, meleePosition.Position));
+                float distToLandingTiles = CombatAPI.MetersToTiles(Vector3.Distance(effectiveCasterPos, meleePosition.Position));
                 if (distToLandingTiles <= abilityRange)
                 {
                     if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] FindGapCloserLanding (fallback): melee position at dist={distToLandingTiles:F1} tiles");

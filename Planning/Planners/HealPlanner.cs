@@ -138,7 +138,8 @@ namespace CompanionAI_v3.Planning.Planners
         public static BaseUnitEntity FindWoundedAlly(Situation situation, float threshold)
         {
             var allTargets = new List<BaseUnitEntity>();
-            allTargets.AddRange(situation.Allies.Where(a => a != null && !a.LifeState.IsDead));
+            // ★ v3.18.4: CombatantAllies 사용 (사역마 제외)
+            allTargets.AddRange(situation.CombatantAllies.Where(a => a != null && !a.LifeState.IsDead));
 
             // 본인도 힐 대상에 포함
             if (!allTargets.Contains(situation.Unit))
@@ -174,7 +175,8 @@ namespace CompanionAI_v3.Planning.Planners
 
                 // ★ v3.1.21: TargetScorer로 최적 버프 대상 선택
                 // 이미 버프가 있는 아군 제외
-                var candidates = situation.Allies
+                // ★ v3.18.4: CombatantAllies 사용 (사역마 제외)
+                var candidates = situation.CombatantAllies
                     .Where(a => a != null && !a.LifeState.IsDead)
                     .Where(a => !AllyStateCache.HasBuff(a, buff))
                     .ToList();

@@ -187,13 +187,14 @@ namespace CompanionAI_v3.Planning.Planners
         /// </summary>
         private static BaseUnitEntity SelectBestAllyForUltimate(Situation situation)
         {
-            if (situation.Allies == null || situation.Allies.Count == 0)
+            // ★ v3.18.4: CombatantAllies 사용 (사역마 제외)
+            if (situation.CombatantAllies == null || situation.CombatantAllies.Count == 0)
                 return null;
 
             BaseUnitEntity bestAlly = null;
             float bestScore = float.MinValue;
 
-            foreach (var ally in situation.Allies)
+            foreach (var ally in situation.CombatantAllies)
             {
                 if (ally == null || !ally.IsConscious) continue;
                 if (ally == situation.Unit) continue;  // 자기 자신 제외
@@ -255,6 +256,7 @@ namespace CompanionAI_v3.Planning.Planners
             else
             {
                 // 지원형 구역: 아군이 가장 많이 모인 위치
+                // ★ v3.18.6: Allies 사용 — AoE 궁극기 위치 최적화에 사역마 포함 (커버리지 극대화)
                 var allies = situation.Allies?.Where(a => a != null && a.IsConscious).ToList();
                 if (allies == null || allies.Count == 0) return null;
 
@@ -466,13 +468,14 @@ namespace CompanionAI_v3.Planning.Planners
         /// </summary>
         private static BaseUnitEntity FindAllyNeedingProtection(Situation situation)
         {
-            if (situation.Allies == null || situation.Allies.Count == 0)
+            // ★ v3.18.4: CombatantAllies 사용 (사역마 제외)
+            if (situation.CombatantAllies == null || situation.CombatantAllies.Count == 0)
                 return null;
 
             BaseUnitEntity bestAlly = null;
             float bestScore = float.MinValue;
 
-            foreach (var ally in situation.Allies)
+            foreach (var ally in situation.CombatantAllies)
             {
                 if (ally == situation.Unit) continue;  // 자기 자신 제외
                 if (!ally.IsConscious) continue;
@@ -562,6 +565,13 @@ namespace CompanionAI_v3.Planning.Planners
                 string reason;
                 if (CombatAPI.CanUseAbilityOn(debuff, targetWrapper, out reason))
                 {
+                    // ★ v3.18.4: AoE 안전성 체크 (아군 피해 방지)
+                    if (!CombatHelpers.IsAttackSafeForTarget(debuff, situation.Unit, target, situation.Allies))
+                    {
+                        Main.Log($"[{roleName}] Debuff SKIPPED (AoE unsafe): {debuff.Name} -> {target.CharacterName}");
+                        continue;
+                    }
+
                     remainingAP -= cost;
                     Main.Log($"[{roleName}] Debuff: {debuff.Name} -> {target.CharacterName}");
                     return PlannedAction.Debuff(debuff, target, $"Debuff {target.CharacterName}", cost);
@@ -665,7 +675,8 @@ namespace CompanionAI_v3.Planning.Planners
             var positionalBuffs = situation.AvailablePositionalBuffs;
             if (positionalBuffs == null || positionalBuffs.Count == 0) return null;
 
-            var allies = situation.Allies.Where(a => a != null && !a.LifeState.IsDead).ToList();
+            // ★ v3.18.4: CombatantAllies 사용 (사역마 제외)
+            var allies = situation.CombatantAllies.Where(a => a != null && !a.LifeState.IsDead).ToList();
             allies.Add(situation.Unit);
 
             if (allies.Count == 0) return null;
@@ -1020,9 +1031,10 @@ namespace CompanionAI_v3.Planning.Planners
                     // ★ v3.6.2: 존 내 유닛 수 계산 - 타일 단위로 통일
                     int allyCount = 0, enemyCount = 0, lowHPAllyCount = 0;
 
-                    if (situation.Allies != null)
+                    // ★ v3.18.4: CombatantAllies 사용 (사역마 제외)
+                    if (situation.CombatantAllies != null)
                     {
-                        foreach (var ally in situation.Allies)
+                        foreach (var ally in situation.CombatantAllies)
                         {
                             if (ally == null || ally.LifeState.IsDead) continue;
                             float distTiles = CombatAPI.MetersToTiles(Vector3.Distance(ally.Position, zonePos));
