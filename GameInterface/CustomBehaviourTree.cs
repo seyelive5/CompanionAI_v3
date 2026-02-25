@@ -113,6 +113,17 @@ namespace CompanionAI_v3.GameInterface
                 // CompanionAI 대상 유닛인지 확인
                 if (!TurnOrchestrator.Instance.ShouldControl(unit))
                 {
+                    // ★ v3.21.2: 아군 사역마(IsPet)가 자기 턴에 이동할 때 카메라 추적
+                    // AI 제어 대상은 아니지만, 게임이 사역마를 움직일 때 플레이어가 볼 수 있도록
+                    if (unit.IsPet && unit.Master?.IsPlayerFaction == true)
+                    {
+                        try
+                        {
+                            if (Kingmaker.Settings.SettingsRoot.Game.TurnBased.CameraScrollToCurrentUnit.GetValue())
+                                Game.Instance.CameraController?.Follower?.Follow(unit);
+                        }
+                        catch (Exception) { /* 카메라 실패가 AI를 중단시키지 않도록 */ }
+                    }
                     return;
                 }
 
