@@ -565,7 +565,7 @@ namespace CompanionAI_v3.Analysis
             var aoeConfig = AIConfig.GetAoEConfig();
             int maxPlayerAlliesHit = aoeConfig?.MaxPlayerAlliesHit ?? 1;
             // ★ v3.8.94: playerAllyPenalty 제거 — 허용 범위 내 감점 없음, 초과 시만 차단
-            float npcAllyPenalty = aoeConfig?.ClusterNpcAllyPenalty ?? 20f;
+            float npcAllyPenalty = SC.AoEClusterNpcAllyPenalty;
 
             int playerPartyAlliesInRange = 0;
 

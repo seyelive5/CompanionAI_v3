@@ -46,9 +46,8 @@ namespace CompanionAI_v3.GameInterface
             float aoERadius = CombatAPI.GetAoERadius(ability);
             if (aoERadius <= 0) aoERadius = 3f;
 
-            // ★ v3.5.76: 설정에서 스코어링 파라미터 로드
             var aoeConfig = AIConfig.GetAoEConfig();
-            float HIT_SCORE = aoeConfig.EnemyHitScore;
+            float HIT_SCORE = SC.AoEEnemyHitScore;
 
             float totalScore = 0f;
             int playerPartyAlliesHit = 0;
@@ -79,12 +78,10 @@ namespace CompanionAI_v3.GameInterface
                         // 아군 체크
                         score.AlliesHit++;
 
-                        // ★ v3.5.76: 플레이어 파티 아군 - 설정 기반 제어
                         if (!caster.IsPlayerEnemy && unit.IsInPlayerParty)
                         {
                             playerPartyAlliesHit++;
 
-                            // 설정된 최대 허용 수 초과 시 거부
                             if (playerPartyAlliesHit > aoeConfig.MaxPlayerAlliesHit)
                             {
                                 score.IsSafe = false;
@@ -93,19 +90,18 @@ namespace CompanionAI_v3.GameInterface
                                 return score;
                             }
 
-                            // 설정된 배수로 페널티 적용 (기존 3.0 → 기본 2.0)
-                            totalScore -= aoeConfig.PlayerAllyPenaltyMultiplier * HIT_SCORE;
-                            CompanionAI_v3.Main.LogDebug($"[AOE] Player party ally in range: {unit.CharacterName} - penalty {aoeConfig.PlayerAllyPenaltyMultiplier}x applied");
+                            totalScore -= SC.AoEPlayerAllyPenaltyMult * HIT_SCORE;
+                            CompanionAI_v3.Main.LogDebug($"[AOE] Player party ally in range: {unit.CharacterName} - penalty {SC.AoEPlayerAllyPenaltyMult}x applied");
                             continue;  // NPC 페널티 중복 적용 방지
                         }
 
-                        // NPC 아군: 설정된 배수 페널티
-                        totalScore -= aoeConfig.NpcAllyPenaltyMultiplier * HIT_SCORE;
+                        // NPC 아군 페널티
+                        totalScore -= SC.AoENpcAllyPenaltyMult * HIT_SCORE;
                     }
                     else if (unit == caster)
                     {
-                        // 캐스터 자신: 설정된 배수 페널티
-                        totalScore -= aoeConfig.CasterSelfPenaltyMultiplier * HIT_SCORE;
+                        // 캐스터 자신 페널티
+                        totalScore -= SC.AoECasterSelfPenaltyMult * HIT_SCORE;
                         score.AlliesHit++;
                     }
                 }
@@ -783,9 +779,8 @@ namespace CompanionAI_v3.GameInterface
                 IsSafe = true
             };
 
-            // ★ v3.5.76: 설정에서 스코어링 파라미터 로드
             var aoeConfig = AIConfig.GetAoEConfig();
-            float HIT_SCORE = aoeConfig.EnemyHitScore;
+            float HIT_SCORE = SC.AoEEnemyHitScore;
             float totalScore = 0f;
             int playerPartyAlliesHit = 0;
 
@@ -820,12 +815,10 @@ namespace CompanionAI_v3.GameInterface
                     {
                         score.AlliesHit++;
 
-                        // ★ v3.5.76: 플레이어 파티 아군 - 설정 기반 제어
                         if (!caster.IsPlayerEnemy && unit.IsInPlayerParty)
                         {
                             playerPartyAlliesHit++;
 
-                            // 설정된 최대 허용 수 초과 시 거부
                             if (playerPartyAlliesHit > aoeConfig.MaxPlayerAlliesHit)
                             {
                                 score.IsSafe = false;
@@ -833,13 +826,12 @@ namespace CompanionAI_v3.GameInterface
                                 return score;
                             }
 
-                            // 설정된 배수로 페널티 적용
-                            totalScore -= aoeConfig.PlayerAllyPenaltyMultiplier * HIT_SCORE;
-                            CompanionAI_v3.Main.LogDebug($"[AOE] Player party ally in directional pattern: {unit.CharacterName} - penalty {aoeConfig.PlayerAllyPenaltyMultiplier}x applied");
+                            totalScore -= SC.AoEPlayerAllyPenaltyMult * HIT_SCORE;
+                            CompanionAI_v3.Main.LogDebug($"[AOE] Player party ally in directional pattern: {unit.CharacterName} - penalty {SC.AoEPlayerAllyPenaltyMult}x applied");
                             continue;  // NPC 페널티 중복 적용 방지
                         }
 
-                        totalScore -= aoeConfig.NpcAllyPenaltyMultiplier * HIT_SCORE;
+                        totalScore -= SC.AoENpcAllyPenaltyMult * HIT_SCORE;
                     }
                 }
                 catch
@@ -884,7 +876,7 @@ namespace CompanionAI_v3.GameInterface
             };
 
             var aoeConfig = AIConfig.GetAoEConfig();
-            float HIT_SCORE = aoeConfig.EnemyHitScore;
+            float HIT_SCORE = SC.AoEEnemyHitScore;
             float totalScore = 0f;
             int playerPartyAlliesHit = 0;
 
@@ -929,11 +921,11 @@ namespace CompanionAI_v3.GameInterface
                                 return score;
                             }
 
-                            totalScore -= aoeConfig.PlayerAllyPenaltyMultiplier * HIT_SCORE;
+                            totalScore -= SC.AoEPlayerAllyPenaltyMult * HIT_SCORE;
                             continue;
                         }
 
-                        totalScore -= aoeConfig.NpcAllyPenaltyMultiplier * HIT_SCORE;
+                        totalScore -= SC.AoENpcAllyPenaltyMult * HIT_SCORE;
                     }
                 }
                 catch

@@ -116,8 +116,6 @@ namespace CompanionAI_v3.Analysis
         /// </summary>
         public static CombatPhase DetectPhase(Situation situation)
         {
-            var t = AIConfig.GetThresholds();
-
             // ★ v3.0.46: 아군 평균 HP 계산 (LifeState null 체크 추가)
             float allyAvgHP = 100f;
             if (situation.Allies != null && situation.Allies.Count > 0)
@@ -129,17 +127,16 @@ namespace CompanionAI_v3.Analysis
                     .Average();
             }
 
-            // ★ v3.5.00: ThresholdConfig에서 임계값 읽기
             // 위기 상황: 아군 평균 HP가 낮거나 본인 HP가 위험
-            if (allyAvgHP < t.DesperatePhaseHP || situation.HPPercent < t.DesperateSelfHP)
+            if (allyAvgHP < SC.DesperatePhaseHP || situation.HPPercent < SC.DesperateSelfHP)
                 return CombatPhase.Desperate;
 
             // 정리 단계: 적 수가 기준 이하
-            if ((situation.Enemies?.Count ?? 0) <= t.CleanupEnemyCount)
+            if ((situation.Enemies?.Count ?? 0) <= SC.CleanupEnemyCount)
                 return CombatPhase.Cleanup;
 
             // 초반: 첫 턴 또는 버프 전
-            if (!situation.HasBuffedThisTurn && !situation.HasAttackedThisTurn && situation.CurrentAP >= t.OpeningPhaseMinAP)
+            if (!situation.HasBuffedThisTurn && !situation.HasAttackedThisTurn && situation.CurrentAP >= SC.OpeningPhaseMinAP)
                 return CombatPhase.Opening;
 
             return CombatPhase.Midgame;
@@ -189,14 +186,12 @@ namespace CompanionAI_v3.Analysis
             var timing = AbilityDatabase.GetTiming(buff);
             var phase = DetectPhase(situation);
 
-            var sc = AIConfig.GetScoringConfig();
-
             switch (timing)
             {
                 case AbilityTiming.PreCombatBuff:
                     // 초반에 선제 버프 높은 점수
-                    if (phase == CombatPhase.Opening) score += sc.PreCombatOpeningBonus;
-                    else if (phase == CombatPhase.Cleanup) score -= sc.PreCombatCleanupPenalty;  // 정리 단계에선 불필요
+                    if (phase == CombatPhase.Opening) score += SC.PreCombatOpeningBonus;
+                    else if (phase == CombatPhase.Cleanup) score -= SC.PreCombatCleanupPenalty;  // 정리 단계에선 불필요
                     break;
 
                 case AbilityTiming.PreAttackBuff:
@@ -209,11 +204,11 @@ namespace CompanionAI_v3.Analysis
                     }
                     else if (situation.HasHittableEnemies)
                     {
-                        score += sc.PreAttackHittableBonus;
+                        score += SC.PreAttackHittableBonus;
                     }
                     else
                     {
-                        score -= sc.PreAttackNoEnemyPenalty;  // 적이 범위 밖
+                        score -= SC.PreAttackNoEnemyPenalty;  // 적이 범위 밖
                     }
                     break;
 
@@ -247,27 +242,23 @@ namespace CompanionAI_v3.Analysis
                     break;
 
                 case AbilityTiming.SelfDamage:
-                    // ★ v3.5.00: ThresholdConfig 적용
-                    var selfDmgThresholds = AIConfig.GetThresholds();
                     // HP가 충분할 때만
-                    if (situation.HPPercent >= selfDmgThresholds.SelfDamageMinHP) score += SELF_DAMAGE_HP_BONUS;
-                    else if (situation.HPPercent < selfDmgThresholds.PreAttackBuffMinHP) score -= SELF_DAMAGE_LOW_HP_PENALTY;
+                    if (situation.HPPercent >= SC.SelfDamageMinHP) score += SELF_DAMAGE_HP_BONUS;
+                    else if (situation.HPPercent < SC.PreAttackBuffMinHP) score -= SELF_DAMAGE_LOW_HP_PENALTY;
                     break;
 
                 case AbilityTiming.Emergency:
                     // 위기 상황에서 높은 점수
-                    if (phase == CombatPhase.Desperate) score += sc.EmergencyDesperateBonus;
-                    else score -= sc.EmergencyNonDesperatePenalty;
+                    if (phase == CombatPhase.Desperate) score += SC.EmergencyDesperateBonus;
+                    else score -= SC.EmergencyNonDesperatePenalty;
                     break;
 
                 case AbilityTiming.Taunt:
-                    // ★ v3.5.00: ThresholdConfig 적용
-                    var tauntThresholds = AIConfig.GetThresholds();
                     // 근접 적 다수일 때
                     int nearbyEnemies = situation.Enemies?.Count(e =>
-                        e != null && CombatAPI.GetDistance(situation.Unit, e) <= tauntThresholds.ThreatProximity) ?? 0;
-                    if (nearbyEnemies >= 2) score += sc.TauntNearEnemiesBonus;
-                    else score -= sc.TauntFewEnemiesPenalty;
+                        e != null && CombatAPI.GetDistance(situation.Unit, e) <= SC.ThreatProximity) ?? 0;
+                    if (nearbyEnemies >= 2) score += SC.TauntNearEnemiesBonus;
+                    else score -= SC.TauntFewEnemiesPenalty;
                     break;
 
                 case AbilityTiming.PostFirstAction:
@@ -327,13 +318,13 @@ namespace CompanionAI_v3.Analysis
             switch (phase)
             {
                 case CombatPhase.Opening:
-                    score *= sc.OpeningPhaseBuffMult;  // 초반엔 버프 가중치 UP
+                    score *= SC.OpeningPhaseBuffMult;
                     break;
                 case CombatPhase.Cleanup:
-                    score *= sc.CleanupPhaseBuffMult;  // 정리 단계엔 버프 가중치 DOWN
+                    score *= SC.CleanupPhaseBuffMult;
                     break;
                 case CombatPhase.Desperate:
-                    if (!IsDefensiveBuff(buff)) score *= sc.DesperateNonDefMult;  // 위기엔 방어 버프만
+                    if (!IsDefensiveBuff(buff)) score *= SC.DesperateNonDefMult;
                     break;
             }
 
@@ -587,8 +578,6 @@ namespace CompanionAI_v3.Analysis
 
             // ★ v3.0.56: ClearMPAfterUse + 위험 상황 = 대폭 감점
             // 이 능력 사용 후 이동 불가 → 위험 상황에서 사용하면 위험
-            var scAtk = AIConfig.GetScoringConfig();
-
             bool clearsMPAfterUse = CombatAPI.AbilityClearsMPAfterUse(attack, situation.Unit);  // ★ v3.8.88: 유닛 특성 고려
             if (clearsMPAfterUse)
             {
@@ -598,7 +587,7 @@ namespace CompanionAI_v3.Analysis
                 // 위험 상황 (적이 가까움) + MP 클리어 능력 = 감점
                 if (situation.IsInDanger)
                 {
-                    float dangerPenalty = scAtk.ClearMPDangerBase * safetyWeight;  // Support는 -48점, Tank는 -12점
+                    float dangerPenalty = SC.ClearMPDangerBase * safetyWeight;  // Support는 -48점, Tank는 -12점
                     score -= dangerPenalty;
                     Main.LogDebug($"[UtilityScorer] {attack.Name}: ClearMP + InDanger penalty={dangerPenalty:F0} (safetyWeight={safetyWeight:F1})");
                 }
@@ -759,27 +748,25 @@ namespace CompanionAI_v3.Analysis
 
                     if (hasHardCC)
                     {
-                        score += scAtk.HardCCExploitBonus;
-                        Main.LogDebug($"[UtilityScorer] +{scAtk.HardCCExploitBonus:F0} HardCC exploit: {target.CharacterName}");
+                        score += SC.HardCCExploitBonus;
+                        Main.LogDebug($"[UtilityScorer] +{SC.HardCCExploitBonus:F0} HardCC exploit: {target.CharacterName}");
                     }
                     if (hasDOT)
                     {
-                        score += scAtk.DOTFollowUpBonus;
-                        Main.LogDebug($"[UtilityScorer] +{scAtk.DOTFollowUpBonus:F0} DOT follow-up: {target.CharacterName}");
+                        score += SC.DOTFollowUpBonus;
+                        Main.LogDebug($"[UtilityScorer] +{SC.DOTFollowUpBonus:F0} DOT follow-up: {target.CharacterName}");
                     }
                 }
             }
             catch (Exception ex) { Main.LogDebug($"[UtilityScorer] {ex.Message}"); }
 
             // ★ 특수 타이밍 고려
-            // ★ v3.5.00: ThresholdConfig 적용
-            var attackThresholds = AIConfig.GetThresholds();
             var timing = AbilityDatabase.GetTiming(attack);
             float targetHPPercent = CombatCache.GetHPPercent(target);
 
             if (timing == AbilityTiming.Finisher)
             {
-                if (targetHPPercent <= attackThresholds.FinisherTargetHP) score += FINISHER_VALID_BONUS;  // 마무리 대상
+                if (targetHPPercent <= SC.FinisherTargetHP) score += FINISHER_VALID_BONUS;  // 마무리 대상
                 else score -= FINISHER_INVALID_PENALTY;  // 마무리 아니면 비효율
             }
 
@@ -804,9 +791,9 @@ namespace CompanionAI_v3.Analysis
                 if (enemiesInPattern >= 2)
                 {
                     int additionalEnemies = enemiesInPattern - 1;
-                    score += additionalEnemies * scAtk.AoEBonusPerEnemy;       // 추가 적당 보너스
+                    score += additionalEnemies * SC.AoEBonusPerEnemy;       // 추가 적당 보너스
                     Main.LogDebug($"[UtilityScorer] AOE {attack.Name} -> {target.CharacterName}: " +
-                        $"hits {enemiesInPattern} enemies (+{additionalEnemies} additional) = +{additionalEnemies * scAtk.AoEBonusPerEnemy:F0}");
+                        $"hits {enemiesInPattern} enemies (+{additionalEnemies} additional) = +{additionalEnemies * SC.AoEBonusPerEnemy:F0}");
                 }
             }
 
@@ -940,7 +927,6 @@ namespace CompanionAI_v3.Analysis
         /// </summary>
         private static float EvaluateThreat(BaseUnitEntity target, Situation situation)
         {
-            var t = AIConfig.GetThresholds();
             float threat = THREAT_BASE;
 
             // 데미지 딜러 판단 (대략적)
@@ -960,11 +946,11 @@ namespace CompanionAI_v3.Analysis
 
             // 가까이 있으면 더 위협적
             float distance = CombatAPI.GetDistance(situation.Unit, target);
-            if (distance <= t.ThreatProximity) threat += THREAT_PROXIMITY_BONUS;
+            if (distance <= SC.ThreatProximity) threat += THREAT_PROXIMITY_BONUS;
 
             // HP 낮은 적은 덜 위협적 (곧 죽음)
             float hpPercent = CombatCache.GetHPPercent(target);
-            if (hpPercent < t.LowThreatHP) threat -= THREAT_LOW_HP_REDUCTION;
+            if (hpPercent < SC.LowThreatHP) threat -= THREAT_LOW_HP_REDUCTION;
 
             return Math.Max(0f, Math.Min(1f, threat));
         }
@@ -1251,7 +1237,6 @@ namespace CompanionAI_v3.Analysis
         private static float CalculateSynergyBonus(List<PlannedAction> plan, Situation situation)
         {
             float bonus = 0f;
-            var sc = AIConfig.GetScoringConfig();
 
             bool hasBuff = plan.Any(a => a.Type == ActionType.Buff);
             bool hasAttack = plan.Any(a => a.Type == ActionType.Attack);
@@ -1262,24 +1247,24 @@ namespace CompanionAI_v3.Analysis
             {
                 var buff = plan.First(a => a.Type == ActionType.Buff);
                 if (IsOffensiveBuff(buff.Ability))
-                    bonus += sc.BuffAttackSynergy;  // 공격 버프 → 공격 시너지
+                    bonus += SC.BuffAttackSynergy;  // 공격 버프 → 공격 시너지
             }
 
             // 이동 + 공격 시너지 (갭클로저)
             if (hasMove && hasAttack)
-                bonus += sc.MoveAttackSynergy;
+                bonus += SC.MoveAttackSynergy;
 
             // 여러 공격 시너지 (연속 공격)
             int attackCount = plan.Count(a => a.Type == ActionType.Attack);
             if (attackCount >= 2)
-                bonus += attackCount * sc.MultiAttackPerAttack;
+                bonus += attackCount * SC.MultiAttackPerAttack;
 
             // ★ v3.8.46: 방어 버프 + 이동 시너지 (후퇴 콤보)
             if (hasBuff && hasMove)
             {
                 var buff = plan.First(a => a.Type == ActionType.Buff);
                 if (IsDefensiveBuff(buff.Ability))
-                    bonus += sc.DefenseRetreatSynergy;
+                    bonus += SC.DefenseRetreatSynergy;
             }
 
             // ★ v3.8.46: 킬 확정 / 거의 킬 시너지
@@ -1305,13 +1290,13 @@ namespace CompanionAI_v3.Analysis
 
                     if (ratio >= 1.0f)
                     {
-                        bonus += sc.KillConfirmSynergy;
-                        Main.LogDebug($"[UtilityScorer] Kill confirm synergy: +{sc.KillConfirmSynergy:F0} ({planTarget.CharacterName}, ratio={ratio:F2})");
+                        bonus += SC.KillConfirmSynergy;
+                        Main.LogDebug($"[UtilityScorer] Kill confirm synergy: +{SC.KillConfirmSynergy:F0} ({planTarget.CharacterName}, ratio={ratio:F2})");
                     }
                     else if (ratio >= 0.9f)
                     {
-                        bonus += sc.AlmostKillSynergy;
-                        Main.LogDebug($"[UtilityScorer] Almost-kill synergy: +{sc.AlmostKillSynergy:F0} ({planTarget.CharacterName}, ratio={ratio:F2})");
+                        bonus += SC.AlmostKillSynergy;
+                        Main.LogDebug($"[UtilityScorer] Almost-kill synergy: +{SC.AlmostKillSynergy:F0} ({planTarget.CharacterName}, ratio={ratio:F2})");
                     }
                 }
             }

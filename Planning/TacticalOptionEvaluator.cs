@@ -274,7 +274,9 @@ namespace CompanionAI_v3.Planning
             };
 
             // 이동 불가 → non-viable
-            if (!situation.CanMove && situation.CurrentMP <= 0)
+            // ★ v3.20.1: && → || 수정 — CanMove=false (구속) OR MP=0 중 하나라도 충족 시 비활성
+            // 기존 &&: 둘 다 true여야 비활성 → CanMove=false+MP=1인 구속 유닛도 MoveToAttack 시도 버그
+            if (!situation.CanMove || situation.CurrentMP <= 0)
             {
                 option.IsViable = false;
                 option.Score = -1000f;

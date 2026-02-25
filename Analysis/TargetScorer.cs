@@ -190,7 +190,6 @@ namespace CompanionAI_v3.Analysis
             catch { }
 
             var weights = GetEnemyWeights(role);
-            var t = AIConfig.GetThresholds();  // ★ v3.5.00: ThresholdConfig 적용
             float score = ENEMY_BASE_SCORE;
 
             try
@@ -205,8 +204,8 @@ namespace CompanionAI_v3.Analysis
                 float distance = CombatCache.GetDistance(situation.Unit, target);
                 float distanceScore = -distance * 2f;  // 거리 패널티
 
-                // Tank는 근접 보너스 (★ v3.5.00: ThresholdConfig)
-                if (role == AIRole.Tank && distance <= t.ThreatProximity)
+                // Tank는 근접 보너스
+                if (role == AIRole.Tank && distance <= SC.ThreatProximity)
                     distanceScore += ENEMY_TANK_PROXIMITY_BONUS;
 
                 score += distanceScore * weights.Distance;
@@ -301,7 +300,7 @@ namespace CompanionAI_v3.Analysis
                 var previousTarget = TeamBlackboard.Instance.GetPreviousTarget(situation.Unit?.UniqueId);
                 if (previousTarget != null && previousTarget == target)
                 {
-                    float inertiaBonus = AIConfig.GetScoringConfig().InertiaBonus;
+                    float inertiaBonus = SC.InertiaBonus;
                     score += inertiaBonus;
                     Main.LogDebug($"[TargetScorer] +{inertiaBonus:F0} Inertia: {target.CharacterName}");
                 }
@@ -517,14 +516,11 @@ namespace CompanionAI_v3.Analysis
 
             try
             {
-                var t = AIConfig.GetThresholds();  // ★ v3.5.00: ThresholdConfig 적용
-                var healThresholds = t.HealPriorityThresholds;
-
-                // 1. HP% (낮을수록 힐 우선) - ★ v3.5.00: 다단계 임계값
+                // 1. HP% (낮을수록 힐 우선) — 3단계 임계값
                 float hpPercent = CombatCache.GetHPPercent(ally);
-                if (hpPercent < healThresholds[0]) score += HEAL_CRITICAL_HP_BONUS * weights.HPPercent;       // 최우선 (기본 25%)
-                else if (hpPercent < healThresholds[1]) score += HEAL_HIGH_HP_BONUS * weights.HPPercent;  // 높음 (기본 50%)
-                else if (hpPercent < healThresholds[2]) score += HEAL_MODERATE_HP_BONUS * weights.HPPercent;  // 보통 (기본 75%)
+                if (hpPercent < SC.HealPriorityLow) score += HEAL_CRITICAL_HP_BONUS * weights.HPPercent;       // 최우선 (25%)
+                else if (hpPercent < SC.HealPriorityMid) score += HEAL_HIGH_HP_BONUS * weights.HPPercent;      // 높음   (50%)
+                else if (hpPercent < SC.HealPriorityHigh) score += HEAL_MODERATE_HP_BONUS * weights.HPPercent; // 보통   (75%)
                 else score -= HEAL_UNNEEDED_PENALTY;  // 힐 불필요
 
                 // 2. 거리 패널티
@@ -549,7 +545,7 @@ namespace CompanionAI_v3.Analysis
 
                 // 4. 위험 상태 (적과 가까움) - ★ v3.5.00: ThresholdConfig
                 float allyNearestEnemyDist = GetNearestEnemyDistance(ally, situation);
-                if (allyNearestEnemyDist < t.ThreatProximity)
+                if (allyNearestEnemyDist < SC.ThreatProximity)
                 {
                     score += HEAL_ALLY_DANGER_BONUS * weights.InDanger;
                 }
@@ -788,34 +784,27 @@ namespace CompanionAI_v3.Analysis
 
             try
             {
-                var t = AIConfig.GetThresholds();
-
                 // 1. Lethality (HP 기반) - Response Curve 적용
-                // API: CombatCache.GetHPPercent() ✅ 검증됨
                 float hpPercent = CombatCache.GetHPPercent(target);
                 float hpNormalized = hpPercent / 100f;  // 0~1 (0=빈사, 1=만피)
                 float lethalityScore = CurvePresets.EnemyLethality.Evaluate(hpNormalized);
-                threat += lethalityScore * t.LethalityWeight;
+                threat += lethalityScore * SC.LethalityWeight;
 
                 // 2. Proximity (거리 기반) - Response Curve 적용
-                // API: CombatCache.GetDistance() ✅ 검증됨
                 float distance = CombatCache.GetDistance(situation.Unit, target);
-                float maxRange = t.ThreatMaxDistance;
-                float proximityNormalized = 1f - Math.Min(1f, distance / maxRange);  // 0~1 (0=멀리, 1=가까이)
+                float proximityNormalized = 1f - Math.Min(1f, distance / SC.ThreatMaxDistance);  // 0~1 (0=멀리, 1=가까이)
                 float proximityScore = CurvePresets.EnemyProximity.Evaluate(proximityNormalized);
-                threat += proximityScore * t.ProximityWeight;
+                threat += proximityScore * SC.ProximityWeight;
 
-                // 3. RoleBonus (역할 기반) - 게임 API 직접 조회
-                // API: unit.Abilities.Enumerable ✅ 검증됨
+                // 3. RoleBonus (역할 기반)
                 if (IsHealer(target))
-                    threat += t.HealerRoleBonus;
+                    threat += SC.HealerRoleBonus;
                 if (IsCaster(target))
-                    threat += t.CasterRoleBonus;
+                    threat += SC.CasterRoleBonus;
 
-                // 무기 기반 보너스 (데미지 예측 대체)
-                // API: weapon.Blueprint.IsMelee ✅ 검증됨
+                // 무기 기반 보너스
                 if (HasRangedWeapon(target))
-                    threat += t.RangedWeaponBonus;
+                    threat += SC.RangedWeaponBonus;
             }
             catch (Exception ex)
             {
@@ -950,7 +939,6 @@ namespace CompanionAI_v3.Analysis
 
             try
             {
-                var t = AIConfig.GetThresholds();  // ★ v3.5.00: ThresholdConfig 적용
                 var role = GetUnitRole(ally);
 
                 switch (role)
@@ -964,9 +952,9 @@ namespace CompanionAI_v3.Analysis
                 if (ally == situation.Unit)
                     priority -= BUFF_SELF_PENALTY;
 
-                // 낮은 HP = 높은 우선순위 (보호 필요) - ★ v3.5.00: ThresholdConfig
+                // 낮은 HP = 높은 우선순위 (보호 필요)
                 float hpPercent = CombatCache.GetHPPercent(ally);
-                if (hpPercent < t.PreAttackBuffMinHP)
+                if (hpPercent < SC.PreAttackBuffMinHP)
                     priority += BUFF_LOW_HP_BONUS;
 
                 // ★ v3.9.16: 턴 순서 기반 버프 우선순위

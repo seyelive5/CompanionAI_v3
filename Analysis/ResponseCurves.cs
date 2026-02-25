@@ -470,40 +470,6 @@ namespace CompanionAI_v3.Analysis
         }
 
         /// <summary>
-        /// JSON 설정에서 곡선 로드 (있으면 덮어쓰기)
-        /// </summary>
-        public static void LoadFromConfig(Dictionary<string, CurveConfig> curves)
-        {
-            if (curves == null) return;
-
-            foreach (var kvp in curves)
-            {
-                var curve = kvp.Value.ToCurve();
-                if (curve == null) continue;
-
-                switch (kvp.Key.ToLower())
-                {
-                    case "damageratio": DamageRatio = curve; break;
-                    case "onehitkillbonus": OneHitKillBonus = curve; break;
-                    case "apefficiency": APEfficiency = curve; break;
-                    case "healurgency": HealUrgency = curve; break;
-                    case "selfhealbonus": SelfHealBonus = curve; break;
-                    case "hppriority": HPPriority = curve; break;
-                    case "threatbydistance": ThreatByDistance = curve; break;
-                    case "distancepenalty": DistancePenalty = curve; break;
-                    case "enemylethality": EnemyLethality = curve; break;
-                    case "enemyproximity": EnemyProximity = curve; break;
-                    case "safetybydistance": SafetyByDistance = curve; break;
-                    case "covervalue": CoverValue = curve; break;
-                    case "threatcountpenalty": ThreatCountPenalty = curve; break;
-                    case "buffapcost": BuffAPCost = curve; break;
-                }
-            }
-
-            Main.Log($"[ResponseCurves] Loaded {curves.Count} curves from config");
-        }
-
-        /// <summary>
         /// 초기화 상태 확인
         /// </summary>
         public static bool IsInitialized => _initialized;
