@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Kingmaker.EntitySystem.Entities;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
+using CompanionAI_v3.Diagnostics;
 using CompanionAI_v3.Settings;
 using CompanionAI_v3.Planning.Plans;
 
@@ -58,6 +59,8 @@ namespace CompanionAI_v3.Planning
             Main.Log($"[TurnPlanner] Planning for {situation.Unit.CharacterName} (Role={roleDisplay}): " +
                     $"HP={situation.HPPercent:F0}%, AP={effectiveAP:F1}, MP={situation.CurrentMP:F1}, " +
                     $"Enemies={situation.Enemies.Count}, Hittable={situation.HittableEnemies.Count}");
+            CombatReportCollector.Instance.LogPhase(
+                $"Plan({roleDisplay}) HP={situation.HPPercent:F0}% AP={effectiveAP:F1} MP={situation.CurrentMP:F1} E={situation.Enemies.Count} H={situation.HittableEnemies.Count}");
 
             try
             {
@@ -113,6 +116,16 @@ namespace CompanionAI_v3.Planning
         {
             _detectedRoles.Clear();
             Main.Log("[TurnPlanner] Cleared detected roles cache");
+        }
+
+        /// <summary>
+        /// ★ v3.20.0: 캐싱된 역할 반환 (CombatReportCollector용)
+        /// 캐시에 없으면 Auto 반환
+        /// </summary>
+        public static AIRole GetCachedRole(string unitId)
+        {
+            if (string.IsNullOrEmpty(unitId)) return AIRole.Auto;
+            return _detectedRoles.TryGetValue(unitId, out var role) ? role : AIRole.Auto;
         }
     }
 }

@@ -10,6 +10,8 @@ using CompanionAI_v3.Planning;
 using CompanionAI_v3.Execution;
 using CompanionAI_v3.GameInterface;
 using CompanionAI_v3.Data;  // ★ v3.11.2: AbilityDatabase.IsTaunt
+using CompanionAI_v3.Diagnostics;  // ★ v3.20.0: CombatReportCollector
+using CompanionAI_v3.Settings;     // ★ v3.21.0: AIRole, RangePreference
 
 namespace CompanionAI_v3.Core
 {
@@ -187,6 +189,9 @@ namespace CompanionAI_v3.Core
             // TeamBlackboard에 상황 등록
             TeamBlackboard.Instance.RegisterUnitSituation(unitId, situation);
 
+            // ★ v3.20.0: [CombatReport] 시점1 — 턴 시작 기록
+            CombatReportCollector.Instance.OnTurnStart(unit, situation);
+
             // 다음 프레임에서 Plan+Execute 수행
             turnState.PendingSituation = situation;
             turnState.CurrentComputePhase = ComputePhase.WaitingForPlan;
@@ -249,6 +254,8 @@ namespace CompanionAI_v3.Core
                 turnState.Plan = _planner.CreatePlan(situation, turnState);
                 Data.CompanionDialogue.AnnouncePlan(unit, turnState.Plan);  // ★ v3.9.32: AI Speech
                 TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
+                // ★ v3.20.0: [CombatReport] 시점2 — 최초 계획 기록
+                CombatReportCollector.Instance.RecordPlan(turnState.Plan);
             }
 
             if (turnState.Plan.NeedsReplan(situation))
@@ -258,6 +265,8 @@ namespace CompanionAI_v3.Core
                 turnState.Plan = _planner.CreatePlan(situation, turnState);
                 Data.CompanionDialogue.AnnouncePlan(unit, turnState.Plan);  // ★ v3.9.32: AI Speech (replan)
                 TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
+                // ★ v3.20.0: [CombatReport] Replan 시 최신 계획으로 업데이트
+                CombatReportCollector.Instance.RecordPlan(turnState.Plan);
             }
 
             _profilerStopwatch.Stop();
@@ -394,6 +403,11 @@ namespace CompanionAI_v3.Core
                 if (_lastProcessedRound != currentRound)
                 {
                     Main.Log($"[Orchestrator] Round changed: {_lastProcessedRound} → {currentRound}");
+
+                    // ★ v3.20.0: [CombatReport] 전투 최초 시작 감지
+                    if (_lastProcessedRound == -1)
+                        CombatReportCollector.Instance.OnCombatStart();
+
                     TeamBlackboard.Instance.OnRoundStart(currentRound);
                     _lastProcessedRound = currentRound;
                 }
@@ -464,6 +478,9 @@ namespace CompanionAI_v3.Core
                 || (nextAction.Type == ActionType.WeaponSwitch &&
                     (result.Type == ResultType.Waiting || result.Type == ResultType.Continue));
             turnState.RecordAction(nextAction, success);
+
+            // ★ v3.20.0: [CombatReport] 시점3 — 실행 결과 기록
+            CombatReportCollector.Instance.RecordExecution(nextAction, result, success);
 
             // 능력 사용 추적
             TrackAbilityUsage(unit, nextAction, success);
@@ -848,6 +865,11 @@ namespace CompanionAI_v3.Core
                 }
 
                 Main.Log($"[Orchestrator] Turn ended for {unit.CharacterName}: {state}");
+
+                // ★ v3.20.0: [CombatReport] 시점4 — 턴 종료 기록
+                CombatReportCollector.Instance.OnTurnEnd(
+                    CombatAPI.GetCurrentAP(unit), CombatAPI.GetCurrentMP(unit));
+
                 _turnStates.Remove(unitId);
             }
 
@@ -864,6 +886,9 @@ namespace CompanionAI_v3.Core
         public void OnCombatEnd()
         {
             Main.Log("[Orchestrator] Combat ended - clearing all turn states");
+
+            // ★ v3.20.0: [CombatReport] 전투 종료 → 리포트 내보내기
+            CombatReportCollector.Instance.OnCombatEnd("Victory");
             _turnStates.Clear();
             _currentUnitId = null;
             _pendingMoveDestinations.Clear();
@@ -925,11 +950,37 @@ namespace CompanionAI_v3.Core
                 var charSettings = settings.GetOrCreateSettings(unit.UniqueId, unit.CharacterName);
                 if (charSettings != null && !charSettings.EnableCustomAI)
                 {
-                    return false;
+                    // ★ v3.21.0: EnableAlliedNPCAI가 켜져 있고, 비파티 아군 NPC이면 자동 제어
+                    if (settings.EnableAlliedNPCAI && IsGuestAlly(unit))
+                    {
+                        charSettings.EnableCustomAI = true;
+                        charSettings.Role = AIRole.DPS;
+                        charSettings.RangePreference = RangePreference.Adaptive;
+                        Main.Log($"[Orchestrator] {unit.CharacterName}: Guest ally auto-enabled (DPS/Adaptive)");
+                    }
+                    else
+                    {
+                        return false;
+                    }
                 }
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// ★ v3.21.0: 파티 멤버가 아닌 아군 NPC인지 확인 (주인공/사역마 제외)
+        /// </summary>
+        private static bool IsGuestAlly(BaseUnitEntity unit)
+        {
+            if (unit.IsMainCharacter) return false;
+            if (FamiliarAPI.IsFamiliar(unit)) return false;
+            try
+            {
+                var party = Game.Instance?.Player?.PartyAndPets;
+                return party != null && !party.Contains(unit);
+            }
+            catch { return false; }
         }
 
         /// <summary>

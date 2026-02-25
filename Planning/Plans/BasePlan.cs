@@ -12,6 +12,7 @@ using UnityEngine;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
 using CompanionAI_v3.Data;
+using CompanionAI_v3.Diagnostics;
 using CompanionAI_v3.GameInterface;
 using CompanionAI_v3.Settings;
 using CompanionAI_v3.Planning.Planners;
@@ -1494,7 +1495,11 @@ namespace CompanionAI_v3.Planning.Plans
                 return null;
 
             bool needsRetreat = ShouldRetreat(situation);
-            return TacticalOptionEvaluator.Evaluate(situation, needsRetreat, RoleName);
+            var result = TacticalOptionEvaluator.Evaluate(situation, needsRetreat, RoleName);
+            // ★ v3.20.1: TacticalEval 결정 JSON 리포트에 기록
+            if (result != null)
+                CombatReportCollector.Instance.LogPhase($"TacticalEval: {result}");
+            return result;
         }
 
         /// <summary>
@@ -1992,13 +1997,16 @@ namespace CompanionAI_v3.Planning.Plans
         /// </summary>
         protected APBudget CreateAPBudget(Situation situation, float remainingAP, float masterMinAttackAP = 0f)
         {
-            return new APBudget
+            var budget = new APBudget
             {
                 TotalAP = remainingAP,
                 PostMoveReserved = CalculateReservedAPForPostMoveAttack(situation),
                 TurnEndingReserved = CalculateTurnEndingReservedAP(situation),
                 MasterMinAttackReserved = masterMinAttackAP
             };
+            // ★ v3.20.1: APBudget 결정 JSON 리포트에 기록 (모든 역할 공통)
+            CombatReportCollector.Instance.LogPhase(budget.ToString());
+            return budget;
         }
 
         /// <summary>

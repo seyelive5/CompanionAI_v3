@@ -71,6 +71,46 @@ namespace CompanionAI_v3.Settings
                 { Language.Russian, "Возглас победы" },
                 { Language.Japanese, "勝利の叫び" }
             },
+
+            // ★ v3.20.2: Debug & Diagnostics 섹션
+            ["DebugDiagnostics"] = new() {
+                { Language.English, "Debug & Diagnostics" },
+                { Language.Korean, "디버그 & 진단" },
+                { Language.Russian, "Отладка и диагностика" },
+                { Language.Japanese, "デバッグ & 診断" }
+            },
+            ["DebugDiagnosticsDesc"] = new() {
+                { Language.English, "Developer tools for inspecting AI behavior. Not required for normal gameplay." },
+                { Language.Korean, "AI 행동 분석용 개발자 도구. 일반 플레이에는 필요하지 않습니다." },
+                { Language.Russian, "Инструменты для анализа ИИ. Не требуются для обычной игры." },
+                { Language.Japanese, "AI動作分析のための開発者ツール。通常プレイには不要です。" }
+            },
+            ["EnableCombatReport"] = new() {
+                { Language.English, "Combat Report (JSON)" },
+                { Language.Korean, "전투 리포트 (JSON)" },
+                { Language.Russian, "Боевой отчёт (JSON)" },
+                { Language.Japanese, "戦闘レポート (JSON)" }
+            },
+            ["EnableCombatReportDesc"] = new() {
+                { Language.English, "Records AI decision-making each turn for post-battle analysis. Updated live during combat.\nOutput: [UMM folder]\\CompanionAI_v3\\combat_reports\\current_combat.json" },
+                { Language.Korean, "매 턴 AI의 결정 근거(APBudget, TacticalEval, 이슈 감지)를 JSON으로 기록합니다.\n전투 중 실시간 갱신. 전투 후 분석 및 버그 리포트에 활용하세요.\n저장 위치: [UMM 폴더]\\CompanionAI_v3\\combat_reports\\current_combat.json" },
+                { Language.Russian, "Записывает решения ИИ каждый ход для анализа. Обновляется в реальном времени.\nВывод: [папка UMM]\\CompanionAI_v3\\combat_reports\\current_combat.json" },
+                { Language.Japanese, "各ターンのAI判断根拠をJSONに記録。戦闘中リアルタイム更新。\n保存先: [UMMフォルダ]\\CompanionAI_v3\\combat_reports\\current_combat.json" }
+            },
+
+            ["EnableAlliedNPCAI"] = new() {
+                { Language.English, "Allied NPC AI (Experimental)" },
+                { Language.Korean, "아군 NPC AI 제어 (실험적)" },
+                { Language.Russian, "AI союзников NPC (эксперим.)" },
+                { Language.Japanese, "NPC味方AI制御 (実験的)" }
+            },
+            ["EnableAlliedNPCAIDesc"] = new() {
+                { Language.English, "Apply CompanionAI to non-party ally units (e.g. BodyGuard mod). May conflict with the originating mod's AI." },
+                { Language.Korean, "파티에 없는 아군 NPC에도 AI 적용 (예: BodyGuard 모드). 원본 모드 AI와 충돌할 수 있습니다." },
+                { Language.Russian, "Применить AI к союзным NPC вне группы (напр. мод BodyGuard). Возможен конфликт с AI мода-источника." },
+                { Language.Japanese, "非パーティの味方NPC（BodyGuardモッド等）にAIを適用。元モッドのAIと競合する可能性あり。" }
+            },
+
             ["ReloadDialogue"] = new() {
                 { Language.English, "Reload Dialogue JSON" },
                 { Language.Korean, "대사 JSON 다시 불러오기" },
@@ -1538,6 +1578,15 @@ namespace CompanionAI_v3.Settings
 
         /// <summary>★ v3.9.80: 전투 승리 시 환호 말풍선 표시 여부</summary>
         public bool EnableVictoryBark { get; set; } = true;
+
+        /// <summary>★ v3.20.0: 전투 리포트 JSON 자동 생성 여부 (combat_reports 폴더)</summary>
+        public bool EnableCombatReport { get; set; } = true;
+
+        /// <summary>★ v3.21.0: 비파티 아군 NPC AI 제어 (BodyGuard 등 타 모드 NPC 대상)</summary>
+        public bool EnableAlliedNPCAI { get; set; } = false;
+
+        /// <summary>★ v3.20.0: 보관할 최대 전투 리포트 수 (초과 시 오래된 것부터 삭제)</summary>
+        public int MaxCombatReports { get; set; } = 10;
 
         public Language UILanguage { get; set; } = Language.English;
 

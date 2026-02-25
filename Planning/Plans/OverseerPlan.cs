@@ -11,6 +11,7 @@ using UnityEngine;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
 using CompanionAI_v3.Data;
+using CompanionAI_v3.Diagnostics;
 using CompanionAI_v3.GameInterface;
 using CompanionAI_v3.Settings;
 
@@ -147,6 +148,7 @@ namespace CompanionAI_v3.Planning.Plans
             if (situation.FamiliarType == PetType.Raven && situation.HasFamiliar)
             {
                 Main.Log($"[Overseer] Raven Turn Phase: {(isRavenBuffPhase ? "BUFF MODE (아군 버프 배포 우선)" : "DEBUFF MODE (적 디버프 전환)")}");
+                CombatReportCollector.Instance.LogPhase($"Raven: {(isRavenBuffPhase ? "BUFF" : "DEBUFF")} MODE");
             }
 
             // ★ v3.7.93: 키스톤 루프에서 실제 성공한 능력 GUID 추적 (아군 버프 Phase에서 중복 방지)
