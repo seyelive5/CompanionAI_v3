@@ -110,6 +110,18 @@ namespace CompanionAI_v3.Settings
                 { Language.Russian, "Применить AI к союзным NPC вне группы (напр. мод BodyGuard). Возможен конфликт с AI мода-источника." },
                 { Language.Japanese, "非パーティの味方NPC（BodyGuardモッド等）にAIを適用。元モッドのAIと競合する可能性あり。" }
             },
+            ["EnableShipCombatAI"] = new() {
+                { Language.English, "Ship Combat AI (Experimental)" },
+                { Language.Korean, "함선전투 AI 제어 (실험적)" },
+                { Language.Russian, "AI в космическом бою (эксперим.)" },
+                { Language.Japanese, "宇宙戦闘AI制御 (実験的)" }
+            },
+            ["EnableShipCombatAIDesc"] = new() {
+                { Language.English, "Auto-control your ship in space combat using the game's built-in ship AI." },
+                { Language.Korean, "게임 내장 함선 AI를 사용하여 함선전투를 자동으로 진행합니다." },
+                { Language.Russian, "Автоуправление кораблём с помощью встроенного ИИ игры." },
+                { Language.Japanese, "ゲーム内蔵の艦船AIで宇宙戦闘を自動制御。" }
+            },
 
             ["ReloadDialogue"] = new() {
                 { Language.English, "Reload Dialogue JSON" },
@@ -1584,6 +1596,9 @@ namespace CompanionAI_v3.Settings
 
         /// <summary>★ v3.21.0: 비파티 아군 NPC AI 제어 (BodyGuard 등 타 모드 NPC 대상)</summary>
         public bool EnableAlliedNPCAI { get; set; } = false;
+
+        /// <summary>★ v3.21.4: 함선전투에서 CompanionAI로 함선 제어 여부</summary>
+        public bool EnableShipCombatAI { get; set; } = false;
 
         /// <summary>★ v3.20.0: 보관할 최대 전투 리포트 수 (초과 시 오래된 것부터 삭제)</summary>
         public int MaxCombatReports { get; set; } = 10;

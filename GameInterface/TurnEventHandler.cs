@@ -58,6 +58,13 @@ namespace CompanionAI_v3.GameInterface
             var unit = EventInvokerExtensions.MechanicEntity as BaseUnitEntity;
             if (unit == null) return;
 
+            // ★ v3.21.6: 함선 AI 위임 — ForceAIControl로 게임 네이티브 AI 활성화
+            if (TurnOrchestrator.IsShipAIDelegated(unit))
+            {
+                TurnOrchestrator.ApplyShipForceAI(unit);
+                return;  // CompanionAI는 개입하지 않음, 게임 네이티브 AI가 제어
+            }
+
             // 우리가 제어하는 유닛인지 확인
             if (!TurnOrchestrator.Instance.ShouldControl(unit)) return;
 
@@ -85,6 +92,9 @@ namespace CompanionAI_v3.GameInterface
             if (unit == null) return;
 
             Main.LogDebug($"[TurnEventHandler] Turn ended for {unit.CharacterName}");
+
+            // ★ v3.21.6: 함선 ForceAIControl 해제
+            TurnOrchestrator.RemoveShipForceAI(unit);
 
             // ★ v3.10.0: 디시전 노드 도달 여부 진단
             if (TurnOrchestrator.Instance.ShouldControl(unit) &&

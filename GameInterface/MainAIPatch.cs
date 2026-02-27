@@ -479,7 +479,14 @@ namespace CompanionAI_v3.GameInterface
             if (!Main.Enabled) return;
 
             var currentUnit = Game.Instance?.TurnController?.CurrentUnit as BaseUnitEntity;
-            if (currentUnit != null && TurnOrchestrator.Instance.ShouldControl(currentUnit))
+            if (currentUnit == null) return;
+
+            if (TurnOrchestrator.Instance.ShouldControl(currentUnit))
+            {
+                __result = true;
+            }
+            // ★ v3.21.6: 함선 AI 위임 — 게임 네이티브 AI가 제어하도록 AI 턴으로 전환
+            else if (TurnOrchestrator.IsShipAIDelegated(currentUnit))
             {
                 __result = true;
             }
@@ -492,7 +499,14 @@ namespace CompanionAI_v3.GameInterface
             if (!Main.Enabled) return;
 
             var currentUnit = Game.Instance?.TurnController?.CurrentUnit as BaseUnitEntity;
-            if (currentUnit != null && TurnOrchestrator.Instance.ShouldControl(currentUnit))
+            if (currentUnit == null) return;
+
+            if (TurnOrchestrator.Instance.ShouldControl(currentUnit))
+            {
+                __result = false;
+            }
+            // ★ v3.21.6: 함선 AI 위임
+            else if (TurnOrchestrator.IsShipAIDelegated(currentUnit))
             {
                 __result = false;
             }
@@ -509,7 +523,14 @@ namespace CompanionAI_v3.GameInterface
             if (!Main.Enabled) return;
 
             var unit = __instance.Owner as BaseUnitEntity;
-            if (unit != null && TurnOrchestrator.Instance.ShouldControl(unit))
+            if (unit == null) return;
+
+            if (TurnOrchestrator.Instance.ShouldControl(unit))
+            {
+                __result = true;
+            }
+            // ★ v3.21.6: 함선 AI 위임 — 게임 네이티브 Brain이 동작하도록 활성화
+            else if (TurnOrchestrator.IsShipAIDelegated(unit))
             {
                 __result = true;
             }

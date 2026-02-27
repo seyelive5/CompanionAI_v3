@@ -102,7 +102,8 @@ namespace CompanionAI_v3.Data
         /// <summary>분노 스킬 - 적 처치 후 활성화</summary>
         RighteousFury,
 
-        /// <summary>스택 버프</summary>
+        /// <summary>스택 버프 (미사용 - AutoDetect/DB 모두 반환하지 않음)</summary>
+        [System.Obsolete("Dead code - never returned by AutoDetectTiming or used in DB entries")]
         StackingBuff,
 
         /// <summary>DoT 강화</summary>

@@ -861,9 +861,10 @@ namespace CompanionAI_v3.Analysis
                         break;
 
                     // ★ v3.0.38: 명시적 타이밍 처리 추가
-                    // HeroicAct, Taunt, RighteousFury -> AvailableBuffs
+                    // HeroicAct, DesperateMeasure, Taunt, RighteousFury -> AvailableBuffs
                     // (TurnPlanner에서 AbilityDatabase.IsXXX()로 필터링)
                     case AbilityTiming.HeroicAct:
+                    case AbilityTiming.DesperateMeasure:  // ★ v3.21.4: Momentum 25 궁극기 — PlanUltimate에서 IsUltimateAbility()로 탐색
                     case AbilityTiming.Taunt:
                     case AbilityTiming.RighteousFury:
                         situation.AvailableBuffs.Add(ability);
@@ -922,6 +923,20 @@ namespace CompanionAI_v3.Analysis
                         situation.AvailableHeals.Add(ability);
                         break;
 
+                    // ★ v3.21.4: CrowdControl -> AvailableDebuffs (Stun, Paralysis 등)
+                    // CC는 디버프의 하위집합 → PlanDebuff() 경로에서 소비됨
+                    case AbilityTiming.CrowdControl:
+                        situation.AvailableDebuffs.Add(ability);
+                        Main.LogDebug($"[Analyzer] CrowdControl: {ability.Name} -> Debuffs");
+                        break;
+
+                    // ★ v3.21.4: Grenade -> AvailableAttacks (수류탄, 투척)
+                    // AoE 분류 코드에서 point-target AoE 감지 → 클러스터 최적화에 포함
+                    case AbilityTiming.Grenade:
+                        situation.AvailableAttacks.Add(ability);
+                        Main.LogDebug($"[Analyzer] Grenade: {ability.Name} -> Attacks");
+                        break;
+
                     default:
                         // Normal 등 기타 공격 능력 분류
                         if (IsAttackAbility(ability, situation.RangePreference))
@@ -934,6 +949,31 @@ namespace CompanionAI_v3.Analysis
                                 break;
                             }
                             situation.AvailableAttacks.Add(ability);
+                        }
+                        else
+                        {
+                            // ★ v3.21.4: 비공격 Normal 능력 구제 — 버프 가능성 체크
+                            // 이전: IsAttackAbility() false → 로그 없이 완전 탈락
+                            // 수정: 아군/자기 대상 이로운 효과 → AvailableBuffs로 구제
+                            if (bp != null && bp.CanTargetFriends == true
+                                && bp.EffectOnAlly == Kingmaker.UnitLogic.Abilities.Blueprints.AbilityEffectOnUnit.Helpful)
+                            {
+                                situation.AvailableBuffs.Add(ability);
+                                Main.LogDebug($"[Analyzer] Default->Buff (ally-helpful): {ability.Name}");
+                            }
+                            else if (bp != null && bp.CanTargetSelf == true && bp.CanTargetEnemies != true
+                                     && bp.EffectOnAlly == Kingmaker.UnitLogic.Abilities.Blueprints.AbilityEffectOnUnit.Helpful)
+                            {
+                                situation.AvailableBuffs.Add(ability);
+                                Main.LogDebug($"[Analyzer] Default->Buff (self-helpful): {ability.Name}");
+                            }
+                            else
+                            {
+                                Main.LogDebug($"[Analyzer] ★ UNCLASSIFIED DROPPED: {ability.Name} [{guid}] " +
+                                    $"Timing={timing}, TargetEnemy={bp?.CanTargetEnemies}, " +
+                                    $"TargetFriend={bp?.CanTargetFriends}, TargetSelf={bp?.CanTargetSelf}, " +
+                                    $"EffectOnAlly={bp?.EffectOnAlly}, EffectOnEnemy={bp?.EffectOnEnemy}");
+                            }
                         }
                         break;
                 }

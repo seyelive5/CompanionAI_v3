@@ -409,7 +409,8 @@ namespace CompanionAI_v3.Data
             { "b509a3ee5ab44253b4b859dd5f3dbffb", new AbilityInfo("b509a3ee5ab44253b4b859dd5f3dbffb", "BreakTheirRanks", AbilityTiming.PreCombatBuff, flags: AbilityFlags.AllyTarget) },
 
             // Move, Move, Move! - 아군 MP 증가
-            { "cb64551ce0234a85880bd0d8da91637f", new AbilityInfo("cb64551ce0234a85880bd0d8da91637f", "MoveMoveMove", AbilityTiming.Normal, flags: AbilityFlags.AllyTarget) },
+            // ★ v3.21.4: Normal→PreCombatBuff 수정 (Normal+AllyTarget → IsAttackAbility()=false → 탈락 버그)
+            { "cb64551ce0234a85880bd0d8da91637f", new AbilityInfo("cb64551ce0234a85880bd0d8da91637f", "MoveMoveMove", AbilityTiming.PreCombatBuff, flags: AbilityFlags.AllyTarget) },
 
             // Get Back in the Fight! - 아군 상태이상 해제
             { "083057fc1a6b47f29ea0409337135030", new AbilityInfo("083057fc1a6b47f29ea0409337135030", "GetBackInTheFight", AbilityTiming.Healing, flags: AbilityFlags.AllyTarget) },
@@ -821,6 +822,29 @@ namespace CompanionAI_v3.Data
 
             // Redirect (Reposition) - 재배치 (펫 이동)
             { "5376c2d18af1499db985fbde6d5fe1ce", new AbilityInfo("5376c2d18af1499db985fbde6d5fe1ce", "Redirect", AbilityTiming.GapCloser, flags: AbilityFlags.PointTarget) },
+
+            // ========================================
+            // ★ v3.21.4: 분류 감사 — 미등록 능력 추가
+            // ========================================
+
+            // At All Costs! - 모든 대가를 치르고! (Commissar)
+            // 아군을 권총으로 쏨 → 아군 버프 (생존 시) / 전체 아군 버프 (사망 시)
+            // AutoDetect: weapon+ally → 공격으로 오분류 위험 → PreCombatBuff로 명시 등록
+            { "cce96eda109f4431941cb5c240040657", new AbilityInfo("cce96eda109f4431941cb5c240040657", "AtAllCosts", AbilityTiming.PreCombatBuff, flags: AbilityFlags.AllyTarget | AbilityFlags.SingleUse) },
+
+            // Show the Path - 길을 보여주라 (Navigator)
+            // 아군에게 Charge 한정 추가 턴 부여 (FinestHour 유사)
+            { "c5f67e2e411d441292360a24e64c609d", new AbilityInfo("c5f67e2e411d441292360a24e64c609d", "ShowThePath", AbilityTiming.PreCombatBuff, flags: AbilityFlags.AllyTarget) },
+
+            // Vigil Beyond Time - 시간 너머의 감시 (Navigator)
+            // 1차: 대상 마킹, 2차: 마킹 위치로 텔레포트+HP 복원 (2단계 상태 머신)
+            // AI가 2단계를 일관되게 사용하기 어려움 — Marker로 등록하여 1차 사용은 안전하게 허용
+            { "033f85024e87491e9aad22b1b4d25c44", new AbilityInfo("033f85024e87491e9aad22b1b4d25c44", "VigilBeyondTime", AbilityTiming.Marker, flags: AbilityFlags.EnemyTarget) },
+
+            // Consolidation - 합류 (Overseer)
+            // 패밀리어 위치로 대시 (사이버이글 비행 중이면 MP 증가)
+            // AutoDetect: isMoveUnit → GapCloser 오분류 (적이 아닌 패밀리어로 이동) → PreCombatBuff로 명시
+            { "f9bdfe87ada64747aa0165adb7d48cef", new AbilityInfo("f9bdfe87ada64747aa0165adb7d48cef", "Consolidation", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
         };
 
         #endregion

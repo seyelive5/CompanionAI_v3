@@ -149,6 +149,10 @@ namespace CompanionAI_v3.UI
             Main.Settings.EnableAlliedNPCAI = DrawCheckbox(Main.Settings.EnableAlliedNPCAI, L("EnableAlliedNPCAI"));
             GUILayout.Label($"<color=#FF8C00><size=14>{L("EnableAlliedNPCAIDesc")}</size></color>", _descriptionStyle);
 
+            // ★ v3.21.4: 함선전투 AI 토글
+            Main.Settings.EnableShipCombatAI = DrawCheckbox(Main.Settings.EnableShipCombatAI, L("EnableShipCombatAI"));
+            GUILayout.Label($"<color=#FF8C00><size=14>{L("EnableShipCombatAIDesc")}</size></color>", _descriptionStyle);
+
             GUILayout.Space(15);
             DrawDebugSettings();
 

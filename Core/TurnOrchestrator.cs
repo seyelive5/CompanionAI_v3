@@ -5,6 +5,8 @@ using System.Linq;
 using Kingmaker;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.AI;  // ★ v3.9.02: AiBrainController.SecondsAiTimeout
+using Kingmaker.UnitLogic;        // ★ v3.21.6: GetMechanicFeature 확장 메서드
+using Kingmaker.UnitLogic.Enums;  // ★ v3.21.6: MechanicsFeatureType.ForceAIControl
 using CompanionAI_v3.Analysis;
 using CompanionAI_v3.Planning;
 using CompanionAI_v3.Execution;
@@ -915,6 +917,9 @@ namespace CompanionAI_v3.Core
 
             // ★ v3.9.02: AI 타임아웃 복원
             RestoreAiTimeout();
+
+            // ★ v3.21.6: 함선 ForceAIControl 정리
+            ClearAllShipForceAI();
         }
 
         #endregion
@@ -943,6 +948,14 @@ namespace CompanionAI_v3.Core
                 // 주인공 AI 제어 활성화됨 - 계속 진행
             }
 
+            // ★ v3.21.6: 함선은 CompanionAI가 직접 제어하지 않음 (무조건)
+            // EnableShipCombatAI=true 시 게임 네이티브 AI에 위임 (IsShipAIDelegated)
+            // charSettings 상태와 무관하게 항상 false 반환
+            if (unit is StarshipEntity)
+            {
+                return false;
+            }
+
             // 설정에서 비활성화된 유닛 제외
             var settings = Settings.ModSettings.Instance;
             if (settings != null)
@@ -950,7 +963,7 @@ namespace CompanionAI_v3.Core
                 var charSettings = settings.GetOrCreateSettings(unit.UniqueId, unit.CharacterName);
                 if (charSettings != null && !charSettings.EnableCustomAI)
                 {
-                    // ★ v3.21.0: EnableAlliedNPCAI가 켜져 있고, 비파티 아군 NPC이면 자동 제어
+                    // ★ v3.21.0: 비파티 아군 NPC 자동 제어
                     if (settings.EnableAlliedNPCAI && IsGuestAlly(unit))
                     {
                         charSettings.EnableCustomAI = true;
@@ -982,6 +995,107 @@ namespace CompanionAI_v3.Core
             }
             catch { return false; }
         }
+
+        /// <summary>
+        /// ★ v3.21.6: 함선이 게임 네이티브 AI에 위임되었는지 확인
+        /// EnableShipCombatAI=true이고 StarshipEntity일 때 true
+        /// → MainAIPatch의 IsAiTurn/IsPlayerTurn/IsAIEnabled 패치에서 사용
+        /// </summary>
+        public static bool IsShipAIDelegated(BaseUnitEntity unit)
+        {
+            if (unit == null || !(unit is StarshipEntity)) return false;
+            if (!Main.Enabled) return false;
+            if (!unit.IsPlayerFaction) return false;
+            var settings = Settings.ModSettings.Instance;
+            return settings != null && settings.EnableShipCombatAI;
+        }
+
+        #region Ship AI ForceAIControl
+
+        /// <summary>
+        /// ★ v3.21.6: ForceAIControl이 적용된 함선 추적
+        /// Retain/Release 짝 맞춤을 보장하기 위해 추적
+        /// </summary>
+        private static readonly HashSet<string> _forceAIShips = new HashSet<string>();
+
+        /// <summary>
+        /// ★ v3.21.6: 함선에 ForceAIControl 적용
+        /// 게임이 플레이어 함선을 AI 제어 대상으로 인식하도록 강제
+        /// → IsDirectlyControllable=false → IsAiTurn=true → Brain.Tick() 정상 실행
+        /// </summary>
+        public static void ApplyShipForceAI(BaseUnitEntity unit)
+        {
+            if (!(unit is StarshipEntity)) return;
+            if (_forceAIShips.Contains(unit.UniqueId)) return;
+
+            try
+            {
+                var feature = unit.GetMechanicFeature(MechanicsFeatureType.ForceAIControl);
+                feature.Retain();
+                _forceAIShips.Add(unit.UniqueId);
+                Main.Log($"[Orchestrator] {unit.CharacterName}: ForceAIControl applied — game native AI will control ship");
+            }
+            catch (Exception ex)
+            {
+                Main.LogError($"[Orchestrator] Failed to apply ForceAIControl: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.21.6: 함선의 ForceAIControl 해제
+        /// 턴 종료 시 호출하여 정리
+        /// </summary>
+        public static void RemoveShipForceAI(BaseUnitEntity unit)
+        {
+            if (!(unit is StarshipEntity)) return;
+            if (!_forceAIShips.Remove(unit.UniqueId)) return;
+
+            try
+            {
+                var feature = unit.GetMechanicFeature(MechanicsFeatureType.ForceAIControl);
+                feature.Release();
+                Main.LogDebug($"[Orchestrator] {unit.CharacterName}: ForceAIControl released");
+            }
+            catch (Exception ex)
+            {
+                Main.LogError($"[Orchestrator] Failed to release ForceAIControl: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.21.6: 전투 종료 시 모든 함선 ForceAIControl 정리
+        /// </summary>
+        public static void ClearAllShipForceAI()
+        {
+            if (_forceAIShips.Count == 0) return;
+
+            try
+            {
+                var allUnits = Game.Instance?.TurnController?.AllUnits;
+                if (allUnits != null)
+                {
+                    foreach (var entity in allUnits)
+                    {
+                        var unit = entity as BaseUnitEntity;
+                        if (unit is StarshipEntity && _forceAIShips.Contains(unit.UniqueId))
+                        {
+                            var feature = unit.GetMechanicFeature(MechanicsFeatureType.ForceAIControl);
+                            if (feature.Value)
+                                feature.Release();
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogError($"[Orchestrator] ClearAllShipForceAI error: {ex.Message}");
+            }
+
+            _forceAIShips.Clear();
+            Main.LogDebug("[Orchestrator] All ship ForceAIControl cleared");
+        }
+
+        #endregion
 
         /// <summary>
         /// ★ v3.9.02: 게임 AI 타임아웃 원래 값으로 복원

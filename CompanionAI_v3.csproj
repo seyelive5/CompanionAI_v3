@@ -63,6 +63,11 @@
       <HintPath>$(ManagedPath)\Kingmaker.Enums.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <!-- ★ v3.21.6: MechanicsFeatureType.ForceAIControl (함선 AI 위임) -->
+    <Reference Include="Kingmaker.UnitLogic.Enums">
+      <HintPath>$(ManagedPath)\Kingmaker.UnitLogic.Enums.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <!-- ★ v3.9.20: StatType 접근용 (버프 공격/방어 자동 분류) -->
     <Reference Include="Kingmaker.EntitySystem.Stats.Base">
       <HintPath>$(ManagedPath)\Kingmaker.EntitySystem.Stats.Base.dll</HintPath>
