@@ -105,9 +105,10 @@ namespace CompanionAI_v3.GameInterface
                         score.AlliesHit++;
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
                     // 피아 구분 실패 시 적으로 간주
+                    Main.LogDebug($"[AoESafetyChecker] Friend/foe classification failed: {ex.Message}");
                     score.EnemiesHit++;
                     totalScore += distanceBonus;
                 }

@@ -48,56 +48,8 @@ namespace CompanionAI_v3.Planning.Plans
             var budget = CreateAPBudget(situation, remainingAP, CalculateMasterMinAttackAP(situation));
             Main.Log($"[Overseer] {budget}");
 
-            // ★ v3.19.0: 전략적 시퀀스 평가 — Overseer Role용 (시드 0,2,4,6만 평가)
-            // ★ v3.19.2: Replan 시 FocusTarget 유효성 검증 + 전략 재사용
-            TurnStrategy strategy = turnState.GetContext<TurnStrategy>(
-                StrategicContextKeys.TurnStrategyKey, default(TurnStrategy));
-
-            bool previousStrategyValid = strategy != null
-                && situation.HasHittableEnemies
-                && situation.BestTarget != null
-                && strategy.ExpectedTotalDamage > 0;
-
-            if (previousStrategyValid)
-            {
-                string focusTargetId = turnState.GetContext<string>(StrategicContextKeys.FocusTargetId, null);
-                if (focusTargetId != null)
-                {
-                    bool found = false;
-                    for (int i = 0; i < situation.HittableEnemies.Count; i++)
-                    {
-                        if (situation.HittableEnemies[i].UniqueId == focusTargetId) { found = true; break; }
-                    }
-                    if (!found)
-                    {
-                        previousStrategyValid = false;
-                        Main.Log($"[Overseer] Strategy: Previous FocusTarget no longer hittable — re-evaluating");
-                    }
-                }
-            }
-
-            if (previousStrategyValid)
-            {
-                budget.StrategyPostActionReserved = strategy.ReservedAPForPostAction;
-                Main.Log($"[Overseer] Strategy: Reusing previous ({strategy.Sequence}, dmg={strategy.ExpectedTotalDamage:F0})");
-            }
-            else if (situation.HasHittableEnemies &&
-                TeamBlackboard.Instance.CurrentTactic != TacticalSignal.Retreat)
-            {
-                strategy = TurnStrategyPlanner.Evaluate(situation, Settings.AIRole.Overseer);
-                if (strategy != null)
-                {
-                    turnState.SetContext(StrategicContextKeys.TurnStrategyKey, strategy);
-                    if (situation.BestTarget != null)
-                        turnState.SetContext(StrategicContextKeys.FocusTargetId, situation.BestTarget.UniqueId);
-                    budget.StrategyPostActionReserved = strategy.ReservedAPForPostAction;
-                    Main.Log($"[Overseer] Strategy: {strategy.Sequence} (dmg={strategy.ExpectedTotalDamage:F0})");
-                }
-            }
-            else
-            {
-                strategy = null;
-            }
+            // ★ v3.22.0: 전략 평가/재사용 — BasePlan.EvaluateOrReuseStrategy()로 통합
+            TurnStrategy strategy = EvaluateOrReuseStrategy(situation, turnState, ref budget, "Overseer", Settings.AIRole.Overseer);
 
             // ★ v3.12.0: Phase 0~1.5 공통 처리 (Ultimate, AoE대피, 긴급힐, 재장전)
             var earlyReturn = ExecuteCommonEarlyPhases(actions, situation, ref remainingAP);
@@ -174,17 +126,10 @@ namespace CompanionAI_v3.Planning.Plans
                 }
 
                 // ────────────────────────────────────────────────────────────
-                // 3.2: Mastiff Fast (이동 버프 - Apprehend 전 사용)
+                // 3.2: ★ v3.22.6: Mastiff Fast → Phase 3.7로 이관
+                // Fast는 새 Apprehend 발행 시에만 필요 (이동력 확보)
+                // Apprehend 활성 상태면 Fast도 불필요 → Phase 3.7에서 조건부 실행
                 // ────────────────────────────────────────────────────────────
-                if (situation.FamiliarType == PetType.Mastiff)
-                {
-                    var mastiffFast = PlanFamiliarFast(situation, ref remainingAP);
-                    if (mastiffFast != null)
-                    {
-                        actions.Add(mastiffFast);
-                        Main.Log($"[Overseer] Phase 3.2: Mastiff Fast");
-                    }
-                }
 
                 // ────────────────────────────────────────────────────────────
                 // ★ v3.10.0: Phase 3.2.5 - Pre-relocate Keystone Buffs (DEBUFF mode)
@@ -389,50 +334,71 @@ namespace CompanionAI_v3.Planning.Plans
                 }
 
                 // ────────────────────────────────────────────────────────────
-                // 3.7: Mastiff Attack Chain: Apprehend → JumpClaws → Claws → Roam
+                // ★ v3.22.6: 3.7: Mastiff Attack Chain — 상태 기반 분기
+                // Apprehend 활성(대상 생존) → 전부 스킵 (AP 절약 → 마스터 공격 강화)
+                // Apprehend 비활성 → Fast + Apprehend → JumpClaws → Claws → Roam
+                // Protect는 Phase 9.5(EndTurn 직전)로 이동
                 // ────────────────────────────────────────────────────────────
                 if (situation.FamiliarType == PetType.Mastiff)
                 {
-                    var apprehend = PlanFamiliarApprehend(situation, ref remainingAP);
-                    if (apprehend != null)
+                    // ★ v3.22.6: Apprehend 활성 상태 확인
+                    bool mastiffApprehendActive = false;
+                    string apprehendTargetId = TeamBlackboard.Instance.GetMastiffApprehendTarget(situation.Unit.UniqueId);
+                    if (apprehendTargetId != null)
                     {
-                        actions.Add(apprehend);
-                        Main.Log($"[Overseer] Phase 3.7: Mastiff Apprehend");
+                        var existingTarget = CollectionHelper.FirstOrDefault(situation.Enemies,
+                            e => e.IsConscious && e.UniqueId == apprehendTargetId);
+                        mastiffApprehendActive = existingTarget != null;
+                    }
+
+                    if (mastiffApprehendActive)
+                    {
+                        Main.Log($"[Overseer] Phase 3.7: Mastiff Apprehend active — all mastiff commands SKIPPED (AP saved for master)");
                     }
                     else
                     {
-                        var jumpClaws = PlanFamiliarJumpClaws(situation, ref remainingAP);
-                        if (jumpClaws != null)
+                        // Fast (새 Apprehend 전 이동력 확보)
+                        var mastiffFast = PlanFamiliarFast(situation, ref remainingAP);
+                        if (mastiffFast != null)
                         {
-                            actions.Add(jumpClaws);
-                            Main.Log($"[Overseer] Phase 3.7: Mastiff JumpClaws");
+                            actions.Add(mastiffFast);
+                            Main.Log($"[Overseer] Phase 3.7: Mastiff Fast (pre-Apprehend)");
+                        }
+
+                        // Apprehend → JumpClaws → Claws → Roam (폴백 체인)
+                        var apprehend = PlanFamiliarApprehend(situation, ref remainingAP);
+                        if (apprehend != null)
+                        {
+                            actions.Add(apprehend);
+                            Main.Log($"[Overseer] Phase 3.7: Mastiff Apprehend");
                         }
                         else
                         {
-                            var claws = PlanFamiliarClaws(situation, ref remainingAP);
-                            if (claws != null)
+                            var jumpClaws = PlanFamiliarJumpClaws(situation, ref remainingAP);
+                            if (jumpClaws != null)
                             {
-                                actions.Add(claws);
-                                Main.Log($"[Overseer] Phase 3.7: Mastiff Claws");
+                                actions.Add(jumpClaws);
+                                Main.Log($"[Overseer] Phase 3.7: Mastiff JumpClaws");
                             }
                             else
                             {
-                                var roam = PlanFamiliarRoam(situation, ref remainingAP);
-                                if (roam != null)
+                                var claws = PlanFamiliarClaws(situation, ref remainingAP);
+                                if (claws != null)
                                 {
-                                    actions.Add(roam);
-                                    Main.Log($"[Overseer] Phase 3.7: Mastiff Roam");
+                                    actions.Add(claws);
+                                    Main.Log($"[Overseer] Phase 3.7: Mastiff Claws");
+                                }
+                                else
+                                {
+                                    var roam = PlanFamiliarRoam(situation, ref remainingAP);
+                                    if (roam != null)
+                                    {
+                                        actions.Add(roam);
+                                        Main.Log($"[Overseer] Phase 3.7: Mastiff Roam");
+                                    }
                                 }
                             }
                         }
-                    }
-
-                    // Mastiff Protect (공격 후 부상 아군 호위)
-                    var protect = PlanFamiliarProtect(situation, ref remainingAP);
-                    if (protect != null)
-                    {
-                        actions.Add(protect);
-                        Main.Log($"[Overseer] Phase 3.7: Mastiff Protect");
                     }
                 }
 
@@ -969,6 +935,21 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     actions.Add(finalAction);
                     Main.Log($"[Overseer] Phase 9: Final AP utilization");
+                }
+            }
+
+            // ══════════════════════════════════════════════════════════════
+            // ★ v3.22.6: Phase 9.5 — Mastiff Protect (EndTurn 직전)
+            // Apprehend 비활성 + 근접 적 위협하는 약한 아군 존재 시에만
+            // Phase 3.7에서 이관 → 모든 행동 후 마지막 남은 AP로 발동
+            // ══════════════════════════════════════════════════════════════
+            if (situation.FamiliarType == PetType.Mastiff && remainingAP >= 1f)
+            {
+                var protect = PlanFamiliarProtect(situation, ref remainingAP);
+                if (protect != null)
+                {
+                    actions.Add(protect);
+                    Main.Log($"[Overseer] Phase 9.5: Mastiff Protect (end-of-turn)");
                 }
             }
 

@@ -2802,7 +2802,7 @@ namespace CompanionAI_v3.GameInterface
             catch
             {
                 // 폴백: 레벨 기반 추정
-                return 15f;  // 기본 추정치
+                return Settings.SC.FallbackEstimateDamage;
             }
         }
 

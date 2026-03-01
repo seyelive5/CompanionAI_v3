@@ -95,6 +95,36 @@ namespace CompanionAI_v3.Core
 
         #endregion
 
+        #region ★ v3.22.6: 마스티프 Apprehend 상태 추적
+
+        /// <summary>마스터별 활성 Apprehend 대상 (masterId → targetId). 전투 전체 유지.</summary>
+        private readonly Dictionary<string, string> _mastiffApprehendTargets = new Dictionary<string, string>();
+
+        /// <summary>마스티프 Apprehend 대상 설정 (전투 종료까지 유지)</summary>
+        public void SetMastiffApprehendTarget(string masterId, string targetId)
+        {
+            if (string.IsNullOrEmpty(masterId) || string.IsNullOrEmpty(targetId)) return;
+            _mastiffApprehendTargets[masterId] = targetId;
+            Main.LogDebug($"[TeamBlackboard] Mastiff Apprehend target set: {targetId}");
+        }
+
+        /// <summary>마스티프 Apprehend 대상 조회 (없으면 null)</summary>
+        public string GetMastiffApprehendTarget(string masterId)
+        {
+            if (string.IsNullOrEmpty(masterId)) return null;
+            return _mastiffApprehendTargets.TryGetValue(masterId, out var targetId) ? targetId : null;
+        }
+
+        /// <summary>마스티프 Apprehend 대상 해제</summary>
+        public void ClearMastiffApprehendTarget(string masterId)
+        {
+            if (string.IsNullOrEmpty(masterId)) return;
+            if (_mastiffApprehendTargets.Remove(masterId))
+                Main.LogDebug($"[TeamBlackboard] Mastiff Apprehend target cleared for {masterId}");
+        }
+
+        #endregion
+
         #region Team Tactical State
 
         /// <summary>팀 공유 타겟 (가장 많이 지정된 적)</summary>
@@ -179,6 +209,9 @@ namespace CompanionAI_v3.Core
 
             // ★ v3.8.46: 타겟 관성 초기화 (전투 종료 시에만)
             _previousTargets.Clear();
+
+            // ★ v3.22.6: 마스티프 Apprehend 상태 초기화
+            _mastiffApprehendTargets.Clear();
 
             Main.LogDebug("[TeamBlackboard] Cleared");
         }

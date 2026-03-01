@@ -339,7 +339,7 @@ namespace CompanionAI_v3.GameInterface
             }
 
             // 무기 사거리 결정
-            float weaponRange = 15f;
+            float weaponRange = Settings.SC.FallbackWeaponRange;
             try
             {
                 var primaryHand = unit.Body?.PrimaryHand;

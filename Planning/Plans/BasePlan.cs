@@ -41,15 +41,13 @@ namespace CompanionAI_v3.Planning.Plans
 
         #endregion
 
-        #region Constants
+        #region Constants — ★ v3.22.0: SC.cs 참조
 
-        protected const float HP_COST_THRESHOLD = 40f;
-        protected const float DEFAULT_MELEE_ATTACK_COST = 2f;
-        protected const float DEFAULT_RANGED_ATTACK_COST = 2f;
-        // ★ v3.8.16: 3 → 10으로 증가 (실질적 제한 해제)
-        // AP 부족/PlanAttack null 반환으로 자연스럽게 종료되므로 인위적 제한 불필요
-        protected const int MAX_ATTACKS_PER_PLAN = 10;
-        protected const int MAX_POSITIONAL_BUFFS = 3;
+        protected const float HP_COST_THRESHOLD = SC.HPCostThreshold;
+        protected const float DEFAULT_MELEE_ATTACK_COST = SC.DefaultMeleeAttackCost;
+        protected const float DEFAULT_RANGED_ATTACK_COST = SC.DefaultRangedAttackCost;
+        protected const int MAX_ATTACKS_PER_PLAN = SC.MaxAttacksPerPlan;
+        protected const int MAX_POSITIONAL_BUFFS = SC.MaxPositionalBuffs;
 
         #endregion
 
@@ -375,10 +373,28 @@ namespace CompanionAI_v3.Planning.Plans
             if (prioritySignal != null)
                 actions.Add(prioritySignal);
 
-            // 2. Mastiff Fast (Apprehend 전 이동 버프)
-            var mastiffFast = PlanFamiliarFast(situation, ref remainingAP);
-            if (mastiffFast != null)
-                actions.Add(mastiffFast);
+            // ★ v3.22.6: 마스티프 Apprehend 상태 확인 — 활성 대상 생존 시 마스티프 명령 전부 스킵
+            bool mastiffApprehendActive = false;
+            if (situation.FamiliarType == PetType.Mastiff)
+            {
+                string apprehendTargetId = TeamBlackboard.Instance.GetMastiffApprehendTarget(situation.Unit.UniqueId);
+                if (apprehendTargetId != null)
+                {
+                    var apprehendTarget = CollectionHelper.FirstOrDefault(situation.Enemies,
+                        e => e.IsConscious && e.UniqueId == apprehendTargetId);
+                    mastiffApprehendActive = apprehendTarget != null;
+                    if (mastiffApprehendActive && Main.IsDebugEnabled)
+                        Main.LogDebug($"[{RoleName}] Phase 1.75: Mastiff Apprehend active — skipping mastiff commands (AP saved)");
+                }
+            }
+
+            // 2. Mastiff Fast (Apprehend 전 이동 버프 — 새 Apprehend 발행 시에만)
+            if (!mastiffApprehendActive)
+            {
+                var mastiffFast = PlanFamiliarFast(situation, ref remainingAP);
+                if (mastiffFast != null)
+                    actions.Add(mastiffFast);
+            }
 
             // 3. Relocate: 사역마 최적 위치로 이동 (Mastiff 제외)
             var familiarRelocate = PlanFamiliarRelocate(situation, ref remainingAP);
@@ -422,29 +438,34 @@ namespace CompanionAI_v3.Planning.Plans
                 actions.Add(hex);
 
             // 7. Mastiff: Apprehend → JumpClaws → Claws → Roam (폴백 체인)
-            var familiarApprehend = PlanFamiliarApprehend(situation, ref remainingAP);
-            if (familiarApprehend != null)
-                actions.Add(familiarApprehend);
-            else
+            // ★ v3.22.6: Apprehend 활성 시 전부 스킵 (AP 절약 → 마스터 공격 강화)
+            if (!mastiffApprehendActive)
             {
-                var jumpClaws = PlanFamiliarJumpClaws(situation, ref remainingAP);
-                if (jumpClaws != null)
-                    actions.Add(jumpClaws);
+                var familiarApprehend = PlanFamiliarApprehend(situation, ref remainingAP);
+                if (familiarApprehend != null)
+                    actions.Add(familiarApprehend);
                 else
                 {
-                    var mastiffClaws = PlanFamiliarClaws(situation, ref remainingAP);
-                    if (mastiffClaws != null)
-                        actions.Add(mastiffClaws);
+                    var jumpClaws = PlanFamiliarJumpClaws(situation, ref remainingAP);
+                    if (jumpClaws != null)
+                        actions.Add(jumpClaws);
                     else
                     {
-                        var roam = PlanFamiliarRoam(situation, ref remainingAP);
-                        if (roam != null)
-                            actions.Add(roam);
+                        var mastiffClaws = PlanFamiliarClaws(situation, ref remainingAP);
+                        if (mastiffClaws != null)
+                            actions.Add(mastiffClaws);
+                        else
+                        {
+                            var roam = PlanFamiliarRoam(situation, ref remainingAP);
+                            if (roam != null)
+                                actions.Add(roam);
+                        }
                     }
                 }
             }
 
-            // Support 전용: Mastiff Protect (위협받는 아군 호위)
+            // ★ v3.22.6: Mastiff Protect — Apprehend 비활성 + 위협받는 아군 존재 시에만
+            // (PlanFamiliarProtect 내부에서 Apprehend 배타 체크도 수행)
             if (supportMode)
             {
                 var familiarProtect = PlanFamiliarProtect(situation, ref remainingAP);
@@ -1293,6 +1314,24 @@ namespace CompanionAI_v3.Planning.Plans
                     prioritizedTargets.Add(ally);
             }
 
+            // ★ v3.22.4: 턴 순서 인지 — 이미 행동한 아군을 뒤로 이동
+            // 역할 우선순위(Tactic→Tank→DPS→Self→Rest) 유지하면서, 행동 예정 아군이 버프 우선 수령
+            TargetScorer.RefreshTurnOrderCache(situation.Unit);
+            {
+                var notActed = new List<BaseUnitEntity>();
+                var acted = new List<BaseUnitEntity>();
+                foreach (var t in prioritizedTargets)
+                {
+                    if (t.Initiative?.ActedThisRound == true)
+                        acted.Add(t);
+                    else
+                        notActed.Add(t);
+                }
+                prioritizedTargets.Clear();
+                prioritizedTargets.AddRange(notActed);
+                prioritizedTargets.AddRange(acted);
+            }
+
             foreach (var buff in situation.AvailableBuffs)
             {
                 if (buff.Blueprint?.CanTargetFriends != true) continue;
@@ -2028,6 +2067,79 @@ namespace CompanionAI_v3.Planning.Plans
         }
 
         /// <summary>
+        /// ★ v3.22.0: 이전 전략의 FocusTarget이 여전히 공격 가능한지 검증
+        /// 4개 Plan에서 중복되던 FocusTarget 유효성 검증 루프를 BasePlan으로 추출
+        /// </summary>
+        /// <returns>FocusTarget이 유효하면 true, 무효하면 false</returns>
+        protected bool ValidateFocusTarget(Situation situation, TurnState turnState, string roleTag)
+        {
+            string focusTargetId = turnState.GetContext<string>(StrategicContextKeys.FocusTargetId, null);
+            if (focusTargetId == null) return true;
+
+            for (int i = 0; i < situation.HittableEnemies.Count; i++)
+            {
+                if (situation.HittableEnemies[i].UniqueId == focusTargetId)
+                    return true;
+            }
+            Main.Log($"[{roleTag}] Strategy: Previous FocusTarget {focusTargetId} no longer hittable — re-evaluating");
+            return false;
+        }
+
+        /// <summary>
+        /// ★ v3.22.0: 전략 평가 또는 이전 전략 재사용 — 전 Role 통합
+        /// 4개 Plan에서 중복되던 ~50줄 전략 블록을 BasePlan으로 추출
+        /// 포함: previousStrategyValid 판정, FocusTarget 검증, TurnStrategyPlanner 호출,
+        ///       FocusTargetId/TacticalObjective 저장, budget.StrategyPostActionReserved 설정
+        /// </summary>
+        /// <param name="role">AI 역할 (DPS는 기본값 사용)</param>
+        /// <returns>최적 전략 (공격 불가 시 null)</returns>
+        protected TurnStrategy EvaluateOrReuseStrategy(
+            Situation situation, TurnState turnState,
+            ref APBudget budget, string roleTag,
+            Settings.AIRole role = Settings.AIRole.DPS)
+        {
+            TurnStrategy strategy = turnState.GetContext<TurnStrategy>(
+                StrategicContextKeys.TurnStrategyKey, default(TurnStrategy));
+
+            bool previousValid = strategy != null
+                && situation.HasHittableEnemies
+                && situation.BestTarget != null
+                && strategy.ExpectedTotalDamage > 0;
+
+            if (previousValid && !ValidateFocusTarget(situation, turnState, roleTag))
+                previousValid = false;
+
+            if (previousValid)
+            {
+                budget.StrategyPostActionReserved = strategy.ReservedAPForPostAction;
+                Main.Log($"[{roleTag}] Strategy: Reusing previous ({strategy.Sequence}, dmg={strategy.ExpectedTotalDamage:F0})");
+                return strategy;
+            }
+
+            if (situation.HasHittableEnemies &&
+                TeamBlackboard.Instance.CurrentTactic != TacticalSignal.Retreat)
+            {
+                strategy = TurnStrategyPlanner.Evaluate(situation, role);
+                if (strategy != null)
+                {
+                    turnState.SetContext(StrategicContextKeys.TurnStrategyKey, strategy);
+                    if (situation.BestTarget != null)
+                        turnState.SetContext(StrategicContextKeys.FocusTargetId, situation.BestTarget.UniqueId);
+
+                    string objective = strategy.PrioritizesKillSequence ? "Kill"
+                        : strategy.ShouldPrioritizeAoE ? "AoE" : "Attack";
+                    turnState.SetContext(StrategicContextKeys.TacticalObjective, objective);
+
+                    budget.StrategyPostActionReserved = strategy.ReservedAPForPostAction;
+                    Main.Log($"[{roleTag}] Strategy: {strategy.Sequence} (dmg={strategy.ExpectedTotalDamage:F0}, objective={objective})");
+                }
+                return strategy;
+            }
+
+            return null;
+        }
+
+        /// <summary>
         /// 주변 적 수 계산
         /// </summary>
         protected int CountNearbyEnemies(Situation situation, float range)
@@ -2682,119 +2794,108 @@ namespace CompanionAI_v3.Planning.Plans
         }
 
         /// <summary>
-        /// ★ v3.7.00: 사역마 Apprehend 계획 (Cyber-Mastiff)
-        /// ★ v3.7.04: 연대공격을 위해 Master가 공격할 타겟과 동일한 적 우선
-        /// Mastiff Apprehend → Master Attack 순서로 같은 적 공격 시 연대공격 발동
+        /// ★ v3.22.6: 사역마 Apprehend 계획 (Cyber-Mastiff) — 완전 재작성
+        /// - TeamBlackboard 기반 대상 고정 (재발행 방지)
+        /// - BestTarget 연동 (마스터 공격 대상과 동일 → 연대공격 극대화)
+        /// - 도달 가능성 체크 (마스티프가 2-3턴 내 도달 불가한 원거리 적 스킵)
         /// </summary>
         protected PlannedAction PlanFamiliarApprehend(Situation situation, ref float remainingAP)
         {
-            // Cyber-Mastiff만 해당
-            if (situation.FamiliarType != PetType.Mastiff)
-                return null;
+            if (situation.FamiliarType != PetType.Mastiff) return null;
 
-            // Apprehend 능력 찾기
             var apprehend = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
                 a => FamiliarAbilities.IsApprehendAbility(a));
+            if (apprehend == null) return null;
 
-            if (apprehend == null)
-                return null;
-
-            // AP 비용 확인
             float apCost = CombatAPI.GetAbilityAPCost(apprehend);
-            if (remainingAP < apCost)
-                return null;
+            if (remainingAP < apCost) return null;
 
-            // ★ v3.7.04: 연대공격을 위해 Master가 공격할 타겟을 최우선 타겟으로
-            // Mastiff Apprehend → Master Attack 같은 적 → 연대공격 보너스
-            BaseUnitEntity targetEnemy = null;
-            bool isCoordinated = false;
-
-            // 1순위: Master가 공격 가능한 적 중 가장 좋은 타겟 (HittableEnemies)
-            // HP가 낮은 적을 우선 (Master가 마무리하기 좋음)
-            if (situation.HittableEnemies != null && situation.HittableEnemies.Count > 0)
+            // ★ v3.22.6: 기존 Apprehend 대상 확인 — 생존 시 재발행 불필요
+            string masterId = situation.Unit.UniqueId;
+            string existingTargetId = TeamBlackboard.Instance.GetMastiffApprehendTarget(masterId);
+            if (existingTargetId != null)
             {
-                // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
-                // HP%가 낮은 순으로 정렬 (마무리 타겟)
-                var bestHittable = CollectionHelper.MinByWhere(situation.HittableEnemies,
-                    e => e.IsConscious,
-                    e => CombatCache.GetHPPercent(e));
-
-                if (bestHittable != null)
+                var existingTarget = CollectionHelper.FirstOrDefault(situation.Enemies,
+                    e => e.IsConscious && e.UniqueId == existingTargetId);
+                if (existingTarget != null)
                 {
-                    var bestTarget = new TargetWrapper(bestHittable);
-                    string bestReason;
-                    if (CombatAPI.CanUseAbilityOn(apprehend, bestTarget, out bestReason))
-                    {
-                        targetEnemy = bestHittable;
-                        isCoordinated = true;
-                        Main.Log($"[{RoleName}] Mastiff Apprehend: Targeting hittable enemy for coordinated attack");
-                    }
-                    else
-                    {
-                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Mastiff Apprehend: Hittable enemy blocked - {bestReason}");
-                    }
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Mastiff Apprehend: Already active on {existingTarget.CharacterName}, skipping");
+                    return null;  // 대상 생존 → 재발행 불필요
+                }
+                // 대상 사망/무효 → clear 후 새 대상 선택
+                TeamBlackboard.Instance.ClearMastiffApprehendTarget(masterId);
+                Main.Log($"[{RoleName}] Mastiff Apprehend: Previous target eliminated, selecting new target");
+            }
+
+            // ★ v3.22.6: BestTarget 연동 + 도달 가능성 체크
+            BaseUnitEntity targetEnemy = null;
+
+            // 1순위: BestTarget (마스터 공격 대상과 일치 → 연대공격 보너스 극대화)
+            if (situation.BestTarget != null && situation.BestTarget.IsConscious
+                && IsMastiffReachable(situation, situation.BestTarget))
+            {
+                string reason;
+                if (CombatAPI.CanUseAbilityOn(apprehend, new TargetWrapper(situation.BestTarget), out reason))
+                {
+                    targetEnemy = situation.BestTarget;
+                    Main.Log($"[{RoleName}] Mastiff Apprehend: BestTarget {targetEnemy.CharacterName} (coordinated)");
                 }
             }
 
-            // 2순위: NearestEnemy (이동 후 공격 가능)
+            // 2순위: HittableEnemies 중 도달 가능한 적 (마스티프 기준 거리순)
+            if (targetEnemy == null && situation.HittableEnemies != null)
+            {
+                float bestDist = float.MaxValue;
+                for (int i = 0; i < situation.HittableEnemies.Count; i++)
+                {
+                    var enemy = situation.HittableEnemies[i];
+                    if (!enemy.IsConscious) continue;
+                    if (!IsMastiffReachable(situation, enemy)) continue;
+                    string reason;
+                    if (!CombatAPI.CanUseAbilityOn(apprehend, new TargetWrapper(enemy), out reason)) continue;
+                    float dist = Vector3.Distance(situation.Familiar.Position, enemy.Position);
+                    if (dist < bestDist) { bestDist = dist; targetEnemy = enemy; }
+                }
+                if (targetEnemy != null)
+                    Main.Log($"[{RoleName}] Mastiff Apprehend: Reachable hittable {targetEnemy.CharacterName} (dist={CombatAPI.MetersToTiles(bestDist):F1}tiles)");
+            }
+
+            // 3순위: NearestEnemy 폴백 (도달 불확실하지만 최선)
             if (targetEnemy == null && situation.NearestEnemy != null && situation.NearestEnemy.IsConscious)
             {
-                var nearTarget = new TargetWrapper(situation.NearestEnemy);
-                string nearReason;
-                if (CombatAPI.CanUseAbilityOn(apprehend, nearTarget, out nearReason))
+                string reason;
+                if (CombatAPI.CanUseAbilityOn(apprehend, new TargetWrapper(situation.NearestEnemy), out reason))
                 {
                     targetEnemy = situation.NearestEnemy;
-                    isCoordinated = true;  // NearestEnemy도 Master가 공격할 가능성 높음
-                    Main.Log($"[{RoleName}] Mastiff Apprehend: Targeting NearestEnemy for coordinated attack");
+                    Main.Log($"[{RoleName}] Mastiff Apprehend: NearestEnemy fallback {targetEnemy.CharacterName}");
                 }
             }
 
-            // 3순위: 원거리 위협 적
             if (targetEnemy == null)
             {
-                // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
-                targetEnemy = CollectionHelper.MaxByWhere(situation.Enemies,
-                    e => e.IsConscious && CombatAPI.HasRangedWeapon(e),
-                    e => (float)(e.Health?.MaxHitPoints ?? 0));
-            }
-
-            // 4순위: 아무 적이라도
-            if (targetEnemy == null)
-            {
-                // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
-                targetEnemy = CollectionHelper.MaxByWhere(situation.Enemies,
-                    e => e.IsConscious,
-                    e => (float)(e.Health?.MaxHitPoints ?? 0));
-            }
-
-            if (targetEnemy == null)
-            {
-                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Mastiff Apprehend: No valid target found");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Mastiff Apprehend: No valid reachable target found");
                 return null;
             }
 
-            // 타겟 가능 여부 확인 (3순위/4순위용)
-            if (!isCoordinated)
-            {
-                var targetWrapper = new TargetWrapper(targetEnemy);
-                string reason;
-                if (!CombatAPI.CanUseAbilityOn(apprehend, targetWrapper, out reason))
-                {
-                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Mastiff Apprehend blocked: {reason}");
-                    return null;
-                }
-            }
-
+            // ★ v3.22.6: Apprehend 대상 기록 (턴 간 보존)
+            TeamBlackboard.Instance.SetMastiffApprehendTarget(masterId, targetEnemy.UniqueId);
             remainingAP -= apCost;
 
-            string coordMsg = isCoordinated ? " (Coordinated Attack)" : "";
-            Main.Log($"[{RoleName}] ★ Mastiff Apprehend: {targetEnemy.CharacterName}{coordMsg}");
+            Main.Log($"[{RoleName}] ★ Mastiff Apprehend: {targetEnemy.CharacterName} (locked until eliminated)");
+            return PlannedAction.Attack(apprehend, targetEnemy,
+                $"Mastiff Apprehend on {targetEnemy.CharacterName}", apCost);
+        }
 
-            return PlannedAction.Attack(
-                apprehend,
-                targetEnemy,
-                $"Mastiff Apprehend on {targetEnemy.CharacterName}{coordMsg}",
-                apCost);
+        /// <summary>
+        /// ★ v3.22.6: 마스티프 도달 가능성 체크
+        /// 마스티프 MP가 아닌 절대 거리 기준 (pet AI가 이동 관리, 우리 API로 정확한 MP 조회 어려움)
+        /// </summary>
+        private bool IsMastiffReachable(Situation situation, BaseUnitEntity enemy)
+        {
+            if (situation.Familiar == null) return false;
+            float dist = Vector3.Distance(situation.Familiar.Position, enemy.Position);
+            float distTiles = CombatAPI.MetersToTiles(dist);
+            return distTiles <= SC.MastiffApprehendMaxReachTiles;
         }
 
         /// <summary>
@@ -2869,60 +2970,58 @@ namespace CompanionAI_v3.Planning.Plans
         }
 
         /// <summary>
-        /// ★ v3.7.01: 사역마 Protect! 계획 (Cyber-Mastiff)
-        /// 위협받거나 HP가 낮은 아군 호위
+        /// ★ v3.22.6: 사역마 Protect! 계획 (Cyber-Mastiff) — 조건 강화
+        /// - Apprehend 활성 시 Protect 스킵 (배타적 명령)
+        /// - 근접 적이 위협하는 약한 아군만 보호 (HP &lt; 50%)
+        /// - 마스터 자신도 보호 대상 (HP &lt; 60% + 근접 적 존재)
         /// </summary>
         protected PlannedAction PlanFamiliarProtect(Situation situation, ref float remainingAP)
         {
-            // Cyber-Mastiff만 해당
-            if (situation.FamiliarType != PetType.Mastiff)
-                return null;
+            if (situation.FamiliarType != PetType.Mastiff) return null;
 
-            // Protect! 능력 찾기
             var protect = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
                 a => FamiliarAbilities.IsProtectAbility(a));
+            if (protect == null) return null;
 
-            if (protect == null)
-                return null;
-
-            // AP 비용 확인
             float apCost = CombatAPI.GetAbilityAPCost(protect);
-            if (remainingAP < apCost)
-                return null;
+            if (remainingAP < apCost) return null;
 
-            // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
-            // 보호할 아군 찾기 (HP 낮거나 주변 적이 많은 아군)
-            // HP 낮을수록 우선 (MinBy), 같은 HP면 주변 적이 많은 순 (ThenByDescending 시뮬)
-            // scorer: HP% * 100 - nearbyEnemies (낮을수록 우선)
-            var allyToProtect = CollectionHelper.MinByWhere(situation.Allies,
-                a => a.IsConscious && !FamiliarAPI.IsFamiliar(a) && a != situation.Unit,
-                a =>
+            // ★ v3.22.6: Apprehend 활성 시 Protect 스킵 (공격 명령과 보호 명령은 배타적)
+            string masterId = situation.Unit.UniqueId;
+            string apprehendTargetId = TeamBlackboard.Instance.GetMastiffApprehendTarget(masterId);
+            if (apprehendTargetId != null)
+            {
+                var apprehendTarget = CollectionHelper.FirstOrDefault(situation.Enemies,
+                    e => e.IsConscious && e.UniqueId == apprehendTargetId);
+                if (apprehendTarget != null)
                 {
-                    int nearbyEnemyCount = CollectionHelper.CountWhere(situation.Enemies,
-                        e => e.IsConscious && CombatCache.GetDistanceInTiles(a, e) <= 3f);
-                    return CombatCache.GetHPPercent(a) * 100f - nearbyEnemyCount;
-                });
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Mastiff Protect: Skipped — Apprehend active on {apprehendTarget.CharacterName}");
+                    return null;  // Apprehend 활성 → Protect 불필요
+                }
+            }
+
+            // ★ v3.22.6: 조건 강화 — 근접 적이 위협하는 약한 아군만 보호
+            // HP < MastiffProtectMaxHP(50%) + 근접 무기 적 3타일 내 존재
+            var allyToProtect = CollectionHelper.MinByWhere(situation.Allies,
+                a => a.IsConscious && !FamiliarAPI.IsFamiliar(a) && a != situation.Unit
+                     && CombatCache.GetHPPercent(a) < SC.MastiffProtectMaxHP
+                     && HasNearbyMeleeEnemy(situation, a),
+                a => CombatCache.GetHPPercent(a));
+
+            // 마스터 자신도 후보 (HP < 60% + 근접 적 존재)
+            if (allyToProtect == null
+                && CombatCache.GetHPPercent(situation.Unit) < 60f
+                && HasNearbyMeleeEnemy(situation, situation.Unit))
+            {
+                allyToProtect = situation.Unit;
+            }
 
             if (allyToProtect == null)
             {
-                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Mastiff Protect: No ally to protect");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Mastiff Protect: No threatened ally needs protection");
                 return null;
             }
 
-            // HP가 70% 이상이고 주변 적이 없으면 스킵
-            float allyHP = CombatCache.GetHPPercent(allyToProtect);
-            // ★ v3.8.48: LINQ → CollectionHelper (0 할당)
-            int nearbyEnemies = CollectionHelper.CountWhere(situation.Enemies, e =>
-                e.IsConscious &&
-                CombatCache.GetDistanceInTiles(allyToProtect, e) <= 3f);
-
-            if (allyHP > 70f && nearbyEnemies == 0)
-            {
-                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Mastiff Protect: {allyToProtect.CharacterName} doesn't need protection (HP={allyHP:F0}%, enemies nearby=0)");
-                return null;
-            }
-
-            // 타겟 가능 여부 확인
             var targetWrapper = new TargetWrapper(allyToProtect);
             string reason;
             if (!CombatAPI.CanUseAbilityOn(protect, targetWrapper, out reason))
@@ -2931,15 +3030,23 @@ namespace CompanionAI_v3.Planning.Plans
                 return null;
             }
 
+            float allyHP = CombatCache.GetHPPercent(allyToProtect);
             remainingAP -= apCost;
+            Main.Log($"[{RoleName}] ★ Mastiff Protect: {allyToProtect.CharacterName} (HP={allyHP:F0}%)");
 
-            Main.Log($"[{RoleName}] ★ Mastiff Protect: {allyToProtect.CharacterName} (HP={allyHP:F0}%, nearby enemies={nearbyEnemies})");
+            return PlannedAction.Buff(protect, allyToProtect,
+                $"Mastiff Protect {allyToProtect.CharacterName}", apCost);
+        }
 
-            return PlannedAction.Buff(
-                protect,
-                allyToProtect,
-                $"Mastiff Protect {allyToProtect.CharacterName}",
-                apCost);
+        /// <summary>
+        /// ★ v3.22.6: 아군 근처에 근접 무기 적이 있는지 확인
+        /// Protect 발동 조건 — 원거리 적에게는 마스티프 보호가 무의미
+        /// </summary>
+        private bool HasNearbyMeleeEnemy(Situation situation, BaseUnitEntity ally)
+        {
+            return CollectionHelper.Any(situation.Enemies,
+                e => e.IsConscious && !CombatAPI.HasRangedWeapon(e)
+                     && CombatCache.GetDistanceInTiles(ally, e) <= 3f);
         }
 
         /// <summary>

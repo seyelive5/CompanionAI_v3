@@ -122,6 +122,20 @@
 4. **설정 기본값 확인**: 새 기능의 기본값이 합리적인가? (OFF로 두면 사실상 미구현)
 5. **실제 동작 시나리오 확인**: 빌드 성공 ≠ 작동. 실전 시나리오에서 트리거되는 조건이 현실적인가?
 
+### 7. 코드 감사 기술 부채 정리 — ★ v3.22.0 완성
+
+**배경**: 전체 코드베이스 감사 결과 A등급 1건(전략 중복) + B등급 5건 발견
+
+**v3.22.0에서 해결된 항목**:
+- [x] **전략 검증 중복 제거**: 4개 Plan의 ~200줄 중복 → `BasePlan.EvaluateOrReuseStrategy()` + `ValidateFocusTarget()` 추출
+- [x] **TacticalObjective 누락 수정**: DPSPlan에만 있던 TacticalObjective 설정을 전 Role 통합
+- [x] **FocusTarget 로그 ID 누락 수정**: Tank/Support/Overseer에서 focusTargetId 미출력 → 통합 메서드에서 전 Role 출력
+- [x] **폴백 상수 SC.cs 중앙화**: CombatAPI/MovementAPI/MainAIPatch/TacticalOptionEvaluator의 하드코딩 `15f` → `SC.FallbackWeaponRange`/`SC.FallbackEstimateDamage`
+- [x] **catch 블록 디버그 로깅**: CustomBehaviourTree(2), TurnOrchestrator(2), AoESafetyChecker(1) — 5곳에 `Main.LogDebug()` 추가
+- [x] **TurnState Obsolete 필드 제거**: `RemainingAP`/`RemainingMP` 완전 제거 (v3.0.77 이후 미사용)
+- [x] **CombatAPI.cs.bak 삭제**: 129KB 백업 파일 정리
+- [x] **BasePlan 매직 넘버 SC.cs 이관**: HP_COST_THRESHOLD, DEFAULT_*_ATTACK_COST, MAX_ATTACKS_PER_PLAN, MAX_POSITIONAL_BUFFS
+
 ---
 
 ## 최근 완료 항목 (검증됨)
@@ -140,3 +154,7 @@
 - [x] v3.19.4: APBudget 팩토리 통합 (CreateAPBudget + EffectiveReserved + effectiveReservedAP 완전 제거)
 - [x] v3.19.6: TurnStrategy Role별 시드 필터 제거 + 가중치 스코어링 (전 Role 10시드 평가, 비-DPS 복합 시드 0.85 가중치)
 - [x] v3.19.8: 위험지역 회피 통합 (HazardZone API, PsychicNullZone 이동 회피, AoE리포지션/SmartTaunt/AerialRush 누락 수정)
+- [x] v3.22.0: 코드 감사 기술 부채 정리 (전략 중복 제거, TacticalObjective 누락 수정, 폴백 상수 중앙화, catch 로깅, Obsolete 제거)
+- [x] v3.22.2: AI 로직 감사 (33건 검증 → 25건+ False Positive 확인, SupportPlan AoE 힐 임계값 70f→healThreshold 수정)
+- [x] v3.22.4: Turn Order Awareness 확장 (PositionEvaluator 턴 순서 기반 위협 가중, BasePlan.PlanAllyBuff 행동 예정 아군 버프 우선)
+- [x] v3.22.6: 마스티프 사역마 Apprehend/Protect 개선 (TeamBlackboard 상태 추적 → 대상 고정/재발행 방지, BestTarget 연동 → 연대공격 극대화, 도달 가능성 체크, Protect 조건 강화 → 근접 적 위협+HP<50%만, OverseerPlan Phase 3.7 재구성 → Apprehend 활성시 전부 스킵으로 AP 절약, Protect Phase 9.5 이동)

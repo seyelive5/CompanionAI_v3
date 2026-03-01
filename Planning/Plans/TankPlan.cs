@@ -40,56 +40,8 @@ namespace CompanionAI_v3.Planning.Plans
                 Main.Log($"[Tank] {budget}");
             }
 
-            // ★ v3.19.0: 전략적 시퀀스 평가 — Tank Role용 (시드 0,2,4,6만 평가)
-            // ★ v3.19.2: Replan 시 FocusTarget 유효성 검증 + 전략 재사용
-            TurnStrategy strategy = turnState.GetContext<TurnStrategy>(
-                StrategicContextKeys.TurnStrategyKey, default(TurnStrategy));
-
-            bool previousStrategyValid = strategy != null
-                && situation.HasHittableEnemies
-                && situation.BestTarget != null
-                && strategy.ExpectedTotalDamage > 0;
-
-            if (previousStrategyValid)
-            {
-                string focusTargetId = turnState.GetContext<string>(StrategicContextKeys.FocusTargetId, null);
-                if (focusTargetId != null)
-                {
-                    bool found = false;
-                    for (int i = 0; i < situation.HittableEnemies.Count; i++)
-                    {
-                        if (situation.HittableEnemies[i].UniqueId == focusTargetId) { found = true; break; }
-                    }
-                    if (!found)
-                    {
-                        previousStrategyValid = false;
-                        Main.Log($"[Tank] Strategy: Previous FocusTarget no longer hittable — re-evaluating");
-                    }
-                }
-            }
-
-            if (previousStrategyValid)
-            {
-                budget.StrategyPostActionReserved = strategy.ReservedAPForPostAction;
-                Main.Log($"[Tank] Strategy: Reusing previous ({strategy.Sequence}, dmg={strategy.ExpectedTotalDamage:F0})");
-            }
-            else if (situation.HasHittableEnemies &&
-                TeamBlackboard.Instance.CurrentTactic != TacticalSignal.Retreat)
-            {
-                strategy = TurnStrategyPlanner.Evaluate(situation, Settings.AIRole.Tank);
-                if (strategy != null)
-                {
-                    turnState.SetContext(StrategicContextKeys.TurnStrategyKey, strategy);
-                    if (situation.BestTarget != null)
-                        turnState.SetContext(StrategicContextKeys.FocusTargetId, situation.BestTarget.UniqueId);
-                    budget.StrategyPostActionReserved = strategy.ReservedAPForPostAction;
-                    Main.Log($"[Tank] Strategy: {strategy.Sequence} (dmg={strategy.ExpectedTotalDamage:F0})");
-                }
-            }
-            else
-            {
-                strategy = null;
-            }
+            // ★ v3.22.0: 전략 평가/재사용 — BasePlan.EvaluateOrReuseStrategy()로 통합
+            TurnStrategy strategy = EvaluateOrReuseStrategy(situation, turnState, ref budget, "Tank", Settings.AIRole.Tank);
 
             // ★ v3.12.0: Phase 0~1.5 공통 처리 (Ultimate, AoE대피, 긴급힐, 재장전)
             var earlyReturn = ExecuteCommonEarlyPhases(actions, situation, ref remainingAP);

@@ -4,6 +4,7 @@ using Kingmaker.EntitySystem.Entities;
 using Kingmaker.View.Covers;
 using UnityEngine;
 using CompanionAI_v3.GameInterface;
+using CompanionAI_v3.Settings;
 
 namespace CompanionAI_v3.Analysis
 {
@@ -23,6 +24,7 @@ namespace CompanionAI_v3.Analysis
             public float DistanceScore;
             public float ThreatScore;
             public float LOSScore;
+            public float TurnOrderThreatScore;  // ★ v3.22.4: 턴 순서 기반 위협 가중
             public bool IsReachable;
         }
 
@@ -38,6 +40,9 @@ namespace CompanionAI_v3.Analysis
         {
             if (unit == null || enemies == null || enemies.Count == 0)
                 return null;
+
+            // ★ v3.22.4: 턴 순서 캐시 갱신 (EvaluatePosition에서 턴 순서 기반 위협 가중에 사용)
+            TargetScorer.RefreshTurnOrderCache(unit);
 
             var candidates = new List<PositionScore>();
             var currentPos = unit.Position;
@@ -171,9 +176,38 @@ namespace CompanionAI_v3.Analysis
             float moveDistance = Vector3.Distance(unit.Position, position);
             score.ThreatScore = -moveDistance * 0.5f;
 
+            // 5. ★ v3.22.4: 턴 순서 기반 위협 가중
+            // 곧 행동할 적 근처 = 더 위험 (이동+공격 가능), 이미 행동한 적 근처 = 덜 위험
+            float turnOrderThreat = 0f;
+            if (TargetScorer._cachedTurnOrder != null && TargetScorer._cachedTurnOrder.Count > 0)
+            {
+                foreach (var enemy in enemies)
+                {
+                    if (enemy == null || enemy.LifeState.IsDead) continue;
+                    float dist = Vector3.Distance(position, enemy.Position);
+                    float threatRadius = minSafeDistance * SC.PositionTurnOrderThreatRadiusMult;
+                    if (dist > threatRadius) continue;
+
+                    float proximityFactor = 1f - (dist / threatRadius);
+                    int turnPos = TargetScorer._cachedTurnOrder.IndexOf(enemy);
+                    if (turnPos >= 0 && turnPos <= 2)
+                    {
+                        // 곧 행동할 적: position 0=-15, 1=-10, 2=-5
+                        float urgency = (3 - turnPos) * SC.PositionTurnOrderUrgencyRate;
+                        turnOrderThreat -= urgency * proximityFactor;
+                    }
+                    else if (enemy.Initiative?.ActedThisRound == true)
+                    {
+                        // 이미 행동한 적: 소폭 안전 보너스
+                        turnOrderThreat += SC.PositionTurnOrderActedBonus * proximityFactor;
+                    }
+                }
+            }
+            score.TurnOrderThreatScore = turnOrderThreat;
+
             // 총점
             score.TotalScore = score.CoverScore + score.DistanceScore +
-                              score.LOSScore + score.ThreatScore;
+                              score.LOSScore + score.ThreatScore + score.TurnOrderThreatScore;
 
             return score;
         }
@@ -189,6 +223,9 @@ namespace CompanionAI_v3.Analysis
         {
             if (unit == null || enemies == null || enemies.Count == 0)
                 return null;
+
+            // ★ v3.22.4: 턴 순서 캐시 갱신 (후퇴 위치 점수에 턴 순서 반영)
+            TargetScorer.RefreshTurnOrderCache(unit);
 
             // 적들의 중심점
             Vector3 enemyCenter = Vector3.zero;
@@ -234,6 +271,27 @@ namespace CompanionAI_v3.Analysis
                     if (nearestDist >= minSafeDistance)
                     {
                         float score = nearestDist * 2f - dist * 0.5f;
+
+                        // ★ v3.22.4: 턴 순서 기반 후퇴 위치 보정
+                        if (TargetScorer._cachedTurnOrder != null && TargetScorer._cachedTurnOrder.Count > 0)
+                        {
+                            foreach (var enemy in enemies)
+                            {
+                                if (enemy == null || enemy.LifeState.IsDead) continue;
+                                float eDist = Vector3.Distance(candidatePos, enemy.Position);
+                                float threatRadius = minSafeDistance * SC.PositionTurnOrderThreatRadiusMult;
+                                if (eDist > threatRadius) continue;
+
+                                float proximityFactor = 1f - (eDist / threatRadius);
+                                int turnPos = TargetScorer._cachedTurnOrder.IndexOf(enemy);
+                                if (turnPos >= 0 && turnPos <= 2)
+                                {
+                                    float urgency = (3 - turnPos) * SC.PositionTurnOrderUrgencyRate;
+                                    score -= urgency * proximityFactor;
+                                }
+                            }
+                        }
+
                         candidates.Add((candidatePos, score));
                     }
                 }

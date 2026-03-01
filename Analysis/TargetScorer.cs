@@ -738,7 +738,8 @@ namespace CompanionAI_v3.Analysis
         /// - 곧 행동할 아군: +15 (버프 즉시 활용 가능)
         /// - 이미 행동한 아군: -10 (버프 효과 다음 라운드까지 대기)
         /// </summary>
-        private static float GetAllyTurnOrderBonus(BaseUnitEntity ally, BaseUnitEntity currentUnit)
+        // ★ v3.22.4: private → internal (BasePlan.PlanAllyBuff에서 턴 순서 기반 버프 대상 정렬에 사용)
+        internal static float GetAllyTurnOrderBonus(BaseUnitEntity ally, BaseUnitEntity currentUnit)
         {
             try
             {

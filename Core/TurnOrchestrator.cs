@@ -843,7 +843,7 @@ namespace CompanionAI_v3.Core
                     Main.LogDebug($"[Orchestrator] AI timeout extended: {currentTimeout}s → 300s");
                 }
             }
-            catch (Exception) { /* AiBrainController 접근 실패 시 무시 */ }
+            catch (Exception ex) { Main.LogDebug($"[Orchestrator] AI timeout extend failed: {ex.Message}"); }
 
             Main.Log($"[Orchestrator] Turn started for {unit.CharacterName} (via event)");
         }
@@ -1110,7 +1110,7 @@ namespace CompanionAI_v3.Core
                     Main.LogDebug($"[Orchestrator] AI timeout restored to {_originalAiTimeout}s");
                     _originalAiTimeout = -1f;
                 }
-                catch (Exception) { }
+                catch (Exception ex) { Main.LogDebug($"[Orchestrator] AI timeout restore failed: {ex.Message}"); }
             }
         }
 

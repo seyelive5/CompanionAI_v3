@@ -111,76 +111,8 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // ★ v3.11.0: 전략적 시퀀스 평가 — Phase들에게 가이드 제공
-            // 10가지 시드 템플릿(Standard~BuffedRnGAoE)을 시뮬레이션하여
-            // TotalDamage + KillBonus + UtilityBonus 통합 스코어로 최적 전략 선택
-            // ★ v3.19.0: Replan 시 이전 전략 재사용 — 유효하면 재평가 생략
-            // ★ v3.19.2: FocusTargetId로 이전 타겟 유효성 검증 추가
-            TurnStrategy strategy = turnState.GetContext<TurnStrategy>(
-                StrategicContextKeys.TurnStrategyKey, default(TurnStrategy));
-
-            bool previousStrategyValid = strategy != null
-                && situation.HasHittableEnemies
-                && situation.BestTarget != null
-                && strategy.ExpectedTotalDamage > 0;
-
-            // ★ v3.19.2: 이전 전략의 FocusTarget이 사망/공격불가면 전략 무효화
-            if (previousStrategyValid)
-            {
-                string focusTargetId = turnState.GetContext<string>(StrategicContextKeys.FocusTargetId, null);
-                if (focusTargetId != null)
-                {
-                    bool focusTargetStillValid = false;
-                    for (int i = 0; i < situation.HittableEnemies.Count; i++)
-                    {
-                        if (situation.HittableEnemies[i].UniqueId == focusTargetId)
-                        {
-                            focusTargetStillValid = true;
-                            break;
-                        }
-                    }
-                    if (!focusTargetStillValid)
-                    {
-                        previousStrategyValid = false;
-                        Main.Log($"[DPS] Strategy: Previous FocusTarget {focusTargetId} no longer hittable — re-evaluating");
-                    }
-                }
-            }
-
-            if (previousStrategyValid)
-            {
-                Main.Log($"[DPS] Strategy: Reusing previous strategy ({strategy.Sequence}, dmg={strategy.ExpectedTotalDamage:F0})");
-            }
-            else if (situation.HasHittableEnemies &&
-                TeamBlackboard.Instance.CurrentTactic != TacticalSignal.Retreat)
-            {
-                strategy = TurnStrategyPlanner.Evaluate(situation);
-                if (strategy != null)
-                {
-                    turnState.SetContext(StrategicContextKeys.TurnStrategyKey, strategy);
-                    // ★ v3.19.2: FocusTargetId 저장 — Replan 시 유효성 검증에 사용
-                    if (situation.BestTarget != null)
-                    {
-                        turnState.SetContext(StrategicContextKeys.FocusTargetId, situation.BestTarget.UniqueId);
-                    }
-                    // ★ v3.19.2: TacticalObjective 저장 — 턴 의도 보존
-                    string objective = strategy.PrioritizesKillSequence ? "Kill"
-                        : strategy.ShouldPrioritizeAoE ? "AoE"
-                        : "Attack";
-                    turnState.SetContext(StrategicContextKeys.TacticalObjective, objective);
-                    Main.Log($"[DPS] Strategy: Fresh evaluation — {strategy.Sequence} (dmg={strategy.ExpectedTotalDamage:F0}, target={situation.BestTarget?.CharacterName}, objective={objective})");
-                }
-            }
-            else
-            {
-                strategy = null; // 공격 불가 상황 — 전략 무효화
-            }
-
-            // ★ v3.19.0: 전략 R&G AP 예약을 APBudget에 반영
-            if (strategy != null)
-            {
-                budget.StrategyPostActionReserved = strategy.ReservedAPForPostAction;
-            }
+            // ★ v3.22.0: 전략 평가/재사용 — BasePlan.EvaluateOrReuseStrategy()로 통합
+            TurnStrategy strategy = EvaluateOrReuseStrategy(situation, turnState, ref budget, "DPS");
 
             // ══════════════════════════════════════════════════════════════
             // Phase 1.6: 전략 옵션 평가 (공격-이동 조합 선택)

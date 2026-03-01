@@ -332,7 +332,7 @@ namespace CompanionAI_v3.Planning
                 float weaponRange = situation.BlendedAttackRange > 0
                     ? situation.BlendedAttackRange
                     : situation.WeaponRange.EffectiveRange;
-                if (weaponRange <= 0f) weaponRange = 15f;  // 안전 폴백
+                if (weaponRange <= 0f) weaponRange = Settings.SC.FallbackWeaponRange;  // 안전 폴백
 
                 // ★ v3.9.74: 무기 로테이션 시 짧은 사거리 무기 기준 포지셔닝
                 // ★ v3.9.78: 동일 타입(원거리+원거리)에만 적용 — 혼합(원거리+근접) 시 현재 무기 사거리 유지

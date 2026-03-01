@@ -108,22 +108,6 @@ namespace CompanionAI_v3.Core
 
         #region Resources
 
-        /// <summary>
-        /// 남은 AP
-        /// ★ v3.4.01: P2-1 레거시 필드 - 실시간 AP는 CombatAPI.GetCurrentAP() 사용
-        /// RecordAction()에서 내부 추적용으로만 사용
-        /// </summary>
-        [System.Obsolete("v3.0.77+: Use CombatAPI.GetCurrentAP() for real-time AP")]
-        public float RemainingAP { get; set; }
-
-        /// <summary>
-        /// 남은 MP
-        /// ★ v3.4.01: P2-1 레거시 필드 - 실시간 MP는 CombatAPI.GetCurrentMP() 사용
-        /// RecordAction()에서 내부 추적용으로만 사용
-        /// </summary>
-        [System.Obsolete("v3.0.77+: Use CombatAPI.GetCurrentMP() for real-time MP")]
-        public float RemainingMP { get; set; }
-
         /// <summary>시작 AP</summary>
         public float StartingAP { get; }
 
@@ -222,8 +206,6 @@ namespace CompanionAI_v3.Core
 
             StartingAP = currentAP;
             StartingMP = currentMP;
-            RemainingAP = currentAP;
-            RemainingMP = currentMP;
             MaxAPSeenThisTurn = currentAP;  // ★ v3.0.76: 초기값 설정
             LastKnownMP = currentMP;  // ★ v3.1.03: MP 변화 감지용
         }
@@ -246,8 +228,6 @@ namespace CompanionAI_v3.Core
                 ConsecutiveFailures = 0;
 
                 // 상태 플래그 업데이트
-                // ★ v3.13.0: RemainingAP 갱신 제거 — [Obsolete] 필드, 읽는 곳 없음
-                //   실시간 AP는 CombatAPI.GetCurrentAP() 사용
                 switch (action.Type)
                 {
                     case ActionType.Move:
@@ -307,7 +287,8 @@ namespace CompanionAI_v3.Core
         /// </summary>
         public override string ToString()
         {
-            return $"[TurnState] {Unit?.CharacterName}: AP={RemainingAP:F1}/{StartingAP:F1}, " +
+            float currentAP = Unit != null ? GameInterface.CombatAPI.GetCurrentAP(Unit) : 0f;
+            return $"[TurnState] {Unit?.CharacterName}: AP={currentAP:F1}/{StartingAP:F1}, " +
                    $"Actions={ActionCount}, Moved={HasMovedThisTurn}, Attacked={HasAttackedThisTurn}";
         }
 

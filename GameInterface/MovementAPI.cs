@@ -993,7 +993,7 @@ namespace CompanionAI_v3.GameInterface
         public static PositionScore FindRangedAttackPositionSync(
             BaseUnitEntity unit,
             List<BaseUnitEntity> enemies,
-            float weaponRange = 15f,
+            float weaponRange = Settings.SC.FallbackWeaponRange,
             float minSafeDistance = 5f,
             float predictedMP = 0f,
             BattlefieldInfluenceMap influenceMap = null,
