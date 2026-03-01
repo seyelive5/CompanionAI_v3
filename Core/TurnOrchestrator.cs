@@ -982,14 +982,29 @@ namespace CompanionAI_v3.Core
         }
 
         /// <summary>
-        /// ★ v3.21.0: 파티 멤버가 아닌 아군 NPC인지 확인 (주인공/사역마 제외)
+        /// ★ v3.22.8: 파티 멤버가 아닌 아군 NPC인지 확인 (주인공/사역마 제외)
+        /// 게임 TurnController.EnumerateAllUnits()와 동일한 전투 참여 조건 적용
+        /// - IsInCombat: 현재 전투에 참여 중인 유닛만
+        /// - !IsExtra: 고스트/엑스트라 유닛 제외 (턴 오더 미참여)
+        /// - !IsPet: 사역마/소환수 제외 (Master 존재 여부 이중 체크)
         /// </summary>
         private static bool IsGuestAlly(BaseUnitEntity unit)
         {
             if (unit.IsMainCharacter) return false;
             if (FamiliarAPI.IsFamiliar(unit)) return false;
+
             try
             {
+                // ★ v3.22.8: 전투 참여 유닛만 (비전투 플레이어 팩션 NPC 제외)
+                if (unit.CombatState?.IsInCombat != true) return false;
+
+                // ★ v3.22.8: 엑스트라/고스트 유닛 제외 (턴 오더에 참여하지 않는 유닛)
+                if (unit.IsExtra) return false;
+
+                // ★ v3.22.8: IsPet 이중 체크 (FamiliarAPI.IsFamiliar 실패 대비)
+                // unit.IsPet = unit.Master != null — Master 참조 타이밍 이슈 방어
+                if (unit.IsPet) return false;
+
                 var party = Game.Instance?.Player?.PartyAndPets;
                 return party != null && !party.Contains(unit);
             }
