@@ -2267,6 +2267,41 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
+        /// ★ v3.40.0: Prey 마킹 능력 GUID 목록 (HuntDownThePrey, ChoosePrey_Noble)
+        /// </summary>
+        private static readonly HashSet<string> PreyAbilityGuids = new HashSet<string>
+        {
+            "b97c9e76f6ca46d3bb8ccd86baa9d7c9", // HuntDownThePrey (Bounty Hunter)
+            "43ee13d74e824d07a0fa2a651c23df40", // ChoosePrey_Noble
+        };
+
+        /// <summary>
+        /// ★ v3.40.0: 적이 Prey(먹잇감)로 마크되었는지 확인
+        /// buff.Context.SourceAbility의 GUID로 역추적 — Prey 버프 GUID 불필요
+        /// Piercing Shot + Prey = 보장 크리 → ScoreAttackBuff에서 가산점
+        /// </summary>
+        public static bool IsMarkedAsPrey(BaseUnitEntity target)
+        {
+            if (target?.Buffs == null) return false;
+            try
+            {
+                foreach (var buff in target.Buffs)
+                {
+                    var sourceAbility = buff?.Context?.SourceAbility;
+                    if (sourceAbility == null) continue;
+                    var guid = sourceAbility.AssetGuid?.ToString();
+                    if (guid != null && PreyAbilityGuids.Contains(guid))
+                        return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsMarkedAsPrey error: {ex.Message}");
+            }
+            return false;
+        }
+
+        /// <summary>
         /// ★ v3.8.39: 유닛이 잠재력 초월(WarhammerFreeUltimateBuff)을 가지고 있는지 확인
         /// 이 버프가 있으면 궁극기 사용이 가능한 추가 턴
         /// </summary>

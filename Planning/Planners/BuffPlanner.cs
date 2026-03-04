@@ -13,6 +13,7 @@ using CompanionAI_v3.Analysis;
 using CompanionAI_v3.Data;
 using CompanionAI_v3.GameInterface;
 using CompanionAI_v3.Settings;
+using Kingmaker.Blueprints.Classes.Experience;
 
 namespace CompanionAI_v3.Planning.Planners
 {
@@ -341,8 +342,75 @@ namespace CompanionAI_v3.Planning.Planners
         }
 
         /// <summary>
+        /// ★ v3.40.0: Cautious/Confident Approach 스탠스 자동 선택
+        /// - Cautious: HP 낮거나 근접 위협 시 (방어적 — 회피/패리 보너스)
+        /// - Confident: HP 충분하고 공격 가능 시 (공격적 — 보장 크리, 회피관통)
+        /// 0 AP, 상호 배타 (게임이 자동으로 이전 스탠스 해제)
+        /// </summary>
+        public static PlannedAction PlanApproachStance(Situation situation, bool preferOffensive, string roleName)
+        {
+            if (situation.AvailableBuffs == null || situation.AvailableBuffs.Count == 0) return null;
+
+            AbilityData cautiousAbility = null;
+            AbilityData confidentAbility = null;
+
+            foreach (var ability in situation.AvailableBuffs)
+            {
+                if (AbilityDatabase.IsCautiousApproach(ability))
+                    cautiousAbility = ability;
+                else if (AbilityDatabase.IsConfidentApproach(ability))
+                    confidentAbility = ability;
+            }
+
+            // 두 스탠스 모두 없으면 스킵 (Veteran 아키타입 전용)
+            if (cautiousAbility == null && confidentAbility == null) return null;
+
+            // ★ 상황 판단: Cautious vs Confident
+            bool wantCautious;
+            if (situation.IsHPLow)
+            {
+                // HP 50% 미만 → 방어 우선
+                wantCautious = true;
+            }
+            else if (situation.NearestEnemyDistance > 0f && situation.NearestEnemyDistance <= 2f && !preferOffensive)
+            {
+                // 근접 적 위협 + 비공격 역할 → 방어 우선
+                wantCautious = true;
+            }
+            else if (situation.HasHittableEnemies && preferOffensive)
+            {
+                // 공격 가능 + 공격 역할 → 공격 우선
+                wantCautious = false;
+            }
+            else
+            {
+                // 기본: 역할 선호에 따름
+                wantCautious = !preferOffensive;
+            }
+
+            AbilityData chosen = wantCautious ? cautiousAbility : confidentAbility;
+            if (chosen == null)
+            {
+                // 원하는 스탠스가 없으면 다른 쪽이라도 사용
+                chosen = cautiousAbility ?? confidentAbility;
+            }
+
+            // 이미 해당 스탠스 버프 활성 → 스킵
+            if (AllyStateCache.HasBuff(situation.Unit, chosen)) return null;
+
+            var target = new TargetWrapper(situation.Unit);
+            string reason;
+            if (!CombatAPI.CanUseAbilityOn(chosen, target, out reason)) return null;
+
+            string stanceName = AbilityDatabase.IsCautiousApproach(chosen) ? "Cautious" : "Confident";
+            Main.Log($"[{roleName}] Phase 1.8: {stanceName} Approach (HP={situation.HPPercent:F0}%, preferOffensive={preferOffensive})");
+            return PlannedAction.Buff(chosen, situation.Unit, $"{stanceName} Approach stance", 0f);
+        }
+
+        /// <summary>
         /// 공격 버프 계획 (DPS 전용)
         /// ★ v3.1.10: 사용 가능한 공격이 없으면 스킵
+        /// ★ v3.34.0: 점수 기반 스마트 버프 선택 — 상황에 맞는 최적 버프 사용
         /// </summary>
         public static PlannedAction PlanAttackBuffWithReservation(Situation situation, ref float remainingAP, float reservedAP, string roleName)
         {
@@ -354,31 +422,28 @@ namespace CompanionAI_v3.Planning.Planners
             }
 
             // ★ v3.8.68: 실제 공격 가능한 적이 없으면 공격 버프 사용 금지
-            // AvailableAttacks는 능력 존재만 체크, HasHittableEnemies는 LOS+사거리 체크
-            // AoE 안전 체크까지는 여기서 못 하지만, 기본적인 실행 가능 여부는 검증
             if (!situation.HasHittableEnemies)
             {
                 if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanAttackBuff skipped: No hittable enemies (attacks available but no valid targets)");
                 return null;
             }
 
-            var attackBuffs = situation.AvailableBuffs
-                .Where(a => {
-                    var timing = AbilityDatabase.GetTiming(a);
-                    return timing == AbilityTiming.PreAttackBuff || timing == AbilityTiming.RighteousFury;
-                })
-                .ToList();
-
-            if (attackBuffs.Count == 0) return null;
-
             float effectiveReservedAP = situation.HasHittableEnemies
                 ? (situation.PrimaryAttack != null ? CombatAPI.GetAbilityAPCost(situation.PrimaryAttack) : 1f)
                 : reservedAP;
 
-            var target = new TargetWrapper(situation.Unit);
+            var selfTarget = new TargetWrapper(situation.Unit);
 
-            foreach (var buff in attackBuffs)
+            // ★ v3.34.0: 점수 기반 최적 버프 선택
+            AbilityData bestBuff = null;
+            float bestScore = -1f;
+
+            foreach (var buff in situation.AvailableBuffs)
             {
+                var timing = AbilityDatabase.GetTiming(buff);
+                if (timing != AbilityTiming.PreAttackBuff && timing != AbilityTiming.RighteousFury)
+                    continue;
+
                 if (AbilityDatabase.IsRunAndGun(buff)) continue;
                 if (AbilityDatabase.IsPostFirstAction(buff)) continue;
 
@@ -391,15 +456,149 @@ namespace CompanionAI_v3.Planning.Planners
                 if (AllyStateCache.HasBuff(situation.Unit, buff)) continue;
 
                 string reason;
-                if (CombatAPI.CanUseAbilityOn(buff, target, out reason))
+                if (!CombatAPI.CanUseAbilityOn(buff, selfTarget, out reason))
+                    continue;
+
+                float score = ScoreAttackBuff(buff, situation, remainingAP);
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] AttackBuff candidate: {buff.Name} score={score:F0} cost={cost:F1}");
+
+                if (score > bestScore)
                 {
-                    remainingAP -= cost;
-                    Main.Log($"[{roleName}] Attack buff: {buff.Name}");
-                    return PlannedAction.Buff(buff, situation.Unit, "Attack buff before strike", cost);
+                    bestScore = score;
+                    bestBuff = buff;
                 }
             }
 
+            if (bestBuff != null)
+            {
+                float cost = CombatAPI.GetAbilityAPCost(bestBuff);
+                remainingAP -= cost;
+                Main.Log($"[{roleName}] Attack buff: {bestBuff.Name} (score={bestScore:F0})");
+                return PlannedAction.Buff(bestBuff, situation.Unit, $"Attack buff (score={bestScore:F0})", cost);
+            }
+
             return null;
+        }
+
+        /// <summary>
+        /// ★ v3.34.0: 공격 전 버프 점수 평가
+        /// 상황(AP, 적 유형, 무기 종류)에 따라 최적 버프를 선택
+        /// </summary>
+        private static float ScoreAttackBuff(AbilityData buff, Situation situation, float remainingAP)
+        {
+            float score = 10f; // 기본 점수
+            float cost = CombatAPI.GetAbilityAPCost(buff);
+            var info = AbilityDatabase.GetInfo(buff);
+
+            // ═══════════════════════════════════════════════
+            // 1. 0 AP 버프 → 무조건 높은 점수 (안 쓰면 손해)
+            // Blood Oath, Terrifying Strike, Where It Hurts, Oath of Vengeance 등
+            // ═══════════════════════════════════════════════
+            if (cost <= 0f)
+            {
+                score += 100f;
+                return score;
+            }
+
+            // ═══════════════════════════════════════════════
+            // 2. "다음 공격 0 AP" 류 (Wildfire 등)
+            // AP가 적을수록 가치 높음 — AP 1~2이면 이 버프 없이는 공격 불가
+            // ═══════════════════════════════════════════════
+            float attackAP = situation.PrimaryAttack != null ? CombatAPI.GetAbilityAPCost(situation.PrimaryAttack) : 2f;
+            float apAfterBuff = remainingAP - cost;
+
+            // 버프가 다음 공격을 무료화하는지 감지: 블루프린트에 ContextActionAddBonusAbilityUsage가 있으면
+            // 또는 이름 기반 폴백 (Wildfire는 이미 등록됨)
+            bool grantsExtraAttack = false;
+            try
+            {
+                var runAction = BlueprintCache.GetCachedRunAction(buff.Blueprint);
+                if (runAction?.Actions?.Actions != null)
+                {
+                    foreach (var action in runAction.Actions.Actions)
+                    {
+                        if (action is ContextActionAddBonusAbilityUsage)
+                        {
+                            grantsExtraAttack = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            catch { /* 안전: 분석 실패 시 무시 */ }
+
+            if (grantsExtraAttack)
+            {
+                // AP가 적을수록 이 버프가 핵심적 — 이게 없으면 공격 기회를 잃음
+                if (apAfterBuff < attackAP)
+                    score += 80f; // AP 부족: 이 버프가 추가 공격을 가능하게 함
+                else
+                    score += 40f; // AP 충분: 여전히 추가 공격이라 좋음
+                return score;
+            }
+
+            // ═══════════════════════════════════════════════
+            // 3. 데미지 증가 버프 — KillSimulator 기반
+            // ═══════════════════════════════════════════════
+            float buffMultiplier = KillSimulator.EstimateBuffMultiplier(buff);
+            score += (buffMultiplier - 1.0f) * 150f; // 1.3 → +45, 1.2 → +30
+
+            // ═══════════════════════════════════════════════
+            // 4. CC 부여 버프 (Devastating Attack, On the Ground 등)
+            // 보스/엘리트 상대 시 더 가치 높음
+            // ═══════════════════════════════════════════════
+            var classData = CombatAPI.GetClassificationData(buff);
+            if (classData.HasCC || classData.HasHardCC)
+            {
+                var bestTarget = situation.BestTarget;
+                if (bestTarget != null)
+                {
+                    // 적이 높은 위협일수록 CC 가치 상승
+                    var diffType = CombatAPI.GetDifficultyType(bestTarget);
+                    bool isHighThreat = diffType >= UnitDifficultyType.Elite;
+                    score += isHighThreat ? 35f : 15f;
+                }
+                else
+                {
+                    score += 15f;
+                }
+            }
+
+            // ═══════════════════════════════════════════════
+            // 5. Piercing Shot + Prey → 보장 크리 (★ v3.40.0)
+            // Prey 마크된 적에게 Piercing Shot = 자동 크리티컬
+            // ═══════════════════════════════════════════════
+            if (buff.Blueprint?.AssetGuid?.ToString() == "0d8923eff3f94a5faf71bfe36ca19d70") // PiercingShot
+            {
+                var bestTarget = situation.BestTarget;
+                if (bestTarget != null && CombatAPI.IsMarkedAsPrey(bestTarget))
+                    score += 60f; // Prey 대상 보장 크리
+            }
+
+            // ═══════════════════════════════════════════════
+            // 6. Burst 전용 버프 필터 (Rapid Fire, Concentrated Fire 등)
+            // 현재 무기가 Burst가 아니면 대폭 감점
+            // ═══════════════════════════════════════════════
+            if (info != null && (info.Flags & AbilityFlags.RequiresBurstAttack) != 0)
+            {
+                bool hasBurstWeapon = situation.PrimaryAttack != null &&
+                    CombatAPI.GetClassificationData(situation.PrimaryAttack).IsBurst;
+                if (!hasBurstWeapon)
+                    score -= 200f; // 사실상 사용 불가
+                else
+                    score += 20f; // Burst 무기와 시너지
+            }
+
+            // ═══════════════════════════════════════════════
+            // 7. AP 효율성 — 비용 대비 가치
+            // ═══════════════════════════════════════════════
+            if (cost >= 2f && apAfterBuff < attackAP)
+            {
+                // 버프 사용 후 공격 AP가 부족하면 감점 (CC/extra attack 제외)
+                score -= 20f;
+            }
+
+            return score;
         }
 
         /// <summary>
@@ -1135,27 +1334,126 @@ namespace CompanionAI_v3.Planning.Planners
         }
 
         /// <summary>
-        /// PostAction (Run and Gun)
+        /// PostAction — PostFirstAction 스킬 전체 처리
         /// ★ v3.5.80: attackPlanned 파라미터 추가 - 공격이 계획됨도 허용
+        /// ★ v3.34.0: RunAndGun 외에 DaringBreach, BringItDown, HitAndRun 등 전체 PostFirstAction 처리
         /// </summary>
         public static PlannedAction PlanPostAction(Situation situation, ref float remainingAP, string roleName, bool attackPlanned = false)
         {
-            var runAndGun = situation.RunAndGunAbility;
-            if (runAndGun == null) return null;
-
             // ★ v3.5.80: 공격이 이미 실행됨 OR 공격이 계획됨
             if (!situation.HasPerformedFirstAction && !attackPlanned) return null;
 
-            float cost = CombatAPI.GetAbilityAPCost(runAndGun);
-            if (cost > remainingAP) return null;
-
-            var target = new TargetWrapper(situation.Unit);
-            string reason;
-            if (CombatAPI.CanUseAbilityOn(runAndGun, target, out reason))
+            // ★ v3.34.0: 1차 — RunAndGun 우선 (기존 로직 호환)
+            var runAndGun = situation.RunAndGunAbility;
+            if (runAndGun != null)
             {
+                float ragCost = CombatAPI.GetAbilityAPCost(runAndGun);
+                if (ragCost <= remainingAP)
+                {
+                    var selfTarget = new TargetWrapper(situation.Unit);
+                    string reason;
+                    if (CombatAPI.CanUseAbilityOn(runAndGun, selfTarget, out reason))
+                    {
+                        remainingAP -= ragCost;
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] Phase 6: Planning {runAndGun.Name} (attackPlanned={attackPlanned})");
+                        return PlannedAction.Buff(runAndGun, situation.Unit, "Run and Gun", ragCost);
+                    }
+                }
+            }
+
+            // ★ v3.34.0: 2차 — 다른 PostFirstAction 스킬 평가
+            // DaringBreach (AP/MP 회복), BringItDown (아군 추가 턴), HitAndRun (MP 회복) 등
+            if (situation.PostFirstActionAbilities == null || situation.PostFirstActionAbilities.Count == 0)
+                return null;
+
+            AbilityData bestAbility = null;
+            float bestScore = 0f;
+
+            foreach (var ability in situation.PostFirstActionAbilities)
+            {
+                // RunAndGun은 이미 위에서 처리
+                if (AbilityDatabase.IsRunAndGun(ability)) continue;
+
+                float cost = CombatAPI.GetAbilityAPCost(ability);
+                if (cost > remainingAP) continue;
+
+                var info = AbilityDatabase.GetInfo(ability);
+
+                // HP 임계값 체크 (DaringBreach 등: HP 40%+ 필요)
+                if (info != null && info.HPThreshold > 0f)
+                {
+                    float hpPct = CombatCache.GetHPPercent(situation.Unit);
+                    if (hpPct < info.HPThreshold) continue;
+                }
+
+                // 타겟 결정 및 사용 가능 여부
+                TargetWrapper target;
+                bool isAllyTarget = info != null && (info.Flags & AbilityFlags.AllyTarget) != 0;
+
+                if (isAllyTarget)
+                {
+                    // BringItDown 등 아군 대상 — 최적 아군 선택
+                    var bestAlly = TargetScorer.SelectBestAllyForBuff(situation.CombatantAllies, situation);
+                    if (bestAlly == null) continue;
+                    target = new TargetWrapper(bestAlly);
+                }
+                else
+                {
+                    target = new TargetWrapper(situation.Unit);
+                }
+
+                string reason;
+                if (!CombatAPI.CanUseAbilityOn(ability, target, out reason)) continue;
+
+                // 점수 평가
+                float score = 10f;
+
+                // MP 회복 스킬 (RecklessRush, HitAndRun): 아직 이동 필요 시 가산
+                float mpRecovery = CombatAPI.GetAbilityMPRecovery(ability);
+                if (mpRecovery > 0f)
+                {
+                    score += 20f;
+                    // 적이 사거리 밖이면 MP 회복이 더 가치 높음
+                    if (situation.NearestEnemyDistance > situation.CurrentMP + 2f)
+                        score += 30f;
+                }
+
+                // 아군 추가 턴 부여 (BringItDown): 고정 높은 가치
+                if (isAllyTarget && AbilityDatabase.IsTurnGrantAbility(ability))
+                    score += 60f;
+
+                // AP 회복 스킬: AP가 적을수록 가치 높음
+                if (info != null && info.Timing == AbilityTiming.PostFirstAction && mpRecovery <= 0f && !isAllyTarget)
+                    score += 15f; // 일반 PostFirstAction (DaringBreach 등)
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestAbility = ability;
+                }
+            }
+
+            if (bestAbility != null)
+            {
+                float cost = CombatAPI.GetAbilityAPCost(bestAbility);
+                var info = AbilityDatabase.GetInfo(bestAbility);
+                bool isAllyTarget = info != null && (info.Flags & AbilityFlags.AllyTarget) != 0;
+
+                TargetWrapper finalTarget;
+                if (isAllyTarget)
+                {
+                    var bestAlly = TargetScorer.SelectBestAllyForBuff(situation.CombatantAllies, situation);
+                    finalTarget = new TargetWrapper(bestAlly ?? situation.Unit);
+                }
+                else
+                {
+                    finalTarget = new TargetWrapper(situation.Unit);
+                }
+
                 remainingAP -= cost;
-                if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] Phase 6: Planning {runAndGun.Name} (attackPlanned={attackPlanned})");
-                return PlannedAction.Buff(runAndGun, situation.Unit, "Run and Gun", cost);
+                Main.Log($"[{roleName}] Phase 6: PostAction {bestAbility.Name} (score={bestScore:F0})");
+                return PlannedAction.Buff(bestAbility, finalTarget.Entity as BaseUnitEntity ?? situation.Unit,
+                    $"PostAction: {bestAbility.Name}", cost);
             }
 
             return null;

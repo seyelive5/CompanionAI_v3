@@ -276,7 +276,9 @@ namespace CompanionAI_v3.Planning
             // 이동 불가 → non-viable
             // ★ v3.20.1: && → || 수정 — CanMove=false (구속) OR MP=0 중 하나라도 충족 시 비활성
             // 기존 &&: 둘 다 true여야 비활성 → CanMove=false+MP=1인 구속 유닛도 MoveToAttack 시도 버그
-            if (!situation.CanMove || situation.CurrentMP <= 0)
+            // ★ v3.34.0: MPBuffAbility가 있으면 MP=0이어도 확장 MP로 이동 가능
+            float extendedMP = situation.CurrentMP + situation.MPBuffExpectedRecovery;
+            if (!situation.CanMove || (situation.CurrentMP <= 0 && extendedMP <= 0))
             {
                 option.IsViable = false;
                 option.Score = -1000f;
@@ -301,11 +303,13 @@ namespace CompanionAI_v3.Planning
             {
                 float meleeRange = GetMeleeRange(unit);
 
+                // ★ v3.34.0: MPBuffAbility가 있으면 확장 MP로 도달 범위 확대
+                float meleeExtraMP = situation.MPBuffExpectedRecovery > 0 ? situation.MPBuffExpectedRecovery : 0f;
                 bestPosition = MovementAPI.FindMeleeAttackPositionSync(
                     unit,
                     situation.NearestEnemy,
                     meleeRange,
-                    0f,  // predictedMP=0 (현재 MP 기반)
+                    meleeExtraMP,  // ★ v3.34.0: MP 버프 예상 회복량 반영
                     situation.InfluenceMap,
                     role,
                     situation.PredictiveThreatMap,
@@ -360,12 +364,14 @@ namespace CompanionAI_v3.Planning
                     }
                 }
 
+                // ★ v3.34.0: MPBuffAbility가 있으면 확장 MP로 도달 범위 확대
+                float rangedExtraMP = situation.MPBuffExpectedRecovery > 0 ? situation.MPBuffExpectedRecovery : 0f;
                 bestPosition = MovementAPI.FindRangedAttackPositionSync(
                     unit,
                     situation.Enemies,
                     weaponRange,
                     situation.MinSafeDistance,
-                    0f,  // predictedMP=0 (현재 MP 기반)
+                    rangedExtraMP,  // ★ v3.34.0: MP 버프 예상 회복량 반영
                     situation.InfluenceMap,
                     role,
                     situation.PredictiveThreatMap

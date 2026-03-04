@@ -223,6 +223,10 @@ namespace CompanionAI_v3.Planning.Plans
                 actions, situation, ref remainingAP,
                 supportMode: false, out _);
 
+            // ★ v3.40.0: Phase 1.8 — Cautious/Confident Approach 스탠스 선택
+            var approachStance = PlanApproachStance(situation, preferOffensive: true);
+            if (approachStance != null) actions.Add(approachStance);
+
             // Phase 2: Heroic Act (Momentum 175+)
             var heroicAction = PlanHeroicAct(situation, ref remainingAP);
             if (heroicAction != null)
@@ -418,6 +422,9 @@ namespace CompanionAI_v3.Planning.Plans
                     }
                 }
             }
+
+            // ★ v3.36.0: Phase 4.05 — 나머지 0 AP 공격 버프 전부 사용 (무료이므로 손해 없음)
+            PlanFreeAttackBuffs(actions, situation);
 
             // ★ v3.9.44: Phase 4.1 - 아군 버프 (CanTargetFriends=true 버프를 아군에게 사용)
             // DPS도 아군에게 사용 가능한 버프(팀 버프, 보호 버프 등)가 있으면 아군에게 사용
@@ -864,6 +871,10 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.36.0: Phase 5.8 — 0 AP 공격 소진 (Kick, Death Whisper, Break Through→Slash 등)
+            // 메인 공격 루프가 AP 예산 부족으로 종료되어도 0 AP 공격은 무료로 사용 가능
+            PlanZeroAPAttacks(actions, situation, plannedAbilityGuids);
+
             // ★ Phase 5.6: GapCloser (공격 계획 실패 시) - 기존 Phase 5.5
             // ★ v3.0.86: 거리 조건 제거 - 적이 4m에 있어도 근접 사거리(2m)에 못 들어올 수 있음
             // 기존: NearestEnemyDistance > 5f → 적이 5m 이내면 스킵 (버그!)
@@ -928,6 +939,14 @@ namespace CompanionAI_v3.Planning.Plans
 
             // ★ v3.5.35: Phase 7 (TurnEnding) → 맨 마지막으로 이동
             // TurnEnding 능력은 턴을 종료시키므로 다른 모든 행동 후에 계획해야 함
+
+            // ★ v3.34.0: Phase 7.8 — 이동 전 MP 버프 (적이 사거리 밖이고 MP 부족 시)
+            if (!didPlanAttack && situation.NeedsReposition && situation.MPBuffAbility != null)
+            {
+                var mpBuff = PlanMPBuffBeforeMove(situation, ref remainingAP, ref remainingMP);
+                if (mpBuff != null)
+                    actions.Add(mpBuff);
+            }
 
             // ★ Phase 8: 이동 또는 GapCloser (공격 불가 시)
             // ★ v3.0.55: remainingMP 체크 - 계획된 능력들의 MP 코스트 반영

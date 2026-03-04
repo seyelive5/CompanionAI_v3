@@ -169,6 +169,8 @@ namespace CompanionAI_v3.Data
             // Healing - 치료
             // ========================================
 
+            { "374265cc61d5475898f17ac969795f7c", new AbilityInfo("374265cc61d5475898f17ac969795f7c", "Reactivate_Ability", AbilityTiming.Healing) },  // ★ v3.34.0: 사역마 재활성화
+
             { "083d5280759b4ed3a2d0b61254653273", new AbilityInfo("083d5280759b4ed3a2d0b61254653273", "Medikit", AbilityTiming.Healing) },
             { "b6e3c9398ea94c75afdbf61633ce2f85", new AbilityInfo("b6e3c9398ea94c75afdbf61633ce2f85", "Medikit_BattleMedic", AbilityTiming.Healing) },
             { "dd2e9a6170b448d4b2ec5a7fe0321e65", new AbilityInfo("dd2e9a6170b448d4b2ec5a7fe0321e65", "CombatStimMedikit", AbilityTiming.Healing) },
@@ -371,11 +373,11 @@ namespace CompanionAI_v3.Data
             // ★ v3.0.34: Arch-Militant 스킬
             // ========================================
 
-            // Cautious Approach - 방어적 스탠스 (회피/패리 보너스)
-            { "4b247404899148edb98585496b072dde", new AbilityInfo("4b247404899148edb98585496b072dde", "CautiousApproach", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
+            // Cautious Approach - 방어적 스탠스 (회피/패리 보너스) ★ v3.40.0: IsCautiousApproach 플래그
+            { "4b247404899148edb98585496b072dde", new AbilityInfo("4b247404899148edb98585496b072dde", "CautiousApproach", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly | AbilityFlags.IsCautiousApproach) },
 
-            // Confident Approach - 공격적 스탠스 (회피 관통/크리티컬)
-            { "142b89c8df7f4b2795c45243fde0a169", new AbilityInfo("142b89c8df7f4b2795c45243fde0a169", "ConfidentApproach", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
+            // Confident Approach - 공격적 스탠스 (회피 관통/크리티컬) ★ v3.40.0: IsConfidentApproach 플래그
+            { "142b89c8df7f4b2795c45243fde0a169", new AbilityInfo("142b89c8df7f4b2795c45243fde0a169", "ConfidentApproach", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly | AbilityFlags.IsConfidentApproach) },
 
             // Devastating Attack - 다음 공격 CC 부여
             { "fe85384efebb4d38b71738594746e413", new AbilityInfo("fe85384efebb4d38b71738594746e413", "DevastatingAttack", AbilityTiming.PreAttackBuff, flags: AbilityFlags.SelfTargetOnly) },
@@ -495,6 +497,10 @@ namespace CompanionAI_v3.Data
             // Terrifying Strike - 공포의 일격
             { "d0c7cc80880242b1ba1ded8192c53ea4", new AbilityInfo("d0c7cc80880242b1ba1ded8192c53ea4", "TerrifyingStrike", AbilityTiming.PreAttackBuff, flags: AbilityFlags.SelfTargetOnly) },
 
+            // ★ v3.36.0→v3.40.0: RecklessAbandon/Exsanguination 중복 제거
+            // 566b... = RecklessDecision(SelfDamage, line 198)과 동일 GUID
+            // 858e... = Bloodletting(SelfDamage, line 197)과 동일 GUID
+
             // ========================================
             // ★ v3.0.34: Navigator 스킬
             // ========================================
@@ -522,6 +528,15 @@ namespace CompanionAI_v3.Data
 
             // Scourge of the Red Tide - 붉은 조수의 스커지 (범위 지속 피해)
             { "9043cccc4e3a4aef82d86f4c46052dc6", new AbilityInfo("9043cccc4e3a4aef82d86f4c46052dc6", "ScourgeOfTheRedTide", AbilityTiming.Normal, flags: AbilityFlags.PointTarget) },
+
+            // ★ v3.36.0: Spot of Apathy - 무관심 지대 (AoE CC 영역)
+            { "8167e54cf7d44b9e8bb34d67bc55ff2a", new AbilityInfo("8167e54cf7d44b9e8bb34d67bc55ff2a", "SpotOfApathy", AbilityTiming.Debuff, flags: AbilityFlags.PointTarget) },
+
+            // ★ v3.36.0: Waking Nightmare - 살아있는 악몽 (AoE 영구 디버프)
+            { "3db1b866b28e4256b359b89f45a6f38a", new AbilityInfo("3db1b866b28e4256b359b89f45a6f38a", "WakingNightmare", AbilityTiming.Debuff, flags: AbilityFlags.PointTarget) },
+
+            // ★ v3.36.0: Immolate the Soul - 영혼 소각 (Line AoE + DOT)
+            { "08767fbd714148ae88d5b1daf1dbc327", new AbilityInfo("08767fbd714148ae88d5b1daf1dbc327", "ImmolateTheSoul", AbilityTiming.Normal, flags: AbilityFlags.PointTarget) },
 
             // ========================================
             // ★ v3.0.34: Arbitrator 스킬
@@ -558,6 +573,18 @@ namespace CompanionAI_v3.Data
             // Piercing Shot - 관통 사격
             { "0d8923eff3f94a5faf71bfe36ca19d70", new AbilityInfo("0d8923eff3f94a5faf71bfe36ca19d70", "PiercingShot", AbilityTiming.PreAttackBuff, flags: AbilityFlags.SelfTargetOnly) },
 
+            // ★ v3.36.0: Cull the Bold - 강자 숙청 (자기 버프 — 강한 적 대상 데미지 증가)
+            { "f333222c78614e6fb8ca145dd8cafcf6", new AbilityInfo("f333222c78614e6fb8ca145dd8cafcf6", "CullTheBold", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
+
+            // ★ v3.36.0: Join the Pack (Raid) - 습격 (자기 버프 — 아군과 협동 공격)
+            { "1394e5c9a6a347db841d961a87f375f4", new AbilityInfo("1394e5c9a6a347db841d961a87f375f4", "JoinThePack", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
+
+            // ★ v3.36.0→v3.40.0: HuntDownThePrey 중복 제거 (line 284에 이미 등록)
+            // ★ v3.36.0: Set the Trap (Ensnare the Prey) - 사냥감을 덫에 걸다 (적 CC)
+            { "9216a3659b1a4111a35d3eafe05f8921", new AbilityInfo("9216a3659b1a4111a35d3eafe05f8921", "SetTheTrap", AbilityTiming.Debuff, flags: AbilityFlags.EnemyTarget) },
+
+            // ★ v3.36.0→v3.40.0: PaveTheTrail 중복 제거 (line 285에 이미 등록)
+
             // ========================================
             // ★ v3.0.36: Biomancy 스킬
             // ========================================
@@ -584,6 +611,8 @@ namespace CompanionAI_v3.Data
             // Syphon Life (Desperate) - 생명력 흡수 (필사적인 수단)
             { "65791f6355c04864b890c9e964b9c372", new AbilityInfo("65791f6355c04864b890c9e964b9c372", "SyphonLife_Desperate", AbilityTiming.HeroicAct, flags: AbilityFlags.SingleUse | AbilityFlags.EnemyTarget) },
 
+            // ★ v3.36.0→v3.40.0: MetabolicOvercharge 중복 제거 (line 201 HyperMetabolism과 동일 GUID)
+
             // ========================================
             // ★ v3.0.36: Pyromancy 스킬
             // ========================================
@@ -608,6 +637,9 @@ namespace CompanionAI_v3.Data
 
             // Inferno (Desperate) - 인페르노 (필사적인 수단)
             { "c4ea2ad9fe1e4509916cb5f1787b1530", new AbilityInfo("c4ea2ad9fe1e4509916cb5f1787b1530", "Inferno_Desperate", AbilityTiming.HeroicAct, flags: AbilityFlags.SingleUse | AbilityFlags.EnemyTarget) },
+
+            // ★ v3.36.0→v3.40.0: FanTheFlames 중복 제거 (line 269에 이미 등록)
+            // ★ v3.36.0→v3.40.0: ShapeFlames 중복 제거 (line 268에 이미 등록)
 
             // ========================================
             // ★ v3.0.36: Divination 스킬
@@ -688,6 +720,15 @@ namespace CompanionAI_v3.Data
             // Psychic Scream - 사이킥 비명 (범위 공격)
             { "fa305ba4e2aa48f394608d1ccfc6d385", new AbilityInfo("fa305ba4e2aa48f394608d1ccfc6d385", "PsychicScream", AbilityTiming.Normal, flags: AbilityFlags.EnemyTarget) },
 
+            // ★ v3.36.0: Mind Bond - 정신 유대 (아군 영구 버프)
+            { "3bc17e7685f343a39b6a800f7f95a623", new AbilityInfo("3bc17e7685f343a39b6a800f7f95a623", "MindBond", AbilityTiming.PreCombatBuff, flags: AbilityFlags.AllyTarget) },
+
+            // ★ v3.36.0: Dominate - 지배 (적 강제 이동 CC)
+            { "3180fee0775146bc905322a318e93600", new AbilityInfo("3180fee0775146bc905322a318e93600", "Dominate", AbilityTiming.Debuff, flags: AbilityFlags.EnemyTarget) },
+
+            // ★ v3.36.0: Sensory Deprivation - 감각 박탈 (적 블라인드 CC)
+            { "8c86972daac142fea33bb3bc5c84396c", new AbilityInfo("8c86972daac142fea33bb3bc5c84396c", "SensoryDeprivation", AbilityTiming.Debuff, flags: AbilityFlags.EnemyTarget) },
+
             // ========================================
             // ★ v3.0.37: Soldier 스킬
             // ========================================
@@ -709,6 +750,9 @@ namespace CompanionAI_v3.Data
 
             // Controlled Burst - 제어 점사 (무기 공격)
             { "60c599a47ab74425a6bfeb53828db0b0", new AbilityInfo("60c599a47ab74425a6bfeb53828db0b0", "ControlledBurst", AbilityTiming.Normal, flags: AbilityFlags.EnemyTarget | AbilityFlags.IsWeaponAttack) },
+
+            // ★ v3.36.0: Concentrated Fire (Offhand Shot) - 집중 사격 (자기 버프 — 보조 무기 추가 공격)
+            { "81ccaba57178473da52e89e99a42392a", new AbilityInfo("81ccaba57178473da52e89e99a42392a", "ConcentratedFire", AbilityTiming.PreAttackBuff, flags: AbilityFlags.SelfTargetOnly) },
 
             // ★ v3.8.23: Soldier Dash - 질주 (포인트 타겟 이동 스킬, 후퇴 지원)
             // 블루프린트: AiEscapeFromThreat Type="Retreat", IgnoreEnemies=true, DisableAttacksOfOpportunity=true
@@ -822,6 +866,26 @@ namespace CompanionAI_v3.Data
 
             // Redirect (Reposition) - 재배치 (펫 이동)
             { "5376c2d18af1499db985fbde6d5fe1ce", new AbilityInfo("5376c2d18af1499db985fbde6d5fe1ce", "Redirect", AbilityTiming.GapCloser, flags: AbilityFlags.PointTarget) },
+
+            // ★ v3.36.0→v3.40.0: InsanitySignal 중복 제거 (line 124 Taunt_Servoskull과 동일 GUID)
+
+            // ★ v3.36.0: Advanced Tracking (Servo-skull) - 고급 추적 (서보스컬 버프)
+            { "131a915efeb5488fa080ec0c8d7b8dfb", new AbilityInfo("131a915efeb5488fa080ec0c8d7b8dfb", "AdvancedTracking_Servoskull", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
+
+            // ★ v3.36.0: Advanced Tracking (Raven) - 고급 추적 (레이븐 버프)
+            { "0aeb900a31c44a158215d8380fea50bf", new AbilityInfo("0aeb900a31c44a158215d8380fea50bf", "AdvancedTracking_Raven", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
+
+            // ★ v3.36.0: Stabilize (Raven) - 안정화 (레이븐 방어 버프)
+            { "d9580c9bca3d4b068905ba234623cf6a", new AbilityInfo("d9580c9bca3d4b068905ba234623cf6a", "RavenStabilize", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
+
+            // ★ v3.36.0: Evil Eye / Hex (Raven) - 사안 (레이븐 AoE 디버프)
+            { "319b06b3dbad4d47ae1dff5c1647f904", new AbilityInfo("319b06b3dbad4d47ae1dff5c1647f904", "RavenHex", AbilityTiming.Debuff, flags: AbilityFlags.SelfTargetOnly) },
+
+            // ★ v3.36.0: Complete the Cycle (Raven) - 순환의 완성 (레이븐 사이킹 재사용)
+            { "78e54abc64dc4935a4b481f9ca745c27", new AbilityInfo("78e54abc64dc4935a4b481f9ca745c27", "RavenCycle", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
+
+            // ★ v3.36.0: Strategic Adaptation - 전략적 적응 (적 처치 시 무료 공격+AP)
+            { "8e7ca949c71e4350a758336d13fd5d93", new AbilityInfo("8e7ca949c71e4350a758336d13fd5d93", "StrategicAdaptation", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
 
             // ========================================
             // ★ v3.21.4: 분류 감사 — 미등록 능력 추가
@@ -1021,6 +1085,16 @@ namespace CompanionAI_v3.Data
                     // 부활 액션 → Healing (사망 타겟 가능 + 힐링)
                     if (canTargetDead && effectOnAlly == AbilityEffectOnUnit.Helpful)
                         return AbilityTiming.Healing;
+                }
+
+                // ★ v3.36.0: Phase 2.5 — MP 회복 능력 감지
+                // ContextAction에서 잡지 못한 MP 회복 능력 (버프 내부의 MP 회복 등)
+                // 자기 대상 + 적 불가인 경우에만 PostFirstAction으로 분류
+                if (canTargetSelf && !canTargetEnemies)
+                {
+                    float mpRecovery = CombatAPI.GetAbilityMPRecovery(ability);
+                    if (mpRecovery > 0)
+                        return AbilityTiming.PostFirstAction;
                 }
 
                 // ═══════════════════════════════════════════════════════════════
@@ -1341,6 +1415,26 @@ namespace CompanionAI_v3.Data
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// ★ v3.40.0: 신중한 접근(Cautious Approach) 스탠스인지 확인
+        /// </summary>
+        public static bool IsCautiousApproach(AbilityData ability)
+        {
+            if (ability == null) return false;
+            var info = GetInfo(ability);
+            return info != null && (info.Flags & AbilityFlags.IsCautiousApproach) != 0;
+        }
+
+        /// <summary>
+        /// ★ v3.40.0: 적극적 접근(Confident Approach) 스탠스인지 확인
+        /// </summary>
+        public static bool IsConfidentApproach(AbilityData ability)
+        {
+            if (ability == null) return false;
+            var info = GetInfo(ability);
+            return info != null && (info.Flags & AbilityFlags.IsConfidentApproach) != 0;
         }
 
         #region Buff Effect Classification (★ v3.9.20)

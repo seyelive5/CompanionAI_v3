@@ -216,6 +216,134 @@ namespace CompanionAI_v3.Planning.Plans
             => MovementPlanner.ShouldRetreat(situation);
 
         /// <summary>
+        /// ★ v3.34.0: 이동 전 MP 버프 사용 — 적이 사거리 밖이고 MP 부족 시 선제 MP 회복
+        /// RecklessRush 등 PostFirstAction MP 회복 스킬을 이동 전에 사용
+        /// </summary>
+        protected PlannedAction PlanMPBuffBeforeMove(Situation situation, ref float remainingAP, ref float remainingMP)
+        {
+            if (situation.MPBuffAbility == null) return null;
+            if (situation.HasHittableEnemies) return null;  // 이미 공격 가능하면 불필요
+            if (!situation.HasLivingEnemies) return null;
+            if (situation.CurrentMP > 3f) return null;  // MP 충분하면 불필요
+
+            var ability = situation.MPBuffAbility;
+            float cost = CombatAPI.GetAbilityAPCost(ability);
+            if (remainingAP < cost + 1f) return null;  // AP가 버프+최소공격 비용 미만이면 스킵
+
+            // 능력 사용 가능 여부 확인
+            if (ability.GetUnavailabilityReasons().Count > 0) return null;
+            if (ability.IsRestricted) return null;
+
+            remainingAP -= cost;
+            remainingMP += situation.MPBuffExpectedRecovery;
+
+            Main.Log($"[{RoleName}] MPBuff before move: {ability.Name} (cost={cost:F1} AP, +{situation.MPBuffExpectedRecovery:F0} MP, predicted MP={remainingMP:F1})");
+
+            return new PlannedAction
+            {
+                Type = ActionType.Buff,
+                Ability = ability,
+                Target = new TargetWrapper(situation.Unit),
+                Priority = 18  // Move(20) 직전
+            };
+        }
+
+        /// <summary>
+        /// ★ v3.36.0: 모든 0 AP PreAttackBuff를 일괄 사용 (Phase 4.05)
+        /// 0 AP 버프는 무조건 사용하는 게 이득 — 한 번에 하나씩이 아닌 모두 사용
+        /// PlanAttackBuffWithReservation이 최고 점수 1개만 선택하므로, 나머지 무료 버프를 여기서 소진
+        /// </summary>
+        protected void PlanFreeAttackBuffs(List<PlannedAction> actions, Situation situation)
+        {
+            if (!situation.HasHittableEnemies) return;
+            if (situation.AvailableBuffs == null || situation.AvailableBuffs.Count == 0) return;
+
+            var selfTarget = new TargetWrapper(situation.Unit);
+
+            foreach (var buff in situation.AvailableBuffs)
+            {
+                var timing = AbilityDatabase.GetTiming(buff);
+                if (timing != AbilityTiming.PreAttackBuff && timing != AbilityTiming.RighteousFury)
+                    continue;
+
+                float cost = CombatAPI.GetAbilityAPCost(buff);
+                if (cost > 0f) continue; // 0 AP만
+
+                if (AbilityDatabase.IsRunAndGun(buff)) continue;
+                if (AbilityDatabase.IsPostFirstAction(buff)) continue;
+                if (AllyStateCache.HasBuff(situation.Unit, buff)) continue;
+
+                // 이미 계획된 버프인지 확인 (Phase 4에서 이미 사용했을 수 있음)
+                bool alreadyPlanned = false;
+                for (int i = 0; i < actions.Count; i++)
+                {
+                    if (actions[i].Ability == buff) { alreadyPlanned = true; break; }
+                }
+                if (alreadyPlanned) continue;
+
+                string reason;
+                if (!CombatAPI.CanUseAbilityOn(buff, selfTarget, out reason)) continue;
+
+                actions.Add(PlannedAction.Buff(buff, situation.Unit, $"Free attack buff: {buff.Name}", 0f));
+                Main.Log($"[{RoleName}] Phase 4.05: Free buff {buff.Name}");
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.36.0: 0 AP 공격 일괄 계획 (Phase 5.8 / 6.5)
+        /// AP 예산과 무관하게 사용 가능한 0 AP 공격을 모두 계획
+        /// Kick, Death Whisper, Break Through 후속 Slash 등
+        /// </summary>
+        protected void PlanZeroAPAttacks(List<PlannedAction> actions, Situation situation,
+            HashSet<string> plannedAbilityGuids = null, int maxAttacks = 3)
+        {
+            if (!situation.HasHittableEnemies) return;
+
+            var zeroAPAttacks = CombatAPI.GetZeroAPAttacks(situation.Unit);
+            if (zeroAPAttacks.Count == 0) return;
+
+            int planned = 0;
+            foreach (var attack in zeroAPAttacks)
+            {
+                if (planned >= maxAttacks) break;
+
+                // 이미 메인 공격 루프에서 계획된 능력은 스킵
+                var guid = attack.Blueprint?.AssetGuid?.ToString();
+                if (plannedAbilityGuids != null && !string.IsNullOrEmpty(guid) && plannedAbilityGuids.Contains(guid))
+                    continue;
+
+                // 이미 actions에 동일 능력이 있으면 스킵
+                bool alreadyPlanned = false;
+                for (int i = 0; i < actions.Count; i++)
+                {
+                    if (actions[i].Ability == attack) { alreadyPlanned = true; break; }
+                }
+                if (alreadyPlanned) continue;
+
+                // 사용 가능 여부 검증
+                if (attack.GetUnavailabilityReasons().Count > 0) continue;
+                if (attack.IsRestricted) continue;
+
+                // Hittable 적 중 사용 가능한 타겟 찾기
+                foreach (var enemy in situation.HittableEnemies)
+                {
+                    if (enemy == null || enemy.LifeState.IsDead) continue;
+
+                    var targetWrapper = new TargetWrapper(enemy);
+                    string reason;
+                    if (CombatAPI.CanUseAbilityOn(attack, targetWrapper, out reason))
+                    {
+                        actions.Add(PlannedAction.Attack(attack, enemy,
+                            $"0-AP attack: {attack.Name}", 0f));
+                        Main.Log($"[{RoleName}] 0-AP attack: {attack.Name} -> {enemy.CharacterName}");
+                        planned++;
+                        break;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
         /// ★ v3.9.70: 긴급 AoE 대피 — 현재 위치가 피해 AoE 안이면 가장 가까운 안전 타일로 이동
         /// Phase 0.5 (Emergency Heal 전)에서 호출
         /// </summary>
@@ -1195,6 +1323,10 @@ namespace CompanionAI_v3.Planning.Plans
             remainingAP -= cost;
             return PlannedAction.Buff(buff, situation.Unit, "Strategy-recommended buff", cost);
         }
+
+        /// <summary>★ v3.40.0: Cautious/Confident Approach 스탠스 자동 선택</summary>
+        protected PlannedAction PlanApproachStance(Situation situation, bool preferOffensive)
+            => BuffPlanner.PlanApproachStance(situation, preferOffensive, RoleName);
 
         protected PlannedAction PlanTaunt(Situation situation, ref float remainingAP)
             => BuffPlanner.PlanTaunt(situation, ref remainingAP, RoleName);

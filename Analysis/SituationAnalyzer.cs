@@ -807,9 +807,22 @@ namespace CompanionAI_v3.Analysis
                         break;
 
                     case AbilityTiming.PostFirstAction:
-                        if (AbilityDatabase.IsRunAndGun(ability))
+                        // ★ v3.34.0: 모든 PostFirstAction 스킬을 수집 (RunAndGun은 호환성 유지)
+                        situation.PostFirstActionAbilities.Add(ability);
+                        if (AbilityDatabase.IsRunAndGun(ability) && situation.RunAndGunAbility == null)
                         {
                             situation.RunAndGunAbility = ability;
+                        }
+                        // ★ v3.34.0: MP 회복 능력 감지 (RunAndGun이 아닌 MP 회복 PostFirstAction)
+                        // RecklessRush 등: 이동 전 선제 사용하여 MP 확보 가능
+                        if (situation.MPBuffAbility == null && !AbilityDatabase.IsRunAndGun(ability))
+                        {
+                            float mpRec = CombatAPI.GetAbilityMPRecovery(ability);
+                            if (mpRec > 0f)
+                            {
+                                situation.MPBuffAbility = ability;
+                                situation.MPBuffExpectedRecovery = mpRec;
+                            }
                         }
                         break;
 

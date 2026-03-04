@@ -67,6 +67,10 @@ namespace CompanionAI_v3.Planning.Plans
                 actions, situation, ref remainingAP,
                 supportMode: false, out _);
 
+            // ★ v3.40.0: Phase 1.8 — Cautious/Confident Approach 스탠스 선택 (Tank = 방어 우선)
+            var approachStance = PlanApproachStance(situation, preferOffensive: false);
+            if (approachStance != null) actions.Add(approachStance);
+
             // Phase 2: 방어 자세 (Confidence 기반 결정)
             // ★ v3.11.2: Curve 기반 연속 판단 (기존 confidence < 0.5f 이진 임계값 대체)
             // defenseNeed > 1.0 → 방어 필요 (confidence ~0.5 이하에서 부드럽게 전환)
@@ -100,6 +104,9 @@ namespace CompanionAI_v3.Planning.Plans
                     actions.Add(buffAction);
                 }
             }
+
+            // ★ v3.36.0: Phase 3.05 — 나머지 0 AP 공격 버프 전부 사용
+            PlanFreeAttackBuffs(actions, situation);
 
             // ★ v3.9.44: Phase 3.5 - 아군 버프 (CanTargetFriends=true 버프를 아군에게 사용)
             if (remainingAP >= 1f)
@@ -522,6 +529,9 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.8.72: Hittable mismatch 사후 보정
             HandleHittableMismatch(situation, didPlanAttack, attackContext);
 
+            // ★ v3.36.0: Phase 5.8 — 0 AP 공격 소진
+            PlanZeroAPAttacks(actions, situation, plannedAbilityGuids);
+
             // Phase 6: PostFirstAction
             // ★ v3.5.80: didPlanAttack 전달
             if (situation.HasPerformedFirstAction || didPlanAttack)
@@ -550,6 +560,14 @@ namespace CompanionAI_v3.Planning.Plans
 
             // ★ v3.5.35: Phase 7 (TurnEnding) → 맨 마지막으로 이동
             // TurnEnding 능력은 턴을 종료시키므로 다른 모든 행동 후에 계획해야 함
+
+            // ★ v3.34.0: Phase 7.8 — 이동 전 MP 버프 (적이 사거리 밖이고 MP 부족 시)
+            if (!didPlanAttack && situation.NeedsReposition && situation.MPBuffAbility != null)
+            {
+                var mpBuff = PlanMPBuffBeforeMove(situation, ref remainingAP, ref remainingMP);
+                if (mpBuff != null)
+                    actions.Add(mpBuff);
+            }
 
             // ★ Phase 8: 이동 또는 GapCloser (공격 가능한 적이 없을 때)
             // ★ v3.0.55: remainingMP 체크 - 계획된 능력들의 MP 코스트 반영

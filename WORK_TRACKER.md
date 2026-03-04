@@ -159,3 +159,27 @@
 - [x] v3.22.4: Turn Order Awareness 확장 (PositionEvaluator 턴 순서 기반 위협 가중, BasePlan.PlanAllyBuff 행동 예정 아군 버프 우선)
 - [x] v3.22.6: 마스티프 사역마 Apprehend/Protect 개선 (TeamBlackboard 상태 추적 → 대상 고정/재발행 방지, BestTarget 연동 → 연대공격 극대화, 도달 가능성 체크, Protect 조건 강화 → 근접 적 위협+HP<50%만, OverseerPlan Phase 3.7 재구성 → Apprehend 활성시 전부 스킵으로 AP 절약, Protect Phase 9.5 이동)
 - [x] v3.24.0: 전투 규칙 기반 스코어링 개선 Tier 1 (EV 스코어링: hitChance×damage 확률적 기대값 도입 → 이산적 hit threshold 대체, 극저 데미지 감지: EstimateDamage<5 타겟/공격 페널티 → 방어구 관통 불가 감지, Overwatch 포지셔닝: TacticalOptionEvaluator 이동 페널티 + PositionEvaluator 구역 회피, 사거리 품질: PositionEvaluator 이진 LOS → 최적사거리 연속 스코어링 + ExpectedDamageRatio 커브)
+
+### 8. 스킬 사용 로직 체계적 개선 — ★ v3.40.0 완성
+
+**배경**: 스킬 사용 감사 결과 6가지 구조적 문제 발견 ([SKILL_USAGE_AUDIT.md](SKILL_USAGE_AUDIT.md) 참조)
+
+**v3.34.0에서 해결된 항목**:
+- [x] **BuffPlanner 스마트화**: ScoreAttackBuff() 점수 시스템 — 0 AP +100, Wildfire AP 부족 +80, KillSimulator 데미지 배율, CC 보너스
+- [x] **PostFirstAction 일반화**: PlanPostAction()이 RunAndGun 외 DaringBreach, BringItDown, HitAndRun 등 전체 처리
+- [x] **OverseerPlan 마스터 버프**: Phase 4.955에 PlanAttackBuffWithReservation() 삽입
+- [x] **이동 전 MP 버프**: Situation.MPBuffAbility + TacticalOptionEvaluator 확장 MP + BasePlan.PlanMPBuffBeforeMove() + 4개 Plan Phase 7.8/8.8
+
+**v3.36.0에서 해결된 항목**:
+- [x] **AbilityDatabase 누락 스킬 22개 등록**: Executioner(2), Bounty Hunter(5), Biomancer(1), Pyromancer(2), Telepathy(3), Soldier(1), Navigator(3), Overseer(7)
+
+**v3.38.0에서 해결된 항목**:
+- [x] **AutoDetectTiming MP 회복 감지**: Phase 2.5 — 미등록 MP 회복 능력 PostFirstAction 자동 분류
+- [x] **0 AP 버프 일괄 사용**: PlanFreeAttackBuffs() — 모든 0 AP PreAttackBuff 전부 계획 (전 Plan Phase 4.05/3.05/4.955b/4.75)
+- [x] **0 AP 공격 소진**: PlanZeroAPAttacks() — AP 예산 무관 무료 공격 계획 (전 Plan Phase 5.8/6.5, 최대 3개)
+
+**v3.40.0에서 해결된 항목**:
+- [x] **Piercing Shot Prey 인식**: CombatAPI.IsMarkedAsPrey() + ScoreAttackBuff Prey 대상 +60점 (HuntDownThePrey/ChoosePrey_Noble 지원)
+- [x] **Cautious/Confident Approach 자동 전환**: PlanApproachStance() — HP/위협/역할 기반 스탠스 선택 (전 Plan Phase 1.8, DPS/Overseer=Confident, Tank/Support=Cautious)
+- [x] **Voice of Command 등록 확인**: 기존 등록 (`9c78e44bf8ff44a9afff8370c673c9ad`, PreCombatBuff, AllyTarget)
+- [ ] **공격제한 미포함 공격 구분**: 보류 — 게임 API에 명시적 구분 없음, 0 AP는 PlanZeroAPAttacks()에서 이미 처리

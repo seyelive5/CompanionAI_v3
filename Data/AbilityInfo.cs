@@ -175,6 +175,8 @@ namespace CompanionAI_v3.Data
         IsRetreatCapable = 1L << 32,    // ★ v3.8.23: 후퇴용 이동 스킬 (SoldierDash 등)
         IsDefensiveBuff = 1L << 33,     // ★ v3.9.20: 방어 버프 (Toughness, Evasion, TempHP 등 부여)
         IsOffensiveBuff = 1L << 34,     // ★ v3.9.20: 공격 버프 (BS, WS, Strength, AP 등 부여)
+        IsCautiousApproach = 1L << 35,  // ★ v3.40.0: 신중한 접근 (방어 스탠스)
+        IsConfidentApproach = 1L << 36, // ★ v3.40.0: 적극적 접근 (공격 스탠스)
     }
 
     /// <summary>

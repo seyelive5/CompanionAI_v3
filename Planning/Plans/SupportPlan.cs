@@ -68,6 +68,10 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.8.67: ClearMP 선제 후퇴는 Phase 5.8에서 처리
             // 일반 후퇴는 Phase 8.5에서 처리
 
+            // ★ v3.40.0: Phase 1.8 — Cautious/Confident Approach 스탠스 선택 (Support = 방어 우선)
+            var approachStance = PlanApproachStance(situation, preferOffensive: false);
+            if (approachStance != null) actions.Add(approachStance);
+
             // Phase 2: 아군 힐 (사용자 설정 + Confidence 보정)
             // ★ v3.2.15: TeamBlackboard 기반 힐 대상 선택 (팀 전체 최적화)
             // ★ v3.11.2: Curve 기반 연속 보정 (기존 3단계 계단식 -20/0/+20 대체)
@@ -205,6 +209,9 @@ namespace CompanionAI_v3.Planning.Plans
                     actions.Add(markerAction);
                 }
             }
+
+            // ★ v3.36.0: Phase 4.75 — 나머지 0 AP 공격 버프 전부 사용
+            PlanFreeAttackBuffs(actions, situation);
 
             // Phase 5: 적 디버프
             if (situation.NearestEnemy != null)
@@ -411,6 +418,9 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.8.72: Hittable mismatch 사후 보정
             HandleHittableMismatch(situation, didPlanAttack, attackContext);
 
+            // ★ v3.36.0: Phase 6.5 — 0 AP 공격 소진
+            PlanZeroAPAttacks(actions, situation, plannedAbilityGuids);
+
             // Phase 7: PostFirstAction
             // ★ v3.5.80: didPlanAttack 전달
             if (situation.HasPerformedFirstAction || didPlanAttack)
@@ -483,6 +493,14 @@ namespace CompanionAI_v3.Planning.Plans
                         Main.Log($"[Support] Post-action safe retreat: {retreatReason}");
                     }
                 }
+            }
+
+            // ★ v3.34.0: Phase 8.8 — 이동 전 MP 버프 (적이 사거리 밖이고 MP 부족 시)
+            if (!didPlanAttack && situation.NeedsReposition && situation.MPBuffAbility != null)
+            {
+                var mpBuff = PlanMPBuffBeforeMove(situation, ref remainingAP, ref remainingMP);
+                if (mpBuff != null)
+                    actions.Add(mpBuff);
             }
 
             // ★ Phase 9: 이동 또는 GapCloser (공격 불가 시)

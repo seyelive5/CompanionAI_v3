@@ -301,6 +301,17 @@ namespace CompanionAI_v3.Analysis
         /// <summary>Run and Gun 능력</summary>
         public AbilityData RunAndGunAbility { get; set; }
 
+        /// <summary>★ v3.34.0: PostFirstAction 스킬 전체 목록 (RunAndGun, DaringBreach, BringItDown, HitAndRun 등)</summary>
+        public List<AbilityData> PostFirstActionAbilities { get; } = new List<AbilityData>();
+
+        /// <summary>★ v3.34.0: MP 회복 능력 (이동 전 사용 가능 — RecklessRush 등)
+        /// PostFirstAction이지만 RunAndGun이 아닌 MP 회복 스킬, 또는 PreCombatBuff MP 버프
+        /// 적이 사거리 밖이고 MP 부족 시 이동 전 선제 사용</summary>
+        public AbilityData MPBuffAbility { get; set; }
+
+        /// <summary>★ v3.34.0: MPBuffAbility 사용 시 예상 MP 회복량</summary>
+        public float MPBuffExpectedRecovery { get; set; }
+
         #endregion
 
         #region Turn State
@@ -473,6 +484,9 @@ namespace CompanionAI_v3.Analysis
             PrimaryAttack = null;
             BestBuff = null;
             RunAndGunAbility = null;
+            PostFirstActionAbilities.Clear();
+            MPBuffAbility = null;
+            MPBuffExpectedRecovery = 0f;
 
             // Turn State
             HasPerformedFirstAction = false;

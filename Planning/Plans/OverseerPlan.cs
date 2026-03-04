@@ -69,6 +69,10 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.40.0: Phase 1.8 — Cautious/Confident Approach 스탠스 선택 (Overseer = 공격 우선)
+            var approachStance = PlanApproachStance(situation, preferOffensive: true);
+            if (approachStance != null) actions.Add(approachStance);
+
             // ══════════════════════════════════════════════════════════════
             // Phase 2: HeroicAct/Overcharge FIRST ★핵심★
             // Raven WarpRelay 전에 Momentum 활성화 필수!
@@ -105,6 +109,42 @@ namespace CompanionAI_v3.Planning.Plans
 
             // ★ v3.7.93: 키스톤 루프에서 실제 성공한 능력 GUID 추적 (아군 버프 Phase에서 중복 방지)
             var usedKeystoneAbilityGuids = new HashSet<string>();
+
+            // ══════════════════════════════════════════════════════════════
+            // ★ v3.34.0: Phase 2.9 — 사역마 재활성화 (기절 시 부활)
+            // 사역마가 기절 상태면 즉시 재활성화 → 다음 턴부터 활동 가능
+            // ══════════════════════════════════════════════════════════════
+            if (situation.HasFamiliar && !FamiliarAPI.IsFamiliarConscious(situation.Unit))
+            {
+                var reactivate = CollectionHelper.FirstOrDefault(situation.FamiliarAbilities,
+                    a => FamiliarAbilities.IsReactivateAbility(a));
+                if (reactivate != null)
+                {
+                    float apCost = CombatAPI.GetAbilityAPCost(reactivate);
+                    if (remainingAP >= apCost)
+                    {
+                        var familiarTarget = new TargetWrapper(situation.Familiar);
+                        string reason;
+                        if (CombatAPI.CanUseAbilityOn(reactivate, familiarTarget, out reason))
+                        {
+                            remainingAP -= apCost;
+                            actions.Add(PlannedAction.Support(reactivate, situation.Familiar,
+                                $"Reactivate {situation.Familiar.CharacterName}", apCost));
+                            Main.Log($"[Overseer] Phase 2.9: ★ Familiar Reactivation — {situation.Familiar.CharacterName}");
+
+                            // 재활성화 후 즉시 반환 (사역마가 다음 턴부터 활동)
+                            return new TurnPlan(actions, TurnPriority.Emergency,
+                                "Overseer familiar reactivation",
+                                situation.HPPercent, situation.NearestEnemyDistance,
+                                situation.NormalHittableCount, situation.CurrentAP, situation.CurrentMP, 0);
+                        }
+                        else
+                        {
+                            Main.LogDebug($"[Overseer] Phase 2.9: Reactivate blocked: {reason}");
+                        }
+                    }
+                }
+            }
 
             // ══════════════════════════════════════════════════════════════
             // Phase 3: Familiar Abilities (PRIMARY DAMAGE/UTILITY)
@@ -305,9 +345,11 @@ namespace CompanionAI_v3.Planning.Plans
 
                 // ────────────────────────────────────────────────────────────
                 // 3.6: Raven Hex (적 디버프)
-                // ★ v3.8.52: 버프 페이즈에서는 Hex 스킵 (Raven이 아군 근처 → 적 사거리 밖)
+                // ★ v3.34.0: 버프/디버프 페이즈 무관하게 시도
+                //   PlanFamiliarHex()가 자체 레이븐-적 거리 체크 보유 (EFFECT_RADIUS_TILES × 2)
+                //   레이븐이 아군 근처면 적이 범위 밖 → 자연스럽게 null 반환
                 // ────────────────────────────────────────────────────────────
-                if (situation.FamiliarType == PetType.Raven && !isRavenBuffPhase)
+                if (situation.FamiliarType == PetType.Raven)
                 {
                     var hex = PlanFamiliarHex(situation, ref remainingAP);
                     if (hex != null)
@@ -321,7 +363,8 @@ namespace CompanionAI_v3.Planning.Plans
                 // ★ v3.18.0: Phase 3.6.5 — 정화방전 (Overcharge 필수 AoE 공격)
                 // 디버프 모드 + Overcharge(HeroicAct) 활성 → 레이븐 AoE 공격
                 // ────────────────────────────────────────────────────────────
-                if (situation.FamiliarType == PetType.Raven && !isRavenBuffPhase && heroicActPlanned)
+                // ★ v3.34.0: 버프/디버프 페이즈 무관 — PlanFamiliarPurificationDischarge()가 자체 범위 체크
+                if (situation.FamiliarType == PetType.Raven && heroicActPlanned)
                 {
                     var purification = PlanFamiliarPurificationDischarge(situation, ref remainingAP);
                     if (purification != null)
@@ -628,6 +671,27 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // ══════════════════════════════════════════════════════════════
+            // ★ v3.34.0: Phase 4.955 - 마스터 공격 전 PreAttackBuff
+            // DPSPlan Phase 4에 해당 — 오버시어 마스터도 공격 전 버프 사용
+            // Wildfire, Devastating Attack, Controlled Shot 등 상황별 최적 선택
+            // ══════════════════════════════════════════════════════════════
+            if (situation.HasHittableEnemies && remainingAP >= 2f && !situation.HasBuffedThisTurn)
+            {
+                float attackReservedAP = situation.PrimaryAttack != null
+                    ? CombatAPI.GetAbilityAPCost(situation.PrimaryAttack)
+                    : 1f;
+                var masterBuff = PlanAttackBuffWithReservation(situation, ref remainingAP, attackReservedAP);
+                if (masterBuff != null)
+                {
+                    actions.Add(masterBuff);
+                    Main.Log($"[Overseer] Phase 4.955: Master PreAttackBuff: {masterBuff.Ability?.Name}");
+                }
+            }
+
+            // ★ v3.36.0: Phase 4.955b — 나머지 0 AP 공격 버프 전부 사용
+            PlanFreeAttackBuffs(actions, situation);
+
+            // ══════════════════════════════════════════════════════════════
             // ★ v3.18.0: Phase 4.96~4.97: AoE 공격 (마스터 직접 공격)
             // DPSPlan Phase 4.3b/4.4에 해당 — 오버시어도 마스터 AoE 활용
             // ══════════════════════════════════════════════════════════════
@@ -767,6 +831,9 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
+            // ★ v3.36.0: Phase 5.8 — 0 AP 공격 소진
+            PlanZeroAPAttacks(actions, situation, plannedAbilityGuids);
+
             // ══════════════════════════════════════════════════════════════
             // Phase 6: PostAction (Run and Gun 등)
             // ══════════════════════════════════════════════════════════════
@@ -807,6 +874,14 @@ namespace CompanionAI_v3.Planning.Plans
                     hasMoveInPlan = true;
                     Main.Log($"[Overseer] Phase 7: Retreat within familiar ability range");
                 }
+            }
+
+            // ★ v3.34.0: Phase 7.8 — 이동 전 MP 버프 (적이 사거리 밖이고 MP 부족 시)
+            if (!didPlanAttack && situation.NeedsReposition && situation.MPBuffAbility != null)
+            {
+                var mpBuff = PlanMPBuffBeforeMove(situation, ref remainingAP, ref remainingMP);
+                if (mpBuff != null)
+                    actions.Add(mpBuff);
             }
 
             // ══════════════════════════════════════════════════════════════
