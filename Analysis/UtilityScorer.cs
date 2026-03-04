@@ -630,15 +630,35 @@ namespace CompanionAI_v3.Analysis
             // ★ v3.1.30: Response Curves 기반 데미지 점수
             float estimatedDamage = CombatAPI.EstimateDamage(attack, target);
             float targetHP = CombatAPI.GetActualHP(target);
-            float damageRatio = estimatedDamage / Mathf.Max(targetHP, 1f);
 
-            // 데미지 비율 → 점수 (Logistic 곡선)
+            // ★ v3.24.0: 극저 데미지 감지 (방어구 관통 불가 공격 회피)
+            if (estimatedDamage < SC.LowDamageThreshold)
+            {
+                score -= SC.LowDamageAttackPenalty;
+                if (Main.IsDebugEnabled)
+                    Main.LogDebug($"[UtilityScorer] {attack.Name}: -{SC.LowDamageAttackPenalty:F0} near-zero damage ({estimatedDamage:F0}) vs {target.CharacterName}");
+            }
+
+            // ★ v3.24.0: EV 통합 — hit chance를 damage에 곱하여 기대값 기반 스코어링
+            // 이전: DamageRatio(raw damage) + 별도 hit threshold → 독립 가산
+            // 변경: DamageRatio(expected damage) → 확률적 기대값 통합
+            float hitFractionForEV = 1.0f;
+            var hitInfoForEV = CombatCache.GetHitChance(attack, situation.Unit, target);
+            if (hitInfoForEV != null)
+                hitFractionForEV = hitInfoForEV.HitChance / 100f;
+
+            float expectedDmg = hitFractionForEV * estimatedDamage;
+            float damageRatio = expectedDmg / Mathf.Max(targetHP, 1f);
+
+            // DamageRatio 커브: 이제 EV 기반 (hit chance 통합됨)
             score += CurvePresets.DamageRatio.Evaluate(damageRatio);
 
-            // 1타킬 보너스 (Exponential 곡선, ratio 0.8 이상에서 급격히 상승)
-            if (damageRatio >= ONE_HIT_KILL_THRESHOLD)
+            // 1타킬 보너스: raw damage 기반 유지 (실제 킬 가능성)
+            // 단, hit chance로 스케일링 (30% 확률 킬은 90% 확률 킬보다 가치 낮음)
+            float rawDamageRatio = estimatedDamage / Mathf.Max(targetHP, 1f);
+            if (rawDamageRatio >= ONE_HIT_KILL_THRESHOLD)
             {
-                score += CurvePresets.OneHitKillBonus.Evaluate(damageRatio);
+                score += CurvePresets.OneHitKillBonus.Evaluate(rawDamageRatio) * hitFractionForEV;
             }
 
             // ★ v3.1.30: AP 효율 Response Curve
@@ -688,18 +708,9 @@ namespace CompanionAI_v3.Analysis
                 else if (distanceTiles < 2f) score -= 10f;  // 너무 가까우면 감점 (2타일 ≈ 2.7m)
             }
 
-            // ★ v3.9.30: 명중률 기반 점수 조정
-            // 근접/Scatter → GetHitChance에서 100% 반환 → 영향 없음
-            var hitInfo = CombatCache.GetHitChance(attack, situation.Unit, target);
-            if (hitInfo != null)
-            {
-                if (hitInfo.HitChance < 30)
-                    score -= 20f;       // 매우 낮은 명중률 → 강한 감점
-                else if (hitInfo.HitChance < 50)
-                    score -= 10f;       // 낮은 명중률 → 중간 감점
-                else if (hitInfo.HitChance >= 80)
-                    score += 5f;        // 높은 명중률 → 약간의 보너스
-            }
+            // ★ v3.24.0: 이산적 hit threshold 제거 — EV 스코어링으로 대체 (line 639 참조)
+            // 이전: hitChance<30→-20, <50→-10, >=80→+5 (독립 가산)
+            // 현재: DamageRatio 커브에 hitChance×damage 통합 (연속 EV)
 
             // ★ RangePreference 적합성
             var preference = situation.RangePreference;
@@ -768,6 +779,29 @@ namespace CompanionAI_v3.Analysis
             {
                 if (targetHPPercent <= SC.FinisherTargetHP) score += FINISHER_VALID_BONUS;  // 마무리 대상
                 else score -= FINISHER_INVALID_PENALTY;  // 마무리 아니면 비효율
+            }
+
+            // ★ v3.30.0: 원거리 캐릭터 — 사거리 밖 수류탄 대폭 감점
+            // 수류탄 때문에 전진하지 않도록 방지 (이미 범위 내이면 정상 사용)
+            if (timing == AbilityTiming.Grenade && situation.PrefersRanged)
+            {
+                float grenadeRange = CombatAPI.GetAbilityRangeInTiles(attack);
+                if (distanceTiles > grenadeRange)
+                    score -= SC.GrenadeOutOfRangePenalty;
+            }
+
+            // ★ v3.32.0: 플라스마 과열 위험도 기반 감점
+            // Rank 1=25% 폭발, 2=50%, 3=75%, 4+=100% — 폭발은 자기+주변 AoE
+            if (CombatAPI.IsPlasmaWeapon(attack))
+            {
+                int overheatRank = CombatAPI.GetPlasmaOverheatRank(situation.Unit);
+                if (overheatRank >= SC.PlasmaOverheatDangerRank)
+                {
+                    float overheatPenalty = (overheatRank - SC.PlasmaOverheatDangerRank + 1) * SC.PlasmaOverheatPenaltyPerRank;
+                    score -= overheatPenalty;
+                    if (Main.IsDebugEnabled)
+                        Main.LogDebug($"[UtilityScorer] {attack.Name}: Plasma overheat penalty={overheatPenalty:F0} (rank={overheatRank})");
+                }
             }
 
             // ★ v3.5.85: AOE 보너스 (IsAoE() 대신 패턴 기반 판단)
@@ -852,6 +886,26 @@ namespace CompanionAI_v3.Analysis
                 else if (alliesInDanger > 0 && Main.IsDebugEnabled)
                 {
                     Main.LogDebug($"[Scorer] AOE {attack.Name}: {alliesInDanger} allies ≤ max {maxAlliesAllowed} - ALLOWED (no penalty)");
+                }
+            }
+
+            // ★ v3.28.0: Arch-Militant Versatility — 다른 유형 공격 선호
+            // 이전 공격과 다른 카테고리 공격에 보너스 → Versatility 스택 축적 유도
+            var turnState = Core.TurnOrchestrator.Instance.GetCurrentTurnState();
+            if (turnState != null && turnState.LastAttackCategory != Data.AttackCategory.Normal
+                && turnState.HasAttackedThisTurn)
+            {
+                var archetype = CombatAPI.DetectArchetype(situation.Unit);
+                if (archetype == CombatAPI.UnitArchetype.ArchMilitant)
+                {
+                    var currentCategory = CombatAPI.GetAbilityTypeInfo(attack).Category;
+                    if (currentCategory != turnState.LastAttackCategory)
+                    {
+                        score += SC.VersatilityDiversityBonus;
+                        if (Main.IsDebugEnabled)
+                            Main.LogDebug($"[UtilityScorer] {attack.Name}: +{SC.VersatilityDiversityBonus:F0} Versatility diversity " +
+                                $"(last={turnState.LastAttackCategory}, current={currentCategory})");
+                    }
                 }
             }
 

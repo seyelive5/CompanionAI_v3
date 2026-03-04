@@ -409,9 +409,14 @@ namespace CompanionAI_v3.GameInterface
                             int range = CombatAPI.GetAbilityRangeInTiles(fact.Data);
                             if (range > 0 && range < 100)
                             {
-                                _cachedRavenSupportRange = range;
-                                Main.Log($"[FamiliarAPI] ★ Raven support ability range: {range} tiles ({CombatAPI.TilesToMeters(range):F1}m)");
-                                return range;
+                                // ★ v3.28.0: 1타일 안전 버퍼 적용
+                                // 모드는 Vector3.Distance(center-to-center)로 계산하지만
+                                // 게임은 DistanceToInCells(edge-to-edge, grid-based)로 검증하여
+                                // 사거리 경계에서 TargetTooFar 오류 발생 (예: 9.8 tiles vs range 10)
+                                int safeRange = range - 1;
+                                _cachedRavenSupportRange = safeRange;
+                                Main.Log($"[FamiliarAPI] ★ Raven support ability range: {range} tiles → safe {safeRange} tiles ({CombatAPI.TilesToMeters(safeRange):F1}m)");
+                                return safeRange;
                             }
                             else
                             {

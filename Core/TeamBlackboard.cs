@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using Kingmaker.EntitySystem.Entities;
 using CompanionAI_v3.Analysis;
+using CompanionAI_v3.Data;      // ★ v3.26.0: AbilityDatabase.IsHeroicAct
 using CompanionAI_v3.GameInterface;
+using CompanionAI_v3.Settings;  // ★ v3.26.0: AIRole, SC
 
 namespace CompanionAI_v3.Core
 {
@@ -785,6 +787,9 @@ namespace CompanionAI_v3.Core
             _reservedHealTargets.Clear();
             _reservedMovePositions.Clear();
 
+            // ★ v3.26.0: HeroicAct 우선 유닛 재계산 (라운드마다)
+            _heroicActPriorityComputed = false;
+
             if (tauntCount > 0 || healCount > 0 || posCount > 0)
             {
                 Main.LogDebug($"[Blackboard] Reservations cleared: {tauntCount} taunts, {healCount} heals, {posCount} positions");
@@ -811,6 +816,81 @@ namespace CompanionAI_v3.Core
         public List<UnityEngine.Vector3> GetReservedMovePositions()
         {
             return _reservedMovePositions;
+        }
+
+        #endregion
+
+        #region ★ v3.26.0: HeroicAct 팀 조율 (캐리 유닛 우선)
+
+        /// <summary>Heroic Act 우선 유닛 ID (null = 미결정)</summary>
+        private string _heroicActPriorityUnitId;
+        private bool _heroicActPriorityComputed;
+
+        /// <summary>
+        /// ★ v3.26.0: Heroic Act 우선 유닛 ID
+        /// 라운드 시작 시 계산, 라운드 내 고정. null이면 제한 없음.
+        /// </summary>
+        public string HeroicActPriorityUnitId
+        {
+            get
+            {
+                if (!_heroicActPriorityComputed)
+                    ComputeHeroicActPriority();
+                return _heroicActPriorityUnitId;
+            }
+        }
+
+        /// <summary>캐리 유닛 식별 — 역할 + Heroic Act 보유 기반</summary>
+        private void ComputeHeroicActPriority()
+        {
+            _heroicActPriorityComputed = true;
+            _heroicActPriorityUnitId = null;
+
+            string bestId = null;
+            float bestScore = 0f;
+
+            foreach (var kvp in _unitSituations)
+            {
+                var sit = kvp.Value;
+                if (sit?.Unit == null || sit.Unit.LifeState.IsDead) continue;
+
+                // Heroic Act 능력 보유 여부 (사용할 수 있어야 의미)
+                bool hasHeroicAbility = false;
+                if (sit.AvailableBuffs != null)
+                {
+                    foreach (var a in sit.AvailableBuffs)
+                    {
+                        if (AbilityDatabase.IsHeroicAct(a))
+                        {
+                            hasHeroicAbility = true;
+                            break;
+                        }
+                    }
+                }
+                if (!hasHeroicAbility) continue;  // Heroic Act 없으면 후보 제외
+
+                // 스코어링: DPS 역할 + HP 충분
+                float score = 0f;
+                var role = RoleDetector.DetectOptimalRole(sit.Unit);
+                if (role == AIRole.DPS) score += 30f;
+                else if (role == AIRole.Overseer) score += 20f;
+                else if (role == AIRole.Tank) score += 5f;
+                // Support: 0 (버프 중심 → Heroic Act 혜택 낮음)
+
+                // HP 충분 (죽기 직전이면 추가 턴 낭비)
+                float hpPercent = CombatAPI.GetHPPercent(sit.Unit);
+                if (hpPercent < 30f) score -= 20f;
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestId = kvp.Key;
+                }
+            }
+
+            _heroicActPriorityUnitId = bestId;
+            if (bestId != null && Main.IsDebugEnabled)
+                Main.LogDebug($"[TeamBlackboard] HeroicAct priority: {bestId} (score={bestScore:F0})");
         }
 
         #endregion

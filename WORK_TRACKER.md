@@ -158,3 +158,4 @@
 - [x] v3.22.2: AI 로직 감사 (33건 검증 → 25건+ False Positive 확인, SupportPlan AoE 힐 임계값 70f→healThreshold 수정)
 - [x] v3.22.4: Turn Order Awareness 확장 (PositionEvaluator 턴 순서 기반 위협 가중, BasePlan.PlanAllyBuff 행동 예정 아군 버프 우선)
 - [x] v3.22.6: 마스티프 사역마 Apprehend/Protect 개선 (TeamBlackboard 상태 추적 → 대상 고정/재발행 방지, BestTarget 연동 → 연대공격 극대화, 도달 가능성 체크, Protect 조건 강화 → 근접 적 위협+HP<50%만, OverseerPlan Phase 3.7 재구성 → Apprehend 활성시 전부 스킵으로 AP 절약, Protect Phase 9.5 이동)
+- [x] v3.24.0: 전투 규칙 기반 스코어링 개선 Tier 1 (EV 스코어링: hitChance×damage 확률적 기대값 도입 → 이산적 hit threshold 대체, 극저 데미지 감지: EstimateDamage<5 타겟/공격 페널티 → 방어구 관통 불가 감지, Overwatch 포지셔닝: TacticalOptionEvaluator 이동 페널티 + PositionEvaluator 구역 회피, 사거리 품질: PositionEvaluator 이진 LOS → 최적사거리 연속 스코어링 + ExpectedDamageRatio 커브)

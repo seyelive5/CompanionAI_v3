@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
-// using System.Linq; // ★ v3.9.10: LINQ 완전 제거 → CollectionHelper.MaxBy
+using System.Linq;  // ★ v3.24.0: FirstOrDefault (primaryAttack 조회)
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.UnitLogic.Parts;  // ★ v3.24.0: PartOverwatch
 using Kingmaker.View.Covers;
 using UnityEngine;
 using CompanionAI_v3.GameInterface;
@@ -10,7 +12,12 @@ namespace CompanionAI_v3.Analysis
 {
     /// <summary>
     /// 위치 평가기 - 전술적 위치 점수 계산
+    /// ★ v3.28.0: [Obsolete] — MovementAPI sync 함수가 완전 대체.
+    /// FindRangedAttackPositionSync / FindMeleeAttackPositionSync / FindRetreatPositionSync가
+    /// AI 패스파인더 + PathRisk 포함하여 모든 포지셔닝을 처리함.
+    /// 이 클래스의 모든 메서드는 호출처 0건 (dead code).
     /// </summary>
+    [Obsolete("v3.28.0: MovementAPI sync 함수로 완전 대체됨. 호출처 없는 dead code.")]
     public static class PositionEvaluator
     {
         /// <summary>
@@ -25,6 +32,7 @@ namespace CompanionAI_v3.Analysis
             public float ThreatScore;
             public float LOSScore;
             public float TurnOrderThreatScore;  // ★ v3.22.4: 턴 순서 기반 위협 가중
+            public float OverwatchScore;        // ★ v3.24.0: Overwatch 구역 회피
             public bool IsReachable;
         }
 
@@ -137,14 +145,61 @@ namespace CompanionAI_v3.Analysis
                 score.DistanceScore = Mathf.Min(30f, nearestEnemyDist * 2f);
             }
 
-            // 2. LOS 점수 (공격 가능한 적이 있어야 함)
-            if (enemiesInLOS > 0)
+            // 2. ★ v3.24.0: 사거리 품질 스코어링 (이전: 이진 LOS +20/-30)
+            // 원거리 유닛: 최적사거리 중심 연속 스코어링
+            // 근접 유닛: 기존 이진 평가 유지
+            Kingmaker.UnitLogic.Abilities.AbilityData primaryAttack = null;
+            bool isRangedUnit = false;
+            try
             {
-                score.LOSScore = 20f;
+                primaryAttack = unit.Body?.PrimaryHand?.Weapon?.Abilities?.FirstOrDefault()?.Data;
+                isRangedUnit = primaryAttack != null && !primaryAttack.IsMelee;
+            }
+            catch { }
+
+            if (isRangedUnit && primaryAttack != null)
+            {
+                float maxRange = CombatAPI.GetAbilityRangeInTiles(primaryAttack);
+                float optimalRange = maxRange / 2f;
+                float totalRangeFit = 0f;
+                int rangeChecked = 0;
+
+                foreach (var enemy in enemies)
+                {
+                    if (enemy == null || enemy.LifeState.IsDead) continue;
+                    float dist = CombatAPI.MetersToTiles(Vector3.Distance(position, enemy.Position));
+
+                    // 최적사거리 이내 = 만점, 최대사거리 이내 = 선형 감소, 밖 = 0
+                    float rangeFit;
+                    if (dist <= optimalRange)
+                        rangeFit = 1.0f;
+                    else if (dist <= maxRange)
+                        rangeFit = 1.0f - (dist - optimalRange) / Mathf.Max(maxRange - optimalRange, 1f);
+                    else
+                        rangeFit = 0f;
+
+                    totalRangeFit += rangeFit;
+                    rangeChecked++;
+                }
+
+                if (rangeChecked > 0)
+                {
+                    float avgRangeFit = totalRangeFit / rangeChecked;
+                    // 0.0 → -30 (사거리 밖), 0.5 → -2.5, 1.0 → +25
+                    score.LOSScore = avgRangeFit * SC.PositionRangeOptimalBonus - SC.PositionRangeBasePenalty;
+                }
+                else
+                {
+                    score.LOSScore = -30f;
+                }
             }
             else
             {
-                score.LOSScore = -30f;  // 공격 불가 위치
+                // 근접 유닛: 기존 이진 평가 유지
+                if (enemiesInLOS > 0)
+                    score.LOSScore = 20f;
+                else
+                    score.LOSScore = -30f;
             }
 
             // 3. 엄폐 점수
@@ -205,9 +260,31 @@ namespace CompanionAI_v3.Analysis
             }
             score.TurnOrderThreatScore = turnOrderThreat;
 
+            // 6. ★ v3.24.0: Overwatch 구역 회피
+            // Overwatch 활성 적 사거리 내 위치 = 위험 (거리 기반 휴리스틱)
+            // PartOverwatch.Contains(unit)은 현재 유닛 위치만 체크 → 후보 위치 불가 → 거리 추정
+            float overwatchPenalty = 0f;
+            foreach (var enemy in enemies)
+            {
+                if (enemy == null || enemy.LifeState.IsDead) continue;
+                try
+                {
+                    var ow = enemy.GetOptional<PartOverwatch>();
+                    if (ow != null && !ow.IsStopped)
+                    {
+                        float distToEnemy = CombatAPI.MetersToTiles(Vector3.Distance(position, enemy.Position));
+                        if (distToEnemy <= SC.OverwatchEstimatedRange)
+                            overwatchPenalty += SC.PositionOverwatchPenalty;
+                    }
+                }
+                catch { }
+            }
+            score.OverwatchScore = -overwatchPenalty;
+
             // 총점
             score.TotalScore = score.CoverScore + score.DistanceScore +
-                              score.LOSScore + score.ThreatScore + score.TurnOrderThreatScore;
+                              score.LOSScore + score.ThreatScore + score.TurnOrderThreatScore +
+                              score.OverwatchScore;
 
             return score;
         }

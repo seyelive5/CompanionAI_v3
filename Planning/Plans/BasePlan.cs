@@ -1370,7 +1370,34 @@ namespace CompanionAI_v3.Planning.Plans
                 // ★ v3.7.87: 턴 전달 능력인지 확인 (쳐부숴라 등)
                 bool isTurnGrant = AbilityDatabase.IsTurnGrantAbility(buff);
 
-                foreach (var target in prioritizedTargets)
+                // ★ v3.28.0: Officer BringItDown → 캐리 유닛 최우선
+                // BringItDown은 아군에게 사용하는 공격 강화 버프 → DPS 캐리에게 집중
+                var targetList = prioritizedTargets;
+                if (AbilityDatabase.IsBringItDown(buff))
+                {
+                    string carryId = TeamBlackboard.Instance.HeroicActPriorityUnitId;
+                    if (carryId != null)
+                    {
+                        BaseUnitEntity carryUnit = null;
+                        foreach (var t in prioritizedTargets)
+                        {
+                            if (t.UniqueId == carryId) { carryUnit = t; break; }
+                        }
+                        if (carryUnit != null)
+                        {
+                            // 캐리 유닛을 맨 앞으로 (나머지 순서 유지)
+                            targetList = new List<BaseUnitEntity> { carryUnit };
+                            foreach (var t in prioritizedTargets)
+                            {
+                                if (t != carryUnit) targetList.Add(t);
+                            }
+                            if (Main.IsDebugEnabled)
+                                Main.LogDebug($"[{RoleName}] BringItDown: carry unit {carryUnit.CharacterName} prioritized");
+                        }
+                    }
+                }
+
+                foreach (var target in targetList)
                 {
                     // ★ v3.8.51: 이미 계획된 (버프, 타겟) 쌍 스킵
                     // 같은 버프를 다른 아군에게는 사용 가능하지만, 동일 조합은 중복 방지

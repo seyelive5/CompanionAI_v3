@@ -34,6 +34,11 @@ using Kingmaker.UnitLogic;  // ★ v3.7.89: AOO API
 using Kingmaker.UnitLogic.Buffs.Components;  // ★ v3.8.36: WarhammerAbilityRestriction
 using Kingmaker.Blueprints.Classes.Experience;  // ★ v3.8.49: UnitDifficultyType
 using Kingmaker.Designers.Mechanics.Facts;  // ★ v3.9.88: WeaponSetChangedTrigger
+using Kingmaker.EntitySystem.Stats.Base;    // ★ v3.26.0: StatType (적/아군 스탯 조회)
+using Kingmaker.EntitySystem.Stats;          // ★ v3.26.0: ModifiableValue
+using Kingmaker.Enums;                       // ★ v3.28.0: Size (플랭킹 공격 방향)
+using Kingmaker.Blueprints.Root;             // ★ v3.28.0: ProgressionRoot (아키타입 감지)
+using Kingmaker.UnitLogic.Progression.Paths; // ★ v3.28.0: BlueprintCareerPath
 
 namespace CompanionAI_v3.GameInterface
 {
@@ -2223,6 +2228,42 @@ namespace CompanionAI_v3.GameInterface
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// ★ v3.32.0: 플라스마 과열 Rank 조회
+        /// PlasmaOverheat_Buff (GUID: 0835dbc012334dd49f849fcc92e9f708) — Stacking: Rank
+        /// 매 사격 Rank +2, 턴 시작 Rank -1, Rank 4+ = 100% 폭발 (자기+주변 AoE)
+        /// </summary>
+        public static int GetPlasmaOverheatRank(BaseUnitEntity unit)
+        {
+            if (unit?.Buffs == null) return 0;
+            try
+            {
+                foreach (var buff in unit.Buffs)
+                {
+                    if (buff.Blueprint?.AssetGuid?.ToString() == "0835dbc012334dd49f849fcc92e9f708")
+                        return buff.Rank;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] GetPlasmaOverheatRank error: {ex.Message}");
+            }
+            return 0;
+        }
+
+        /// <summary>
+        /// ★ v3.32.0: 능력이 플라스마 무기를 사용하는지 확인
+        /// AbilityData.Weapon → BlueprintItemWeapon.Family == WeaponFamily.Plasma
+        /// </summary>
+        public static bool IsPlasmaWeapon(AbilityData ability)
+        {
+            try
+            {
+                return ability?.Weapon?.Blueprint.Family == WeaponFamily.Plasma;
+            }
+            catch { return false; }
         }
 
         /// <summary>
@@ -5489,8 +5530,17 @@ namespace CompanionAI_v3.GameInterface
         /// </summary>
         public class HitChanceInfo
         {
-            /// <summary>최종 명중률 (0-95%, 클램핑됨)</summary>
+            /// <summary>★ v3.26.0: 실질 명중률 (BS × (1-Dodge) × (1-Parry), 1-95%)</summary>
             public int HitChance { get; set; }
+
+            /// <summary>★ v3.26.0: BS 기반 원본 명중률 (dodge/parry 미반영)</summary>
+            public int RawBSHitChance { get; set; }
+
+            /// <summary>★ v3.26.0: 추정 회피율 (0-95%)</summary>
+            public int EstimatedDodgeChance { get; set; }
+
+            /// <summary>★ v3.26.0: 추정 패리율 (0-95%, 근접만)</summary>
+            public int EstimatedParryChance { get; set; }
 
             /// <summary>거리 계수 (1.0=최적, 0.5=절반 이상, 0.0=사거리 초과)</summary>
             public float DistanceFactor { get; set; }
@@ -5512,7 +5562,7 @@ namespace CompanionAI_v3.GameInterface
 
             public override string ToString()
             {
-                return $"HitChance={HitChance}%, DistFactor={DistanceFactor:F1}, Cover={CoverType}";
+                return $"HitChance={HitChance}%(BS={RawBSHitChance}% dodge={EstimatedDodgeChance}% parry={EstimatedParryChance}%), DistFactor={DistanceFactor:F1}, Cover={CoverType}";
             }
         }
 
@@ -5531,37 +5581,48 @@ namespace CompanionAI_v3.GameInterface
 
             try
             {
-                // ★ v3.6.8: 근접/Scatter 공격은 항상 100% 명중 (게임 로직 동일)
+                int rawHitChance;
+                float distanceFactor = 1.0f;
+                var coverType = LosCalculations.CoverType.None;
+
+                // ★ v3.6.8: 근접/Scatter 공격은 BS 100% (게임 로직 동일)
                 if (ability.IsMelee || ability.IsScatter)
                 {
-                    return new HitChanceInfo
-                    {
-                        HitChance = 100,  // ★ v3.6.8: 게임과 동일 100%
-                        DistanceFactor = 1.0f,
-                        CoverType = LosCalculations.CoverType.None
-                    };
+                    rawHitChance = 100;
+                }
+                else
+                {
+                    // RuleCalculateHitChances 트리거
+                    var hitRule = new RuleCalculateHitChances(
+                        attacker, target, ability,
+                        0,  // burstIndex (첫 발)
+                        attacker.Position, target.Position
+                    );
+                    Rulebook.Trigger(hitRule);
+
+                    rawHitChance = hitRule.ResultHitChance;
+                    distanceFactor = hitRule.DistanceFactor;
+                    coverType = hitRule.ResultLos;
                 }
 
-                // RuleCalculateHitChances 트리거
-                var hitRule = new RuleCalculateHitChances(
-                    attacker,
-                    target,
-                    ability,
-                    0,  // burstIndex (첫 발)
-                    attacker.Position,
-                    target.Position
-                );
-
-                Rulebook.Trigger(hitRule);
+                // ★ v3.26.0: Dodge/Parry 추정 → 실질 명중률 계산
+                int dodgeChance = EstimateDodgeChance(target, attacker, ability);
+                int parryChance = EstimateParryChance(target, attacker, ability);
+                int effectiveHitChance = CalculateEffectiveHitChance(rawHitChance, dodgeChance, parryChance);
 
                 var result = new HitChanceInfo
                 {
-                    HitChance = hitRule.ResultHitChance,
-                    DistanceFactor = hitRule.DistanceFactor,
-                    CoverType = hitRule.ResultLos
+                    HitChance = effectiveHitChance,        // 실질 명중률
+                    RawBSHitChance = rawHitChance,         // 원본 보존
+                    EstimatedDodgeChance = dodgeChance,
+                    EstimatedParryChance = parryChance,
+                    DistanceFactor = distanceFactor,
+                    CoverType = coverType
                 };
 
-                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] HitChance: {attacker.CharacterName} -> {target.CharacterName} with {ability.Name}: {result}");
+                if (Main.IsDebugEnabled)
+                    Main.LogDebug($"[CombatAPI] HitChance: {attacker.CharacterName} -> {target.CharacterName}: " +
+                        $"BS={rawHitChance}% dodge={dodgeChance}% parry={parryChance}% → effective={effectiveHitChance}%");
 
                 return result;
             }
@@ -5586,33 +5647,43 @@ namespace CompanionAI_v3.GameInterface
 
             try
             {
-                // ★ v3.6.8: 근접/Scatter 공격은 항상 100% 명중
+                int rawHitChance;
+                float distanceFactor = 1.0f;
+                var coverType = LosCalculations.CoverType.None;
+
+                // ★ v3.6.8: 근접/Scatter 공격은 BS 100%
                 if (ability.IsMelee || ability.IsScatter)
                 {
-                    return new HitChanceInfo
-                    {
-                        HitChance = 100,  // ★ v3.6.8: 게임과 동일 100%
-                        DistanceFactor = 1.0f,
-                        CoverType = LosCalculations.CoverType.None
-                    };
+                    rawHitChance = 100;
+                }
+                else
+                {
+                    var hitRule = new RuleCalculateHitChances(
+                        attacker, target, ability,
+                        0,
+                        attackerPosition,  // 가상 위치에서 계산
+                        target.Position
+                    );
+                    Rulebook.Trigger(hitRule);
+
+                    rawHitChance = hitRule.ResultHitChance;
+                    distanceFactor = hitRule.DistanceFactor;
+                    coverType = hitRule.ResultLos;
                 }
 
-                var hitRule = new RuleCalculateHitChances(
-                    attacker,
-                    target,
-                    ability,
-                    0,
-                    attackerPosition,  // 가상 위치에서 계산
-                    target.Position
-                );
-
-                Rulebook.Trigger(hitRule);
+                // ★ v3.26.0: Dodge/Parry 추정 → 실질 명중률
+                int dodgeChance = EstimateDodgeChance(target, attacker, ability);
+                int parryChance = EstimateParryChance(target, attacker, ability);
+                int effectiveHitChance = CalculateEffectiveHitChance(rawHitChance, dodgeChance, parryChance);
 
                 return new HitChanceInfo
                 {
-                    HitChance = hitRule.ResultHitChance,
-                    DistanceFactor = hitRule.DistanceFactor,
-                    CoverType = hitRule.ResultLos
+                    HitChance = effectiveHitChance,
+                    RawBSHitChance = rawHitChance,
+                    EstimatedDodgeChance = dodgeChance,
+                    EstimatedParryChance = parryChance,
+                    DistanceFactor = distanceFactor,
+                    CoverType = coverType
                 };
             }
             catch (Exception ex)
@@ -5672,6 +5743,274 @@ namespace CompanionAI_v3.GameInterface
             catch
             {
                 return 10f;  // 폴백
+            }
+        }
+
+        #endregion
+
+        #region Unit Stat Query API (v3.26.0)
+
+        // ─── ★ v3.26.0: 유닛 스탯 조회 API ──────────────────────────────────
+        // 적/아군 동일 API — BaseUnitEntity.GetStatOptional()
+
+        /// <summary>스탯 최종값 (모든 버프/디버프 적용 후)</summary>
+        public static int GetStatValue(BaseUnitEntity unit, StatType stat)
+        {
+            try
+            {
+                return unit?.GetStatOptional(stat)?.ModifiedValue ?? 0;
+            }
+            catch { return 0; }
+        }
+
+        /// <summary>방어구 흡수값 (장비 + 스탯 보너스)</summary>
+        public static int GetArmorAbsorption(BaseUnitEntity unit)
+        {
+            try
+            {
+                int equipArmor = unit?.Body?.Armor?.MaybeArmor?.Blueprint?.DamageAbsorption ?? 0;
+                int statBonus = GetStatValue(unit, StatType.DamageAbsorption);
+                return equipArmor + statBonus;
+            }
+            catch { return 0; }
+        }
+
+        /// <summary>편향값 (장비 + 스탯)</summary>
+        public static int GetDeflection(BaseUnitEntity unit)
+        {
+            try
+            {
+                int equipDeflect = unit?.Body?.Armor?.MaybeArmor?.Blueprint?.DamageDeflection ?? 0;
+                int statBonus = GetStatValue(unit, StatType.DamageDeflection);
+                return equipDeflect + statBonus;
+            }
+            catch { return 0; }
+        }
+
+        /// <summary>
+        /// ★ v3.26.0: CC 저항력 추정 (0-100)
+        /// 높을수록 CC에 강함. Toughness + Willpower 기반 간이 추정.
+        /// </summary>
+        public static float EstimateCCResistance(BaseUnitEntity target)
+        {
+            try
+            {
+                int tgh = GetStatValue(target, StatType.WarhammerToughness);
+                int wp = GetStatValue(target, StatType.WarhammerWillpower);
+                int dominantStat = Math.Max(tgh, wp);
+                float resistance = Math.Min(95f, 30f + dominantStat);
+                return resistance;
+            }
+            catch { return 50f; }
+        }
+
+        #endregion
+
+        #region Dodge/Parry Estimation (v3.26.0)
+
+        // ─── ★ v3.26.0: Dodge/Parry 추정 → Effective Hit Chance ─────────────
+
+        /// <summary>
+        /// Dodge 확률 추정 (RuleCalculateDodgeChance 트리거)
+        /// 디컴파일 확인: 계산 전용 Rule (사이드이펙트 없음)
+        /// </summary>
+        public static int EstimateDodgeChance(BaseUnitEntity target, BaseUnitEntity attacker, AbilityData ability)
+        {
+            try
+            {
+                var targetUnit = target as UnitEntity;
+                if (targetUnit == null) return 0;
+
+                var dodgeRule = new RuleCalculateDodgeChance(
+                    targetUnit,
+                    attacker,    // MechanicEntity (BaseUnitEntity 상속)
+                    ability,
+                    LosCalculations.CoverType.None,
+                    0            // burstIndex
+                );
+                Rulebook.Trigger(dodgeRule);
+                return dodgeRule.Result;  // 0-95 (게임 자동 클램핑)
+            }
+            catch
+            {
+                return EstimateDodgeFromStats(target, attacker);
+            }
+        }
+
+        /// <summary>스탯 기반 Dodge 폴백 추정</summary>
+        private static int EstimateDodgeFromStats(BaseUnitEntity target, BaseUnitEntity attacker)
+        {
+            int targetAgi = GetStatValue(target, StatType.WarhammerAgility);
+            int attackerPer = attacker != null ? GetStatValue(attacker, StatType.WarhammerPerception) : 0;
+            int dodge = 30 + targetAgi - attackerPer / 2;
+            return Math.Max(0, Math.Min(95, dodge));
+        }
+
+        /// <summary>
+        /// Parry 확률 추정 (근접 전용, RuleCalculateParryChance 트리거)
+        /// </summary>
+        public static int EstimateParryChance(BaseUnitEntity target, BaseUnitEntity attacker, AbilityData ability)
+        {
+            try
+            {
+                if (ability == null || !ability.IsMelee) return 0;
+
+                var targetUnit = target as UnitEntity;
+                if (targetUnit == null) return 0;
+
+                var parryRule = new RuleCalculateParryChance(
+                    targetUnit,
+                    attacker,    // MechanicEntity
+                    ability,
+                    0,           // resultSuperiorityNumber
+                    false,       // isRangedParry
+                    0            // attackerWeaponSkillOverride
+                );
+                Rulebook.Trigger(parryRule);
+                return parryRule.Result;  // 0-95
+            }
+            catch
+            {
+                return EstimateParryFromStats(target, attacker, ability);
+            }
+        }
+
+        /// <summary>스탯 기반 Parry 폴백 추정</summary>
+        private static int EstimateParryFromStats(BaseUnitEntity target, BaseUnitEntity attacker, AbilityData ability)
+        {
+            if (ability == null || !ability.IsMelee) return 0;
+            int targetWS = GetStatValue(target, StatType.WarhammerWeaponSkill);
+            int attackerWS = attacker != null ? GetStatValue(attacker, StatType.WarhammerWeaponSkill) : 0;
+            int parry = 20 + targetWS - attackerWS;
+            return Math.Max(0, Math.Min(95, parry));
+        }
+
+        /// <summary>
+        /// 실질 명중률 계산 (BS × (1-Dodge) × (1-Parry))
+        /// </summary>
+        private static int CalculateEffectiveHitChance(int rawHitChance, int dodgeChance, int parryChance)
+        {
+            float effective = rawHitChance / 100f;
+            effective *= (1f - dodgeChance / 100f);
+            effective *= (1f - parryChance / 100f);
+            return Math.Max(1, Math.Min(95, (int)(effective * 100f)));
+        }
+
+        #endregion
+
+        #region Flanking API (v3.28.0)
+
+        // ─── ★ v3.28.0: 플랭킹 (공격 방향) API ─────────────────────────────
+        // CustomGraphHelper.GetWarhammerAttackSide()를 래핑하여 AI 포지셔닝에 활용
+
+        /// <summary>공격 방향의 전투 측면 판정 (Front/Left/Right/Back)</summary>
+        public static WarhammerCombatSide GetAttackSide(BaseUnitEntity target, Vector3 attackerPosition)
+        {
+            try
+            {
+                Vector3 attackDir = (target.Position - attackerPosition).normalized;
+                return CustomGraphHelper.GetWarhammerAttackSide(target.Forward, attackDir, target.Size);
+            }
+            catch
+            {
+                return WarhammerCombatSide.Front;
+            }
+        }
+
+        /// <summary>
+        /// 플랭킹 보너스 점수 (Back=1.0, Side=0.5, Front=0.0)
+        /// 포지셔닝 및 타겟 스코어링에서 후방/측면 공격 보너스 부여용
+        /// </summary>
+        public static float GetFlankingBonus(BaseUnitEntity target, Vector3 attackerPosition)
+        {
+            var side = GetAttackSide(target, attackerPosition);
+            switch (side)
+            {
+                case WarhammerCombatSide.Back: return 1.0f;
+                case WarhammerCombatSide.Left:
+                case WarhammerCombatSide.Right: return 0.5f;
+                default: return 0f;
+            }
+        }
+
+        #endregion
+
+        #region Archetype Detection API (v3.28.0)
+
+        // ─── ★ v3.28.0: 유닛 아키타입 감지 ─────────────────────────────────
+        // ProgressionRoot.CareerPaths + GetPathRank()로 주 아키타입 감지
+
+        /// <summary>유닛 아키타입 열거형</summary>
+        public enum UnitArchetype
+        {
+            Unknown, Officer, Operative, ArchMilitant,
+            Soldier, Assassin, Psyker, Navigator
+        }
+
+        // 아키타입 캐시 (유닛별, 전투 중 변경 없음)
+        private static readonly Dictionary<string, UnitArchetype> _archetypeCache = new Dictionary<string, UnitArchetype>();
+
+        /// <summary>아키타입 캐시 클리어 (전투 시작 시)</summary>
+        public static void ClearArchetypeCache() => _archetypeCache.Clear();
+
+        /// <summary>
+        /// 유닛의 주 아키타입 감지 (캐시됨)
+        /// ProgressionRoot.CareerPaths에서 가장 높은 PathRank를 가진 경로의 이름으로 판정
+        /// </summary>
+        public static UnitArchetype DetectArchetype(BaseUnitEntity unit)
+        {
+            if (unit == null) return UnitArchetype.Unknown;
+
+            string unitId = unit.UniqueId;
+            if (_archetypeCache.TryGetValue(unitId, out var cached))
+                return cached;
+
+            try
+            {
+                var progression = ProgressionRoot.Instance;
+                if (progression == null)
+                {
+                    _archetypeCache[unitId] = UnitArchetype.Unknown;
+                    return UnitArchetype.Unknown;
+                }
+
+                BlueprintCareerPath bestPath = null;
+                int maxRank = 0;
+
+                foreach (var cp in progression.CareerPaths)
+                {
+                    if (cp == null) continue;
+                    int rank = unit.Progression.GetPathRank(cp);
+                    if (rank > maxRank)
+                    {
+                        maxRank = rank;
+                        bestPath = cp;
+                    }
+                }
+
+                UnitArchetype result = UnitArchetype.Unknown;
+                if (bestPath != null)
+                {
+                    string pathName = bestPath.name?.ToLowerInvariant() ?? "";
+                    if (pathName.Contains("officer")) result = UnitArchetype.Officer;
+                    else if (pathName.Contains("operative")) result = UnitArchetype.Operative;
+                    else if (pathName.Contains("militant")) result = UnitArchetype.ArchMilitant;
+                    else if (pathName.Contains("soldier")) result = UnitArchetype.Soldier;
+                    else if (pathName.Contains("assassin")) result = UnitArchetype.Assassin;
+                    else if (pathName.Contains("psyker")) result = UnitArchetype.Psyker;
+                    else if (pathName.Contains("navigator")) result = UnitArchetype.Navigator;
+
+                    if (Main.IsDebugEnabled && result != UnitArchetype.Unknown)
+                        Main.LogDebug($"[CombatAPI] DetectArchetype({unit.CharacterName}): {result} (path={bestPath.name}, rank={maxRank})");
+                }
+
+                _archetypeCache[unitId] = result;
+                return result;
+            }
+            catch
+            {
+                _archetypeCache[unitId] = UnitArchetype.Unknown;
+                return UnitArchetype.Unknown;
             }
         }
 

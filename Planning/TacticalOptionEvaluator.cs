@@ -405,6 +405,17 @@ namespace CompanionAI_v3.Planning
             }
 
             option.Score = hittableScore + improvementBonus + positionQuality + moveCost;
+
+            // ★ v3.24.0: Overwatch 구역 내 이동 페널티
+            // 현재 Overwatch 구역 안에 있으면 이동 시 Overwatch 공격 트리거
+            if (situation.IsInEnemyOverwatchZone && situation.EnemyOverwatchCount > 0)
+            {
+                float owPenalty = situation.EnemyOverwatchCount * SC.OverwatchMovePenalty;
+                option.Score -= owPenalty;
+                if (Main.IsDebugEnabled)
+                    Main.LogDebug($"[TacticalEval] MoveToAttack: -{owPenalty:F0} overwatch ({situation.EnemyOverwatchCount} overwatchers)");
+            }
+
             option.Reason = $"dest={bestPosition.HittableEnemyCount}, current={currentHittable}, posScore={bestPosition.TotalScore:F0}";
             return option;
         }
@@ -493,6 +504,16 @@ namespace CompanionAI_v3.Planning
             }
 
             option.Score = attackScore + retreatSafetyGain + mpRecoveryBonus;
+
+            // ★ v3.24.0: Overwatch 구역 내 후퇴 이동 페널티
+            if (situation.IsInEnemyOverwatchZone && situation.EnemyOverwatchCount > 0)
+            {
+                float owPenalty = situation.EnemyOverwatchCount * SC.OverwatchMovePenalty;
+                option.Score -= owPenalty;
+                if (Main.IsDebugEnabled)
+                    Main.LogDebug($"[TacticalEval] AttackThenRetreat: -{owPenalty:F0} overwatch ({situation.EnemyOverwatchCount} overwatchers)");
+            }
+
             option.Reason = $"hittable={currentHittable}, safetyGain={retreatSafetyGain:F0}, mpRecov={hasPostActionMPRecovery}";
             return option;
         }

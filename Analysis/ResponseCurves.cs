@@ -180,6 +180,13 @@ namespace CompanionAI_v3.Analysis
         /// </summary>
         public static ResponseCurve APEfficiency { get; private set; }
 
+        /// <summary>
+        /// ★ v3.24.0: 기대 데미지 비율 (EV/HP) -> 타겟 스코어
+        /// TargetScorer에서 hitChance × damage / targetHP를 연속 스코어링
+        /// 이산적 hit threshold (HIT_VERY_LOW_PENALTY 등)를 대체
+        /// </summary>
+        public static ResponseCurve ExpectedDamageRatio { get; private set; }
+
         #endregion
 
         #region Heal Scoring Curves
@@ -318,6 +325,21 @@ namespace CompanionAI_v3.Analysis
                     MinOutput = 0f,
                     MaxOutput = 30f,
                     Exponent = 0.5f  // 감소하는 수익률
+                };
+
+                // ★ v3.24.0: Expected Damage Ratio — TargetScorer EV 스코어링
+                // 입력: expectedDamage / targetHP (0 = 데미지 없음, 1.0 = HP 100% 기대 데미지)
+                // 출력: -20 (EV≈0) ~ +60 (높은 EV)
+                // 전이점 0.3 = HP의 30% 기대 데미지에서 중간 점수
+                ExpectedDamageRatio = new ResponseCurve
+                {
+                    Type = CurveType.Logistic,
+                    MinInput = 0f,
+                    MaxInput = 1.5f,    // EV = HP의 150%까지
+                    MinOutput = -20f,   // EV ≈ 0 → 페널티
+                    MaxOutput = 60f,    // 높은 EV → 큰 보너스
+                    Steepness = 6f,
+                    Midpoint = 0.3f     // EV = HP의 30%가 전이점
                 };
 
                 // Heal Scoring
@@ -465,7 +487,7 @@ namespace CompanionAI_v3.Analysis
                 };
 
                 _initialized = true;
-                Main.Log("[ResponseCurves] Presets initialized (v3.2.20 with Confidence curves)");
+                Main.Log("[ResponseCurves] Presets initialized (v3.24.0 with ExpectedDamageRatio)");
             }
         }
 

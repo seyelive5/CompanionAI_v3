@@ -1195,6 +1195,20 @@ namespace CompanionAI_v3.Planning.Plans
 
             if (heroicAbilities.Count == 0) return null;
 
+            // ★ v3.26.0: 팀 조율 — 캐리 유닛 우선
+            string priorityId = TeamBlackboard.Instance.HeroicActPriorityUnitId;
+            if (priorityId != null && situation.Unit.UniqueId != priorityId)
+            {
+                bool isEmergency = CombatAPI.GetHPPercent(situation.Unit) < Settings.SC.EmergencyHealHP;
+                bool isCleanup = (situation.Enemies?.Count ?? 0) <= Settings.SC.CleanupEnemyCount;
+                if (!isEmergency && !isCleanup)
+                {
+                    if (Main.IsDebugEnabled)
+                        Main.LogDebug($"[DPS] HeroicAct suppressed (priority={priorityId})");
+                    return null;
+                }
+            }
+
             var target = new TargetWrapper(situation.Unit);
             string unitId = situation.Unit.UniqueId;
 

@@ -1117,6 +1117,9 @@ namespace CompanionAI_v3.Analysis
                 if (attack == null) continue;
                 // GapCloser는 특수 이동 스킬 — 포지셔닝에 영향 없음
                 if (AbilityDatabase.IsGapCloser(attack)) continue;
+                // ★ v3.30.0: 수류탄은 포지셔닝에서 제외 — 이미 사거리 내일 때만 기회적 사용
+                // 수류탄의 짧은 사거리가 BlendedAttackRange를 지배하여 원거리 캐릭터가 위험하게 전진하는 문제 방지
+                if (AbilityDatabase.GetTiming(attack) == Data.AbilityTiming.Grenade) continue;
 
                 float abilityRange;
 

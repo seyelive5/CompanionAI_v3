@@ -152,11 +152,14 @@ namespace CompanionAI_v3.GameInterface
             /// <summary>★ v3.9.02: 아군 밀집 패널티 (AoE 취약성 방지 + 아군 AoE 방해 방지)</summary>
             public float AllyClusterPenalty { get; set; }
 
+            /// <summary>★ v3.28.0: 플랭킹 보너스 (Back=최대, Side=중간, Front=0)</summary>
+            public float FlankingScore { get; set; }
+
             public float TotalScore => CoverScore + DistanceScore - ThreatScore + AttackScore
                                        - InfluenceThreatScore + InfluenceControlBonus
                                        + SharedTargetBonus + TacticalAdjustment
                                        - PathRiskScore + HitChanceBonus + MeleeAoESplashBonus
-                                       - AllyClusterPenalty;
+                                       - AllyClusterPenalty + FlankingScore;
 
             public bool CanStand { get; set; }
             public bool HasLosToEnemy { get; set; }
@@ -172,7 +175,8 @@ namespace CompanionAI_v3.GameInterface
                 (PathRiskScore > 0 ? $" [Path:{PathRiskScore:F1}]" : "") +
                 (HitChanceBonus != 0 ? $" [Hit:{HitChanceBonus:F1}]" : "") +
                 (MeleeAoESplashBonus > 0 ? $" [Splash:{MeleeAoESplashBonus:F1}]" : "") +
-                (AllyClusterPenalty > 0 ? $" [AllyCluster:-{AllyClusterPenalty:F1}]" : "");
+                (AllyClusterPenalty > 0 ? $" [AllyCluster:-{AllyClusterPenalty:F1}]" : "") +
+                (FlankingScore > 0 ? $" [Flank:+{FlankingScore:F1}]" : "");
         }
 
         public enum MovementGoal
@@ -1097,6 +1101,17 @@ namespace CompanionAI_v3.GameInterface
                 // primaryAttack 있으면 GetHitChanceFromPosition 사용, 없으면 거리 밴드 폴백
                 score.HitChanceBonus = CalculateHitChanceBonus(score.Position, enemies, weaponRange, isScatter, isMelee, unit, primaryAttack);
 
+                // ★ v3.28.0: 플랭킹 스코어 (원거리 — 적들의 후방/측면에서 사격 가능한 위치 선호)
+                {
+                    float flankSum = 0f;
+                    foreach (var enemy in enemies)
+                    {
+                        if (enemy == null || enemy.LifeState.IsDead) continue;
+                        flankSum += CombatAPI.GetFlankingBonus(enemy, score.Position);
+                    }
+                    score.FlankingScore = flankSum * SC.FlankingPositionBonus;
+                }
+
                 // ★ v3.8.78: LOS 기반 hittable count가 0이면 정밀 체크 생략
                 // EvaluatePosition에서 LOS로 사전 계산한 HittableEnemyCount 활용
                 // LOS 0이면 CanTargetFromNode도 실패 → 500+ 불필요 호출 제거
@@ -1195,9 +1210,6 @@ namespace CompanionAI_v3.GameInterface
             var targetPos = target.Position;
             var unitPos = unit.Position;
 
-            // 적 뒤쪽 방향 (플랭킹 보너스용)
-            var flankDir = (targetPos - unitPos).normalized;
-
             // ★ v3.18.18: DamagingAoE 회피 — 안전한 유닛이 AoE 안으로 이동하지 않도록
             bool avoidHazardZones = !CombatAPI.IsUnitInHazardZone(unit);
 
@@ -1238,14 +1250,10 @@ namespace CompanionAI_v3.GameInterface
                 float distFromUnit = Vector3.Distance(pos, unitPos);
                 score -= distFromUnit * 2f;
 
-                // 2. 플랭킹 보너스 (적 뒤쪽에서 공격)
-                // ★ v3.9.50: 부호 수정 — flankDir(유닛→적)와 attackDir(후보→적)가
-                // 반대 방향(dot < -0.3)이면 후보가 적 반대편 = 플랭킹
-                // 이전: dot > 0.5 = 같은 방향에서 접근 (플랭킹 아님) → 잘못된 보너스
-                var attackDir = (targetPos - pos).normalized;
-                float flankDot = Vector3.Dot(attackDir, flankDir);
-                if (flankDot < -0.3f)  // 적 반대편에서 공격 = 플랭킹
-                    score += 15f;
+                // 2. ★ v3.28.0: 플랭킹 보너스 (게임 네이티브 공격 방향 판정)
+                // 이전: dot product 근사 → GetWarhammerAttackSide() 기반 정밀 판정
+                float flankBonus = CombatAPI.GetFlankingBonus(target, pos);
+                score += flankBonus * SC.FlankingMeleeBonus;
 
                 // 3. ★ v3.8.13: AI 셀의 경로 위협 데이터 활용 (목적지 위협 + 경로 위협)
                 // CalculateThreatScore(목적지)에 추가로 경로 위협도 반영

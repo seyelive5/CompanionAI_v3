@@ -1229,6 +1229,18 @@ namespace CompanionAI_v3.Data
             return GetTiming(ability) == AbilityTiming.GapCloser;
         }
 
+        // ─── ★ v3.28.0: 아키타입 전술용 GUID 헬퍼 ─────────────────────────
+        private const string BRING_IT_DOWN_GUID = "f6998735d21d42f7b23afe1485735f73";
+        private const string EXPOSE_WEAKNESS_GUID = "197b8a8a12b0442db7ffee1067cf3d97";
+
+        /// <summary>BringItDown 능력인지 확인 (Officer 아키타입 전술용)</summary>
+        public static bool IsBringItDown(AbilityData ability)
+            => ability?.Blueprint?.AssetGuid?.ToString() == BRING_IT_DOWN_GUID;
+
+        /// <summary>ExposeWeakness 능력인지 확인 (Operative 아키타입 전술용)</summary>
+        public static bool IsExposeWeakness(AbilityData ability)
+            => ability?.Blueprint?.AssetGuid?.ToString() == EXPOSE_WEAKNESS_GUID;
+
         /// <summary>
         /// ★ v3.8.23: 후퇴용 이동 스킬인지 확인 (SoldierDash 등)
         /// 블루프린트에 AiEscapeFromThreat Type="Retreat" 컴포넌트가 있는 능력

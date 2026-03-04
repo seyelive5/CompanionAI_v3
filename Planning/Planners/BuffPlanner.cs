@@ -516,6 +516,22 @@ namespace CompanionAI_v3.Planning.Planners
 
             if (heroicAbilities.Count == 0) return null;
 
+            // ★ v3.26.0: 팀 조율 — 캐리 유닛 우선
+            string priorityId = TeamBlackboard.Instance.HeroicActPriorityUnitId;
+            if (priorityId != null && situation.Unit.UniqueId != priorityId)
+            {
+                // 이 유닛은 캐리가 아님 → Heroic Act 억제
+                // 예외: 긴급 상황 또는 전투 말기
+                bool isEmergency = CombatAPI.GetHPPercent(situation.Unit) < Settings.SC.EmergencyHealHP;
+                bool isCleanup = (situation.Enemies?.Count ?? 0) <= Settings.SC.CleanupEnemyCount;
+                if (!isEmergency && !isCleanup)
+                {
+                    if (Main.IsDebugEnabled)
+                        Main.LogDebug($"[{roleName}] HeroicAct suppressed (priority={priorityId})");
+                    return null;
+                }
+            }
+
             var target = new TargetWrapper(situation.Unit);
             string unitId = situation.Unit.UniqueId;
 
@@ -561,6 +577,32 @@ namespace CompanionAI_v3.Planning.Planners
                 if (cost > remainingAP) continue;
 
                 if (AllyStateCache.HasBuff(target, debuff)) continue;
+
+                // ★ v3.26.0: CC 저항률 체크 — 고저항 적에게 CC 스킬 억제
+                var classData = CombatAPI.GetClassificationData(debuff);
+                if (classData != null && (classData.HasHardCC || classData.HasCC))
+                {
+                    float resistance = CombatAPI.EstimateCCResistance(target);
+                    if (resistance > Settings.SC.CCResistanceHighThreshold)
+                    {
+                        if (Main.IsDebugEnabled)
+                            Main.LogDebug($"[{roleName}] CC {debuff.Name} suppressed vs {target.CharacterName} (resistance={resistance:F0}%)");
+                        continue;
+                    }
+                }
+
+                // ★ v3.28.0: Operative ExposeWeakness → 고방어 적만
+                // 방어력 낮은 잡몹에 낭비 방지 — 방어구 흡수값이 임계값 미만이면 스킵
+                if (AbilityDatabase.IsExposeWeakness(debuff))
+                {
+                    int armor = CombatAPI.GetArmorAbsorption(target);
+                    if (armor < Settings.SC.ExposeWeaknessMinArmor)
+                    {
+                        if (Main.IsDebugEnabled)
+                            Main.LogDebug($"[{roleName}] ExposeWeakness skipped: {target.CharacterName} armor={armor} < {Settings.SC.ExposeWeaknessMinArmor}");
+                        continue;
+                    }
+                }
 
                 string reason;
                 if (CombatAPI.CanUseAbilityOn(debuff, targetWrapper, out reason))

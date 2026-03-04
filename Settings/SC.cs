@@ -87,6 +87,7 @@ namespace CompanionAI_v3.Settings
 
         // ─── PositionEvaluator 턴 순서 ──────────────────────────────────
         // ★ v3.22.4: 곧 행동할 적 근처 위치 회피, 이미 행동한 적 근처 안전 보너스
+        // ★ v3.28.0: PositionEvaluator는 dead code (MovementAPI sync 대체). 아래 상수는 PositionEvaluator 내부에서만 참조.
         public const float PositionTurnOrderThreatRadiusMult = 1.5f;  // minSafeDistance × 이 배수 내 적만 고려
         public const float PositionTurnOrderUrgencyRate      = 5f;    // 턴 위치당 패널티 (0번=-15, 1번=-10, 2번=-5)
         public const float PositionTurnOrderActedBonus       = 3f;    // 이미 행동한 적 근처 안전 보너스
@@ -95,6 +96,39 @@ namespace CompanionAI_v3.Settings
         // ★ v3.22.6: 마스티프 Apprehend/Protect 개선
         public const float MastiffApprehendMaxReachTiles = 15f;  // Apprehend 도달 가능 최대 거리 (타일)
         public const float MastiffProtectMaxHP           = 50f;  // Protect 발동 아군 최대 HP%
+
+        // ─── 전투 규칙 개선 ─────────────────────────────────────────────
+        // ★ v3.24.0: 극저 데미지 감지 (방어구 관통 불가)
+        public const float LowDamageThreshold        = 5f;   // EstimateDamage 이 이하면 방어구 관통 불가 판정
+        public const float LowDamagePenalty           = 30f;  // TargetScorer 극저 데미지 타겟 페널티
+        public const float LowDamageAttackPenalty     = 40f;  // UtilityScorer 극저 데미지 공격 페널티
+
+        // ★ v3.24.0: Overwatch 포지셔닝 반영
+        public const float OverwatchMovePenalty       = 15f;  // TacticalOptionEvaluator 이동 Overwatch 페널티 (적 1명당)
+        public const float PositionOverwatchPenalty   = 12f;  // PositionEvaluator Overwatch 근접 페널티 (적 1명당)
+        public const float OverwatchEstimatedRange    = 15f;  // Overwatch 추정 사거리 (타일)
+
+        // ★ v3.24.0: 사거리 품질 포지셔닝
+        public const float PositionRangeOptimalBonus  = 55f;  // rangeFit 1.0 → +25 (55-30), 0.0 → -30 (0-30)
+        public const float PositionRangeBasePenalty   = 30f;  // 기본 감산 (사거리 밖 = -30)
+
+        // ─── v3.26.0: Tier 2 전투 규칙 ──────────────────────────────────
+        // Step 4: CC 저항
+        public const float CCResistanceHighThreshold = 70f;  // CC 저항률 이 이상이면 CC 스킵
+
+        // ─── v3.28.0: Tier 3 플랭킹 + 아키타입 ──────────────────────────
+        public const float FlankingPositionBonus     = 8f;    // 원거리 포지셔닝: 적 1명 Back → +8, Side → +4
+        public const float FlankingMeleeBonus        = 15f;   // 근접 포지셔닝: 타겟 Back → +15, Side → +7.5
+        public const float TargetFlankingBonus       = 12f;   // TargetScorer: 타겟 Back → +12, Side → +6
+        public const float ExposeWeaknessMinArmor    = 15f;   // ExposeWeakness: 이 이상 방어력만 대상
+        public const float VersatilityDiversityBonus = 20f;   // Arch-Militant: 다른 공격 유형 선호 보너스
+
+        // ─── v3.30.0: 수류탄 포지셔닝 안전 ────────────────────────────────
+        public const float GrenadeOutOfRangePenalty  = 60f;   // 원거리 캐릭터: 사거리 밖 수류탄 감점 (전진 방지)
+
+        // ─── v3.32.0: 플라스마 과열 인식 ────────────────────────────────
+        public const int   PlasmaOverheatDangerRank     = 2;    // 이 Rank부터 감점 시작 (50% 폭발)
+        public const float PlasmaOverheatPenaltyPerRank = 40f;  // Rank당 감점 (rank2=-40, rank3=-80, rank4=-120)
 
         // ─── 폴백 기본값 ─────────────────────────────────────────────────
         // ★ v3.22.0: 게임 API 조회 실패 시 사용되는 안전 폴백 값 중앙화

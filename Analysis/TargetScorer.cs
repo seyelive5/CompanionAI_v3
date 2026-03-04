@@ -9,6 +9,7 @@ using CompanionAI_v3.Data;
 using CompanionAI_v3.GameInterface;
 using CompanionAI_v3.Settings;
 using Kingmaker.Blueprints.Classes.Experience;  // ★ v3.8.49: UnitDifficultyType
+using UnityEngine;  // ★ v3.24.0: Mathf (EV 스코어링)
 
 namespace CompanionAI_v3.Analysis
 {
@@ -236,39 +237,34 @@ namespace CompanionAI_v3.Analysis
                     score += ENEMY_DEBUFF_BONUS * weights.DebuffState;
                 }
 
-                // ★ v3.8.31: 명중률 기반 스코어링 (게임 RuleCalculateHitChances 사용)
-                // - 낮은 명중률 타겟 페널티 (회피 or 사거리 초과)
-                // - 최적 거리 타겟 보너스
-                // - 엄폐 상태 반영
+                // ★ v3.24.0: Expected Damage Value (EV) 스코어링
+                // 이전: 이산적 hit threshold (-25/-15/+10) + 별도 damage
+                // 변경: hitChance × EstimateDamage / targetHP → 연속 커브 (확률적 기대값)
                 if (situation.PrimaryAttack != null)
                 {
                     var hitInfo = CombatCache.GetHitChance(situation.PrimaryAttack, situation.Unit, target);
                     if (hitInfo != null)
                     {
-                        // 명중률 기반 점수 조정
-                        if (hitInfo.IsVeryLowHitChance)  // < 30%
-                        {
-                            score -= HIT_VERY_LOW_PENALTY;
-                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: -{HIT_VERY_LOW_PENALTY} very low hit ({hitInfo.HitChance}%)");
-                        }
-                        else if (hitInfo.IsLowHitChance)  // < 50%
-                        {
-                            score -= HIT_LOW_PENALTY;
-                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: -{HIT_LOW_PENALTY} low hit ({hitInfo.HitChance}%)");
-                        }
-                        else if (hitInfo.HitChance >= 80)  // 높은 명중률
-                        {
-                            score += HIT_HIGH_BONUS;
-                        }
+                        // EV 기반 연속 스코어링 (hit threshold 대체)
+                        float estimatedDmgForEV = CombatAPI.EstimateDamage(situation.PrimaryAttack, target);
+                        float hitFraction = hitInfo.HitChance / 100f;
+                        float expectedDamage = hitFraction * estimatedDmgForEV;
+                        float evTargetHP = CombatAPI.GetActualHP(target);
+                        float evRatio = expectedDamage / Mathf.Max(evTargetHP, 1f);
 
-                        // 최적 거리 보너스 (DistanceFactor >= 1.0)
+                        float evScore = CurvePresets.ExpectedDamageRatio.Evaluate(evRatio);
+                        score += evScore;
+                        if (Main.IsDebugEnabled)
+                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: EV={expectedDamage:F0} (hit{hitInfo.HitChance}%×dmg{estimatedDmgForEV:F0}), ratio={evRatio:F2}, score={evScore:F1}");
+
+                        // 최적 거리 보너스 (DistanceFactor >= 1.0) — 포지셔닝 시그널, EV와 독립
                         if (hitInfo.IsInOptimalRange)
                         {
                             score += OPTIMAL_RANGE_BONUS;
                             Main.LogDebug($"[TargetScorer] {target.CharacterName}: +{OPTIMAL_RANGE_BONUS} optimal range");
                         }
 
-                        // 엄폐 페널티 (Full Cover = 높은 페널티)
+                        // 엄폐 페널티 — 포지셔닝 시그널, EV와 독립
                         if (hitInfo.CoverType == LosCalculations.CoverType.Full)
                         {
                             score -= FULL_COVER_PENALTY;
@@ -278,6 +274,29 @@ namespace CompanionAI_v3.Analysis
                         {
                             score -= HALF_COVER_PENALTY;
                         }
+                    }
+                }
+
+                // ★ v3.24.0: 극저 데미지 감지 (방어구 관통 불가 타겟 회피)
+                if (situation.PrimaryAttack != null)
+                {
+                    float estimatedDmg = CombatAPI.EstimateDamage(situation.PrimaryAttack, target);
+                    if (estimatedDmg < SC.LowDamageThreshold)
+                    {
+                        score -= SC.LowDamagePenalty;
+                        Main.LogDebug($"[TargetScorer] {target.CharacterName}: -{SC.LowDamagePenalty:F0} low damage ({estimatedDmg:F0} estimated)");
+                    }
+                }
+
+                // ★ v3.28.0: 플랭킹 보너스 — 현재 위치에서 적의 후방/측면 공격 가능 시
+                {
+                    float flankBonus = CombatAPI.GetFlankingBonus(target, situation.Unit.Position);
+                    if (flankBonus > 0f)
+                    {
+                        float flankScore = flankBonus * SC.TargetFlankingBonus;
+                        score += flankScore;
+                        if (Main.IsDebugEnabled)
+                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: flank bonus +{flankScore:F0} (side={CombatAPI.GetAttackSide(target, situation.Unit.Position)})");
                     }
                 }
 

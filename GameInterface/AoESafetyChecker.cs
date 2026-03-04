@@ -107,10 +107,11 @@ namespace CompanionAI_v3.GameInterface
                 }
                 catch (Exception ex)
                 {
-                    // 피아 구분 실패 시 적으로 간주
-                    Main.LogDebug($"[AoESafetyChecker] Friend/foe classification failed: {ex.Message}");
-                    score.EnemiesHit++;
-                    totalScore += distanceBonus;
+                    // ★ v3.30.0: 피아 구분 실패 시 아군으로 간주 (안전 우선)
+                    // 이전: 적으로 간주하여 AoE 보너스 → 분류 실패한 아군 피격 위험
+                    Main.Log($"[AoESafetyChecker] ★ Classification FAILED: {unit?.CharacterName}: {ex.Message}");
+                    score.AlliesHit++;
+                    totalScore -= SC.AoEPlayerAllyPenaltyMult * HIT_SCORE;
                 }
             }
 
@@ -460,6 +461,14 @@ namespace CompanionAI_v3.GameInterface
                     }
                 }
                 catch (Exception ex) { Main.LogDebug($"[AoESafety] {ex.Message}"); }
+            }
+
+            // ★ v3.30.0: AoE 안전 허용 시 진단 로깅 — 아군이 범위 내 있지만 허용된 경우 추적
+            if (Main.IsDebugEnabled && playerPartyAlliesInRange > 0)
+            {
+                int effectiveMaxAllies = (aoERadius <= 0 && hasScatterDanger) ? 0 : aoeConfig.MaxPlayerAlliesHit;
+                Main.LogDebug($"[AOE] Safety ALLOWED: {ability.Name} -> {target.CharacterName} " +
+                    $"(allies_in_range={playerPartyAlliesInRange}, max={effectiveMaxAllies})");
             }
 
             return true;
@@ -835,10 +844,12 @@ namespace CompanionAI_v3.GameInterface
                         totalScore -= SC.AoENpcAllyPenaltyMult * HIT_SCORE;
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    score.EnemiesHit++;
-                    totalScore += distanceBonus;
+                    // ★ v3.30.0: 피아 구분 실패 시 아군으로 간주 (안전 우선)
+                    Main.Log($"[AoESafetyChecker] ★ DirectionalAoE classification FAILED: {unit?.CharacterName}: {ex.Message}");
+                    score.AlliesHit++;
+                    totalScore -= SC.AoEPlayerAllyPenaltyMult * HIT_SCORE;
                 }
             }
 
@@ -929,10 +940,12 @@ namespace CompanionAI_v3.GameInterface
                         totalScore -= SC.AoENpcAllyPenaltyMult * HIT_SCORE;
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    score.EnemiesHit++;
-                    totalScore += distanceBonus;
+                    // ★ v3.30.0: 피아 구분 실패 시 아군으로 간주 (안전 우선)
+                    Main.Log($"[AoESafetyChecker] ★ DirectionalAoE(Pos) classification FAILED: {unit?.CharacterName}: {ex.Message}");
+                    score.AlliesHit++;
+                    totalScore -= SC.AoEPlayerAllyPenaltyMult * HIT_SCORE;
                 }
             }
 
