@@ -441,7 +441,8 @@ namespace CompanionAI_v3.Planning.Planners
             foreach (var buff in situation.AvailableBuffs)
             {
                 var timing = AbilityDatabase.GetTiming(buff);
-                if (timing != AbilityTiming.PreAttackBuff && timing != AbilityTiming.RighteousFury)
+                if (timing != AbilityTiming.PreAttackBuff && timing != AbilityTiming.RighteousFury
+                    && timing != AbilityTiming.SelfDamage)  // ★ v3.40.2: 자해 버프도 공격 전 사용
                     continue;
 
                 if (AbilityDatabase.IsRunAndGun(buff)) continue;
@@ -596,6 +597,19 @@ namespace CompanionAI_v3.Planning.Planners
             {
                 // 버프 사용 후 공격 AP가 부족하면 감점 (CC/extra attack 제외)
                 score -= 20f;
+            }
+
+            // ═══════════════════════════════════════════════
+            // 8. SelfDamage HP 안전 마진 (★ v3.40.2)
+            // HP가 임계값 바로 위면 감점 (위험), 여유 있으면 가산
+            // ═══════════════════════════════════════════════
+            if (info != null && info.Timing == AbilityTiming.SelfDamage)
+            {
+                float hpMargin = situation.HPPercent - info.HPThreshold;
+                if (hpMargin < 10f)
+                    score -= 30f;  // HP 임계값 +10% 미만: 위험
+                else if (hpMargin >= 30f)
+                    score += 15f;  // HP 여유 충분: 적극 사용
             }
 
             return score;

@@ -34,6 +34,7 @@ using Kingmaker.UnitLogic;  // ★ v3.7.89: AOO API
 using Kingmaker.UnitLogic.Buffs.Components;  // ★ v3.8.36: WarhammerAbilityRestriction
 using Kingmaker.Blueprints.Classes.Experience;  // ★ v3.8.49: UnitDifficultyType
 using Kingmaker.Designers.Mechanics.Facts;  // ★ v3.9.88: WeaponSetChangedTrigger
+using Kingmaker.UnitLogic.FactLogic;        // ★ v3.40.2: ForceMoveTriggerInitiator (Push 감지)
 using Kingmaker.EntitySystem.Stats.Base;    // ★ v3.26.0: StatType (적/아군 스탯 조회)
 using Kingmaker.EntitySystem.Stats;          // ★ v3.26.0: ModifiableValue
 using Kingmaker.Enums;                       // ★ v3.28.0: Size (플랭킹 공격 방향)
@@ -2297,6 +2298,44 @@ namespace CompanionAI_v3.GameInterface
             catch (Exception ex)
             {
                 if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsMarkedAsPrey error: {ex.Message}");
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// ★ v3.40.2: 유닛의 근접 공격이 적을 밀어내는지 (Push) 판별
+        /// 1) 무기 Blueprint의 OnHitActions에 ContextActionPush 포함
+        /// 2) 유닛 버프에 ForceMoveTriggerInitiator 컴포넌트 보유 (공격 시 밀어내기 발동)
+        /// </summary>
+        public static bool CanMeleeAttackCausePush(BaseUnitEntity unit)
+        {
+            if (unit == null) return false;
+
+            try
+            {
+                // 1. 무기의 OnHitActions에서 ContextActionPush 검사
+                var weapon = unit.Body?.PrimaryHand?.Weapon;
+                if (weapon?.Blueprint != null)
+                {
+                    var onHitEffect = weapon.Blueprint.OnHitActions;
+                    var actionList = onHitEffect?.OnHitActions;
+                    if (actionList?.Actions != null)
+                    {
+                        foreach (var action in actionList.Actions)
+                        {
+                            if (action is ContextActionPush)
+                                return true;
+                        }
+                    }
+                }
+
+                // 2. 유닛 버프에 ForceMoveTriggerInitiator 검사 (공격 시 밀어내기 트리거)
+                if (unit.Facts.HasComponent<ForceMoveTriggerInitiator>(null))
+                    return true;
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] CanMeleeAttackCausePush error: {ex.Message}");
             }
             return false;
         }

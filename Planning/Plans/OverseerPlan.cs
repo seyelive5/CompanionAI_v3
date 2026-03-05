@@ -772,6 +772,11 @@ namespace CompanionAI_v3.Planning.Plans
                     if (remainingMP < 0) remainingMP = 0;
                 }
 
+                // ★ v3.40.2: Push recovery — 밀어내기 공격 후 갭클로저 삽입
+                var pushRecovery = TryPlanPushRecoveryGapCloser(situation, attackAction, ref remainingAP, ref remainingMP, budget);
+                if (pushRecovery != null)
+                    actions.Add(pushRecovery);
+
                 // 타겟/능력 제외 목록 업데이트
                 // ★ v3.8.30: 적이 1명일 때는 타겟/능력 모두 제외하지 않음 (동일 능력으로 재공격 허용)
                 var targetEntity = attackAction.Target?.Entity as BaseUnitEntity;

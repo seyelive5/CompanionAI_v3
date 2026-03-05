@@ -134,6 +134,35 @@ namespace CompanionAI_v3.Planning.Plans
             => MovementPlanner.PlanGapCloser(situation, target, ref remainingAP, ref remainingMP, RoleName, out preMoveAction);
 
         /// <summary>
+        /// ★ v3.40.2: 밀어내기(Push) 공격 후 갭클로저 삽입 — 적 추격
+        /// 근접 무기 공격이 적을 밀어내면, 후속 공격을 위해 갭클로저 계획
+        /// AP 예산이 후속 공격까지 감당 가능할 때만 삽입 (낭비 방지)
+        /// </summary>
+        protected PlannedAction TryPlanPushRecoveryGapCloser(
+            Situation situation, PlannedAction attackAction,
+            ref float remainingAP, ref float remainingMP, APBudget budget)
+        {
+            // 무기 공격이 아니면 스킵
+            if (attackAction?.Ability?.Weapon == null) return null;
+            // 근접이 아니면 스킵
+            if (!attackAction.Ability.Weapon.Blueprint.IsMelee) return null;
+            // 밀어내기 가능한 유닛이 아니면 스킵
+            if (!CombatAPI.CanMeleeAttackCausePush(situation.Unit)) return null;
+            // 후속 공격할 AP가 없으면 갭클로저 불필요
+            if (!budget.CanAfford(0, remainingAP)) return null;
+
+            var pushTarget = attackAction.Target?.Entity as BaseUnitEntity;
+            if (pushTarget == null) return null;
+
+            var gapCloser = PlanGapCloser(situation, pushTarget, ref remainingAP, ref remainingMP);
+            if (gapCloser != null)
+            {
+                Main.Log($"[{RoleName}] Push recovery: {gapCloser.Ability?.Name} → {pushTarget.CharacterName} (melee push detected)");
+            }
+            return gapCloser;
+        }
+
+        /// <summary>
         /// ★ v3.16.0: 갭클로저를 MoveToAttack 대안으로 평가
         /// ★ v3.16.6: Walk+Jump 콤보 지원 — preMoveAction 출력 추가
         /// TacticalEval이 MoveToAttack을 선택했을 때, 갭클로저가 더 효율적인지 비교
@@ -263,7 +292,8 @@ namespace CompanionAI_v3.Planning.Plans
             foreach (var buff in situation.AvailableBuffs)
             {
                 var timing = AbilityDatabase.GetTiming(buff);
-                if (timing != AbilityTiming.PreAttackBuff && timing != AbilityTiming.RighteousFury)
+                if (timing != AbilityTiming.PreAttackBuff && timing != AbilityTiming.RighteousFury
+                    && timing != AbilityTiming.SelfDamage)  // ★ v3.40.2: 0 AP 자해 버프도 포함
                     continue;
 
                 float cost = CombatAPI.GetAbilityAPCost(buff);

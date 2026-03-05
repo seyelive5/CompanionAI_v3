@@ -379,6 +379,11 @@ namespace CompanionAI_v3.Planning.Plans
                 didPlanAttack = true;
                 attacksPlanned++;
 
+                // ★ v3.40.2: Push recovery — 밀어내기 공격 후 갭클로저 삽입
+                var pushRecovery = TryPlanPushRecoveryGapCloser(situation, attackAction, ref remainingAP, ref remainingMP, budget);
+                if (pushRecovery != null)
+                    actions.Add(pushRecovery);
+
                 var targetEntity = attackAction.Target?.Entity as BaseUnitEntity;
                 // ★ v3.6.22: Hittable 적이 2명 이상일 때만 타겟 제외
                 if (targetEntity != null)
