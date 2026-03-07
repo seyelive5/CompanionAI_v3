@@ -1819,6 +1819,8 @@ namespace CompanionAI_v3.Planning.Plans
             foreach (var enemy in situation.Enemies)
             {
                 if (enemy == null || enemy.LifeState.IsDead) continue;
+                // ★ v3.40.8: 데미지 면역 적 제외 (구조물 등)
+                if (CombatAPI.IsTargetImmuneToDamage(enemy, situation.Unit)) continue;
 
                 bool canHit = false;
                 foreach (var attack in situation.AvailableAttacks)

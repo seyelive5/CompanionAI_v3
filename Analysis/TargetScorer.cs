@@ -506,6 +506,12 @@ namespace CompanionAI_v3.Analysis
 
                 if (best != null)
                 {
+                    // ★ v3.40.8: SCORE_IMPOSSIBLE 이하 점수면 유효 타겟 없음 (면역/사망 등)
+                    if (bestScore <= UtilityScorer.SCORE_IMPOSSIBLE + 1000f)
+                    {
+                        Main.LogDebug($"[TargetScorer] Best enemy {best.CharacterName} rejected: score={bestScore:F1} (IMPOSSIBLE)");
+                        return null;
+                    }
                     Main.LogDebug($"[TargetScorer] Best enemy for {role}: {best.CharacterName} (score={bestScore:F1})");
                     return best;
                 }

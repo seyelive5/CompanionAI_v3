@@ -299,7 +299,9 @@ namespace CompanionAI_v3.Planning
             MovementAPI.PositionScore bestPosition = null;
 
             // ★ v3.8.98: 근접 유닛은 FindMeleeAttackPositionSync 사용
-            if (!situation.PrefersRanged && situation.NearestEnemy != null)
+            // ★ v3.40.8: 면역 적에게 이동 공격 방지
+            if (!situation.PrefersRanged && situation.NearestEnemy != null
+                && !CombatAPI.IsTargetImmuneToDamage(situation.NearestEnemy, unit))
             {
                 float meleeRange = GetMeleeRange(unit);
 
