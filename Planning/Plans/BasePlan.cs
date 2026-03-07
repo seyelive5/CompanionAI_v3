@@ -1498,6 +1498,11 @@ namespace CompanionAI_v3.Planning.Plans
             {
                 if (buff.Blueprint?.CanTargetFriends != true) continue;
 
+                // ★ v3.40.4: 공격 능력이 아군 버프로 잘못 사용되는 것 방지
+                // 무기 능력(Weapon != null)은 공격 → 아군에게 사용하면 피해를 입힘
+                // 예: 죽음의 환영 (영웅적 행위) = CanTargetFriends이지만 무기 공격 → 아군 즉사
+                if (buff.Weapon != null) continue;
+
                 // ★ v3.7.07 Fix: 실제 사역마에게 성공한 버프만 스킵
                 string buffGuid = buff.Blueprint?.AssetGuid?.ToString();
                 if (!string.IsNullOrEmpty(buffGuid) && usedKeystoneGuids != null && usedKeystoneGuids.Contains(buffGuid))

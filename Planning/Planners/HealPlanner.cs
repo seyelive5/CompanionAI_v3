@@ -169,6 +169,8 @@ namespace CompanionAI_v3.Planning.Planners
             foreach (var buff in situation.AvailableBuffs)
             {
                 if (buff.Blueprint?.CanTargetFriends != true) continue;
+                // ★ v3.40.4: 무기 공격이 아군 버프로 사용되는 것 방지
+                if (buff.Weapon != null) continue;
 
                 float cost = CombatAPI.GetAbilityAPCost(buff);
                 if (cost > remainingAP) continue;
