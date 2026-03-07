@@ -838,6 +838,8 @@ namespace CompanionAI_v3.Planning.Plans
                     foreach (var enemy in situation.Enemies)
                     {
                         if (enemy == null || enemy.LifeState.IsDead) continue;
+                        // ★ v3.40.8: 데미지 면역 적 제외
+                        if (CombatAPI.IsTargetImmuneToDamage(enemy, situation.Unit)) continue;
 
                         // DOT가 있는 적에게만 DOT 강화 사용
                         if (!SpecialAbilityHandler.CanUseSpecialAbilityEffectively(
@@ -1403,6 +1405,8 @@ namespace CompanionAI_v3.Planning.Plans
                 foreach (var enemy in enemies)
                 {
                     if (enemy == null || enemy.LifeState.IsDead) continue;
+                    // ★ v3.40.8: 데미지 면역 적 제외
+                    if (CombatAPI.IsTargetImmuneToDamage(enemy, situation.Unit)) continue;
 
                     // ★ v3.1.22: 콤보 선행 능력 필요 여부 확인
                     // 예: Shape Flames가 DOT 없는 적에게 사용 불가 → Inferno 먼저 필요
@@ -1467,6 +1471,8 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     if (enemy == null || enemy.LifeState.IsDead) continue;
                     if (excludeTargetIds.Contains(enemy.UniqueId)) continue;
+                    // ★ v3.40.8: 데미지 면역 적 제외
+                    if (CombatAPI.IsTargetImmuneToDamage(enemy, situation.Unit)) continue;
 
                     var targetWrapper = new TargetWrapper(enemy);
                     string reason;

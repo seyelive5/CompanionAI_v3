@@ -33,8 +33,12 @@ using CompanionAI_v3.Settings;
 using Kingmaker.UnitLogic;  // ★ v3.7.89: AOO API
 using Kingmaker.UnitLogic.Buffs.Components;  // ★ v3.8.36: WarhammerAbilityRestriction
 using Kingmaker.Blueprints.Classes.Experience;  // ★ v3.8.49: UnitDifficultyType
-using Kingmaker.Designers.Mechanics.Facts;  // ★ v3.9.88: WeaponSetChangedTrigger
+using Kingmaker.Designers.Mechanics.Facts;        // ★ v3.9.88: WeaponSetChangedTrigger
+using Kingmaker.Designers.Mechanics.Facts.Damage; // ★ v3.40.6: WarhammerDamageModifier (면역 감지)
 using Kingmaker.UnitLogic.FactLogic;        // ★ v3.40.2: ForceMoveTriggerInitiator (Push 감지)
+using Kingmaker.UnitLogic.Mechanics;        // ★ v3.40.6: ContextValueType (면역 컴포넌트 평가)
+using Kingmaker.UnitLogic.Mechanics.Damage; // ★ v3.40.6: DamageTypeMask (데미지 면역 감지)
+using Kingmaker.Mechanics.Damage;           // ★ v3.40.6: DamageExtension.Contains
 using Kingmaker.EntitySystem.Stats.Base;    // ★ v3.26.0: StatType (적/아군 스탯 조회)
 using Kingmaker.EntitySystem.Stats;          // ★ v3.26.0: ModifiableValue
 using Kingmaker.Enums;                       // ★ v3.28.0: Size (플랭킹 공격 방향)
@@ -2300,6 +2304,154 @@ namespace CompanionAI_v3.GameInterface
                 if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsMarkedAsPrey error: {ex.Message}");
             }
             return false;
+        }
+
+        /// <summary>
+        /// ★ v3.40.6: 타겟이 공격자의 데미지에 면역인지 확인
+        /// 4가지 메커니즘 검사:
+        /// 1) AddDamageTypeImmunity — 특정 데미지 타입 면역 (PctMul_Extra = 0)
+        /// 2) WarhammerDamageModifier — UnmodifiablePercentDamageModifier=0 or PercentDamageModifier≤-100
+        /// 3) WarhammerModifyIncomingAttackDamage — PercentDamageModifier ≤ -100
+        /// 4) WarhammerIncomingDamageNullifier — NullifyChances = 0 (데미지 통과 확률 0%)
+        /// 면역 타겟은 공격해도 데미지 0이므로 AI가 다른 타겟을 선택해야 함
+        /// </summary>
+        public static bool IsTargetImmuneToDamage(BaseUnitEntity target, BaseUnitEntity attacker)
+        {
+            if (target == null || attacker == null) return false;
+
+            try
+            {
+                // 공격자의 주 무기 데미지 타입 조회
+                var weapon = attacker.Body?.PrimaryHand?.Weapon;
+                if (weapon?.Blueprint?.DamageType == null) return false;
+
+                var attackerDmgType = weapon.Blueprint.DamageType.Type;
+                bool debugEnabled = Main.IsDebugEnabled;
+
+                foreach (var fact in target.Facts.List)
+                {
+                    if (fact == null) continue;
+
+                    // 1. AddDamageTypeImmunity — 특정 데미지 타입 면역
+                    foreach (var component in fact.SelectComponents<AddDamageTypeImmunity>())
+                    {
+                        if (component.Types.Contains(attackerDmgType))
+                        {
+                            if (debugEnabled)
+                                Main.LogDebug($"[CombatAPI] ★ {target.CharacterName} IMMUNE via AddDamageTypeImmunity ({attackerDmgType}, fact: {fact.Name})");
+                            return true;
+                        }
+                    }
+
+                    // 2. WarhammerDamageModifier (WarhammerDamageModifierTarget 포함)
+                    //    - UnmodifiablePercentDamageModifier = 0 → PctMul_Extra=0 = 데미지 완전 무효화
+                    //    - PercentDamageModifier ≤ -100 → PctAdd -100% = 데미지 0
+                    foreach (var component in fact.SelectComponents<WarhammerDamageModifier>())
+                    {
+                        try
+                        {
+                            var unmodPct = component.UnmodifiablePercentDamageModifier;
+                            if (unmodPct != null && unmodPct.Enabled)
+                            {
+                                int unmodValue = EvaluateContextValue(unmodPct, fact);
+                                if (unmodValue != int.MaxValue && unmodValue == 0)
+                                {
+                                    if (debugEnabled)
+                                        Main.LogDebug($"[CombatAPI] ★ {target.CharacterName} IMMUNE via WarhammerDamageModifier.UnmodPctMul=0 (fact: {fact.Name})");
+                                    return true;
+                                }
+                            }
+
+                            var pctMod = component.PercentDamageModifier;
+                            if (pctMod != null && pctMod.Enabled)
+                            {
+                                int pctValue = EvaluateContextValue(pctMod, fact);
+                                if (pctValue != int.MaxValue && pctValue <= -100)
+                                {
+                                    if (debugEnabled)
+                                        Main.LogDebug($"[CombatAPI] ★ {target.CharacterName} IMMUNE via WarhammerDamageModifier.PctDmgMod={pctValue} (fact: {fact.Name})");
+                                    return true;
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+
+                    // 3. WarhammerModifyIncomingAttackDamage — PctDmgMod ≤ -100
+                    foreach (var component in fact.SelectComponents<WarhammerModifyIncomingAttackDamage>())
+                    {
+                        try
+                        {
+                            var pctMod = component.PercentDamageModifier;
+                            if (pctMod != null)
+                            {
+                                int pctValue = EvaluateContextValue(pctMod, fact);
+                                if (pctValue != int.MaxValue && pctValue <= -100)
+                                {
+                                    if (debugEnabled)
+                                        Main.LogDebug($"[CombatAPI] ★ {target.CharacterName} IMMUNE via WarhammerModifyIncomingAttackDamage (PctDmgMod={pctValue}, fact: {fact.Name})");
+                                    return true;
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+
+                    // 4. WarhammerIncomingDamageNullifier — DamageChance = 0% (완전 면역)
+                    foreach (var component in fact.SelectComponents<WarhammerIncomingDamageNullifier>())
+                    {
+                        try
+                        {
+                            var field = typeof(WarhammerIncomingDamageNullifier).GetField("m_NullifyChances",
+                                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                            if (field != null)
+                            {
+                                var nullifyCV = field.GetValue(component) as Kingmaker.UnitLogic.Mechanics.ContextValue;
+                                if (nullifyCV != null)
+                                {
+                                    int chances = EvaluateContextValue(nullifyCV, fact);
+                                    if (chances != int.MaxValue)
+                                    {
+                                        chances = Math.Max(Math.Min(chances, 100), 0);
+                                        if (chances <= 0)
+                                        {
+                                            if (debugEnabled)
+                                                Main.LogDebug($"[CombatAPI] ★ {target.CharacterName} IMMUNE via WarhammerIncomingDamageNullifier (DmgChance=0%, fact: {fact.Name})");
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+
+                // 진단 로그 제거됨 — 면역 감지 확인 완료 (v3.40.6)
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsTargetImmuneToDamage error: {ex.Message}");
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// ContextValue를 안전하게 평가 — Simple이면 직접 읽기, 아니면 Context로 Calculate 시도
+        /// 실패 시 int.MaxValue 반환
+        /// </summary>
+        private static int EvaluateContextValue(Kingmaker.UnitLogic.Mechanics.ContextValue cv, EntityFact fact)
+        {
+            if (cv == null) return int.MaxValue;
+            if (cv.ValueType == Kingmaker.UnitLogic.Mechanics.ContextValueType.Simple)
+                return cv.Value;
+            try
+            {
+                var ctx = fact.MaybeContext;
+                if (ctx != null) return cv.Calculate(ctx);
+            }
+            catch { }
+            return int.MaxValue;
         }
 
         /// <summary>

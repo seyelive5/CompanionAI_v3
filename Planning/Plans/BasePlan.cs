@@ -3127,8 +3127,9 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.8.48: LINQ → CollectionHelper (O(n²) 클러스터링 but 0 할당)
             // 적 밀집 지역 (2명 이상) 또는 위협적 적 찾기
             // 합산 scorer: nearbyCount * 10000 + maxHP로 ThenByDescending 시뮬레이션
+            // ★ v3.40.8: 데미지 면역 적 제외 (구조물에 시야 방해 무의미)
             var targetEnemy = CollectionHelper.MaxByWhere(situation.Enemies,
-                e => e.IsConscious,
+                e => e.IsConscious && !CombatAPI.IsTargetImmuneToDamage(e, situation.Unit),
                 e =>
                 {
                     int nearbyCount = CollectionHelper.CountWhere(situation.Enemies,
@@ -3586,8 +3587,9 @@ namespace CompanionAI_v3.Planning.Plans
 
             // 타겟 선정: 원거리 적 > 고HP 적 > 아무 적
             // ★ v3.8.78: LINQ → CollectionHelper (0 할당)
+            // ★ v3.40.8: 데미지 면역 적 제외 (구조물 등)
             CollectionHelper.FillWhere(situation.Enemies, _tempUnits,
-                e => e.IsConscious);
+                e => e.IsConscious && !CombatAPI.IsTargetImmuneToDamage(e, situation.Unit));
             var enemies = _tempUnits;
 
             if (enemies.Count == 0)
@@ -3674,9 +3676,9 @@ namespace CompanionAI_v3.Planning.Plans
                 return null;
 
             // 타겟 선정: 클러스터 중심 > 저HP 적 > 가장 가까운 적
-            // ★ v3.8.78: LINQ → CollectionHelper (0 할당)
+            // ★ v3.40.8: 데미지 면역 적 제외 (구조물 등)
             CollectionHelper.FillWhere(situation.Enemies, _tempUnits,
-                e => e.IsConscious);
+                e => e.IsConscious && !CombatAPI.IsTargetImmuneToDamage(e, situation.Unit));
             var enemies = _tempUnits;
 
             if (enemies.Count == 0)
@@ -3791,9 +3793,9 @@ namespace CompanionAI_v3.Planning.Plans
                 return null;
 
             // 타겟 선정: 저HP 적 > 가장 가까운 적
-            // ★ v3.8.78: LINQ → CollectionHelper (0 할당)
+            // ★ v3.40.8: 데미지 면역 적 제외 (구조물 등)
             CollectionHelper.FillWhere(situation.Enemies, _tempUnits,
-                e => e.IsConscious);
+                e => e.IsConscious && !CombatAPI.IsTargetImmuneToDamage(e, situation.Unit));
             var enemies = _tempUnits;
 
             if (enemies.Count == 0)
@@ -4058,10 +4060,12 @@ namespace CompanionAI_v3.Planning.Plans
             float maxHexRange = CombatAPI.TilesToMeters(FamiliarPositioner.EFFECT_RADIUS_TILES * 2f);
             BaseUnitEntity target = null;
             float bestHP = 0f;
+            // ★ v3.40.8: 데미지 면역 적 제외 (Hex도 면역 구조물에는 무의미)
             for (int i = 0; i < situation.Enemies.Count; i++)
             {
                 var enemy = situation.Enemies[i];
                 if (!enemy.IsConscious) continue;
+                if (CombatAPI.IsTargetImmuneToDamage(enemy, situation.Unit)) continue;
 
                 float distToRaven = CombatCache.GetDistance(raven, enemy);
                 if (distToRaven > maxHexRange) continue;
@@ -4127,12 +4131,14 @@ namespace CompanionAI_v3.Planning.Plans
             if (apCost > remainingAP) return null;
 
             // 레이븐 주변 4타일 내 적 존재 확인
+            // ★ v3.40.8: 데미지 면역 적 제외
             int enemiesNearRaven = 0;
             float ravenEffectRadius = CombatAPI.TilesToMeters(4);
             for (int i = 0; i < situation.Enemies.Count; i++)
             {
                 var enemy = situation.Enemies[i];
                 if (enemy == null || !enemy.IsConscious) continue;
+                if (CombatAPI.IsTargetImmuneToDamage(enemy, situation.Unit)) continue;
                 float dist = Vector3.Distance(situation.Familiar.Position, enemy.Position);
                 if (dist <= ravenEffectRadius) enemiesNearRaven++;
             }

@@ -190,6 +190,13 @@ namespace CompanionAI_v3.Analysis
             }
             catch { }
 
+            // ★ v3.40.6: 데미지 면역 타겟은 공격 무의미 — 매우 낮은 점수
+            if (CombatAPI.IsTargetImmuneToDamage(target, situation.Unit))
+            {
+                Main.LogDebug($"[TargetScorer] {target.CharacterName}: IMMUNE to attacker's damage type — deprioritized");
+                return UtilityScorer.SCORE_IMPOSSIBLE + 10f; // 죽은 적보다는 높지만 거의 선택 안 됨
+            }
+
             var weights = GetEnemyWeights(role);
             float score = ENEMY_BASE_SCORE;
 

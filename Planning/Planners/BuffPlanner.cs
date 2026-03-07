@@ -241,7 +241,9 @@ namespace CompanionAI_v3.Planning.Planners
             if (isOffensive)
             {
                 // 공격형 구역: 적이 가장 많이 모인 위치
-                var enemies = situation.Enemies?.Where(e => e != null && e.IsConscious).ToList();
+                // ★ v3.40.8: 데미지 면역 적 제외
+                var enemies = situation.Enemies?.Where(e => e != null && e.IsConscious
+                    && !CombatAPI.IsTargetImmuneToDamage(e, situation.Unit)).ToList();
                 if (enemies == null || enemies.Count == 0) return null;
 
                 var clusters = ClusterDetector.FindClusters(enemies, radius);

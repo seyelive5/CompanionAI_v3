@@ -335,6 +335,13 @@ namespace CompanionAI_v3.Analysis
             {
                 if (enemy == null || enemy.LifeState.IsDead) continue;
 
+                // ★ v3.40.6: 데미지 면역 타겟은 hittable에서 제외
+                if (CombatAPI.IsTargetImmuneToDamage(enemy, unit))
+                {
+                    Main.LogDebug($"[Analyzer] {enemy.CharacterName} IMMUNE to damage — excluded from hittable");
+                    continue;
+                }
+
                 var targetWrapper = new TargetWrapper(enemy);
                 bool isHittable = false;
                 bool isHittableByNormal = false;  // ★ v3.9.26: 일반 공격으로 hittable
@@ -538,6 +545,8 @@ namespace CompanionAI_v3.Analysis
                     {
                         if (enemy == null || enemy.LifeState.IsDead) continue;
                         if (situation.HittableEnemies.Contains(enemy)) continue;
+                        // ★ v3.40.6: fallback에서도 면역 타겟 제외
+                        if (CombatAPI.IsTargetImmuneToDamage(enemy, unit)) continue;
 
                         var targetWrapper = new TargetWrapper(enemy);
 
@@ -1384,8 +1393,10 @@ namespace CompanionAI_v3.Analysis
                 }
                 if (minAoE < float.MaxValue)
                 {
-                    familiarEffectRadius = minAoE;
-                    Main.LogDebug($"[Analyzer] Familiar effect radius from keystone abilities: {familiarEffectRadius} tiles (min AoE)");
+                    // ★ v3.40.6: 사역마의 버프 분배 오라(4타일)보다 작아지면 안 됨
+                    // 디버프 AoE(허약=2)가 오라 반경을 줄이면 → 아군 커버리지 과소평가 → 재배치 거부
+                    familiarEffectRadius = Math.Max(minAoE, FamiliarPositioner.EFFECT_RADIUS_TILES);
+                    Main.LogDebug($"[Analyzer] Familiar effect radius: {familiarEffectRadius} tiles (min AoE={minAoE}, aura={FamiliarPositioner.EFFECT_RADIUS_TILES})");
                 }
                 situation.FamiliarEffectRadius = familiarEffectRadius;
 

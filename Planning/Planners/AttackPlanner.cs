@@ -701,8 +701,10 @@ namespace CompanionAI_v3.Planning.Planners
                 e => !e.LifeState.IsDead && CombatCache.GetHPPercent(e) <= threshold,
                 e => (float)CombatAPI.GetActualHP(e));
 
+            // ★ v3.40.8: 데미지 면역 적 제외
             return hittableLowHP ?? CollectionHelper.MinByWhere(situation.Enemies,
-                e => !e.LifeState.IsDead && CombatCache.GetHPPercent(e) <= threshold,
+                e => !e.LifeState.IsDead && CombatCache.GetHPPercent(e) <= threshold
+                     && !CombatAPI.IsTargetImmuneToDamage(e, situation.Unit),
                 e => (float)CombatAPI.GetActualHP(e));
         }
 

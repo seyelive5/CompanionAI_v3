@@ -93,21 +93,30 @@ namespace CompanionAI_v3.Analysis
             // ★ v3.18.12: 0이면 기본값 사용
             if (effectRadiusTiles <= 0f) effectRadiusTiles = EFFECT_RADIUS_TILES;
 
+            // ★ v3.40.6: 사역마 support range 계산 → 모든 전략에 전달
+            // 재배치 시 게임은 사역마가 support ability를 시전하여 이동
+            // → 사역마의 현재 위치에서 support range 이내만 유효
+            var familiar = FamiliarAPI.GetFamiliar(master);
+            Vector3? familiarPos = familiar?.Position;
+            float familiarRangeMeters = 0f;
+            if (familiar != null && familiarType == PetType.Raven)
+                familiarRangeMeters = FamiliarAPI.GetRavenSupportRangeMeters(familiar);
+
             try
             {
                 return familiarType switch
                 {
                     // 버프 확산형: 아군 중심
-                    PetType.ServoskullSwarm => FindBuffCenterPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles),
+                    PetType.ServoskullSwarm => FindBuffCenterPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles, familiarPos, familiarRangeMeters),
                     // ★ v3.7.90: Raven은 페이즈 기반 위치 결정
-                    PetType.Raven => FindRavenOptimalPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles),
+                    PetType.Raven => FindRavenOptimalPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles, familiarPos, familiarRangeMeters),
 
                     // 적 제어형: 위협적 적 근처
-                    PetType.Mastiff => FindApprehendPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles),
-                    PetType.Eagle => FindDisruptPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles),
+                    PetType.Mastiff => FindApprehendPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles, familiarPos, familiarRangeMeters),
+                    PetType.Eagle => FindDisruptPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles, familiarPos, familiarRangeMeters),
 
                     // 기본값
-                    _ => FindBuffCenterPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles)
+                    _ => FindBuffCenterPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles, familiarPos, familiarRangeMeters)
                 };
             }
             catch (Exception ex)
@@ -141,11 +150,11 @@ namespace CompanionAI_v3.Analysis
             bool isDebuffMode = !optimalPosition.IsBuffPhase;
 
             // 2. 최적 위치에서 효과를 받을 유닛 수 체크
-            // ★ v3.8.56: 디버프 모드에서는 적 1명이라도 있으면 재배치 가치 있음
-            //   사람 플레이어라면 "일단 뭐라도 해야겠다" → 적 1명이라도 찾아 이동
+            // ★ v3.40.6: 버프/디버프 모두 1명 이상이면 재배치 가치 있음
+            //   버프 모드: 아군 1명이라도 커버하면 워프 릴레이 확산 가능
+            //   디버프 모드: 적 1명이라도 있으면 디버프/공격 가능
             int totalAffected = optimalPosition.AlliesInRange + optimalPosition.EnemiesInRange;
-            int minAffected = isDebuffMode ? 1 : 2;
-            if (totalAffected < minAffected)
+            if (totalAffected < 1)
                 return false;
 
             // ★ v3.7.22: 커버리지 향상 기준으로 판단
@@ -190,7 +199,9 @@ namespace CompanionAI_v3.Analysis
             List<BaseUnitEntity> allies,
             List<BaseUnitEntity> enemies,
             float maxRangeMeters = 0f,
-            float effectRadiusTiles = 0f)
+            float effectRadiusTiles = 0f,
+            Vector3? familiarPos = null,
+            float familiarRangeMeters = 0f)
         {
             // ★ v3.9.10: LINQ → FillWhere (GC 할당 제거)
             CollectionHelper.FillWhere(allies, _sharedValidAllies, a => a != null && a.IsConscious && !FamiliarAPI.IsFamiliar(a));
@@ -210,6 +221,8 @@ namespace CompanionAI_v3.Analysis
                 enemies ?? new List<BaseUnitEntity>(),
                 prioritizeAllies: true,
                 maxRangeMeters: maxRangeMeters,
+                familiarPos: familiarPos,
+                familiarRangeMeters: familiarRangeMeters,
                 effectRadiusTiles: effectRadiusTiles);
 
             Main.LogDebug($"[FamiliarPositioner] BuffCenter: {bestPosition}");
@@ -227,7 +240,9 @@ namespace CompanionAI_v3.Analysis
             List<BaseUnitEntity> allies,
             List<BaseUnitEntity> enemies,
             float maxRangeMeters = 0f,
-            float effectRadiusTiles = 0f)
+            float effectRadiusTiles = 0f,
+            Vector3? familiarPos = null,
+            float familiarRangeMeters = 0f)
         {
             // ★ v3.9.10: LINQ → FillWhere (GC 할당 제거)
             CollectionHelper.FillWhere(allies, _sharedValidAllies, a => a != null && a.IsConscious && !FamiliarAPI.IsFamiliar(a));
@@ -248,7 +263,7 @@ namespace CompanionAI_v3.Analysis
             if (isBuffPhase)
             {
                 Main.LogDebug($"[FamiliarPositioner] Raven BUFF PHASE: coverage={buffCoverage:P0} ({totalBuffTypes} WR buff types, {Core.AllyStateCache.AllyCount} allies)");
-                var buffPos = FindBuffCenterPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles);
+                var buffPos = FindBuffCenterPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles, familiarPos, familiarRangeMeters);
                 buffPos.Reason = $"Buff phase (psychic coverage={buffCoverage:P0})";
                 buffPos.IsBuffPhase = true;  // ★ v3.8.52: 턴 단위 페이즈 전달
                 return buffPos;
@@ -260,12 +275,8 @@ namespace CompanionAI_v3.Analysis
                 // 적 밀집 지역으로 이동 (디버프/공격용)
                 if (validEnemies.Count > 0)
                 {
-                    // ★ v3.8.55: Raven support ability 실제 사거리로 도달 가능 범위 제한
-                    var familiar = FamiliarAPI.GetFamiliar(master);
-                    float supportRangeMeters = FamiliarAPI.GetRavenSupportRangeMeters(familiar);
-                    Vector3? ravenPos = familiar?.Position;
-
                     // ★ v3.18.14: 마스터 위치 전달 → 마스터가 도달 가능한 클러스터 우선
+                    // ★ v3.40.6: familiarPos/familiarRangeMeters는 FindOptimalPosition()에서 전달
                     var enemyClusterCenter = FindEnemyClusterCenter(validEnemies, effectRadiusTiles, (Vector3?)master.Position);
                     var attackPos = FindBestPositionAroundPoint(
                         enemyClusterCenter,
@@ -274,17 +285,17 @@ namespace CompanionAI_v3.Analysis
                         validEnemies,
                         prioritizeAllies: false,  // 적 우선
                         maxRangeMeters: maxRangeMeters,
-                        familiarPos: ravenPos,
-                        familiarRangeMeters: supportRangeMeters,
+                        familiarPos: familiarPos,
+                        familiarRangeMeters: familiarRangeMeters,
                         effectRadiusTiles: effectRadiusTiles);
 
                     attackPos.Reason = $"Attack phase - enemy cluster ({attackPos.EnemiesInRange} enemies)";
                     attackPos.IsBuffPhase = false;  // ★ v3.8.52: 공격/디버프 페이즈
 
-                    if (ravenPos.HasValue)
+                    if (familiarPos.HasValue)
                     {
-                        float distFromRaven = Vector3.Distance(ravenPos.Value, attackPos.Position);
-                        Main.LogDebug($"[FamiliarPositioner] Raven Attack: {attackPos} (dist from Raven={distFromRaven:F1}m, supportRange={supportRangeMeters:F1}m)");
+                        float distFromRaven = Vector3.Distance(familiarPos.Value, attackPos.Position);
+                        Main.LogDebug($"[FamiliarPositioner] Raven Attack: {attackPos} (dist from Raven={distFromRaven:F1}m, supportRange={familiarRangeMeters:F1}m)");
                     }
                     else
                     {
@@ -294,7 +305,7 @@ namespace CompanionAI_v3.Analysis
                 }
 
                 // 적이 없으면 아군 위치 유지
-                var fallbackPos = FindBuffCenterPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles);
+                var fallbackPos = FindBuffCenterPosition(master, allies, enemies, maxRangeMeters, effectRadiusTiles, familiarPos, familiarRangeMeters);
                 fallbackPos.IsBuffPhase = false;  // ★ v3.8.52: 커버리지 충분하지만 적 없음
                 return fallbackPos;
             }
@@ -309,7 +320,9 @@ namespace CompanionAI_v3.Analysis
             List<BaseUnitEntity> allies,
             List<BaseUnitEntity> enemies,
             float maxRangeMeters = 0f,
-            float effectRadiusTiles = 0f)
+            float effectRadiusTiles = 0f,
+            Vector3? familiarPos = null,
+            float familiarRangeMeters = 0f)
         {
             // ★ v3.9.10: LINQ → FillWhere + 수동 top-3 (GC 할당 제거)
             CollectionHelper.FillWhere(enemies, _sharedValidEnemies, e => e != null && e.IsConscious);
@@ -355,6 +368,8 @@ namespace CompanionAI_v3.Analysis
                 validEnemies,
                 prioritizeAllies: false,
                 maxRangeMeters: maxRangeMeters,
+                familiarPos: familiarPos,
+                familiarRangeMeters: familiarRangeMeters,
                 effectRadiusTiles: effectRadiusTiles);
 
             bestPosition.Reason = $"Near threatening enemies ({threateningEnemies.Count})";
@@ -371,7 +386,9 @@ namespace CompanionAI_v3.Analysis
             List<BaseUnitEntity> allies,
             List<BaseUnitEntity> enemies,
             float maxRangeMeters = 0f,
-            float effectRadiusTiles = 0f)
+            float effectRadiusTiles = 0f,
+            Vector3? familiarPos = null,
+            float familiarRangeMeters = 0f)
         {
             // ★ v3.9.10: LINQ → FillWhere (GC 할당 제거)
             CollectionHelper.FillWhere(enemies, _sharedValidEnemies, e => e != null && e.IsConscious);
@@ -391,6 +408,8 @@ namespace CompanionAI_v3.Analysis
                 validEnemies,
                 prioritizeAllies: false,
                 maxRangeMeters: maxRangeMeters,
+                familiarPos: familiarPos,
+                familiarRangeMeters: familiarRangeMeters,
                 effectRadiusTiles: effectRadiusTiles);
 
             bestPosition.Reason = "Enemy cluster center";
@@ -512,6 +531,36 @@ namespace CompanionAI_v3.Analysis
                     bestScore = score.Score;
                     best = score;
                 }
+            }
+
+            // ★ v3.40.6: 사역마 사거리 제약으로 center 주변에 유효 위치 없을 때
+            // → 사역마 현재 위치 기준으로 재탐색 (최대한 가까운 거리라도 이동)
+            if (best == null && familiarPos.HasValue && familiarRangeMeters > 0f)
+            {
+                Main.LogDebug($"[FamiliarPositioner] No position within familiar range from center ({center.x:F1}, {center.z:F1}) — searching from familiar position");
+                int famRangeTiles = Math.Min(
+                    Math.Max(1, (int)CombatAPI.MetersToTiles(familiarRangeMeters)),
+                    MAX_SEARCH_RADIUS_TILES);
+
+                foreach (var node in GetValidNodesAround(familiar, familiarPos.Value, famRangeTiles))
+                {
+                    Vector3 pos = node.Vector3Position;
+                    if (Vector3.Distance(familiarPos.Value, pos) > familiarRangeMeters)
+                        continue;
+                    if (hasRangeLimit && Vector3.Distance(masterPos, pos) > maxRangeMeters)
+                        continue;
+
+                    var score = EvaluatePosition(pos, allies, enemies, prioritizeAllies, effectRadiusTiles,
+                        prioritizeAllies ? null : (Vector3?)masterPos);
+                    if (score.Score > bestScore)
+                    {
+                        bestScore = score.Score;
+                        best = score;
+                    }
+                }
+
+                if (best != null)
+                    Main.LogDebug($"[FamiliarPositioner] Fallback found: ({best.Position.x:F1}, {best.Position.z:F1}) Score={best.Score:F1}");
             }
 
             // 유효한 위치를 찾지 못하면 폴백
