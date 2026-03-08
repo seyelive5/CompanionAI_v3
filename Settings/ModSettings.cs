@@ -233,6 +233,56 @@ namespace CompanionAI_v3.Settings
                 { Language.Russian, "Реактивирует {0} — фамильяр без сознания" },
                 { Language.Japanese, "{0}を再起動 — ファミリアが気絶中" }
             },
+            // 그룹화 템플릿
+            ["narr_attack_multi"] = new() {
+                { Language.English, "Attacking {0} ({1} targets)" },
+                { Language.Korean, "{0}을(를) 공격합니다 ({1}개 대상)" },
+                { Language.Russian, "Атакует {0} ({1} целей)" },
+                { Language.Japanese, "{0}を攻撃 ({1}体)" }
+            },
+            ["narr_buff_multi"] = new() {
+                { Language.English, "Using {0} on {1} allies" },
+                { Language.Korean, "아군 {1}명에게 {0} 사용" },
+                { Language.Russian, "Использует {0} на {1} союзниках" },
+                { Language.Japanese, "味方{1}名に{0}を使用" }
+            },
+            ["narr_heal_multi"] = new() {
+                { Language.English, "Healing {0} allies" },
+                { Language.Korean, "아군 {0}명을 치료합니다" },
+                { Language.Russian, "Лечит {0} союзников" },
+                { Language.Japanese, "味方{0}名を回復" }
+            },
+            // 전략 의도 요약
+            ["narr_strat_critical"] = new() {
+                { Language.English, "★ Using ultimate ability" },
+                { Language.Korean, "★ 궁극기를 사용합니다" },
+                { Language.Russian, "★ Использует ультимативную способность" },
+                { Language.Japanese, "★ 究極技を使用" }
+            },
+            ["narr_strat_emergency"] = new() {
+                { Language.English, "⚠ Emergency — HP {0}%, prioritizing survival" },
+                { Language.Korean, "⚠ 긴급 상황 — HP {0}%, 생존 우선" },
+                { Language.Russian, "⚠ Экстренно — HP {0}%, приоритет выживание" },
+                { Language.Japanese, "⚠ 緊急 — HP {0}%、生存優先" }
+            },
+            ["narr_strat_retreat"] = new() {
+                { Language.English, "↩ Falling back to safe distance" },
+                { Language.Korean, "↩ 안전 거리로 후퇴합니다" },
+                { Language.Russian, "↩ Отступает на безопасное расстояние" },
+                { Language.Japanese, "↩ 安全距離まで後退" }
+            },
+            ["narr_strat_reload"] = new() {
+                { Language.English, "⟳ Reloading before engaging" },
+                { Language.Korean, "⟳ 교전 전 재장전" },
+                { Language.Russian, "⟳ Перезарядка перед боем" },
+                { Language.Japanese, "⟳ 交戦前にリロード" }
+            },
+            ["narr_strat_support"] = new() {
+                { Language.English, "♦ Supporting allies this turn" },
+                { Language.Korean, "♦ 이번 턴은 아군 지원에 집중합니다" },
+                { Language.Russian, "♦ Поддержка союзников в этом ходу" },
+                { Language.Japanese, "♦ 今ターンは味方支援に集中" }
+            },
             ["narr_continue"] = new() {
                 { Language.English, "▶ Continue" },
                 { Language.Korean, "▶ 계속" },
