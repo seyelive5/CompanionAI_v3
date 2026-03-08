@@ -2,11 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.Pathfinding;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Utility;
+using UnityEngine;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
 using CompanionAI_v3.GameInterface;
+using CompanionAI_v3.Settings;
 
 namespace CompanionAI_v3.Planning.Planners
 {
@@ -15,13 +18,17 @@ namespace CompanionAI_v3.Planning.Planners
     /// </summary>
     public static class HealPlanner
     {
+        // ★ v3.42.0: Zero-allocation 임시 리스트
+        private static readonly List<PlannedAction> _tempHealActions = new List<PlannedAction>();
+        private static readonly List<BaseUnitEntity> _tempHealTargets = new List<BaseUnitEntity>();
+
         /// <summary>
         /// 긴급 자기 힐
         /// </summary>
         public static PlannedAction PlanEmergencyHeal(Situation situation, ref float remainingAP, string roleName)
         {
             if (situation.AvailableHeals.Count == 0) return null;
-            if (situation.HPPercent >= 30f) return null;
+            if (situation.HPPercent >= Settings.SC.EmergencyHealHP) return null;
             if (situation.HasHealedThisTurn) return null;
 
             // ★ v3.12.2: ScoreHeal 기반 최적 힐 선택 (기존 first-available 대체)
@@ -137,27 +144,199 @@ namespace CompanionAI_v3.Planning.Planners
         /// </summary>
         public static BaseUnitEntity FindWoundedAlly(Situation situation, float threshold)
         {
-            var allTargets = new List<BaseUnitEntity>();
+            // ★ v3.42.0: Zero-allocation — static 리스트 재사용
+            _tempHealTargets.Clear();
             // ★ v3.18.4: CombatantAllies 사용 (사역마 제외)
-            allTargets.AddRange(situation.CombatantAllies.Where(a => a != null && !a.LifeState.IsDead));
+            for (int i = 0; i < situation.CombatantAllies.Count; i++)
+            {
+                var a = situation.CombatantAllies[i];
+                if (a != null && !a.LifeState.IsDead && !TeamBlackboard.Instance.IsHealReserved(a))
+                    _tempHealTargets.Add(a);
+            }
 
             // 본인도 힐 대상에 포함
-            if (!allTargets.Contains(situation.Unit))
-                allTargets.Add(situation.Unit);
+            if (!_tempHealTargets.Contains(situation.Unit) && !TeamBlackboard.Instance.IsHealReserved(situation.Unit))
+                _tempHealTargets.Add(situation.Unit);
 
-            // ★ v3.5.10: 이미 힐 예약된 아군 제외 (중복 힐 방지)
-            allTargets = allTargets
-                .Where(a => !TeamBlackboard.Instance.IsHealReserved(a))
-                .ToList();
-
-            if (allTargets.Count == 0)
+            if (_tempHealTargets.Count == 0)
             {
                 if (Main.IsDebugEnabled) Main.LogDebug($"[HealPlanner] No heal targets available (all reserved or healthy)");
                 return null;
             }
 
             // ★ v3.1.21: TargetScorer 사용 (Role 우선순위 + 위험도 고려)
-            return TargetScorer.SelectBestAllyForHealing(allTargets, situation, threshold);
+            return TargetScorer.SelectBestAllyForHealing(_tempHealTargets, situation, threshold);
+        }
+
+        /// <summary>
+        /// ★ v3.42.0: 이동 후 힐 - 힐 사거리 밖의 아군에게 접근하여 힐
+        /// SupportPlan에서 공용화 — 전 역할에서 사용 가능
+        /// ★ v3.9.46: 최초 구현 (SupportPlan)
+        /// ★ v3.9.66: Chebyshev 거리 + LOS 검증 + 조기 반환 제거
+        /// ★ v3.12.2: ScoreHeal 기반 최적 힐 선택
+        /// ★ v3.18.18: DamagingAoE/HazardZone 회피
+        /// </summary>
+        public static List<PlannedAction> PlanMoveToHeal(Situation situation, BaseUnitEntity woundedAlly, ref float remainingAP, float remainingMP, string roleName)
+        {
+            if (remainingMP <= 0) return null;
+            if (situation.AvailableHeals.Count == 0) return null;
+
+            var unit = situation.Unit;
+            if (unit == null || woundedAlly == null) return null;
+
+            // 최장 사거리 파악 (탐색 범위 최대화)
+            int maxHealRange = 0;
+            bool hasAffordableHeal = false;
+
+            foreach (var heal in situation.AvailableHeals)
+            {
+                float cost = CombatAPI.GetAbilityAPCost(heal);
+                if (cost > remainingAP) continue;
+
+                hasAffordableHeal = true;
+                int range = CombatAPI.GetAbilityRangeInTiles(heal);
+                if (range > maxHealRange) maxHealRange = range;
+            }
+
+            if (!hasAffordableHeal) return null;
+
+            // 도달 가능한 타일 획득
+            var tiles = MovementAPI.FindAllReachableTilesSync(unit, remainingMP);
+            if (tiles == null || tiles.Count == 0) return null;
+
+            // 타일 검색 — Chebyshev 거리 + LOS 검증 + ScoreHeal 기반 최적 힐 선택
+            Vector3? bestPos = null;
+            float bestDist = float.MaxValue;
+            AbilityData bestHeal = null;
+            float bestHealCost = 0f;
+            float bestTileScore = float.MinValue;
+
+            bool avoidHazardZonesHeal = !situation.NeedsAoEEvacuation;
+
+            foreach (var kvp in tiles)
+            {
+                var cell = kvp.Value;
+                if (!cell.IsCanStand) continue;
+
+                var node = kvp.Key as CustomGridNodeBase;
+                if (node == null) continue;
+
+                var pos = node.Vector3Position;
+
+                // HazardZone 회피
+                if (avoidHazardZonesHeal && CombatAPI.IsPositionInHazardZone(pos, unit))
+                    continue;
+
+                // 게임 API 그리드 거리 (Chebyshev + SizeRect)
+                float distToAlly = CombatAPI.GetDistanceInTiles(pos, woundedAlly);
+                if (distToAlly > maxHealRange) continue;
+
+                // 이 위치에서 최고 점수 힐 탐색
+                AbilityData tileHeal = null;
+                float tileScore = float.MinValue;
+                float tileCost = 0f;
+
+                foreach (var heal in situation.AvailableHeals)
+                {
+                    float cost = CombatAPI.GetAbilityAPCost(heal);
+                    if (cost > remainingAP) continue;
+
+                    int range = CombatAPI.GetAbilityRangeInTiles(heal);
+                    if (distToAlly > range) continue;
+
+                    // LOS 검증 — 해당 위치에서 힐 시전 가능 확인
+                    if (!CombatAPI.CanReachTargetFromPosition(heal, pos, woundedAlly)) continue;
+
+                    float score = UtilityScorer.ScoreHeal(heal, woundedAlly, situation);
+                    if (score > tileScore)
+                    {
+                        tileScore = score;
+                        tileHeal = heal;
+                        tileCost = cost;
+                    }
+                }
+
+                if (tileHeal == null) continue;
+
+                // 가장 가까운 유효 타일 (같은 거리면 점수 최대)
+                if (distToAlly < bestDist || (distToAlly == bestDist && tileScore > bestTileScore))
+                {
+                    bestDist = distToAlly;
+                    bestPos = pos;
+                    bestHeal = tileHeal;
+                    bestHealCost = tileCost;
+                    bestTileScore = tileScore;
+                }
+            }
+
+            if (!bestPos.HasValue)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] MoveToHeal: No reachable tile with LOS within heal range ({maxHealRange}) of {woundedAlly.CharacterName}");
+                return null;
+            }
+
+            // 힐 대상 예약 (중복 힐 방지)
+            TeamBlackboard.Instance.ReserveHeal(woundedAlly);
+
+            // Move + Heal 계획
+            remainingAP -= bestHealCost;
+
+            int plannedRange = CombatAPI.GetAbilityRangeInTiles(bestHeal);
+            // ★ v3.42.0: Zero-allocation — static 리스트 재사용
+            _tempHealActions.Clear();
+            _tempHealActions.Add(PlannedAction.Move(bestPos.Value,
+                $"Move to heal {woundedAlly.CharacterName} (range={plannedRange} tiles)"));
+            _tempHealActions.Add(PlannedAction.Heal(bestHeal, woundedAlly,
+                $"Heal after move: {woundedAlly.CharacterName}", bestHealCost));
+
+            Main.Log($"[{roleName}] MoveToHeal: Moving {CombatAPI.MetersToTiles(Vector3.Distance(unit.Position, bestPos.Value)):F1} tiles to heal {woundedAlly.CharacterName} ({bestHeal.Name}, range={plannedRange})");
+
+            return _tempHealActions;
+        }
+
+        /// <summary>
+        /// ★ v3.42.0: 여유 AP/MP가 있을 때 부상 아군 치유 (이동 포함)
+        /// 주 행동(공격 등) 이후 호출 — 낭비 방지를 위해 조건부 실행
+        /// 전 역할에서 사용 가능 (DPS/Tank/Support/Overseer)
+        /// ⚠️ 반환된 리스트는 static — 즉시 AddRange로 복사할 것
+        /// </summary>
+        public static List<PlannedAction> PlanOpportunisticAllyHeal(Situation situation, ref float remainingAP, float remainingMP, string roleName)
+        {
+            if (situation.AvailableHeals.Count == 0) return null;
+
+            // 최소 치유 AP 비용 확인
+            float minHealCost = float.MaxValue;
+            for (int i = 0; i < situation.AvailableHeals.Count; i++)
+            {
+                float cost = CombatAPI.GetAbilityAPCost(situation.AvailableHeals[i]);
+                if (cost < minHealCost) minHealCost = cost;
+            }
+            if (remainingAP < minHealCost) return null;
+
+            // 사용자 설정 기반 임계값
+            float healThreshold = situation.CharacterSettings?.HealAtHPPercent ?? SC.HealPriorityMid;
+
+            // 부상 아군 탐색
+            var woundedAlly = FindWoundedAlly(situation, healThreshold);
+            if (woundedAlly == null) return null;
+
+            // 1차: 직접 치유 시도 (사거리 내)
+            var directHeal = PlanAllyHeal(situation, woundedAlly, ref remainingAP, roleName);
+            if (directHeal != null)
+            {
+                // ★ v3.42.0: Zero-allocation — static 리스트 재사용
+                _tempHealActions.Clear();
+                _tempHealActions.Add(directHeal);
+                return _tempHealActions;
+            }
+
+            // 2차: 이동 후 치유 시도 (사거리 밖) — PlanMoveToHeal도 _tempHealActions 사용
+            if (remainingMP > 0)
+            {
+                return PlanMoveToHeal(situation, woundedAlly, ref remainingAP, remainingMP, roleName);
+            }
+
+            return null;
         }
 
         /// <summary>

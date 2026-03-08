@@ -113,6 +113,12 @@ namespace CompanionAI_v3.Planning.Plans
         protected BaseUnitEntity FindWoundedAlly(Situation situation, float threshold)
             => HealPlanner.FindWoundedAlly(situation, threshold);
 
+        /// <summary>
+        /// ★ v3.42.0: 여유 AP/MP 아군 치유 (이동 포함) — 전 역할 공용
+        /// </summary>
+        protected List<PlannedAction> PlanOpportunisticAllyHeal(Situation situation, ref float remainingAP, float remainingMP)
+            => HealPlanner.PlanOpportunisticAllyHeal(situation, ref remainingAP, remainingMP, RoleName);
+
         #endregion
 
         #region Movement - Delegates to MovementPlanner
@@ -788,8 +794,10 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // DPS 전용: 공격 불가 시 유틸리티 디버프
+            // ★ v3.40.8: 면역 적에게 디버프 낭비 방지
             if (includeFallbackDebuff && !didPlanAttack && remainingAP >= 1f
-                && situation.AvailableDebuffs.Count > 0 && situation.NearestEnemy != null)
+                && situation.AvailableDebuffs.Count > 0 && situation.NearestEnemy != null
+                && !CombatAPI.IsTargetImmuneToDamage(situation.NearestEnemy, situation.Unit))
             {
                 var debuffAction = PlanDebuff(situation, situation.NearestEnemy, ref remainingAP);
                 if (debuffAction != null)
@@ -1952,7 +1960,9 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // 2. 디버프 (적에게)
-            if (situation.NearestEnemy != null && situation.AvailableDebuffs != null)
+            // ★ v3.40.8: 면역 적에게 디버프 낭비 방지
+            if (situation.NearestEnemy != null && situation.AvailableDebuffs != null
+                && !CombatAPI.IsTargetImmuneToDamage(situation.NearestEnemy, situation.Unit))
             {
                 foreach (var debuff in situation.AvailableDebuffs)
                 {
@@ -1984,8 +1994,10 @@ namespace CompanionAI_v3.Planning.Plans
 
             // 3. 마커 (적에게)
             // ★ v3.1.28: 이미 마킹된 타겟에 중복 적용 방지
+            // ★ v3.40.8: 면역 적에게 마커 낭비 방지
             if (situation.NearestEnemy != null && situation.AvailableMarkers != null
-                && situation.HasHittableEnemies)  // ★ v3.9.14: 때릴 수 없으면 마킹 무의미 (SingleUse 낭비 방지)
+                && situation.HasHittableEnemies  // ★ v3.9.14: 때릴 수 없으면 마킹 무의미 (SingleUse 낭비 방지)
+                && !CombatAPI.IsTargetImmuneToDamage(situation.NearestEnemy, situation.Unit))
             {
                 string targetId = situation.NearestEnemy.UniqueId;
                 foreach (var marker in situation.AvailableMarkers)
@@ -2089,7 +2101,9 @@ namespace CompanionAI_v3.Planning.Plans
                 return actions;
 
             // 디버프
-            if (remainingAP >= 1f && situation.NearestEnemy != null && situation.AvailableDebuffs.Count > 0)
+            // ★ v3.40.8: 면역 적에게 디버프 낭비 방지
+            if (remainingAP >= 1f && situation.NearestEnemy != null && situation.AvailableDebuffs.Count > 0
+                && !CombatAPI.IsTargetImmuneToDamage(situation.NearestEnemy, situation.Unit))
             {
                 var debuff = PlanDebuff(situation, situation.NearestEnemy, ref remainingAP);
                 if (debuff != null) actions.Add(debuff);

@@ -2437,6 +2437,112 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
+        /// ★ v3.42.0: attacker 없이 무조건적 면역만 체크 (메커니즘 2-4)
+        /// 도발 타겟 선택, 위치 기반 적 탐색 등 특정 공격자의 무기 타입이 불필요한 경우 사용
+        /// 메커니즘 1 (AddDamageTypeImmunity)은 무기 타입 의존이므로 생략
+        /// </summary>
+        public static bool IsTargetUnconditionallyImmune(BaseUnitEntity target)
+        {
+            if (target == null) return false;
+
+            try
+            {
+                bool debugEnabled = Main.IsDebugEnabled;
+
+                foreach (var fact in target.Facts.List)
+                {
+                    if (fact == null) continue;
+
+                    // 2. WarhammerDamageModifier — 무조건적 데미지 무효화
+                    foreach (var component in fact.SelectComponents<WarhammerDamageModifier>())
+                    {
+                        try
+                        {
+                            var unmodPct = component.UnmodifiablePercentDamageModifier;
+                            if (unmodPct != null && unmodPct.Enabled)
+                            {
+                                int unmodValue = EvaluateContextValue(unmodPct, fact);
+                                if (unmodValue != int.MaxValue && unmodValue == 0)
+                                {
+                                    if (debugEnabled)
+                                        Main.LogDebug($"[CombatAPI] ★ {target.CharacterName} UNCONDITIONALLY IMMUNE via WarhammerDamageModifier.UnmodPctMul=0 (fact: {fact.Name})");
+                                    return true;
+                                }
+                            }
+
+                            var pctMod = component.PercentDamageModifier;
+                            if (pctMod != null && pctMod.Enabled)
+                            {
+                                int pctValue = EvaluateContextValue(pctMod, fact);
+                                if (pctValue != int.MaxValue && pctValue <= -100)
+                                {
+                                    if (debugEnabled)
+                                        Main.LogDebug($"[CombatAPI] ★ {target.CharacterName} UNCONDITIONALLY IMMUNE via WarhammerDamageModifier.PctDmgMod={pctValue} (fact: {fact.Name})");
+                                    return true;
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+
+                    // 3. WarhammerModifyIncomingAttackDamage — PctDmgMod ≤ -100
+                    foreach (var component in fact.SelectComponents<WarhammerModifyIncomingAttackDamage>())
+                    {
+                        try
+                        {
+                            var pctMod = component.PercentDamageModifier;
+                            if (pctMod != null)
+                            {
+                                int pctValue = EvaluateContextValue(pctMod, fact);
+                                if (pctValue != int.MaxValue && pctValue <= -100)
+                                {
+                                    if (debugEnabled)
+                                        Main.LogDebug($"[CombatAPI] ★ {target.CharacterName} UNCONDITIONALLY IMMUNE via WarhammerModifyIncomingAttackDamage (PctDmgMod={pctValue}, fact: {fact.Name})");
+                                    return true;
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+
+                    // 4. WarhammerIncomingDamageNullifier — DamageChance = 0%
+                    foreach (var component in fact.SelectComponents<WarhammerIncomingDamageNullifier>())
+                    {
+                        try
+                        {
+                            var field = typeof(WarhammerIncomingDamageNullifier).GetField("m_NullifyChances",
+                                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                            if (field != null)
+                            {
+                                var nullifyCV = field.GetValue(component) as Kingmaker.UnitLogic.Mechanics.ContextValue;
+                                if (nullifyCV != null)
+                                {
+                                    int chances = EvaluateContextValue(nullifyCV, fact);
+                                    if (chances != int.MaxValue)
+                                    {
+                                        chances = Math.Max(Math.Min(chances, 100), 0);
+                                        if (chances <= 0)
+                                        {
+                                            if (debugEnabled)
+                                                Main.LogDebug($"[CombatAPI] ★ {target.CharacterName} UNCONDITIONALLY IMMUNE via WarhammerIncomingDamageNullifier (DmgChance=0%, fact: {fact.Name})");
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsTargetUnconditionallyImmune error: {ex.Message}");
+            }
+            return false;
+        }
+
+        /// <summary>
         /// ContextValue를 안전하게 평가 — Simple이면 직접 읽기, 아니면 Context로 Calculate 시도
         /// 실패 시 int.MaxValue 반환
         /// </summary>

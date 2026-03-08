@@ -228,6 +228,8 @@ namespace CompanionAI_v3.Analysis
                 foreach (var enemy in enemies)
                 {
                     if (enemy == null || !enemy.IsConscious) continue;
+                    // ★ v3.42.0: 면역 적 제외 — 도발해도 무의미한 대상 (무조건적 면역만 체크)
+                    if (CombatAPI.IsTargetUnconditionallyImmune(enemy)) continue;
                     // ★ v3.6.24: AOE 중심점에서 거리 계산 (캐스터 위치가 아님!)
                     float distTiles = CombatAPI.MetersToTiles(Vector3.Distance(aoeCenterForPrediction, enemy.Position));
                     if (distTiles <= effectiveRadiusTiles)
@@ -272,18 +274,20 @@ namespace CompanionAI_v3.Analysis
                 };
 
                 // ★ v3.5.98: 1순위: 아군 타겟팅 중인 적 (타일 단위 + LOS 체크)
+                // ★ v3.42.0: 면역 적 제외 (무조건적 면역만 체크)
                 target = enemiesTargetingAllies
-                    .Where(e => e != null && e.IsConscious)
+                    .Where(e => e != null && e.IsConscious && !CombatAPI.IsTargetUnconditionallyImmune(e))
                     .Where(e => CombatAPI.MetersToTiles(Vector3.Distance(position, e.Position)) <= tauntRange)
                     .Where(hasLosToEnemy)
                     .OrderBy(e => Vector3.Distance(position, e.Position))
                     .FirstOrDefault();
 
                 // ★ v3.5.98: 2순위: 가장 가까운 적 (타일 단위 + LOS 체크)
+                // ★ v3.42.0: 면역 적 제외 (무조건적 면역만 체크)
                 if (target == null)
                 {
                     target = enemies
-                        .Where(e => e != null && e.IsConscious)
+                        .Where(e => e != null && e.IsConscious && !CombatAPI.IsTargetUnconditionallyImmune(e))
                         .Where(e => CombatAPI.MetersToTiles(Vector3.Distance(position, e.Position)) <= tauntRange)
                         .Where(hasLosToEnemy)
                         .OrderBy(e => Vector3.Distance(position, e.Position))

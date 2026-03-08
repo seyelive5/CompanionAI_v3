@@ -684,8 +684,10 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // ★ v3.19.0: Phase 4.95 — 전략이 디버프 우선 추천 시, 공격 전에 디버프 적용
+            // ★ v3.40.8: 면역 적에게 디버프 낭비 방지
             if (strategy?.ShouldDebuffBeforeAttack == true && remainingAP >= 2f &&
-                situation.AvailableDebuffs.Count > 0 && situation.NearestEnemy != null)
+                situation.AvailableDebuffs.Count > 0 && situation.NearestEnemy != null
+                && !CombatAPI.IsTargetImmuneToDamage(situation.BestTarget ?? situation.NearestEnemy, situation.Unit))
             {
                 var preAttackDebuff = PlanDebuff(situation, situation.BestTarget ?? situation.NearestEnemy, ref remainingAP);
                 if (preAttackDebuff != null)
@@ -944,6 +946,16 @@ namespace CompanionAI_v3.Planning.Plans
             ExecuteFallbackBuffsPhase(actions, situation, ref remainingAP, didPlanAttack, tacticalEval,
                 tryAllyBuffFirst: true, includeFallbackDebuff: true);
 
+            // ★ v3.42.0: Phase 7.0 — 여유 아군 치유 (메디킷 등)
+            // 공격+PostAction 이후, 남은 AP/MP로 부상 아군 치유
+            var oppHealActions = PlanOpportunisticAllyHeal(situation, ref remainingAP, remainingMP);
+            if (oppHealActions != null)
+            {
+                actions.AddRange(oppHealActions);
+                remainingMP = 0;
+                Main.Log($"[DPS] Phase 7.0: Opportunistic ally heal");
+            }
+
             // ★ v3.5.35: Phase 7 (TurnEnding) → 맨 마지막으로 이동
             // TurnEnding 능력은 턴을 종료시키므로 다른 모든 행동 후에 계획해야 함
 
@@ -1031,7 +1043,9 @@ namespace CompanionAI_v3.Planning.Plans
                         hasMoveInPlan = true;
 
                         // ★ v3.1.24: 이동 목적지 추출하여 Post-move 공격에 전달
-                        if (budget.PostMoveReserved > 0 && situation.NearestEnemy != null)
+                        // ★ v3.40.8: 면역 적에게 PostMoveAttack 방지
+                        if (budget.PostMoveReserved > 0 && situation.NearestEnemy != null
+                            && !CombatAPI.IsTargetImmuneToDamage(situation.NearestEnemy, situation.Unit))
                         {
                             UnityEngine.Vector3? moveDestination = moveOrGapCloser.Target?.Point;
                             var postMoveAttack = PlanPostMoveAttack(situation, situation.NearestEnemy, ref remainingAP, moveDestination);
@@ -1098,7 +1112,9 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.8.84: 공격 계획 후 디버프 (PlanPostAttackActions의 HasAttackedThisTurn 제한 우회)
             // PlanPostAttackActions 내부에서 HasAttackedThisTurn=false → 디버프 미반환
             // 계획 단계에서는 공격이 아직 실행되지 않았으므로 별도 처리 필요
-            if (didPlanAttack && remainingAP >= 1f && situation.AvailableDebuffs.Count > 0 && situation.NearestEnemy != null)
+            // ★ v3.40.8: 면역 적에게 디버프 낭비 방지
+            if (didPlanAttack && remainingAP >= 1f && situation.AvailableDebuffs.Count > 0 && situation.NearestEnemy != null
+                && !CombatAPI.IsTargetImmuneToDamage(situation.NearestEnemy, situation.Unit))
             {
                 var debuffAction = PlanDebuff(situation, situation.NearestEnemy, ref remainingAP);
                 if (debuffAction != null)

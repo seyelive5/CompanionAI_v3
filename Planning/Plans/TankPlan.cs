@@ -643,7 +643,9 @@ namespace CompanionAI_v3.Planning.Plans
                     hasMoveInPlan = true;
 
                     // ★ v3.1.24: 이동 목적지 추출하여 Post-move 공격에 전달
-                    if (budget.PostMoveReserved > 0 && situation.NearestEnemy != null)
+                    // ★ v3.40.8: 면역 적에게 PostMoveAttack 방지
+                    if (budget.PostMoveReserved > 0 && situation.NearestEnemy != null
+                        && !CombatAPI.IsTargetImmuneToDamage(situation.NearestEnemy, situation.Unit))
                     {
                         UnityEngine.Vector3? moveDestination = moveOrGapCloser.Target?.Point;
                         var postMoveAttack = PlanPostMoveAttack(situation, situation.NearestEnemy, ref remainingAP, moveDestination);
@@ -708,6 +710,15 @@ namespace CompanionAI_v3.Planning.Plans
             {
                 var postAttackActions = PlanPostAttackActions(situation, ref remainingAP, skipMove: hasMoveInPlan);
                 actions.AddRange(postAttackActions);
+            }
+
+            // ★ v3.42.0: Phase 7.0 — 여유 아군 치유 (메디킷 등)
+            var oppHealActions = PlanOpportunisticAllyHeal(situation, ref remainingAP, remainingMP);
+            if (oppHealActions != null)
+            {
+                actions.AddRange(oppHealActions);
+                remainingMP = 0;
+                Main.Log($"[Tank] Phase 7.0: Opportunistic ally heal");
             }
 
             // ★ v3.8.86: Phase 8.9 - 이동 완료 후 ClearMP 방어 자세

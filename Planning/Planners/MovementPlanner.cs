@@ -86,23 +86,43 @@ namespace CompanionAI_v3.Planning.Planners
         private static BaseUnitEntity GetTacticalMoveTarget(Situation situation)
         {
             // 1. Blackboard의 SharedTarget 확인
+            // ★ v3.40.8: 면역 타겟 필터 — 데미지 면역 적에게 이동 방지
             var sharedTarget = TeamBlackboard.Instance?.SharedTarget;
             if (sharedTarget != null && !sharedTarget.LifeState.IsDead && situation.Enemies.Contains(sharedTarget))
             {
-                // ★ v3.5.19: Main.Log로 변경
-                Main.Log($"[MovementPlanner] ★ Using SharedTarget: {sharedTarget.CharacterName}");
-                return sharedTarget;
+                if (CombatAPI.IsTargetImmuneToDamage(sharedTarget, situation.Unit))
+                {
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] SharedTarget {sharedTarget.CharacterName} is damage-immune, skipping");
+                }
+                else
+                {
+                    Main.Log($"[MovementPlanner] ★ Using SharedTarget: {sharedTarget.CharacterName}");
+                    return sharedTarget;
+                }
             }
 
             // 2. BestTarget 확인 (Situation에서 이미 계산됨)
+            // ★ v3.40.8: 면역 타겟 필터
             if (situation.BestTarget != null && !situation.BestTarget.LifeState.IsDead)
             {
-                // ★ v3.5.19: Main.Log로 변경
-                Main.Log($"[MovementPlanner] Using BestTarget: {situation.BestTarget.CharacterName}");
-                return situation.BestTarget;
+                if (CombatAPI.IsTargetImmuneToDamage(situation.BestTarget, situation.Unit))
+                {
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] BestTarget {situation.BestTarget.CharacterName} is damage-immune, skipping");
+                }
+                else
+                {
+                    Main.Log($"[MovementPlanner] Using BestTarget: {situation.BestTarget.CharacterName}");
+                    return situation.BestTarget;
+                }
             }
 
             // 3. 폴백: NearestEnemy
+            // ★ v3.40.8: 면역 타겟 필터 — NearestEnemy도 면역이면 null 반환
+            if (situation.NearestEnemy != null && CombatAPI.IsTargetImmuneToDamage(situation.NearestEnemy, situation.Unit))
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] NearestEnemy {situation.NearestEnemy.CharacterName} is damage-immune, returning null");
+                return null;
+            }
             return situation.NearestEnemy;
         }
 
@@ -156,9 +176,10 @@ namespace CompanionAI_v3.Planning.Planners
                 if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanGapCloser: {gapCloser.Name} isPointTarget={isPointTarget}");
 
                 // ★ v3.1.24: 첫 타겟 실패 시 다른 적들도 시도
+                // ★ v3.40.8: 면역 적 조기 필터 (불필요한 경로 검증 방지)
                 var targetsToTry = new List<BaseUnitEntity>();
-                if (target != null) targetsToTry.Add(target);
-                targetsToTry.AddRange(situation.Enemies.Where(e => e != target && e != null && e.IsConscious));
+                if (target != null && !CombatAPI.IsTargetImmuneToDamage(target, situation.Unit)) targetsToTry.Add(target);
+                targetsToTry.AddRange(situation.Enemies.Where(e => e != target && e != null && e.IsConscious && !CombatAPI.IsTargetImmuneToDamage(e, situation.Unit)));
 
                 foreach (var candidateTarget in targetsToTry)
                 {
@@ -651,7 +672,13 @@ namespace CompanionAI_v3.Planning.Planners
 
             var unit = situation.Unit;
             // ★ v3.5.18: tacticalTarget이 있으면 사용, 없으면 NearestEnemy
+            // ★ v3.40.8: tacticalTarget=null (면역 필터)이면 NearestEnemy도 면역 체크
             var target = tacticalTarget ?? situation.NearestEnemy;
+            if (target != null && CombatAPI.IsTargetImmuneToDamage(target, unit))
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanMoveToEnemy: target {target.CharacterName} is damage-immune, skipping movement");
+                return null;
+            }
 
             // ★ v3.1.01: 실제 MP와 예측 MP 중 큰 값 사용
             float effectiveMP = Math.Max(situation.CurrentMP, predictedMP);
@@ -924,6 +951,7 @@ namespace CompanionAI_v3.Planning.Planners
         private static PlannedAction PlanRetreatWithDash(Situation situation)
         {
             var unit = situation.Unit;
+            if (situation.NearestEnemy == null) return null;
 
             // 후퇴 가능한 대시 능력 찾기
             var retreatDashes = situation.AvailableAttacks?

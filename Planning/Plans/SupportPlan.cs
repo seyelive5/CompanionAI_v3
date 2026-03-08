@@ -10,6 +10,7 @@ using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
 using CompanionAI_v3.Data;
 using CompanionAI_v3.GameInterface;
+using CompanionAI_v3.Planning.Planners;
 using CompanionAI_v3.Settings;
 
 namespace CompanionAI_v3.Planning.Plans
@@ -102,15 +103,17 @@ namespace CompanionAI_v3.Planning.Plans
             }
             if (woundedAlly != null)
             {
-                var allyHealAction = PlanAllyHeal(situation, woundedAlly, ref remainingAP);
+                // ★ v3.42.0: HealPlanner 위임 (예약 시스템 통일)
+                var allyHealAction = HealPlanner.PlanAllyHeal(situation, woundedAlly, ref remainingAP, RoleName);
                 if (allyHealAction != null)
                 {
                     actions.Add(allyHealAction);
                 }
                 // ★ v3.9.46: 힐 실패 시 이동 후 힐 시도 (메디킷 Touch 사거리 대응)
+                // ★ v3.42.0: HealPlanner.PlanMoveToHeal 위임
                 else if (remainingMP > 0)
                 {
-                    var moveHealActions = PlanMoveToHeal(situation, woundedAlly, ref remainingAP, remainingMP);
+                    var moveHealActions = HealPlanner.PlanMoveToHeal(situation, woundedAlly, ref remainingAP, remainingMP, RoleName);
                     if (moveHealActions != null)
                     {
                         actions.AddRange(moveHealActions);
@@ -214,7 +217,9 @@ namespace CompanionAI_v3.Planning.Plans
             PlanFreeAttackBuffs(actions, situation);
 
             // Phase 5: 적 디버프
-            if (situation.NearestEnemy != null)
+            // ★ v3.40.8: 면역 적에게 디버프 낭비 방지
+            if (situation.NearestEnemy != null
+                && !CombatAPI.IsTargetImmuneToDamage(situation.NearestEnemy, situation.Unit))
             {
                 var debuffAction = PlanDebuff(situation, situation.NearestEnemy, ref remainingAP);
                 if (debuffAction != null)
@@ -450,6 +455,15 @@ namespace CompanionAI_v3.Planning.Plans
             ExecuteFallbackBuffsPhase(actions, situation, ref remainingAP, didPlanAttack, tacticalEval,
                 tryAllyBuffFirst: false, includeFallbackDebuff: false);
 
+            // ★ v3.42.0: Phase 7.6 — 추가 아군 치유 기회 (Phase 2에서 치유하지 못한 대상)
+            var oppHealActions = PlanOpportunisticAllyHeal(situation, ref remainingAP, remainingMP);
+            if (oppHealActions != null)
+            {
+                actions.AddRange(oppHealActions);
+                remainingMP = 0;
+                Main.Log($"[Support] Phase 7.6: Opportunistic ally heal (2nd chance)");
+            }
+
             // ★ v3.5.35: Phase 8 (TurnEnding) → 맨 마지막으로 이동
             // TurnEnding 능력은 턴을 종료시키므로 다른 모든 행동 후에 계획해야 함
 
@@ -572,7 +586,9 @@ namespace CompanionAI_v3.Planning.Plans
                     hasMoveInPlan = true;
 
                     // ★ v3.1.24: 이동 목적지 추출하여 Post-move 공격에 전달
-                    if (budget.PostMoveReserved > 0 && situation.NearestEnemy != null)
+                    // ★ v3.40.8: 면역 적에게 PostMoveAttack 방지
+                    if (budget.PostMoveReserved > 0 && situation.NearestEnemy != null
+                        && !CombatAPI.IsTargetImmuneToDamage(situation.NearestEnemy, situation.Unit))
                     {
                         UnityEngine.Vector3? moveDestination = moveOrGapCloser.Target?.Point;
                         var postMoveAttack = PlanPostMoveAttack(situation, situation.NearestEnemy, ref remainingAP, moveDestination);
@@ -668,172 +684,8 @@ namespace CompanionAI_v3.Planning.Plans
 
         #region Support-Specific Methods
 
-        /// <summary>
-        /// ★ v3.12.2: ScoreHeal 기반 최적 힐 선택 (기존 first-available 대체)
-        /// </summary>
-        private PlannedAction PlanAllyHeal(Situation situation, BaseUnitEntity ally, ref float remainingAP)
-        {
-            if (situation.AvailableHeals.Count == 0) return null;
-
-            var targetWrapper = new TargetWrapper(ally);
-            AbilityData bestHeal = null;
-            float bestScore = float.MinValue;
-            float bestCost = 0f;
-
-            for (int i = 0; i < situation.AvailableHeals.Count; i++)
-            {
-                var heal = situation.AvailableHeals[i];
-                float cost = CombatAPI.GetAbilityAPCost(heal);
-                if (cost > remainingAP) continue;
-
-                string reason;
-                if (!CombatAPI.CanUseAbilityOn(heal, targetWrapper, out reason)) continue;
-
-                float score = UtilityScorer.ScoreHeal(heal, ally, situation);
-                if (score > bestScore)
-                {
-                    bestScore = score;
-                    bestHeal = heal;
-                    bestCost = cost;
-                }
-            }
-
-            if (bestHeal == null) return null;
-
-            remainingAP -= bestCost;
-            Main.Log($"[Support] Heal ally: {bestHeal.Name} -> {ally.CharacterName} (score={bestScore:F1})");
-            return PlannedAction.Heal(bestHeal, ally, $"Heal {ally.CharacterName}", bestCost);
-        }
-
-        /// <summary>
-        /// ★ v3.9.46: 이동 후 힐 - 힐 사거리 밖의 아군에게 접근하여 힐
-        /// ★ v3.9.66: 3가지 핵심 수정:
-        ///   1. 거리 계산: MetersToTiles(Euclidean) → GetDistanceInTiles (Chebyshev+SizeRect)
-        ///      기존: 대각선 타일이 1.414배로 과대 계산 → 유효 타일 거짓 탈락
-        ///   2. LOS 검증: CanReachTargetFromPosition으로 이동 후 시전 가능 확인
-        ///      기존: 사거리만 체크, 벽 뒤 타일로 이동 시 힐 실패
-        ///   3. "이미 사거리 내" 조기 반환 제거: LOS 차단 시에도 이동으로 LOS 확보 가능
-        ///      기존: 사거리 내이면 무조건 포기 → LOS 우회 이동 불가
-        /// </summary>
-        private List<PlannedAction> PlanMoveToHeal(Situation situation, BaseUnitEntity woundedAlly, ref float remainingAP, float remainingMP)
-        {
-            if (remainingMP <= 0) return null;
-            if (situation.AvailableHeals.Count == 0) return null;
-
-            var unit = situation.Unit;
-            if (unit == null || woundedAlly == null) return null;
-
-            // ★ v3.9.66: 최장 사거리 파악 (탐색 범위 최대화)
-            // 기존: 최저 비용 힐만 사용 → 짧은 사거리로 탐색 범위 축소
-            int maxHealRange = 0;
-            bool hasAffordableHeal = false;
-
-            foreach (var heal in situation.AvailableHeals)
-            {
-                float cost = CombatAPI.GetAbilityAPCost(heal);
-                if (cost > remainingAP) continue;
-
-                hasAffordableHeal = true;
-                int range = CombatAPI.GetAbilityRangeInTiles(heal);
-                if (range > maxHealRange) maxHealRange = range;
-            }
-
-            if (!hasAffordableHeal) return null;
-
-            // 도달 가능한 타일 획득
-            var tiles = MovementAPI.FindAllReachableTilesSync(unit, remainingMP);
-            if (tiles == null || tiles.Count == 0) return null;
-
-            // ★ v3.9.66: 타일 검색 — Chebyshev 거리 + LOS 검증
-            // ★ v3.12.2: ScoreHeal 기반 최적 힐 선택 (기존 cheapest 대체)
-            UnityEngine.Vector3? bestPos = null;
-            float bestDist = float.MaxValue;
-            AbilityData bestHeal = null;
-            float bestHealCost = 0f;
-            float bestTileScore = float.MinValue;
-
-            // ★ v3.18.18: DamagingAoE 회피
-            bool avoidHazardZonesHeal = !situation.NeedsAoEEvacuation;
-
-            foreach (var kvp in tiles)
-            {
-                var cell = kvp.Value;
-                if (!cell.IsCanStand) continue;
-
-                var node = kvp.Key as CustomGridNodeBase;
-                if (node == null) continue;
-
-                var pos = node.Vector3Position;
-
-                // ★ v3.18.18: DamagingAoE 위치 필터링
-                if (avoidHazardZonesHeal && CombatAPI.IsPositionInHazardZone(pos, unit))
-                    continue;
-
-                // ★ v3.9.66: 게임 API 그리드 거리 (Chebyshev + SizeRect)
-                float distToAlly = CombatAPI.GetDistanceInTiles(pos, woundedAlly);
-                if (distToAlly > maxHealRange) continue;
-
-                // ★ v3.12.2: 이 위치에서 최고 점수 힐 탐색 (기존: 최저 비용)
-                AbilityData tileHeal = null;
-                float tileScore = float.MinValue;
-                float tileCost = 0f;
-
-                foreach (var heal in situation.AvailableHeals)
-                {
-                    float cost = CombatAPI.GetAbilityAPCost(heal);
-                    if (cost > remainingAP) continue;
-
-                    int range = CombatAPI.GetAbilityRangeInTiles(heal);
-                    if (distToAlly > range) continue;
-
-                    // ★ v3.9.66: LOS 검증 — 해당 위치에서 힐 시전 가능 확인
-                    if (!CombatAPI.CanReachTargetFromPosition(heal, pos, woundedAlly)) continue;
-
-                    float score = UtilityScorer.ScoreHeal(heal, woundedAlly, situation);
-                    if (score > tileScore)
-                    {
-                        tileScore = score;
-                        tileHeal = heal;
-                        tileCost = cost;
-                    }
-                }
-
-                if (tileHeal == null) continue;
-
-                // ★ v3.12.2: 가장 가까운 유효 타일 (같은 거리면 점수 최대)
-                if (distToAlly < bestDist || (distToAlly == bestDist && tileScore > bestTileScore))
-                {
-                    bestDist = distToAlly;
-                    bestPos = pos;
-                    bestHeal = tileHeal;
-                    bestHealCost = tileCost;
-                    bestTileScore = tileScore;
-                }
-            }
-
-            if (!bestPos.HasValue)
-            {
-                if (Main.IsDebugEnabled) Main.LogDebug($"[Support] MoveToHeal: No reachable tile with LOS within heal range ({maxHealRange}) of {woundedAlly.CharacterName}");
-                return null;
-            }
-
-            // ★ v3.5.10: 힐 대상 예약 (중복 힐 방지)
-            TeamBlackboard.Instance.ReserveHeal(woundedAlly);
-
-            // Move + Heal 계획
-            remainingAP -= bestHealCost;
-
-            int plannedRange = CombatAPI.GetAbilityRangeInTiles(bestHeal);
-            var result = new List<PlannedAction>();
-            result.Add(PlannedAction.Move(bestPos.Value,
-                $"Move to heal {woundedAlly.CharacterName} (range={plannedRange} tiles)"));
-            result.Add(PlannedAction.Heal(bestHeal, woundedAlly,
-                $"Heal after move: {woundedAlly.CharacterName}", bestHealCost));
-
-            Main.Log($"[Support] MoveToHeal: Moving {CombatAPI.MetersToTiles(UnityEngine.Vector3.Distance(unit.Position, bestPos.Value)):F1} tiles to heal {woundedAlly.CharacterName} ({bestHeal.Name}, range={plannedRange})");
-
-            return result;
-        }
+        // ★ v3.42.0: PlanAllyHeal, PlanMoveToHeal → HealPlanner로 이동 (전 역할 공용화)
+        // SupportPlan에서 HealPlanner.PlanAllyHeal(), HealPlanner.PlanMoveToHeal() 직접 호출
 
         // ★ v3.7.93: PlanAllyBuff 메서드는 BasePlan으로 이동
         // SupportPlan에서 BasePlan.PlanAllyBuff(situation, ref remainingAP, usedKeystoneGuids) 호출

@@ -111,8 +111,9 @@ namespace CompanionAI_v3.Planning.Plans
             var usedKeystoneAbilityGuids = new HashSet<string>();
 
             // ══════════════════════════════════════════════════════════════
-            // ★ v3.34.0: Phase 2.9 — 사역마 재활성화 (기절 시 부활)
-            // 사역마가 기절 상태면 즉시 재활성화 → 다음 턴부터 활동 가능
+            // ★ v3.42.0: Phase 2.9 — 사역마 재활성화 (기절 시 부활)
+            // 사역마가 기절 상태면 최우선으로 재활성화
+            // 사거리 밖이면 사역마 쪽으로 이동 후 재활성화
             // ══════════════════════════════════════════════════════════════
             if (situation.HasFamiliar && !FamiliarAPI.IsFamiliarConscious(situation.Unit))
             {
@@ -127,12 +128,14 @@ namespace CompanionAI_v3.Planning.Plans
                         string reason;
                         if (CombatAPI.CanUseAbilityOn(reactivate, familiarTarget, out reason))
                         {
+                            // Case 1: 사거리 이내 → 즉시 재활성화
                             remainingAP -= apCost;
-                            actions.Add(PlannedAction.Support(reactivate, situation.Familiar,
-                                $"Reactivate {situation.Familiar.CharacterName}", apCost));
+                            var reactivateAction = PlannedAction.Support(reactivate, situation.Familiar,
+                                $"Reactivate {situation.Familiar.CharacterName}", apCost);
+                            reactivateAction.IsFamiliarTarget = true;
+                            actions.Add(reactivateAction);
                             Main.Log($"[Overseer] Phase 2.9: ★ Familiar Reactivation — {situation.Familiar.CharacterName}");
 
-                            // 재활성화 후 즉시 반환 (사역마가 다음 턴부터 활동)
                             return new TurnPlan(actions, TurnPriority.Emergency,
                                 "Overseer familiar reactivation",
                                 situation.HPPercent, situation.NearestEnemyDistance,
@@ -140,8 +143,57 @@ namespace CompanionAI_v3.Planning.Plans
                         }
                         else
                         {
-                            Main.LogDebug($"[Overseer] Phase 2.9: Reactivate blocked: {reason}");
+                            // Case 2: 사거리 밖 → 사역마 쪽으로 이동 후 재활성화 시도
+                            Main.LogDebug($"[Overseer] Phase 2.9: Reactivate blocked ({reason}), attempting move toward familiar");
+
+                            float reactivateRange = CombatAPI.GetAbilityRangeInTiles(reactivate);
+                            float distToFamiliar = CombatAPI.GetDistanceInTiles(situation.Unit, situation.Familiar);
+                            Main.LogDebug($"[Overseer] Phase 2.9: Familiar dist={distToFamiliar:F1} tiles, reactivate range={reactivateRange} tiles");
+
+                            // 이동으로 사거리 이내 도달 가능한지 확인
+                            var approachPos = MovementAPI.FindBestApproachPosition(situation.Unit, situation.Familiar);
+                            if (approachPos != null)
+                            {
+                                float distAfterMove = CombatAPI.GetDistanceInTiles(approachPos.Position, situation.Familiar);
+                                Main.LogDebug($"[Overseer] Phase 2.9: After move dist={distAfterMove:F1} tiles to familiar");
+
+                                if (distAfterMove <= reactivateRange)
+                                {
+                                    // 이동 후 사거리 이내 → 이동 + 재활성화
+                                    actions.Add(PlannedAction.Move(approachPos.Position,
+                                        $"Move toward unconscious {situation.Familiar.CharacterName} for reactivation"));
+                                    remainingAP -= apCost;
+                                    var moveReactivateAction = PlannedAction.Support(reactivate, situation.Familiar,
+                                        $"Reactivate {situation.Familiar.CharacterName}", apCost);
+                                    moveReactivateAction.IsFamiliarTarget = true;
+                                    actions.Add(moveReactivateAction);
+                                    Main.Log($"[Overseer] Phase 2.9: ★ Move + Reactivate — {situation.Familiar.CharacterName} (dist after move: {distAfterMove:F1})");
+
+                                    return new TurnPlan(actions, TurnPriority.Emergency,
+                                        "Overseer move + familiar reactivation",
+                                        situation.HPPercent, situation.NearestEnemyDistance,
+                                        situation.NormalHittableCount, situation.CurrentAP, situation.CurrentMP, 0);
+                                }
+                                else
+                                {
+                                    // 이동해도 사거리 밖 → 일단 접근만 (다음 턴에 재활성화)
+                                    actions.Add(PlannedAction.Move(approachPos.Position,
+                                        $"Approach unconscious {situation.Familiar.CharacterName} (out of reactivation range)"));
+                                    // ★ v3.42.0: MP 차감 — 후속 Phase에서 이동 예산 과대 계획 방지
+                                    remainingMP = 0;  // 접근 이동은 전체 MP 소비로 간주 (보수적)
+                                    Main.Log($"[Overseer] Phase 2.9: Approaching familiar — dist after move: {distAfterMove:F1} (need {reactivateRange})");
+                                    // 접근만 하고 나머지 턴은 정상 진행 (break하지 않음)
+                                }
+                            }
+                            else
+                            {
+                                Main.LogDebug($"[Overseer] Phase 2.9: No reachable tiles toward familiar");
+                            }
                         }
+                    }
+                    else
+                    {
+                        Main.LogDebug($"[Overseer] Phase 2.9: Not enough AP for reactivation (need {apCost}, have {remainingAP})");
                     }
                 }
             }
@@ -805,7 +857,9 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.18.0: Phase 5.6 — GapCloser 폴백 (근접 오버시어)
             // DPSPlan Phase 5.6 대응 — 일반 공격 실패 시 갭클로저로 돌파
             // ══════════════════════════════════════════════════════════════
-            if (!didPlanAttack && !situation.PrefersRanged && situation.NearestEnemy != null)
+            // ★ v3.40.8: 면역 적에게 갭클로저 낭비 방지
+            if (!didPlanAttack && !situation.PrefersRanged && situation.NearestEnemy != null
+                && !CombatAPI.IsTargetImmuneToDamage(situation.NearestEnemy, situation.Unit))
             {
                 Main.Log($"[Overseer] Phase 5.6: Trying GapCloser fallback");
                 PlannedAction gcPreMove;
@@ -857,6 +911,15 @@ namespace CompanionAI_v3.Planning.Plans
                         Main.Log($"[Overseer] Phase 6: {postAction.Ability.Name} will restore ~{expectedMP:F0} MP");
                     }
                 }
+            }
+
+            // ★ v3.42.0: Phase 6.5 — 여유 아군 치유 (메디킷 등)
+            var oppHealActions = PlanOpportunisticAllyHeal(situation, ref remainingAP, remainingMP);
+            if (oppHealActions != null)
+            {
+                actions.AddRange(oppHealActions);
+                remainingMP = 0;
+                Main.Log($"[Overseer] Phase 6.5: Opportunistic ally heal");
             }
 
             // ══════════════════════════════════════════════════════════════
@@ -937,7 +1000,9 @@ namespace CompanionAI_v3.Planning.Plans
                     // 근접 접근 후 즉시 공격 시도 - DPS/Tank/Support와 동일 패턴
                     // 문제: 근접 선호 오버시어가 이동만 하고 공격하지 않음
                     // 원인: Phase 5(공격) → Phase 8(이동) 순서라 이동 후 공격 기회 없음
-                    if (needsApproach && remainingAP > 0 && situation.NearestEnemy != null)
+                    // ★ v3.40.8: 면역 적에게 PostMoveAttack 방지
+                    if (needsApproach && remainingAP > 0 && situation.NearestEnemy != null
+                        && !CombatAPI.IsTargetImmuneToDamage(situation.NearestEnemy, situation.Unit))
                     {
                         UnityEngine.Vector3? moveDestination = moveAction.Target?.Point;
                         var postMoveAttack = PlanPostMoveAttack(situation, situation.NearestEnemy, ref remainingAP, moveDestination);

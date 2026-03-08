@@ -169,7 +169,7 @@ namespace CompanionAI_v3.Data
             // Healing - 치료
             // ========================================
 
-            { "374265cc61d5475898f17ac969795f7c", new AbilityInfo("374265cc61d5475898f17ac969795f7c", "Reactivate_Ability", AbilityTiming.Healing) },  // ★ v3.34.0: 사역마 재활성화
+            { "374265cc61d5475898f17ac969795f7c", new AbilityInfo("374265cc61d5475898f17ac969795f7c", "Master_Reactivate_Ability_01", AbilityTiming.Healing) },  // ★ v3.42.0: 사역마 재활성화 (실제 BP명 수정)
 
             { "083d5280759b4ed3a2d0b61254653273", new AbilityInfo("083d5280759b4ed3a2d0b61254653273", "Medikit", AbilityTiming.Healing) },
             { "b6e3c9398ea94c75afdbf61633ce2f85", new AbilityInfo("b6e3c9398ea94c75afdbf61633ce2f85", "Medikit_BattleMedic", AbilityTiming.Healing) },

@@ -223,8 +223,10 @@ namespace CompanionAI_v3.Analysis
 
             // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
             // ★ v3.5.29: 캐시된 거리 사용
+            // ★ v3.40.8: 면역 적 제외 — NearestEnemy는 공격/이동/디버프 타겟으로 사용되므로
+            //   데미지 면역 적은 최초 계산에서 배제 (12+ 폴백 경로 일괄 보호)
             situation.NearestEnemy = CollectionHelper.MinByWhere(situation.Enemies,
-                e => !e.LifeState.IsDead,
+                e => !e.LifeState.IsDead && !CombatAPI.IsTargetImmuneToDamage(e, unit),
                 e => CombatCache.GetDistance(unit, e));
 
             situation.NearestEnemyDistance = situation.NearestEnemy != null

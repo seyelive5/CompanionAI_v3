@@ -342,7 +342,7 @@ namespace CompanionAI_v3.Planning.Planners
             var effectiveTarget = target;
             if (moveDestination.HasValue && situation.Enemies != null)
             {
-                effectiveTarget = FindNearestEnemyFromPosition(moveDestination.Value, situation.Enemies);
+                effectiveTarget = FindNearestEnemyFromPosition(moveDestination.Value, situation.Enemies, situation.Unit);
                 if (effectiveTarget == null)
                 {
                     if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanPostMoveAttack: No enemy reachable from destination");
@@ -356,6 +356,13 @@ namespace CompanionAI_v3.Planning.Planners
             }
 
             if (effectiveTarget == null) return null;
+
+            // ★ v3.40.8: 면역 타겟 공격 방지
+            if (CombatAPI.IsTargetImmuneToDamage(effectiveTarget, situation.Unit))
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanPostMoveAttack: {effectiveTarget.CharacterName} is damage-immune, skipping");
+                return null;
+            }
 
             var attack = SelectBestAttack(situation, effectiveTarget);
             if (attack == null)
@@ -434,13 +441,14 @@ namespace CompanionAI_v3.Planning.Planners
         /// <summary>
         /// ★ v3.1.24: 특정 위치에서 최근접 적 찾기
         /// </summary>
-        private static BaseUnitEntity FindNearestEnemyFromPosition(UnityEngine.Vector3 position, List<BaseUnitEntity> enemies)
+        private static BaseUnitEntity FindNearestEnemyFromPosition(UnityEngine.Vector3 position, List<BaseUnitEntity> enemies, BaseUnitEntity attacker)
         {
             if (enemies == null || enemies.Count == 0) return null;
 
             // ★ v3.8.48: LINQ → CollectionHelper (0 할당, O(n))
+            // ★ v3.42.0: 면역 적 필터 — attacker 전달하여 무기 타입별 면역도 체크
             return CollectionHelper.MinByWhere(enemies,
-                e => e.IsConscious,
+                e => e.IsConscious && !CombatAPI.IsTargetImmuneToDamage(e, attacker),
                 e => UnityEngine.Vector3.Distance(position, e.Position));
         }
 

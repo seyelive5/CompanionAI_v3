@@ -425,37 +425,15 @@ namespace CompanionAI_v3.Data
 
         /// <summary>
         /// Reactivate 능력인지 확인 (사역마 부활)
-        /// ★ v3.8.59: GUID 우선 체크 + Blueprint 이름 폴백 (GUID 자동 등록)
+        /// ★ v3.42.0: GUID 직접 매칭 — 블루프린트 이름 폴백 제거
         /// </summary>
-        private static string _reactivateGuid;
+        private const string ReactivateGuid = "374265cc61d5475898f17ac969795f7c";
         public static bool IsReactivateAbility(AbilityData ability)
         {
             if (ability == null) return false;
-
             try
             {
-                string guid = AbilityDatabase.GetGuid(ability);
-
-                // GUID 캐시 히트
-                if (!string.IsNullOrEmpty(_reactivateGuid) && guid == _reactivateGuid)
-                    return true;
-
-                // Blueprint 이름으로 확인 후 GUID 자동 등록
-                string blueprintName = ability.Blueprint?.name;
-                if (string.IsNullOrEmpty(blueprintName)) return false;
-
-                if (blueprintName.Equals("Reactivate_Ability", StringComparison.OrdinalIgnoreCase) ||
-                    blueprintName.Equals("Pet_Reactivate_Ability", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (!string.IsNullOrEmpty(guid) && _reactivateGuid == null)
-                    {
-                        _reactivateGuid = guid;
-                        Main.LogDebug($"[FamiliarAbilities] Reactivate GUID registered: {guid}");
-                    }
-                    return true;
-                }
-
-                return false;
+                return ability.Blueprint?.AssetGuid?.ToString() == ReactivateGuid;
             }
             catch
             {
@@ -1585,6 +1563,28 @@ namespace CompanionAI_v3.Data
                     var ability = fact?.Data;
                     if (ability?.Blueprint == null) continue;
 
+                    // ★ v3.42.0: 공통 능력(재활성화/재배치)은 Pet 접두사 필터 전에 먼저 체크
+                    // "Reactivate_Ability"는 Pet 접두사가 없어서 IsPetAbilityByName()에서 걸러지던 버그 수정
+                    if (IsReactivateAbility(ability))
+                    {
+                        // ★ Reactivate는 항상 수집 — 가용성은 OverseerPlan Phase 2.9에서 CanUseAbilityOn으로 체크
+                        // IsAbilityAvailable 필터에서 게임이 unavailability reason을 반환하면 수집 자체가 차단되는 문제 방지
+                        Main.LogDebug($"[FamiliarAbilities] Reactivate ability collected (always-collect bypass)");
+                        result.Add(ability);
+                        continue;
+                    }
+                    if (IsRelocateAbility(ability))
+                    {
+                        List<string> commonUnavailableReasons;
+                        if (!GameInterface.CombatAPI.IsAbilityAvailable(ability, out commonUnavailableReasons))
+                        {
+                            Main.LogDebug($"[FamiliarAbilities] Filtered out {ability.Name}: {string.Join(", ", commonUnavailableReasons)}");
+                            continue;
+                        }
+                        result.Add(ability);
+                        continue;
+                    }
+
                     // BlueprintName 접두사로 Pet 능력 필터링
                     string bpName = ability.Blueprint.name ?? "";
                     if (!IsPetAbilityByName(bpName))
@@ -1596,13 +1596,6 @@ namespace CompanionAI_v3.Data
                     if (!GameInterface.CombatAPI.IsAbilityAvailable(ability, out unavailableReasons))
                     {
                         Main.LogDebug($"[FamiliarAbilities] Filtered out {ability.Name}: {string.Join(", ", unavailableReasons)}");
-                        continue;
-                    }
-
-                    // 공통 능력
-                    if (IsRelocateAbility(ability) || IsReactivateAbility(ability))
-                    {
-                        result.Add(ability);
                         continue;
                     }
 
