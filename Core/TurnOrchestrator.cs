@@ -145,6 +145,10 @@ namespace CompanionAI_v3.Core
                     }
                 }
 
+                // ★ v3.44.0: 일시정지 중이면 실행 보류 — Resume 시 다음 Tick에서 계속
+                if (DecisionNarrator.Instance.IsPaused)
+                    return ExecutionResult.Waiting("DecisionNarrator paused — waiting for user");
+
                 // 3. 명령 완료 후 처리
                 _executor.CheckForKills();
                 NotifyRoundChangeIfNeeded();
@@ -261,10 +265,7 @@ namespace CompanionAI_v3.Core
                 // ★ v3.44.0: DecisionNarrator — 자연어 결정 요약 + UI + 일시정지
                 DecisionNarrator.Instance.Narrate(turnState.Plan, situation, unit);
                 if (DecisionNarrator.IsEnabled && Main.Settings.PauseOnAITurn)
-                {
                     DecisionNarrator.Instance.IsPaused = true;
-                    UnityEngine.Time.timeScale = 0f;
-                }
             }
 
             if (turnState.Plan.NeedsReplan(situation))

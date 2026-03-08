@@ -212,6 +212,13 @@ namespace CompanionAI_v3.UI
             {
                 Main.Settings.PauseOnAITurn = DrawCheckbox(Main.Settings.PauseOnAITurn, $"    {L("PauseOnAITurn")}");
                 GUILayout.Label($"<size=15><color=#888888>    {L("PauseOnAITurnDesc")}</color></size>", _descriptionStyle);
+
+                GUILayout.Space(5);
+                GUILayout.BeginHorizontal();
+                GUILayout.Label($"    {L("OverlayScale")}: {Main.Settings.DecisionOverlayScale:F1}x", GUILayout.Width(200));
+                Main.Settings.DecisionOverlayScale = GUILayout.HorizontalSlider(
+                    Main.Settings.DecisionOverlayScale, 0.8f, 2.0f, GUILayout.Width(200));
+                GUILayout.EndHorizontal();
             }
 
             GUILayout.Space(10);

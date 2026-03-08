@@ -54,11 +54,10 @@ namespace CompanionAI_v3.Diagnostics
             IsPaused = false;
         }
 
-        /// <summary>일시정지 해제</summary>
+        /// <summary>일시정지 해제 — 다음 Tick에서 실행 재개</summary>
         public void Resume()
         {
             IsPaused = false;
-            UnityEngine.Time.timeScale = 1f;
         }
     }
 }

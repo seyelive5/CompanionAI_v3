@@ -123,6 +123,12 @@ namespace CompanionAI_v3.Settings
                 { Language.Russian, "Автоматическая пауза при начале хода ИИ. Нажмите «Продолжить»." },
                 { Language.Japanese, "AI仲間のターン開始時に自動一時停止。「続行」ボタンで再開。" }
             },
+            ["OverlayScale"] = new() {
+                { Language.English, "Overlay Size" },
+                { Language.Korean, "오버레이 크기" },
+                { Language.Russian, "Размер оверлея" },
+                { Language.Japanese, "オーバーレイサイズ" }
+            },
 
             // === ★ v3.44.0: Decision Narrator — 내러티브 템플릿 ===
             ["narr_header"] = new() {
@@ -1753,6 +1759,9 @@ namespace CompanionAI_v3.Settings
 
         /// <summary>★ v3.44.0: AI 턴 자동 일시정지 — 결정 내용을 읽고 수동으로 재개</summary>
         public bool PauseOnAITurn { get; set; } = false;
+
+        /// <summary>★ v3.44.0: 오버레이 UI 크기 배율 (0.8 ~ 2.0, 기본 1.0)</summary>
+        public float DecisionOverlayScale { get; set; } = 1.0f;
 
         /// <summary>★ v3.20.0: 보관할 최대 전투 리포트 수 (초과 시 오래된 것부터 삭제)</summary>
         public int MaxCombatReports { get; set; } = 10;

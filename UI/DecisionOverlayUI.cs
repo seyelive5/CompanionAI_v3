@@ -27,10 +27,15 @@ namespace CompanionAI_v3.UI
         private static GUIStyle _lineStyle;
         private static GUIStyle _buttonStyle;
         private static GameObject _overlayGO;
+        private static float _lastScale;  // 스케일 변경 감지
 
-        private const float PANEL_X = 220f;    // 포트레이트 열 너비 이후
-        private const float PANEL_WIDTH = 380f;
-        private const float PANEL_BOTTOM_MARGIN = 20f;
+        // 기본 크기 (scale=1.0 기준)
+        private const float BASE_PANEL_X = 220f;
+        private const float BASE_PANEL_WIDTH = 380f;
+        private const float BASE_PANEL_BOTTOM_MARGIN = 20f;
+        private const int BASE_HEADER_FONT = 15;
+        private const int BASE_LINE_FONT = 13;
+        private const int BASE_BUTTON_FONT = 12;
 
         public static void RequestUpdate() { /* 현재는 매 프레임 렌더링 — 향후 최적화 여지 */ }
 
@@ -55,7 +60,7 @@ namespace CompanionAI_v3.UI
                 Object.Destroy(_overlayGO);
                 _overlayGO = null;
             }
-            _panelStyle = null;  // 스타일 캐시도 초기화
+            _panelStyle = null;
         }
 
         /// <summary>
@@ -66,26 +71,31 @@ namespace CompanionAI_v3.UI
         {
             if (!DecisionNarrator.IsEnabled) return;
 
-            InitStyles();
+            float scale = Mathf.Clamp(ModSettings.Instance?.DecisionOverlayScale ?? 1f, 0.8f, 2.0f);
+            InitStyles(scale);
 
             var narrator = DecisionNarrator.Instance;
             var entry = narrator.History.GetCurrent();
             if (entry == null) return;
 
+            float panelWidth = BASE_PANEL_WIDTH * scale;
+            float panelX = BASE_PANEL_X * scale;
+
             // 패널 높이 동적 계산
-            float lineHeight = 22f;
-            float headerHeight = 28f;
-            float navHeight = 30f;
-            float pauseButtonHeight = narrator.IsPaused ? 35f : 0f;
-            float contentHeight = headerHeight + (entry.Lines.Count * lineHeight) + navHeight + pauseButtonHeight + 20f;
-            float panelY = Screen.height - contentHeight - PANEL_BOTTOM_MARGIN;
+            float lineHeight = 22f * scale;
+            float headerHeight = 28f * scale;
+            float navHeight = 30f * scale;
+            float pauseButtonHeight = narrator.IsPaused ? 35f * scale : 0f;
+            float contentHeight = headerHeight + (entry.Lines.Count * lineHeight) + navHeight + pauseButtonHeight + 20f * scale;
+            float panelY = Screen.height - contentHeight - BASE_PANEL_BOTTOM_MARGIN;
 
             // 반투명 배경
             GUI.color = new Color(0f, 0f, 0f, 0.75f);
-            GUI.Box(new Rect(PANEL_X, panelY, PANEL_WIDTH, contentHeight), "", _panelStyle);
+            GUI.Box(new Rect(panelX, panelY, panelWidth, contentHeight), "", _panelStyle);
             GUI.color = Color.white;
 
-            GUILayout.BeginArea(new Rect(PANEL_X + 10f, panelY + 5f, PANEL_WIDTH - 20f, contentHeight - 10f));
+            float pad = 10f * scale;
+            GUILayout.BeginArea(new Rect(panelX + pad, panelY + 5f, panelWidth - pad * 2f, contentHeight - 10f));
 
             // 헤더: 유닛명 (역할) — HP
             string header = string.Format(Localization.Get("narr_header"),
@@ -98,24 +108,25 @@ namespace CompanionAI_v3.UI
                 GUILayout.Label($"  \u2022 {line}", _lineStyle);
             }
 
-            GUILayout.Space(5f);
+            GUILayout.Space(5f * scale);
 
             // 네비게이션
+            float navBtnWidth = 70f * scale;
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button(Localization.Get("narr_prev_turn"), _buttonStyle, GUILayout.Width(70f)))
+            if (GUILayout.Button(Localization.Get("narr_prev_turn"), _buttonStyle, GUILayout.Width(navBtnWidth)))
                 narrator.History.NavigatePrev();
             GUILayout.FlexibleSpace();
             GUILayout.Label(narrator.History.GetPositionLabel(), _lineStyle);
             GUILayout.FlexibleSpace();
-            if (GUILayout.Button(Localization.Get("narr_next_turn"), _buttonStyle, GUILayout.Width(70f)))
+            if (GUILayout.Button(Localization.Get("narr_next_turn"), _buttonStyle, GUILayout.Width(navBtnWidth)))
                 narrator.History.NavigateNext();
             GUILayout.EndHorizontal();
 
             // 일시정지 시 "계속" 버튼
             if (narrator.IsPaused)
             {
-                GUILayout.Space(5f);
-                if (GUILayout.Button(Localization.Get("narr_continue"), _buttonStyle, GUILayout.Height(28f)))
+                GUILayout.Space(5f * scale);
+                if (GUILayout.Button(Localization.Get("narr_continue"), _buttonStyle, GUILayout.Height(28f * scale)))
                 {
                     narrator.Resume();
                 }
@@ -124,16 +135,18 @@ namespace CompanionAI_v3.UI
             GUILayout.EndArea();
         }
 
-        private static void InitStyles()
+        private static void InitStyles(float scale)
         {
-            if (_panelStyle != null) return;
+            // 스케일 변경 시 스타일 재생성
+            if (_panelStyle != null && Mathf.Abs(_lastScale - scale) < 0.01f) return;
+            _lastScale = scale;
 
             _panelStyle = new GUIStyle(GUI.skin.box);
             _panelStyle.normal.background = Texture2D.whiteTexture;
 
             _headerStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 15,
+                fontSize = Mathf.RoundToInt(BASE_HEADER_FONT * scale),
                 fontStyle = FontStyle.Bold,
                 normal = { textColor = new Color(1f, 0.85f, 0.4f) },  // 골드
                 richText = true
@@ -141,7 +154,7 @@ namespace CompanionAI_v3.UI
 
             _lineStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 13,
+                fontSize = Mathf.RoundToInt(BASE_LINE_FONT * scale),
                 normal = { textColor = Color.white },
                 wordWrap = true,
                 richText = true
@@ -149,7 +162,7 @@ namespace CompanionAI_v3.UI
 
             _buttonStyle = new GUIStyle(GUI.skin.button)
             {
-                fontSize = 12
+                fontSize = Mathf.RoundToInt(BASE_BUTTON_FONT * scale)
             };
         }
     }
