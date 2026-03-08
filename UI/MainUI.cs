@@ -204,6 +204,17 @@ namespace CompanionAI_v3.UI
             GUILayout.Label($"<size=15><color=#888888>{L("EnableCombatReportDesc")}</color></size>", _descriptionStyle);
 
             GUILayout.Space(10);
+
+            // ★ v3.44.0: Decision Overlay
+            Main.Settings.EnableDecisionOverlay = DrawCheckbox(Main.Settings.EnableDecisionOverlay, L("EnableDecisionOverlay"));
+            GUILayout.Label($"<size=15><color=#888888>{L("EnableDecisionOverlayDesc")}</color></size>", _descriptionStyle);
+            if (Main.Settings.EnableDecisionOverlay)
+            {
+                Main.Settings.PauseOnAITurn = DrawCheckbox(Main.Settings.PauseOnAITurn, $"    {L("PauseOnAITurn")}");
+                GUILayout.Label($"<size=15><color=#888888>    {L("PauseOnAITurnDesc")}</color></size>", _descriptionStyle);
+            }
+
+            GUILayout.Space(10);
             GUILayout.EndVertical();
         }
 

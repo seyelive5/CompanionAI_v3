@@ -8,6 +8,7 @@ using Kingmaker.PubSubSystem.Core;
 using Kingmaker.PubSubSystem.Core.Interfaces;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
+using CompanionAI_v3.Diagnostics;  // ★ v3.44.0: DecisionNarrator
 using CompanionAI_v3.Data;
 
 namespace CompanionAI_v3.GameInterface
@@ -144,6 +145,9 @@ namespace CompanionAI_v3.GameInterface
                 }
 
                 TurnOrchestrator.Instance.OnCombatEnd();
+
+                // ★ v3.44.0: DecisionNarrator 히스토리 초기화
+                DecisionNarrator.Instance.OnCombatEnd();
 
                 // ★ v3.1.19: 패턴 캐시 클리어
                 CombatAPI.ClearPatternCache();
