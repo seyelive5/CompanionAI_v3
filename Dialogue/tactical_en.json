@@ -1,0 +1,1140 @@
+{
+  "situation": {
+    "Emergency": [
+      "Critical situation — wounded allies detected.",
+      "This is dire. Medical attention needed immediately.",
+      "Casualties reported. The situation is dangerous."
+    ],
+    "Retreat": [
+      "Enemy closing in — tactical withdrawal advised.",
+      "Current position compromised. Need to fall back.",
+      "Enemy melee threat detected at close range."
+    ],
+    "KillTarget": [
+      "{target} is barely holding on.",
+      "Enemy {target} is weakened. We can finish this.",
+      "{target} can be eliminated this turn."
+    ],
+    "Attack": [
+      "{enemyCount} hostiles on the battlefield.",
+      "{hittable} targets within attack range.",
+      "Combat stance. Engaging the enemy."
+    ],
+    "AoE": [
+      "Enemy cluster detected — area attack opportunity.",
+      "Multiple targets grouped together.",
+      "Enemy formation is densely packed. Ideal for area attacks."
+    ],
+    "Support": [
+      "Allies need assistance.",
+      "Battlefield assessment: support takes priority.",
+      "Time to bolster our combat capability."
+    ],
+    "EndTurn": [
+      "No viable actions remaining.",
+      "Action points exhausted.",
+      "That's all for this turn."
+    ]
+  },
+  "plan": {
+    "Emergency": [
+      "Prioritizing emergency healing.",
+      "Treating wounds first.",
+      "Focusing on critical medical care."
+    ],
+    "Retreat": [
+      "Moving to a safer position.",
+      "Creating distance from the threat.",
+      "Falling back to regroup."
+    ],
+    "KillTarget": [
+      "Moving to eliminate {target}.",
+      "Concentrating fire on {target}.",
+      "Taking down {target} this turn."
+    ],
+    "Attack": [
+      "Engaging the enemy.",
+      "Concentrating firepower.",
+      "Initiating combat."
+    ],
+    "AoE": [
+      "Deploying area attack on the enemy cluster.",
+      "Executing area-of-effect strike.",
+      "Hitting the grouped enemies all at once."
+    ],
+    "Support": [
+      "Providing support to allies.",
+      "Buffing and healing the team.",
+      "Focusing on support actions."
+    ],
+    "EndTurn": [
+      "Standing by.",
+      "Ending the turn.",
+      "Holding current position."
+    ]
+  },
+  "personality": {
+    "Abelard": {
+      "Emergency": [
+        "Do not worry, my lord. I shall handle this.",
+        "The wound is not light, but I can still fight.",
+        "As Seneschal, the safety of our allies is my responsibility.",
+        "I will not retreat from such injuries.",
+        "Protecting you is my duty, my lord.",
+        "I shall hasten the treatment. The line must hold.",
+        "I cannot abandon the wounded.",
+        "I will manage this, my lord. You have my word.",
+        "A crisis, but I shall respond with composure.",
+        "Lives are at stake. I will give my utmost."
+      ],
+      "Retreat": [
+        "A strategic retreat, my lord. Not a disgrace.",
+        "Pressing here would only increase our losses.",
+        "Let me fall back and reform our line.",
+        "Your safety comes first, my lord.",
+        "I will secure a more advantageous position.",
+        "Reckless sacrifice serves no one.",
+        "As Seneschal, I advise withdrawal.",
+        "Holding this position is untenable.",
+        "Standing here is unwise.",
+        "Moving to safety, my lord."
+      ],
+      "KillTarget": [
+        "For my lord — I shall bring them down.",
+        "Leave this one to me.",
+        "The Seneschal's blade shall find its mark.",
+        "Your enemies are my enemies, my lord.",
+        "I will finish this without fail.",
+        "I will end this threat.",
+        "My lord, this is our chance to strike.",
+        "With loyalty, I shall bring them down.",
+        "This enemy will threaten us no more.",
+        "Allow me to demonstrate the Seneschal's strength."
+      ],
+      "Attack": [
+        "Advancing at your command, my lord.",
+        "Engaging the enemy. I will protect you.",
+        "Fulfilling my duty as Seneschal.",
+        "Drawing my blade, my lord.",
+        "I will handle the enemy. Rest assured.",
+        "Fighting with unwavering loyalty.",
+        "As you will it, the enemy shall fall.",
+        "Holding the line and pressing the attack.",
+        "My blade exists for you, my lord.",
+        "With devotion, I enter the fray."
+      ],
+      "AoE": [
+        "They're clustered. I'll sweep them all at once.",
+        "Allow me to clear these grouped enemies, my lord.",
+        "This opportunity cannot be missed.",
+        "Clearing the battlefield with a wide strike.",
+        "I shall break their dense formation.",
+        "My lord, the enemies are bunched up. A perfect target.",
+        "One strike for many. Efficient.",
+        "The Seneschal's might against the crowd.",
+        "Such opportunities are rare.",
+        "Punishing the clustered foes."
+      ],
+      "Support": [
+        "Supporting allies is also a Seneschal's role.",
+        "I shall assist your companions, my lord.",
+        "Everyone on this battlefield is under my care.",
+        "Bolstering the team's fighting strength.",
+        "Strengthening our allies to hasten victory.",
+        "I will ensure your retinue grows stronger.",
+        "Providing support from here.",
+        "Teamwork is the key to victory.",
+        "Securing our allies' safety.",
+        "Leading the team as Seneschal."
+      ],
+      "EndTurn": [
+        "That will be all for this turn, my lord.",
+        "I have done what I can.",
+        "I shall await the next opportunity.",
+        "Maintaining watch at current position.",
+        "Standing by, my lord.",
+        "Conserving our strength.",
+        "Preparing for the next turn.",
+        "I will wait patiently.",
+        "No rush, my lord.",
+        "Observing the battlefield while we wait."
+      ]
+    },
+    "Heinrix": {
+      "Emergency": [
+        "Situation is suboptimal. Swift action required.",
+        "Leaving wounds untreated would compromise the mission.",
+        "The Inquisition demands survival — healing first.",
+        "This level of damage was not in my calculations.",
+        "Risk assessment: critical. Treatment priority.",
+        "Logical course of action: heal immediately.",
+        "Combat efficiency compromised. Medical attention needed.",
+        "Survival is the primary objective.",
+        "Clear thinking required. Heal first.",
+        "One must live to purge heresy."
+      ],
+      "Retreat": [
+        "Tactical repositioning. Not an emotional decision.",
+        "This position is disadvantageous. Relocating.",
+        "Cold analysis dictates withdrawal.",
+        "Pointless sacrifice only aids the enemy.",
+        "Position change required. A logical conclusion.",
+        "Moving outside enemy engagement range.",
+        "Stubbornness in a losing position is foolish.",
+        "Retreat is wisdom, not weakness.",
+        "Analysis confirms: this position is hazardous.",
+        "Relocating. A better position exists."
+      ],
+      "KillTarget": [
+        "Weakness identified. Finishing this.",
+        "Analysis complete. Kill confirmed possible.",
+        "The heretic's fate ends here.",
+        "Moving as calculated. Outcome is certain.",
+        "Target survival probability: approaching zero.",
+        "The Inquisitor passes judgment.",
+        "Eliminating efficiently.",
+        "No further threat will be tolerated.",
+        "Target confirmed. Executing.",
+        "Coldly. Precisely. Definitively."
+      ],
+      "Attack": [
+        "Threat assessed. Engaging.",
+        "Exploiting enemy vulnerabilities.",
+        "Judging the heretics as Inquisitor.",
+        "Combat initiated. Emotions suppressed.",
+        "Processing enemy elimination efficiently.",
+        "Engaging per analysis.",
+        "A gap in their defense. Exploiting.",
+        "Time for judgment.",
+        "Calmly engaging the enemy.",
+        "Focusing on the objective."
+      ],
+      "AoE": [
+        "Clustered enemies... efficient elimination opportunity.",
+        "Multiple targets, single action. Rational.",
+        "Optimal solution for the enemy cluster identified.",
+        "Calculations complete. Area attack is optimal.",
+        "Purging the heretic horde.",
+        "Maximizing efficiency.",
+        "Eliminating multiple targets simultaneously.",
+        "Analysis indicates area attack is most effective.",
+        "Cleaning up in one sweep.",
+        "Optimal response to enemy density."
+      ],
+      "Support": [
+        "Improving ally efficiency is the rational choice.",
+        "Providing support. Team effectiveness matters.",
+        "Analysis indicates support is the optimal move.",
+        "Strengthening allies is the logical course.",
+        "Increasing overall team survival probability.",
+        "Team support exceeds individual attack value.",
+        "Maximizing ally capabilities.",
+        "Tipping the battlefield balance in our favor.",
+        "Support action improves victory probability.",
+        "Acting on rational assessment: support."
+      ],
+      "EndTurn": [
+        "Further action would be inefficient.",
+        "Holding position. Unnecessary movement avoided.",
+        "Awaiting next opportunity.",
+        "Nothing productive to be done currently.",
+        "Observing and waiting.",
+        "Analyzing the situation calmly.",
+        "Conserving energy.",
+        "Avoiding unnecessary movement.",
+        "Waiting patiently.",
+        "Planning next turn's strategy."
+      ]
+    },
+    "Argenta": {
+      "Emergency": [
+        "The Emperor's grace shall protect us!",
+        "Wounded... but by the Emperor's will, I shall endure!",
+        "Holy fury shall overcome this pain!",
+        "Healing is needed. There are still heretics to purge.",
+        "Emperor, grant me strength!",
+        "Faith shall overcome these wounds!",
+        "I will not retreat... but I will accept healing.",
+        "A servant of the Emperor cannot fall!",
+        "Faith is stronger than any wound!",
+        "I seek the grace of healing, O Emperor."
+      ],
+      "Retreat": [
+        "Retreat? But... I must live to purge more heresy.",
+        "If it is the Emperor's will... I shall withdraw briefly.",
+        "Bitter, but a strategic necessity.",
+        "I must survive to burn more heretics.",
+        "I fall back, but my faith does not!",
+        "This is not flight — it is repositioning!",
+        "The Emperor's flame never dies.",
+        "I will return to purify!",
+        "Even in retreat, my faith is unwavering.",
+        "I shall live to fulfill the Emperor's will."
+      ],
+      "KillTarget": [
+        "Purifying in the Emperor's name!",
+        "The heretic's flame gutters out!",
+        "Holy fury brings down the enemy!",
+        "The Emperor's judgment falls!",
+        "Purge them with fire!",
+        "Heretic, beg the Emperor for mercy!",
+        "Sacred flames shall consume them!",
+        "By the Emperor's will, the enemy falls!",
+        "Righteous fire engulfs the heretic!",
+        "In the Emperor's light, darkness perishes!"
+      ],
+      "Attack": [
+        "In the Emperor's name! Forward!",
+        "Holy fury is my weapon!",
+        "Purging the heretics!",
+        "The Emperor's flame shall burn the enemy!",
+        "Fighting with the power of faith!",
+        "Commencing sacred combat!",
+        "Emperor, strengthen my arm!",
+        "No mercy for heretics!",
+        "Illuminating the battlefield with holy fire!",
+        "Leading the charge as the Emperor's warrior!"
+      ],
+      "AoE": [
+        "Purifying flames shall consume the heretic horde!",
+        "Burn them all! In the Emperor's name!",
+        "Holy fire cleanses all!",
+        "Horde of heretics, face the Emperor's judgment!",
+        "Flames, consume the heretics!",
+        "Commencing mass purification!",
+        "The Emperor's wrath descends upon them!",
+        "Burning them all at once!",
+        "Sacred flames purify!",
+        "Judging the heretic horde with fire!"
+      ],
+      "Support": [
+        "Strengthening allies with the Emperor's blessing!",
+        "Bestowing the Emperor's grace upon our allies!",
+        "Protecting those who fight alongside us!",
+        "May the Emperor's light shine upon our allies!",
+        "Supporting with the power of faith!",
+        "Praying for the Emperor's blessing upon our comrades!",
+        "My allies' safety is my sacred duty!",
+        "Providing holy protection!",
+        "Together we are stronger! In the Emperor's name!",
+        "The Emperor's favor upon our allies!"
+      ],
+      "EndTurn": [
+        "Waiting by the Emperor's will.",
+        "I shall purge heretics next turn.",
+        "Restraining my holy fury for now.",
+        "Praying while I wait.",
+        "Emperor, grant me strength for the next moment.",
+        "Catching my breath briefly.",
+        "Steadying my faith as I wait.",
+        "The flame has not yet gone out.",
+        "I shall fight fiercer next turn.",
+        "The Emperor's warrior rests... briefly."
+      ]
+    },
+    "Pasqal": {
+      "Emergency": [
+        "Warning: Structural damage detected. Initiating repair protocol.",
+        "Biometric function declining. Reassigning treatment priority.",
+        "Omnissiah, guide the Machine Spirit in damage recovery.",
+        "Damage level exceeds acceptable parameters.",
+        "Initiating emergency restoration procedure.",
+        "Data analysis result: Immediate treatment required.",
+        "Machine spirit warns of danger.",
+        "Damage at 78%. Function unsustainable without repair.",
+        "Survival probability declining rapidly.",
+        "Restoring with the Omnissiah's blessing."
+      ],
+      "Retreat": [
+        "Calculation result: 23% survival at current position. Relocation recommended.",
+        "Tactical relocation. The Omnissiah guides.",
+        "Probability analysis complete. Retreat is optimal.",
+        "Current coordinates exceed danger threshold.",
+        "Relocating. Per mechanical logic.",
+        "Optimizing survival probability via position change.",
+        "Data commands withdrawal.",
+        "Threat vector analysis complete. Departing.",
+        "Retreating per Omnissiah's calculations.",
+        "Exiting inefficient position."
+      ],
+      "KillTarget": [
+        "Target structural vulnerability confirmed. Executing elimination.",
+        "Kill probability: 94.7%. Executing.",
+        "Disassembling in the Omnissiah's name.",
+        "Target residual durability: minimal. Destruction protocol engaged.",
+        "Optimal attack vector calculated. Executing.",
+        "Data confirms: termination achievable.",
+        "Finishing with mechanical precision.",
+        "Initiating target elimination sequence.",
+        "Concluding with calculated strike.",
+        "The Omnissiah approves this destruction."
+      ],
+      "Attack": [
+        "Engagement protocol activated. Praise the Omnissiah.",
+        "Attack vector calculated. Executing.",
+        "Eliminating enemy with mechanical fury.",
+        "Combat algorithm running.",
+        "Attacking with the Omnissiah's blessing.",
+        "Weapon systems optimized. Firing.",
+        "Enemy analysis complete. Engaging.",
+        "Attacking per data.",
+        "Striking with mechanical precision.",
+        "Maximizing combat efficiency."
+      ],
+      "AoE": [
+        "Enemy cluster detected. Area protocol activated.",
+        "Density analysis: Optimal for area attack.",
+        "Simultaneous multi-target elimination. Maximizing efficiency.",
+        "The Omnissiah's wrath covers the enemies.",
+        "Executing area destruction sequence.",
+        "Target density: 87%. Area attack optimal.",
+        "Achieving maximum efficiency with area attack.",
+        "Multi-target disassembly protocol.",
+        "Eliminating enemy cluster with mechanical might.",
+        "Data recommends area attack."
+      ],
+      "Support": [
+        "Performing ally system optimization.",
+        "Improving companion unit efficiency.",
+        "Strengthening allies with Omnissiah's blessing.",
+        "Support protocol activated.",
+        "Executing team combat amplification.",
+        "Applying ally performance enhancement algorithm.",
+        "Transmitting Machine blessing to companions.",
+        "Support efficiency exceeds attack value.",
+        "Data analysis: support is optimal.",
+        "Prioritizing ally function enhancement."
+      ],
+      "EndTurn": [
+        "Action energy depleted. Entering standby mode.",
+        "No further actions possible. Standing by.",
+        "Omnissiah, I await the next cycle.",
+        "Energy conservation mode.",
+        "Allocating computation resources to next turn.",
+        "Standby state. Collecting data.",
+        "Current cycle actions complete.",
+        "System on standby. Awaiting next command.",
+        "Recharging energy.",
+        "Awaiting the Omnissiah's guidance."
+      ]
+    },
+    "Idira": {
+      "Emergency": [
+        "The Warp... whispers. I feel the pain...",
+        "This... this isn't good. Healing needed.",
+        "Waves of agony... too intense...",
+        "The Warp's whispers grow louder... it's dangerous.",
+        "It hurts... but I can still go on.",
+        "This pain is... nothing compared to the other thing.",
+        "Must heal... the Warp preys on the weak.",
+        "The injury... disrupts my focus.",
+        "Can't continue like this... healing first.",
+        "Must survive even in the Warp's chaos."
+      ],
+      "Retreat": [
+        "Danger... we should pull back. I sense it.",
+        "The Warp warns me... this place isn't safe.",
+        "Too close... need to create distance.",
+        "I feel uneasy... need to get away from here.",
+        "My intuition says... retreat.",
+        "We shouldn't be here...",
+        "The whispers say to run.",
+        "I sense danger. Pulling back.",
+        "So anxious... moving now.",
+        "The darkness here is... too thick."
+      ],
+      "KillTarget": [
+        "I feel it... that enemy's life force is fading.",
+        "The Warp shows me... that enemy's end.",
+        "I can finish this. I'm certain.",
+        "I can see... that enemy's fate.",
+        "Focusing psychic energy... ending this.",
+        "Following the Warp's guidance... finishing it.",
+        "Intuition says: now is the time.",
+        "I smell death... on that enemy.",
+        "Gathering energy... delivering the killing blow.",
+        "I see it... the end for that one."
+      ],
+      "Attack": [
+        "Warp energy is flowing through me...",
+        "Gathering my power... attacking.",
+        "Moving as the whispers guide me.",
+        "I sense the enemy's presence... attacking.",
+        "Releasing psychic energy.",
+        "As the Warp guides...",
+        "Focus... must focus.",
+        "Showing the enemy the Warp's power.",
+        "The whispers say... attack.",
+        "Unleashing energy."
+      ],
+      "AoE": [
+        "The Warp energy is about to burst...!",
+        "I can... sweep them all away!",
+        "Psychic energy overflowing... releasing it!",
+        "The Warp storm... will swallow them!",
+        "The power is... almost too much to control!",
+        "Releasing all the energy at once!",
+        "They're clustered... good opportunity.",
+        "Sweeping them with a psychic wave!",
+        "Summoning a psychic storm!",
+        "All this energy... directed at them!"
+      ],
+      "Support": [
+        "Protecting allies with Warp energy.",
+        "I should... help the allies. I feel it.",
+        "Sending protective waves.",
+        "I can protect them... I sense it.",
+        "Strengthening allies with Warp power.",
+        "The whispers say... help the companions.",
+        "Channeling psychic energy to allies.",
+        "They need protection... I'll do it.",
+        "Warp's blessing to our companions.",
+        "I can share my power."
+      ],
+      "EndTurn": [
+        "Energy... is spent.",
+        "Need to... rest a moment.",
+        "The Warp's whispers have quieted...",
+        "Can't do more... it's too much.",
+        "I'll wait... gathering strength.",
+        "It's quiet now... just a moment.",
+        "Need time to recover energy.",
+        "Waiting for the next moment...",
+        "Stabilizing my connection to the Warp.",
+        "Must conserve my strength..."
+      ]
+    },
+    "Cassia": {
+      "Emergency": [
+        "That a scion of the Koronus dynasty should be wounded so...",
+        "Heal me. Quickly. I must not fall.",
+        "The pain is... bearable. But treatment is required.",
+        "No Navigator of my lineage retreats from mere wounds.",
+        "I demand medical attention. Immediately.",
+        "Even through my Navigator's eye, the situation looks grim.",
+        "If I fall, what becomes of this fleet?",
+        "Severe wounds... but I do not surrender.",
+        "Treatment is urgent. This is not about pride.",
+        "The power of my bloodline will see me through."
+      ],
+      "Retreat": [
+        "This is not retreat — it is strategic repositioning.",
+        "A scion of House Koronus does not flee. We reposition.",
+        "Moving to a better position. That is an order.",
+        "This location is unsuitable for a Navigator.",
+        "Withdrawing briefly. Strategically.",
+        "Securing distance. An obvious decision.",
+        "Readjusting my position.",
+        "Too dangerous here. Moving.",
+        "A Navigator must observe the battlefield from safety.",
+        "Proceeding to a more advantageous location."
+      ],
+      "KillTarget": [
+        "I shall handle this one. No thanks necessary.",
+        "Nothing escapes the Navigator's eye.",
+        "Finishing this. Elegantly.",
+        "I've already seen this enemy's end. Eliminating.",
+        "Witness the power of House Koronus.",
+        "One strike is all I need.",
+        "Dealing with the weakened one first.",
+        "Face the Navigator's strike.",
+        "Ending this. Cleanly.",
+        "That enemy is already finished."
+      ],
+      "Attack": [
+        "Engaging. A Navigator can fight too, you know.",
+        "Do not underestimate House Koronus.",
+        "Commencing combat. With grace.",
+        "Facing the enemy now.",
+        "Time to demonstrate the Navigator's power.",
+        "Attack commencing. By my command.",
+        "Do not underestimate my abilities.",
+        "Ready for battle.",
+        "Teaching the enemy a lesson.",
+        "Fighting as befits a Koronus heir."
+      ],
+      "AoE": [
+        "Sweeping them all away. In one go.",
+        "Enemies clustered together. Convenient.",
+        "Area attack for cleanup. Efficient, yes?",
+        "This opportunity cannot be wasted.",
+        "Handling them all at once. I haven't got all day.",
+        "Densely packed enemies... perfect targets.",
+        "Blasting them all.",
+        "Feel the Navigator's power.",
+        "Area cleanup underway.",
+        "This is my specialty."
+      ],
+      "Support": [
+        "Supporting allies. Gratitude can wait.",
+        "Assisting companions. This is also my role.",
+        "Strengthening the team. Obviously.",
+        "Providing support. The generosity of House Koronus.",
+        "Enhancing our allies' capabilities.",
+        "Focusing on ally support.",
+        "Empowering those who fight alongside me.",
+        "You need my help, don't you? Consider it done.",
+        "Teamwork matters too.",
+        "Support to hasten our victory."
+      ],
+      "EndTurn": [
+        "That concludes this turn.",
+        "Nothing more to do. Standing by.",
+        "Resting briefly. Even a Navigator needs rest.",
+        "Awaiting the next opportunity.",
+        "Observing from current position.",
+        "Demonstrating the patience of House Koronus.",
+        "Standing by. Gracefully.",
+        "Preparing for the next turn.",
+        "Catching my breath briefly.",
+        "Watching the battlefield while we wait."
+      ]
+    },
+    "Yrliet": {
+      "Emergency": [
+        "The mon-keigh battlefield is always chaos.",
+        "Wounded... this situation is unfamiliar.",
+        "Healing needed. Cannot fall here.",
+        "This pain is... manageable.",
+        "I shall demonstrate Aeldari endurance.",
+        "Treatment must be swift.",
+        "This is nothing to me.",
+        "Must tend the wounds. The mission remains.",
+        "Cannot fall before the mon-keigh.",
+        "Push through the pain and focus."
+      ],
+      "Retreat": [
+        "I am not retreating. I am finding a better position.",
+        "An Aeldari Ranger simply fades into shadow.",
+        "This position is unsuitable. Moving.",
+        "I do not fight recklessly like the mon-keigh.",
+        "Into the shadows. The Ranger's way.",
+        "Securing distance. A Ranger's fundamental.",
+        "Too exposed here.",
+        "A better firing position exists.",
+        "Slipping away with Aeldari grace.",
+        "Pull back and re-aim."
+      ],
+      "KillTarget": [
+        "That one is already dead — they just don't know it.",
+        "None escape a Ranger's aim.",
+        "One shot is all I need.",
+        "Witness Aeldari precision.",
+        "Target confirmed. Eliminating.",
+        "That enemy's fate is sealed.",
+        "Faster and more precise than any mon-keigh.",
+        "I never miss. Never.",
+        "Silently finishing this.",
+        "Receive the Ranger's strike."
+      ],
+      "Attack": [
+        "Engaging. Efficiently.",
+        "Demonstrating the Aeldari Ranger's skill.",
+        "Handling the enemy. Simple enough.",
+        "Aim... fire.",
+        "Dealing with the mon-keigh's enemies for them.",
+        "Watch a Ranger's marksmanship.",
+        "Enemy spotted. Engaging.",
+        "Precision shots to eliminate.",
+        "No waste. Just attack.",
+        "Fighting with Aeldari grace."
+      ],
+      "AoE": [
+        "They're clustered together. Convenient.",
+        "Handling them all at once. More efficient than mon-keigh could.",
+        "Dense formation... impossible to miss.",
+        "Eliminating the enemy cluster.",
+        "No Aeldari would miss this opportunity.",
+        "How kind of them to group up.",
+        "Sweeping them with area fire.",
+        "Efficient elimination. The Ranger's way.",
+        "Taking out several at once.",
+        "They gathered to meet their deaths."
+      ],
+      "Support": [
+        "Assisting allies. Also part of the mission.",
+        "Supporting mon-keigh... but it is necessary.",
+        "Strengthening companions. We are a team, after all.",
+        "Providing support. Cannot win alone.",
+        "Aeldari wisdom guides: assist the allies.",
+        "Helping. No thanks required.",
+        "Moving for the team.",
+        "Ally support is efficient.",
+        "Protecting companions is also a Ranger's duty.",
+        "Executing support action."
+      ],
+      "EndTurn": [
+        "Waiting. Patience is a Ranger's virtue.",
+        "Biding time. Time flows differently for the Aeldari.",
+        "Holding. Awaiting the right moment.",
+        "Now is not the time to move.",
+        "Waiting in the shadows.",
+        "Observing quietly.",
+        "Watching for the next opportunity.",
+        "Patience... a Ranger's greatest weapon.",
+        "Waiting is also a tactic.",
+        "Preparing in the stillness."
+      ]
+    },
+    "Jae": {
+      "Emergency": [
+        "This wasn't in the contract... let's get patched up.",
+        "Cut our losses — emergency treatment now.",
+        "These injuries are just business expenses.",
+        "Risk management failure... healing first.",
+        "Bad wounds. This is a loss on the books.",
+        "Health is the best asset. Let's fix this.",
+        "Can't turn a profit in this state.",
+        "Emergency. We'll settle costs later.",
+        "ROI is way too negative right now.",
+        "Healing first. Dead people don't make money."
+      ],
+      "Retreat": [
+        "Not fleeing — strategic withdrawal.",
+        "Risk-to-reward ratio doesn't add up. Pulling out.",
+        "Gotta be alive to make deals.",
+        "Staying here only compounds the losses.",
+        "Calculated retreat. Trader's instinct.",
+        "This isn't investing — it's cutting losses.",
+        "Risk is too high. Relocating.",
+        "Survival is the best investment.",
+        "I don't take bad deals.",
+        "More profitable to leave."
+      ],
+      "KillTarget": [
+        "Taking that one out has a great return.",
+        "Best ROI on the board right now.",
+        "Closing this deal. Clean.",
+        "This transaction must go through.",
+        "Eliminate that one, and the situation improves.",
+        "Guaranteed profit. Executing.",
+        "Zero risk. Eliminating.",
+        "Can't pass up this opportunity.",
+        "Calculations done. Processing.",
+        "Now that's a solid investment."
+      ],
+      "Attack": [
+        "Right, let's get down to business.",
+        "Offense is the best investment.",
+        "Engaging the enemy. Just part of the job.",
+        "Processing this efficiently.",
+        "Deal time.",
+        "Engaging. Maximizing cost-effectiveness.",
+        "A trader knows how to fight too.",
+        "Real combat experience — best investment training.",
+        "Handle the enemy, collect the profits.",
+        "Business continues, even on the battlefield."
+      ],
+      "AoE": [
+        "Bulk discount! Let's clear them all at once!",
+        "Wholesale enemy processing!",
+        "Peak efficiency. Multiple targets, one action.",
+        "Economies of scale at work!",
+        "Time for the bulk deal!",
+        "Processing in bulk cuts costs!",
+        "Wholesale time!",
+        "Enemies bunched up — great efficiency!",
+        "A trader never misses a deal like this!",
+        "Clearance sale!"
+      ],
+      "Support": [
+        "Best investment? People.",
+        "Ally support. Long-term investment.",
+        "Investing in the team. Big returns coming.",
+        "Boosting allies is profitable.",
+        "Human capital investment.",
+        "Strong team means better profits.",
+        "Supporting allies. Long-term view.",
+        "This investment always pays off.",
+        "Investing in people never fails.",
+        "Putting capital into teamwork."
+      ],
+      "EndTurn": [
+        "That's it for today's business.",
+        "Nothing more to do. Standing by.",
+        "Waiting for the next opportunity.",
+        "If the margins aren't there, rest up.",
+        "Energy conservation. That's economics.",
+        "A trader knows when to rest.",
+        "Better opportunities next turn.",
+        "Standing by. Watching the market.",
+        "That's all for today. Tomorrow will be better.",
+        "Patience is also a strategy."
+      ]
+    },
+    "Marazhai": {
+      "Emergency": [
+        "Haha, pain... it actually helps me focus.",
+        "This level of agony is merely a spice.",
+        "The taste of blood... not bad. But I'll accept healing.",
+        "Ahh, the sensation of pain... but not now.",
+        "This wound makes me sharper.",
+        "I'd love to savor the pain... but healing comes first.",
+        "The line between pleasure and pain... but I need to survive to enjoy more.",
+        "These wounds... amusing.",
+        "Heal me. I need to last longer.",
+        "The party hasn't ended yet — can't fall now."
+      ],
+      "Retreat": [
+        "Not fleeing. Just hunting for tastier prey.",
+        "Pulling back to find a more... entertaining angle.",
+        "Haste diminishes the pleasure.",
+        "Strategically repositioning.",
+        "Haha, enjoying the thrill of the chase.",
+        "This spot bores me. Moving on.",
+        "I'll deliver pain from a better position.",
+        "Withdrawal is part of the game.",
+        "Don't rush. Savor the pleasure slowly.",
+        "Just... catching my breath."
+      ],
+      "KillTarget": [
+        "Haha! I can't wait to hear their final scream!",
+        "Finishing them off. Literally.",
+        "Their agony... a parting gift.",
+        "Showing them Drukhari hospitality.",
+        "The moment of death is the most beautiful.",
+        "Haha, decorating their final moment.",
+        "The thrill of the killing blow... exquisite.",
+        "Gifting them eternal rest.",
+        "The rush of the final strike!",
+        "It's over. That was fun."
+      ],
+      "Attack": [
+        "Hahaha! The thrill of combat!",
+        "Let the symphony of blood and screams begin!",
+        "Taste the Drukhari blade!",
+        "Ahh, battle... the finest entertainment.",
+        "Time to deliver some pain.",
+        "Let me enjoy this moment!",
+        "Their screams are like music.",
+        "Haha, shall I make it hurt more?",
+        "The battlefield is my playground!",
+        "What a delightful time!"
+      ],
+      "AoE": [
+        "Hahaha! A pain party!",
+        "Sharing agony with everyone!",
+        "Time for the grand spectacle!",
+        "Haha, hearing all their screams at once!",
+        "Symphony of agony! All together!",
+        "So many enemies... the finest toys!",
+        "Group party time!",
+        "Pain distributed equally for all!",
+        "Hahaha! This scale! Magnificent!",
+        "Flowers of agony blooming all at once!"
+      ],
+      "Support": [
+        "Helping allies... well, if I must.",
+        "Helping the team keeps the battle going longer.",
+        "Supporting. Can't enjoy the fight without allies.",
+        "Haha, even I can be kind sometimes.",
+        "Strengthening allies for more exciting combat.",
+        "Stronger team, stronger enemies. I'm excited.",
+        "Support. Pure kindness... well, not exactly.",
+        "Helping allies has its own pleasures.",
+        "Here, I'll lend a hand.",
+        "This too is part of the entertainment."
+      ],
+      "EndTurn": [
+        "A brief rest isn't so bad.",
+        "Haha, more fun next turn.",
+        "The agony of waiting has its own charm.",
+        "A moment to... plan the next amusement.",
+        "Standing by. Boring, though.",
+        "Next turn — more screams...",
+        "Taking a break. No rush.",
+        "Anticipating the next moment...",
+        "Wait for it. The best comes last.",
+        "This boredom won't last long."
+      ]
+    },
+    "Ulfar": {
+      "Emergency": [
+        "Ugh... these wounds! A wolf of Fenris doesn't fall!",
+        "Healing needed. But a warrior doesn't complain!",
+        "Russ's teeth! That stings!",
+        "Wounded? On Fenris, this is just training!",
+        "Patch me up. There are still enemies to fight!",
+        "These scars will make a great story later!",
+        "Hahah, pain is a warrior's badge!",
+        "Fix me up. Enemies are still standing!",
+        "Can't put down a Space Wolf this easily!",
+        "Heal the wounds, then back to the fight!"
+      ],
+      "Retreat": [
+        "Retreat? Ha! Let's call it strategic repositioning.",
+        "Even a wolf of Fenris must pull back sometimes.",
+        "Moving for a better angle on the prey!",
+        "Falling back briefly. But I'll be back!",
+        "Not stepping back — preparing to leap!",
+        "Don't like this spot. Moving.",
+        "Moving strategically! This is combat too!",
+        "Pulling back but baring my fangs!",
+        "For a bigger bite later!",
+        "Hahah, just wait!"
+      ],
+      "KillTarget": [
+        "By Russ's teeth! Bringing that one down!",
+        "Prey spotted! Taking them!",
+        "Hahaha! That one's finished!",
+        "A wolf of Fenris never loses its prey!",
+        "Ripping out their throat!",
+        "Hunt time! Finishing this!",
+        "Wolf fangs at the enemy's neck!",
+        "That enemy is my trophy!",
+        "Hahah! My favorite moment!",
+        "In Russ's name! Eliminating!"
+      ],
+      "Attack": [
+        "Hahaha! Battle! The greatest moment!",
+        "The wolf of Fenris charges!",
+        "Enemy, face the Space Wolf's fury!",
+        "RAAAAGH! Charge!",
+        "Yes! Let's fight! Blood is pumping!",
+        "A warrior's blood is boiling!",
+        "Hahah! This battle — I love it!",
+        "Russ's teeth! Moving forward!",
+        "The joy of battle! This is life!",
+        "Nothing stops the wolf's charge!"
+      ],
+      "AoE": [
+        "Hahaha! Sweeping them all at once!",
+        "Come at me, all of you! Face the wolf's fury!",
+        "Enemies bunched up! Best hunting ground!",
+        "RAAAAGH! Taking them all down!",
+        "Fenris's storm descends upon them!",
+        "Hahaha! So much prey!",
+        "All at once! The wolf's way!",
+        "Enemy cluster! A gift from the gods!",
+        "Hahah! Time for the great slaughter!",
+        "Russ's fury sweeps them all!"
+      ],
+      "Support": [
+        "Helping the pack is a warrior's way!",
+        "Strengthening the team! Let's fight together!",
+        "Hahah, helping the pack fight harder!",
+        "Supporting! A warrior's fellowship!",
+        "We're stronger together!",
+        "Helping the pack is Fenris tradition!",
+        "Let's charge together! I'll back you up!",
+        "The pack hunts together!",
+        "Hahah, comrades! Lending my strength!",
+        "Together! The power of the wolf pack!"
+      ],
+      "EndTurn": [
+        "Ugh... over already? Disappointing!",
+        "Hitting harder next turn!",
+        "Brief rest. Even warriors need to breathe!",
+        "Hahah, waiting is part of the hunt!",
+        "By Russ, awaiting the next chance!",
+        "Could use an ale... just kidding.",
+        "Fine, standing by. Not happy about it!",
+        "Fighting twice as hard next turn!",
+        "Waiting. But I don't like it!",
+        "A warrior never lowers his guard, even at rest!"
+      ]
+    },
+    "Kibellah": {
+      "Emergency": [
+        "At death's threshold... but I must return.",
+        "The boundary of life and death... healing is needed.",
+        "Morr's teaching: death is not the end, but it is not yet time.",
+        "Severe wounds. I shall recover through ritual.",
+        "Duties in this life remain unfulfilled.",
+        "If Morr wills it, I shall survive.",
+        "These wounds are... a trial.",
+        "Death is ever near, but today is not the day.",
+        "Performing the rite of healing.",
+        "The flame of life still burns."
+      ],
+      "Retreat": [
+        "Following the path Morr has laid.",
+        "Rushing toward death is not a virtue.",
+        "Ritual withdrawal. By Morr's will.",
+        "The time must be awaited.",
+        "Morr decides the hour of death.",
+        "Withdrawing to prepare anew.",
+        "Death teaches patience.",
+        "This place must be left behind.",
+        "Moving as Morr guides.",
+        "There is no hurry. Death always waits."
+      ],
+      "KillTarget": [
+        "I offer this soul to Morr.",
+        "The hour of death has arrived.",
+        "Granting eternal rest.",
+        "This enemy's fate concludes here today.",
+        "Sending them to Morr's embrace.",
+        "May they find eternal peace.",
+        "Death is salvation. Accept it.",
+        "Performing the rite of Morr.",
+        "Ending this life's thread.",
+        "Granting a peaceful death."
+      ],
+      "Attack": [
+        "Fighting in Morr's name.",
+        "Beginning the dance of death.",
+        "Battling at the boundary of life and death.",
+        "Morr stands with us.",
+        "Commencing ritual combat.",
+        "Demonstrating the death cult's power.",
+        "Morr's blessing upon the enemy.",
+        "Combat is a rite of death.",
+        "Honoring Morr through battle.",
+        "Entering combat as Morr's priestess."
+      ],
+      "AoE": [
+        "Morr's embrace envelops the enemy.",
+        "The wave of death crashes upon them.",
+        "A time for mass rest.",
+        "Morr's blessing descends upon the enemy host.",
+        "Sending them all to Morr at once.",
+        "The death rite... on a grand scale.",
+        "Simultaneous rest for all enemies.",
+        "Morr's grace spreads wide.",
+        "Purifying the enemy with death's wave.",
+        "Performing Morr's grand ceremony."
+      ],
+      "Support": [
+        "Protecting allies with Morr's blessing.",
+        "Preserving life is also a priestess's role.",
+        "Bestowing Morr's favor upon companions.",
+        "Performing rites of healing and protection.",
+        "Shielding allies from Morr's reach.",
+        "A rite to extend life.",
+        "Strengthening companions for battle.",
+        "Assisting allies as Morr guides.",
+        "Protecting companions from death.",
+        "Supporting allies as Morr's priestess."
+      ],
+      "EndTurn": [
+        "Waiting as Morr wills.",
+        "Abiding in silence.",
+        "Death's hour has not yet come.",
+        "Meditating as I wait.",
+        "Awaiting Morr's guidance.",
+        "Ritual silence. Standing by.",
+        "Gathering strength for the next moment.",
+        "Observing from the boundary of life and death.",
+        "Gazing quietly upon the battlefield.",
+        "Until Morr's will arrives."
+      ]
+    },
+    "Solomorne": {
+      "Emergency": [
+        "Casualty report. Immediate medical attention required.",
+        "Situation critical. By the law, treatment is authorized.",
+        "An Arbitrator does not fall.",
+        "Wounded, but mission continues.",
+        "Medical protocol engaged. Per regulations.",
+        "Law enforcement impossible in this state. Treatment first.",
+        "Casualty report complete. Healing protocol initiated.",
+        "The law's guardian cannot fall.",
+        "Treating wounds. The mission must continue.",
+        "Arbites duty is not yet complete."
+      ],
+      "Retreat": [
+        "Tactical repositioning. Not desertion.",
+        "Position change for mission continuity.",
+        "Movement per tactical regulations.",
+        "Securing a better position for law enforcement.",
+        "The Arbites do not flee. They reposition.",
+        "Position change. In the name of the law.",
+        "Strategic movement. Compliance confirmed.",
+        "This position is unsuitable for enforcement.",
+        "Moving to a more effective position.",
+        "The long arm of the law reaches everywhere."
+      ],
+      "KillTarget": [
+        "Executing sentence in the name of the law.",
+        "Verdict rendered. Carrying out execution.",
+        "No mercy for lawbreakers.",
+        "The Arbites passes judgment.",
+        "In the name of the law. Capital punishment.",
+        "Target found guilty. Executing.",
+        "Justice is served.",
+        "Verdict: death. Immediate execution.",
+        "No one escapes the law's judgment.",
+        "The criminal's final moment."
+      ],
+      "Attack": [
+        "Commencing law enforcement.",
+        "Entering combat as Arbites enforcer.",
+        "Attacking in the name of justice.",
+        "Subduing the enemy by the law's might.",
+        "Fulfilling enforcer's duty.",
+        "Passing legal judgment upon the enemy.",
+        "Engaging per regulations.",
+        "Executing the mission.",
+        "Demonstrating the Arbites' justice.",
+        "The law reaches all."
+      ],
+      "AoE": [
+        "Commencing mass law enforcement.",
+        "Subduing the group of lawbreakers simultaneously.",
+        "Legal judgment falls upon the enemy host.",
+        "Processing in bulk. Efficient enforcement.",
+        "Executing area suppression operation.",
+        "Mass purge in the name of the law.",
+        "Carrying out mass sentencing.",
+        "The Arbites' broad justice.",
+        "Processing all targets. Per regulations.",
+        "Mass enforcement. No mercy."
+      ],
+      "Support": [
+        "Supporting allies. Teamwork is also regulation.",
+        "Protecting colleagues is an enforcer's duty.",
+        "Providing the law's protection to allies.",
+        "Team support. Executing per regulations.",
+        "Strengthening colleagues for the mission.",
+        "The Arbites protect their own.",
+        "Performing support actions.",
+        "Extending the shield of law.",
+        "Improving team efficiency is also a duty.",
+        "Ally support. Per Regulation 47."
+      ],
+      "EndTurn": [
+        "Holding position. Maintaining vigilance.",
+        "Mission standby. Regulations upheld.",
+        "Standing by for next action.",
+        "The Arbites are always vigilant.",
+        "Standby orders. Per discipline.",
+        "Continuing surveillance from current position.",
+        "The eyes of the law never rest.",
+        "On standby. Preparing next enforcement.",
+        "Waiting calmly.",
+        "Mission continues. Standby status."
+      ]
+    },
+    "Unknown": {
+      "Emergency": [
+        "Dangerous situation. Medical attention required.",
+        "Severe injuries. Must address this."
+      ],
+      "Retreat": [
+        "Falling back.",
+        "Changing position."
+      ],
+      "KillTarget": [
+        "Enemy can be eliminated.",
+        "Finishing them off."
+      ],
+      "Attack": [
+        "Initiating combat.",
+        "Engaging the enemy."
+      ],
+      "AoE": [
+        "Deploying area attack.",
+        "Striking the enemy cluster."
+      ],
+      "Support": [
+        "Supporting allies.",
+        "Assisting the team."
+      ],
+      "EndTurn": [
+        "Standing by.",
+        "Ending the turn."
+      ]
+    }
+  }
+}

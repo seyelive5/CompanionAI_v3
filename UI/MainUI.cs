@@ -121,6 +121,8 @@ namespace CompanionAI_v3.UI
                 {
                     Main.Settings.UILanguage = lang;
                     Localization.CurrentLanguage = lang;
+                    // ★ v3.48.0: 언어 변경 시 Tactical Narrator 대사도 재로드
+                    Diagnostics.TacticalDialogueDB.ReloadFromJson();
                 }
             }
             GUILayout.FlexibleSpace();
@@ -138,6 +140,7 @@ namespace CompanionAI_v3.UI
                 if (GUILayout.Button($"<color=#D8D8D8>{L("ReloadDialogue")}</color>", GUILayout.Width(250), GUILayout.Height(30)))
                 {
                     DialogueLocalization.ReloadFromJson();
+                    Diagnostics.TacticalDialogueDB.ReloadFromJson();  // ★ v3.48.0
                 }
                 GUILayout.EndHorizontal();
             }
@@ -205,14 +208,11 @@ namespace CompanionAI_v3.UI
 
             GUILayout.Space(10);
 
-            // ★ v3.44.0: Decision Overlay
+            // ★ v3.46.0: Strategic Directive UI
             Main.Settings.EnableDecisionOverlay = DrawCheckbox(Main.Settings.EnableDecisionOverlay, L("EnableDecisionOverlay"));
             GUILayout.Label($"<size=15><color=#888888>{L("EnableDecisionOverlayDesc")}</color></size>", _descriptionStyle);
             if (Main.Settings.EnableDecisionOverlay)
             {
-                Main.Settings.PauseOnAITurn = DrawCheckbox(Main.Settings.PauseOnAITurn, $"    {L("PauseOnAITurn")}");
-                GUILayout.Label($"<size=15><color=#888888>    {L("PauseOnAITurnDesc")}</color></size>", _descriptionStyle);
-
                 GUILayout.Space(5);
                 GUILayout.BeginHorizontal();
                 GUILayout.Label($"    {L("OverlayScale")}: {Main.Settings.DecisionOverlayScale:F1}x", GUILayout.Width(200));

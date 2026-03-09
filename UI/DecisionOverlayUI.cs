@@ -1,58 +1,53 @@
 using UnityEngine;
-using CompanionAI_v3.Diagnostics;
 using CompanionAI_v3.Settings;
 
 namespace CompanionAI_v3.UI
 {
     /// <summary>
-    /// ★ v3.44.0: IMGUI OnGUI를 매 프레임 호출하기 위한 MonoBehaviour
+    /// ★ v3.48.0: IMGUI OnGUI를 매 프레임 호출하기 위한 MonoBehaviour
     /// Main.Load()에서 GameObject에 부착. DontDestroyOnLoad로 영속.
     /// </summary>
     public class DecisionOverlayBehaviour : MonoBehaviour
     {
         private void OnGUI()
         {
-            DecisionOverlayUI.OnGUI();
+            TacticalOverlayUI.OnGUI();
         }
     }
 
     /// <summary>
-    /// ★ v3.44.0: AI 결정 오버레이 — IMGUI 기반 인게임 패널
-    /// 화면 좌하단 포트레이트 옆에 반투명 패널로 결정 내용 표시
+    /// ★ v3.48.0: Tactical Narrator 오버레이 — 턴 시작 시 동료 대사 표시
+    /// 5초 자동 페이드아웃, 턴 종료 시 즉시 소멸
     /// </summary>
-    public static class DecisionOverlayUI
+    public static class TacticalOverlayUI
     {
-        private static GUIStyle _panelStyle;
-        private static GUIStyle _headerStyle;
-        private static GUIStyle _lineStyle;
-        private static GUIStyle _buttonStyle;
         private static GameObject _overlayGO;
-        private static float _lastScale;  // 스케일 변경 감지
 
-        // 기본 크기 (scale=1.0 기준)
-        private const float BASE_PANEL_X = 220f;
-        private const float BASE_PANEL_WIDTH = 380f;
-        private const float BASE_PANEL_BOTTOM_MARGIN = 20f;
-        private const int BASE_HEADER_FONT = 15;
-        private const int BASE_LINE_FONT = 13;
-        private const int BASE_BUTTON_FONT = 12;
+        // 현재 표시 중인 데이터
+        private static string _unitName;
+        private static string[] _lines;
+        private static Color _nameColor = new Color(1f, 0.85f, 0.4f);
 
-        public static void RequestUpdate() { /* 현재는 매 프레임 렌더링 — 향후 최적화 여지 */ }
+        // 타이머
+        private static float _showStartTime;
+        private static float _duration;
+        private static bool _isVisible;
 
-        /// <summary>
-        /// 모드 로드 시 호출 — IMGUI 렌더링용 GameObject 생성
-        /// </summary>
+        // 스타일 캐시
+        private static GUIStyle _nameStyle;
+        private static GUIStyle _lineStyle;
+        private static float _lastScale;
+
+        /// <summary>오버레이 GameObject 초기화 (Main.Load에서 호출)</summary>
         public static void Initialize()
         {
             if (_overlayGO != null) return;
-            _overlayGO = new GameObject("CompanionAI_DecisionOverlay");
+            _overlayGO = new GameObject("CompanionAI_TacticalOverlay");
             _overlayGO.AddComponent<DecisionOverlayBehaviour>();
             Object.DontDestroyOnLoad(_overlayGO);
         }
 
-        /// <summary>
-        /// 모드 비활성화 시 호출 — GameObject 정리
-        /// </summary>
+        /// <summary>오버레이 GameObject 파괴 (Main.Unload에서 호출)</summary>
         public static void Destroy()
         {
             if (_overlayGO != null)
@@ -60,110 +55,135 @@ namespace CompanionAI_v3.UI
                 Object.Destroy(_overlayGO);
                 _overlayGO = null;
             }
-            _panelStyle = null;
+            _nameStyle = null;
+            _lineStyle = null;
+            _isVisible = false;
         }
 
         /// <summary>
-        /// DecisionOverlayBehaviour.OnGUI()에서 매 프레임 호출
-        /// 전투 중이고 EnableDecisionOverlay일 때만 그림
+        /// 대사 표시 시작
         /// </summary>
+        /// <param name="unitName">캐릭터 이름</param>
+        /// <param name="lines">2~3줄 대사</param>
+        /// <param name="nameColor">캐릭터 이름 색상</param>
+        /// <param name="duration">표시 시간 (초)</param>
+        public static void Show(string unitName, string[] lines, Color nameColor, float duration = 5f)
+        {
+            if (lines == null || lines.Length == 0) return;
+
+            _unitName = unitName;
+            _lines = lines;
+            _nameColor = nameColor;
+            _duration = duration;
+            _showStartTime = Time.unscaledTime;
+            _isVisible = true;
+        }
+
+        /// <summary>즉시 숨기기 (턴 종료 시)</summary>
+        public static void Hide()
+        {
+            _isVisible = false;
+            _lines = null;
+        }
+
+        /// <summary>현재 표시 중인지</summary>
+        public static bool IsVisible => _isVisible;
+
+        /// <summary>매 프레임 IMGUI 렌더링</summary>
         public static void OnGUI()
         {
-            if (!DecisionNarrator.IsEnabled) return;
+            if (!_isVisible) return;
+            if (_lines == null || _lines.Length == 0) return;
+            if (!Main.Enabled) return;
+            if (ModSettings.Instance?.EnableDecisionOverlay != true) return;
 
-            float scale = Mathf.Clamp(ModSettings.Instance?.DecisionOverlayScale ?? 1f, 0.8f, 2.0f);
+            // 타이머 체크
+            float elapsed = Time.unscaledTime - _showStartTime;
+            if (elapsed >= _duration)
+            {
+                _isVisible = false;
+                return;
+            }
+
+            // 페이드아웃: 마지막 1초
+            float alpha = 1f;
+            float fadeStart = _duration - 1f;
+            if (elapsed > fadeStart)
+            {
+                alpha = 1f - ((elapsed - fadeStart) / 1f);
+            }
+
+            float scale = Mathf.Clamp(
+                ModSettings.Instance?.DecisionOverlayScale ?? 1f, 0.8f, 2.0f);
             InitStyles(scale);
 
-            var narrator = DecisionNarrator.Instance;
-            var entry = narrator.History.GetCurrent();
-            if (entry == null) return;
-
-            float panelWidth = BASE_PANEL_WIDTH * scale;
-            float panelX = BASE_PANEL_X * scale;
-
-            // 패널 높이 동적 계산
+            // 레이아웃 계산
+            float padding = 12f * scale;
             float lineHeight = 22f * scale;
-            float headerHeight = 28f * scale;
-            float navHeight = 30f * scale;
-            float pauseButtonHeight = narrator.IsPaused ? 35f * scale : 0f;
-            float contentHeight = headerHeight + (entry.Lines.Count * lineHeight) + navHeight + pauseButtonHeight + 20f * scale;
-            float panelY = Screen.height - contentHeight - BASE_PANEL_BOTTOM_MARGIN;
+            float nameHeight = 26f * scale;
+            float maxWidth = 500f * scale;
+
+            float panelHeight = nameHeight + (_lines.Length * lineHeight) + padding * 2;
+            float panelWidth = maxWidth + padding * 2;
+
+            // ★ v3.48.0: 초상화 바로 오른쪽 위 — 말풍선 느낌
+            float panelX = (Screen.width / 2f) + 80f * scale;
+            float panelY = Screen.height - panelHeight - 180f * scale;
 
             // 반투명 배경
-            GUI.color = new Color(0f, 0f, 0f, 0.75f);
-            GUI.Box(new Rect(panelX, panelY, panelWidth, contentHeight), "", _panelStyle);
+            Color bgColor = new Color(0f, 0f, 0f, 0.7f * alpha);
+            GUI.color = bgColor;
+            GUI.Box(new Rect(panelX, panelY, panelWidth, panelHeight), "");
             GUI.color = Color.white;
 
-            float pad = 10f * scale;
-            GUILayout.BeginArea(new Rect(panelX + pad, panelY + 5f, panelWidth - pad * 2f, contentHeight - 10f));
+            float y = panelY + padding;
 
-            // 헤더: 유닛명 (역할) — HP
-            string header = string.Format(Localization.Get("narr_header"),
-                entry.UnitName, entry.Role, $"{entry.HPPercent:F0}");
-            GUILayout.Label(header, _headerStyle);
+            // 캐릭터 이름
+            Color fadedNameColor = _nameColor;
+            fadedNameColor.a = alpha;
+            _nameStyle.normal.textColor = fadedNameColor;
+            GUI.Label(new Rect(panelX + padding, y, maxWidth, nameHeight), _unitName, _nameStyle);
+            y += nameHeight;
 
-            // 결정 라인
-            foreach (var line in entry.Lines)
+            // 대사 라인들
+            Color lineColor = new Color(0.9f, 0.9f, 0.85f, alpha);
+            _lineStyle.normal.textColor = lineColor;
+            foreach (var line in _lines)
             {
-                GUILayout.Label($"  \u2022 {line}", _lineStyle);
+                if (string.IsNullOrEmpty(line)) continue;
+                GUI.Label(new Rect(panelX + padding, y, maxWidth, lineHeight), line, _lineStyle);
+                y += lineHeight;
             }
-
-            GUILayout.Space(5f * scale);
-
-            // 네비게이션
-            float navBtnWidth = 70f * scale;
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button(Localization.Get("narr_prev_turn"), _buttonStyle, GUILayout.Width(navBtnWidth)))
-                narrator.History.NavigatePrev();
-            GUILayout.FlexibleSpace();
-            GUILayout.Label(narrator.History.GetPositionLabel(), _lineStyle);
-            GUILayout.FlexibleSpace();
-            if (GUILayout.Button(Localization.Get("narr_next_turn"), _buttonStyle, GUILayout.Width(navBtnWidth)))
-                narrator.History.NavigateNext();
-            GUILayout.EndHorizontal();
-
-            // 일시정지 시 "계속" 버튼
-            if (narrator.IsPaused)
-            {
-                GUILayout.Space(5f * scale);
-                if (GUILayout.Button(Localization.Get("narr_continue"), _buttonStyle, GUILayout.Height(28f * scale)))
-                {
-                    narrator.Resume();
-                }
-            }
-
-            GUILayout.EndArea();
         }
 
         private static void InitStyles(float scale)
         {
-            // 스케일 변경 시 스타일 재생성
-            if (_panelStyle != null && Mathf.Abs(_lastScale - scale) < 0.01f) return;
+            if (_nameStyle != null && Mathf.Abs(_lastScale - scale) < 0.01f) return;
             _lastScale = scale;
 
-            _panelStyle = new GUIStyle(GUI.skin.box);
-            _panelStyle.normal.background = Texture2D.whiteTexture;
-
-            _headerStyle = new GUIStyle(GUI.skin.label)
+            _nameStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = Mathf.RoundToInt(BASE_HEADER_FONT * scale),
+                fontSize = Mathf.RoundToInt(16 * scale),
                 fontStyle = FontStyle.Bold,
-                normal = { textColor = new Color(1f, 0.85f, 0.4f) },  // 골드
-                richText = true
+                alignment = TextAnchor.MiddleLeft
             };
 
             _lineStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = Mathf.RoundToInt(BASE_LINE_FONT * scale),
-                normal = { textColor = Color.white },
-                wordWrap = true,
-                richText = true
-            };
-
-            _buttonStyle = new GUIStyle(GUI.skin.button)
-            {
-                fontSize = Mathf.RoundToInt(BASE_BUTTON_FONT * scale)
+                fontSize = Mathf.RoundToInt(14 * scale),
+                fontStyle = FontStyle.Normal,
+                alignment = TextAnchor.MiddleLeft,
+                wordWrap = true
             };
         }
+    }
+
+    /// <summary>
+    /// ★ v3.48.0: 호환성 스텁 — Main.cs에서 DirectiveOverlayUI.Initialize() 호출 유지
+    /// </summary>
+    public static class DirectiveOverlayUI
+    {
+        public static void Initialize() => TacticalOverlayUI.Initialize();
+        public static void Destroy() => TacticalOverlayUI.Destroy();
     }
 }

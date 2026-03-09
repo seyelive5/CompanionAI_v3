@@ -116,7 +116,7 @@ namespace CompanionAI_v3.Planning
         // 핵심 평가 로직
         // ══════════════════════════════════════════════════════════════
 
-        private static TurnStrategy EvaluateInternal(Situation situation, Settings.AIRole role = Settings.AIRole.DPS)
+        private static TurnStrategy EvaluateInternal(Situation situation, Settings.AIRole role)
         {
             _candidates.Clear();
 
@@ -652,5 +652,6 @@ namespace CompanionAI_v3.Planning
                     return c.Score;
             }
         }
+
     }
 }

@@ -123,6 +123,7 @@ namespace CompanionAI_v3.Planning.Plans
             // D. 이동만 (공격 불가)
             // ══════════════════════════════════════════════════════════════
             bool deferRetreat = false;
+
             TacticalEvaluation tacticalEval = EvaluateTacticalOptions(situation);
 
             if (tacticalEval != null && tacticalEval.WasEvaluated)

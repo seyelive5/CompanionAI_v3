@@ -49,8 +49,11 @@ namespace CompanionAI_v3
             // ★ v3.9.36: 대사 JSON 로드 (없으면 기본값 내보내기)
             DialogueLocalization.LoadFromJson(modEntry.Path);
 
-            // ★ v3.44.0: DecisionOverlay IMGUI 렌더러 초기화
-            DecisionOverlayUI.Initialize();
+            // ★ v3.48.0: Tactical Narrator 대사 JSON 로드
+            Diagnostics.TacticalDialogueDB.LoadFromJson(modEntry.Path);
+
+            // ★ v3.48.0: TacticalOverlay IMGUI 렌더러 초기화 (구 DirectiveOverlay 대체)
+            DirectiveOverlayUI.Initialize();
 
             Log("CompanionAI v3.0 loaded successfully");
             return true;
@@ -91,8 +94,8 @@ namespace CompanionAI_v3
                     // ★ v3.0.76: 게임 턴 이벤트 구독 해제
                     TurnEventHandler.Instance.Unsubscribe();
 
-                    // ★ v3.44.0: DecisionOverlay 정리
-                    DecisionOverlayUI.Destroy();
+                    // ★ v3.46.0: DirectiveOverlay 정리
+                    DirectiveOverlayUI.Destroy();
 
                     _harmony?.UnpatchAll(modEntry.Info.Id);
                     Log("Harmony patches removed");

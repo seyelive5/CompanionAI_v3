@@ -145,10 +145,6 @@ namespace CompanionAI_v3.Core
                     }
                 }
 
-                // ★ v3.44.0: 일시정지 중이면 실행 보류 — Resume 시 다음 Tick에서 계속
-                if (DecisionNarrator.Instance.IsPaused)
-                    return ExecutionResult.Waiting("DecisionNarrator paused — waiting for user");
-
                 // 3. 명령 완료 후 처리
                 _executor.CheckForKills();
                 NotifyRoundChangeIfNeeded();
@@ -262,10 +258,10 @@ namespace CompanionAI_v3.Core
                 TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
                 // ★ v3.20.0: [CombatReport] 시점2 — 최초 계획 기록
                 CombatReportCollector.Instance.RecordPlan(turnState.Plan);
-                // ★ v3.44.0: DecisionNarrator — 자연어 결정 요약 + UI + 일시정지
-                DecisionNarrator.Instance.Narrate(turnState.Plan, situation, unit);
-                if (DecisionNarrator.IsEnabled && Main.Settings.PauseOnAITurn)
-                    DecisionNarrator.Instance.IsPaused = true;
+                // ★ v3.48.0: Tactical Narrator — 초기 plan만 (replan 제외)
+                var narratorStrategy = turnState.GetContext<TurnStrategy>(
+                    StrategicContextKeys.TurnStrategyKey, default(TurnStrategy));
+                Diagnostics.TacticalNarrator.Narrate(unit, turnState.Plan, situation, narratorStrategy);
             }
 
             if (turnState.Plan.NeedsReplan(situation))
@@ -277,8 +273,6 @@ namespace CompanionAI_v3.Core
                 TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
                 // ★ v3.20.0: [CombatReport] Replan 시 최신 계획으로 업데이트
                 CombatReportCollector.Instance.RecordPlan(turnState.Plan);
-                // ★ v3.44.0: DecisionNarrator — replan 시에도 내러티브 갱신
-                DecisionNarrator.Instance.Narrate(turnState.Plan, situation, unit);
             }
 
             _profilerStopwatch.Stop();

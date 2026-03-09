@@ -104,8 +104,9 @@ namespace CompanionAI_v3.Planning.Plans
 
         #region Heal/Reload - Delegates to HealPlanner
 
-        protected PlannedAction PlanEmergencyHeal(Situation situation, ref float remainingAP)
-            => HealPlanner.PlanEmergencyHeal(situation, ref remainingAP, RoleName);
+        protected PlannedAction PlanEmergencyHeal(Situation situation, ref float remainingAP,
+            float healThresholdOverride = -1f)
+            => HealPlanner.PlanEmergencyHeal(situation, ref remainingAP, RoleName, healThresholdOverride);
 
         protected PlannedAction PlanReload(Situation situation, ref float remainingAP)
             => HealPlanner.PlanReload(situation, ref remainingAP, RoleName);

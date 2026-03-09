@@ -25,10 +25,12 @@ namespace CompanionAI_v3.Planning.Planners
         /// <summary>
         /// 긴급 자기 힐
         /// </summary>
-        public static PlannedAction PlanEmergencyHeal(Situation situation, ref float remainingAP, string roleName)
+        public static PlannedAction PlanEmergencyHeal(Situation situation, ref float remainingAP, string roleName,
+            float healThresholdOverride = -1f)
         {
             if (situation.AvailableHeals.Count == 0) return null;
-            if (situation.HPPercent >= Settings.SC.EmergencyHealHP) return null;
+            float threshold = healThresholdOverride > 0 ? healThresholdOverride : Settings.SC.EmergencyHealHP;
+            if (situation.HPPercent >= threshold) return null;
             if (situation.HasHealedThisTurn) return null;
 
             // ★ v3.12.2: ScoreHeal 기반 최적 힐 선택 (기존 first-available 대체)

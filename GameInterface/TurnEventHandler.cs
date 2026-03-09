@@ -8,7 +8,6 @@ using Kingmaker.PubSubSystem.Core;
 using Kingmaker.PubSubSystem.Core.Interfaces;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
-using CompanionAI_v3.Diagnostics;  // ★ v3.44.0: DecisionNarrator
 using CompanionAI_v3.Data;
 
 namespace CompanionAI_v3.GameInterface
@@ -110,6 +109,9 @@ namespace CompanionAI_v3.GameInterface
             // TurnOrchestrator에 턴 종료 알림
             TurnOrchestrator.Instance.OnTurnEnd(unit);
 
+            // ★ v3.48.0: Tactical Narrator 오버레이 숨김
+            Diagnostics.TacticalNarrator.OnTurnEnd();
+
             // ★ v3.5.26: 턴 시작 시간 정리
             CustomBehaviourTreePatch.ClearTurnStart(unit.UniqueId);
         }
@@ -146,8 +148,8 @@ namespace CompanionAI_v3.GameInterface
 
                 TurnOrchestrator.Instance.OnCombatEnd();
 
-                // ★ v3.44.0: DecisionNarrator 히스토리 초기화
-                DecisionNarrator.Instance.OnCombatEnd();
+                // ★ v3.48.0: Tactical Narrator 전투 종료 정리
+                Diagnostics.TacticalNarrator.OnCombatEnd();
 
                 // ★ v3.1.19: 패턴 캐시 클리어
                 CombatAPI.ClearPatternCache();

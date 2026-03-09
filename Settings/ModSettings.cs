@@ -98,208 +98,24 @@ namespace CompanionAI_v3.Settings
                 { Language.Japanese, "各ターンのAI判断根拠をJSONに記録。戦闘中リアルタイム更新。\n保存先: [UMMフォルダ]\\CompanionAI_v3\\combat_reports\\current_combat.json" }
             },
 
-            // === ★ v3.44.0: Decision Narrator — AI 결정 오버레이 설정 ===
+            // === ★ v3.48.0: Tactical Narrator 설정 ===
             ["EnableDecisionOverlay"] = new() {
-                { Language.English, "AI Decision Overlay" },
-                { Language.Korean, "AI 결정 오버레이" },
-                { Language.Russian, "Оверлей решений ИИ" },
-                { Language.Japanese, "AI判断オーバーレイ" }
+                { Language.English, "Tactical Narrator" },
+                { Language.Korean, "전술 내레이터" },
+                { Language.Russian, "Тактический рассказчик" },
+                { Language.Japanese, "タクティカルナレーター" }
             },
             ["EnableDecisionOverlayDesc"] = new() {
-                { Language.English, "Show AI decision reasoning in-game during combat. Displays why each companion chose their actions." },
-                { Language.Korean, "전투 중 AI의 결정 근거를 인게임으로 표시합니다. 각 동료가 왜 그 행동을 선택했는지 자연어로 설명합니다." },
-                { Language.Russian, "Показывать обоснование решений ИИ в бою. Объясняет, почему каждый компаньон выбрал свои действия." },
-                { Language.Japanese, "戦闘中にAIの判断根拠をゲーム内に表示。各仲間がその行動を選んだ理由を説明します。" }
-            },
-            ["PauseOnAITurn"] = new() {
-                { Language.English, "Pause on AI Turn" },
-                { Language.Korean, "AI 턴 자동 일시정지" },
-                { Language.Russian, "Пауза на ходу ИИ" },
-                { Language.Japanese, "AIターンで自動一時停止" }
-            },
-            ["PauseOnAITurnDesc"] = new() {
-                { Language.English, "Automatically pause when an AI companion starts their turn. Press 'Continue' to resume." },
-                { Language.Korean, "AI 동료의 턴 시작 시 자동으로 일시정지합니다. '계속' 버튼으로 재개하세요." },
-                { Language.Russian, "Автоматическая пауза при начале хода ИИ. Нажмите «Продолжить»." },
-                { Language.Japanese, "AI仲間のターン開始時に自動一時停止。「続行」ボタンで再開。" }
+                { Language.English, "Show companion dialogue at turn start — each character narrates the battlefield situation and their plan in their own personality" },
+                { Language.Korean, "턴 시작 시 동료 대사 표시 — 각 캐릭터가 전장 상황과 계획을 자신만의 개성으로 설명합니다" },
+                { Language.Russian, "Показывать реплики компаньонов в начале хода — каждый персонаж описывает ситуацию и план в своём стиле" },
+                { Language.Japanese, "ターン開始時に仲間の台詞を表示 — 各キャラが戦場状況と計画を自分の個性で語ります" }
             },
             ["OverlayScale"] = new() {
                 { Language.English, "Overlay Size" },
                 { Language.Korean, "오버레이 크기" },
                 { Language.Russian, "Размер оверлея" },
                 { Language.Japanese, "オーバーレイサイズ" }
-            },
-
-            // === ★ v3.44.0: Decision Narrator — 내러티브 템플릿 ===
-            ["narr_header"] = new() {
-                { Language.English, "{0} ({1}) — HP {2}%" },
-                { Language.Korean, "{0} ({1}) — HP {2}%" },
-                { Language.Russian, "{0} ({1}) — HP {2}%" },
-                { Language.Japanese, "{0} ({1}) — HP {2}%" }
-            },
-            ["narr_attack_threatening"] = new() {
-                { Language.English, "Attacking {0} — threatening {1} allies" },
-                { Language.Korean, "{0}을(를) 공격합니다 — 아군 {1}명을 위협하고 있어서" },
-                { Language.Russian, "Атакует {0} — угрожает {1} союзникам" },
-                { Language.Japanese, "{0}を攻撃 — 味方{1}名を脅かしているため" }
-            },
-            ["narr_attack_killable"] = new() {
-                { Language.English, "Attacking {0} — can finish them off" },
-                { Language.Korean, "{0}을(를) 공격합니다 — 처치 가능한 적이라서" },
-                { Language.Russian, "Атакует {0} — можно добить" },
-                { Language.Japanese, "{0}を攻撃 — 倒せる敵だから" }
-            },
-            ["narr_attack_nearest"] = new() {
-                { Language.English, "Attacking {0} — nearest enemy" },
-                { Language.Korean, "{0}을(를) 공격합니다 — 가장 가까운 적이라서" },
-                { Language.Russian, "Атакует {0} — ближайший враг" },
-                { Language.Japanese, "{0}を攻撃 — 最も近い敵" }
-            },
-            ["narr_attack_best"] = new() {
-                { Language.English, "Attacking {0} — highest priority target" },
-                { Language.Korean, "{0}을(를) 공격합니다 — 가장 위험한 적이라서" },
-                { Language.Russian, "Атакует {0} — приоритетная цель" },
-                { Language.Japanese, "{0}を攻撃 — 最優先目標" }
-            },
-            ["narr_move_approach"] = new() {
-                { Language.English, "Moving toward {0} — getting into attack range" },
-                { Language.Korean, "{0} 방향으로 이동합니다 — 공격 사거리에 들어가기 위해" },
-                { Language.Russian, "Двигается к {0} — входит в зону атаки" },
-                { Language.Japanese, "{0}に接近 — 攻撃射程に入るため" }
-            },
-            ["narr_retreat"] = new() {
-                { Language.English, "Retreating — enemy too close" },
-                { Language.Korean, "후퇴합니다 — 적이 너무 가까워서" },
-                { Language.Russian, "Отступает — враг слишком близко" },
-                { Language.Japanese, "後退 — 敵が近すぎる" }
-            },
-            ["narr_move_heal"] = new() {
-                { Language.English, "Moving toward {0} — to heal them" },
-                { Language.Korean, "{0}에게 접근합니다 — 치료하기 위해" },
-                { Language.Russian, "Двигается к {0} — чтобы лечить" },
-                { Language.Japanese, "{0}に接近 — 治療するため" }
-            },
-            ["narr_heal"] = new() {
-                { Language.English, "Healing {0} — HP {1}%" },
-                { Language.Korean, "{0}을(를) 치료합니다 — HP {1}%" },
-                { Language.Russian, "Лечит {0} — HP {1}%" },
-                { Language.Japanese, "{0}を回復 — HP {1}%" }
-            },
-            ["narr_buff"] = new() {
-                { Language.English, "Using {1} on {0}" },
-                { Language.Korean, "{0}에게 {1}을(를) 사용합니다" },
-                { Language.Russian, "Использует {1} на {0}" },
-                { Language.Japanese, "{0}に{1}を使用" }
-            },
-            ["narr_taunt"] = new() {
-                { Language.English, "Taunting — drawing enemy attention to protect allies" },
-                { Language.Korean, "적의 관심을 끌어 아군을 보호합니다" },
-                { Language.Russian, "Провоцирует — отвлекает врагов от союзников" },
-                { Language.Japanese, "挑発 — 味方を守るため敵の注意を引く" }
-            },
-            ["narr_reload"] = new() {
-                { Language.English, "Reloading weapon" },
-                { Language.Korean, "무기를 재장전합니다" },
-                { Language.Russian, "Перезаряжает оружие" },
-                { Language.Japanese, "武器をリロード" }
-            },
-            ["narr_end_no_ap"] = new() {
-                { Language.English, "Turn complete — not enough AP" },
-                { Language.Korean, "행동을 마칩니다 — AP가 부족합니다" },
-                { Language.Russian, "Ход завершён — недостаточно AP" },
-                { Language.Japanese, "ターン終了 — APが足りない" }
-            },
-            ["narr_end_no_targets"] = new() {
-                { Language.English, "Turn complete — no targets in range" },
-                { Language.Korean, "행동을 마칩니다 — 공격 가능한 적이 없습니다" },
-                { Language.Russian, "Ход завершён — нет целей в зоне" },
-                { Language.Japanese, "ターン終了 — 射程内に目標なし" }
-            },
-            ["narr_end_wait"] = new() {
-                { Language.English, "Turn complete — waiting for next turn" },
-                { Language.Korean, "행동을 마칩니다 — 다음 턴을 기다립니다" },
-                { Language.Russian, "Ход завершён — ожидание следующего хода" },
-                { Language.Japanese, "ターン終了 — 次のターンを待機" }
-            },
-            ["narr_emergency_heal"] = new() {
-                { Language.English, "Emergency heal — HP critically low ({0}%)" },
-                { Language.Korean, "긴급 치료 — HP가 매우 낮습니다 ({0}%)" },
-                { Language.Russian, "Экстренное лечение — HP критически низкий ({0}%)" },
-                { Language.Japanese, "緊急回復 — HPが極めて低い ({0}%)" }
-            },
-            ["narr_familiar_reactivate"] = new() {
-                { Language.English, "Reactivating {0} — familiar is unconscious" },
-                { Language.Korean, "{0}을(를) 재활성화합니다 — 사역마가 기절 상태" },
-                { Language.Russian, "Реактивирует {0} — фамильяр без сознания" },
-                { Language.Japanese, "{0}を再起動 — ファミリアが気絶中" }
-            },
-            // 그룹화 템플릿
-            ["narr_attack_multi"] = new() {
-                { Language.English, "Attacking {0} ({1} targets)" },
-                { Language.Korean, "{0}을(를) 공격합니다 ({1}개 대상)" },
-                { Language.Russian, "Атакует {0} ({1} целей)" },
-                { Language.Japanese, "{0}を攻撃 ({1}体)" }
-            },
-            ["narr_buff_multi"] = new() {
-                { Language.English, "Using {0} on {1} allies" },
-                { Language.Korean, "아군 {1}명에게 {0} 사용" },
-                { Language.Russian, "Использует {0} на {1} союзниках" },
-                { Language.Japanese, "味方{1}名に{0}を使用" }
-            },
-            ["narr_heal_multi"] = new() {
-                { Language.English, "Healing {0} allies" },
-                { Language.Korean, "아군 {0}명을 치료합니다" },
-                { Language.Russian, "Лечит {0} союзников" },
-                { Language.Japanese, "味方{0}名を回復" }
-            },
-            // 전략 의도 요약
-            ["narr_strat_critical"] = new() {
-                { Language.English, "★ Using ultimate ability" },
-                { Language.Korean, "★ 궁극기를 사용합니다" },
-                { Language.Russian, "★ Использует ультимативную способность" },
-                { Language.Japanese, "★ 究極技を使用" }
-            },
-            ["narr_strat_emergency"] = new() {
-                { Language.English, "⚠ Emergency — HP {0}%, prioritizing survival" },
-                { Language.Korean, "⚠ 긴급 상황 — HP {0}%, 생존 우선" },
-                { Language.Russian, "⚠ Экстренно — HP {0}%, приоритет выживание" },
-                { Language.Japanese, "⚠ 緊急 — HP {0}%、生存優先" }
-            },
-            ["narr_strat_retreat"] = new() {
-                { Language.English, "↩ Falling back to safe distance" },
-                { Language.Korean, "↩ 안전 거리로 후퇴합니다" },
-                { Language.Russian, "↩ Отступает на безопасное расстояние" },
-                { Language.Japanese, "↩ 安全距離まで後退" }
-            },
-            ["narr_strat_reload"] = new() {
-                { Language.English, "⟳ Reloading before engaging" },
-                { Language.Korean, "⟳ 교전 전 재장전" },
-                { Language.Russian, "⟳ Перезарядка перед боем" },
-                { Language.Japanese, "⟳ 交戦前にリロード" }
-            },
-            ["narr_strat_support"] = new() {
-                { Language.English, "♦ Supporting allies this turn" },
-                { Language.Korean, "♦ 이번 턴은 아군 지원에 집중합니다" },
-                { Language.Russian, "♦ Поддержка союзников в этом ходу" },
-                { Language.Japanese, "♦ 今ターンは味方支援に集中" }
-            },
-            ["narr_continue"] = new() {
-                { Language.English, "▶ Continue" },
-                { Language.Korean, "▶ 계속" },
-                { Language.Russian, "▶ Продолжить" },
-                { Language.Japanese, "▶ 続行" }
-            },
-            ["narr_prev_turn"] = new() {
-                { Language.English, "◀ Prev" },
-                { Language.Korean, "◀ 이전" },
-                { Language.Russian, "◀ Назад" },
-                { Language.Japanese, "◀ 前へ" }
-            },
-            ["narr_next_turn"] = new() {
-                { Language.English, "Next ▶" },
-                { Language.Korean, "다음 ▶" },
-                { Language.Russian, "Далее ▶" },
-                { Language.Japanese, "次へ ▶" }
             },
 
             ["EnableAlliedNPCAI"] = new() {
@@ -1804,13 +1620,10 @@ namespace CompanionAI_v3.Settings
         /// <summary>★ v3.21.4: 함선전투에서 CompanionAI로 함선 제어 여부</summary>
         public bool EnableShipCombatAI { get; set; } = false;
 
-        /// <summary>★ v3.44.0: AI 결정 오버레이 — 인게임에서 AI의 결정 근거를 자연어로 표시</summary>
+        /// <summary>★ v3.46.0: 전략 지시 UI — 전투 중 유닛별 AI 행동 방향 지시 버튼 표시</summary>
         public bool EnableDecisionOverlay { get; set; } = false;
 
-        /// <summary>★ v3.44.0: AI 턴 자동 일시정지 — 결정 내용을 읽고 수동으로 재개</summary>
-        public bool PauseOnAITurn { get; set; } = false;
-
-        /// <summary>★ v3.44.0: 오버레이 UI 크기 배율 (0.8 ~ 2.0, 기본 1.0)</summary>
+        /// <summary>★ v3.46.0: 전략 지시 UI 크기 배율 (0.8 ~ 2.0, 기본 1.0)</summary>
         public float DecisionOverlayScale { get; set; } = 1.0f;
 
         /// <summary>★ v3.20.0: 보관할 최대 전투 리포트 수 (초과 시 오래된 것부터 삭제)</summary>
