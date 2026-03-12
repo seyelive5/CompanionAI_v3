@@ -21,6 +21,8 @@ namespace CompanionAI_v3.MachineSpirit
         // Styles (created once per scale change)
         private static GUIStyle _chatBubbleStyle;
         private static GUIStyle _inputFieldStyle;
+        private static GUIStyle _windowStyle;
+        private static Texture2D _windowBgTex;
         private static bool _stylesInitialized;
         private static float _stylesScale;
 
@@ -55,7 +57,7 @@ namespace CompanionAI_v3.MachineSpirit
                 _windowRect = new Rect(Screen.width - w - 20, 100, w, h);
             }
 
-            _windowRect = GUI.Window(WINDOW_ID, _windowRect, _ => DrawWindow(chatHistory), "", UIStyles.Background);
+            _windowRect = GUI.Window(WINDOW_ID, _windowRect, _ => DrawWindow(chatHistory), "", _windowStyle);
         }
 
         private static void EnsureStyles()
@@ -79,6 +81,21 @@ namespace CompanionAI_v3.MachineSpirit
                 fontSize = Mathf.RoundToInt(14 * UIStyles.Scale),
                 normal = { textColor = new Color(0.78f, 0.78f, 0.78f) },
                 padding = new RectOffset(8, 8, 6, 6)
+            };
+
+            // Semi-transparent dark background for chat window
+            if (_windowBgTex == null)
+            {
+                _windowBgTex = new Texture2D(1, 1);
+                _windowBgTex.SetPixel(0, 0, new Color(0.08f, 0.08f, 0.10f, 0.85f));
+                _windowBgTex.Apply();
+                _windowBgTex.hideFlags = HideFlags.HideAndDontSave;
+            }
+
+            _windowStyle = new GUIStyle(GUI.skin.box)
+            {
+                normal = { background = _windowBgTex },
+                padding = new RectOffset(8, 8, 8, 8)
             };
         }
 
