@@ -144,7 +144,7 @@ namespace CompanionAI_v3.MachineSpirit
             // Send on Enter or button click
             if ((enterPressed || sendClicked) && !string.IsNullOrWhiteSpace(_inputText))
             {
-                // TODO: Task 6 — MachineSpirit.OnUserMessage(_inputText.Trim());
+                MachineSpirit.OnUserMessage(_inputText.Trim());
                 _inputText = "";
             }
 

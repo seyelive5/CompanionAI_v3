@@ -7,6 +7,7 @@ using CompanionAI_v3.Data;
 using CompanionAI_v3.Settings;
 using CompanionAI_v3.UI;
 using CompanionAI_v3.GameInterface;
+using MSController = CompanionAI_v3.MachineSpirit.MachineSpirit;
 
 namespace CompanionAI_v3
 {
@@ -55,6 +56,9 @@ namespace CompanionAI_v3
             // ★ v3.48.0: TacticalOverlay IMGUI 렌더러 초기화 (구 DirectiveOverlay 대체)
             DirectiveOverlayUI.Initialize();
 
+            // ★ v3.52.0: Machine Spirit 초기화
+            MSController.Initialize();
+
             Log("CompanionAI v3.0 loaded successfully");
             return true;
         }
@@ -97,6 +101,9 @@ namespace CompanionAI_v3
                     // ★ v3.46.0: DirectiveOverlay 정리
                     DirectiveOverlayUI.Destroy();
 
+                    // ★ v3.52.0: Machine Spirit 정리
+                    MSController.Shutdown();
+
                     _harmony?.UnpatchAll(modEntry.Info.Id);
                     Log("Harmony patches removed");
                 }
@@ -115,6 +122,7 @@ namespace CompanionAI_v3
         private static void OnGUI(UnityModManager.ModEntry modEntry)
         {
             MainUI.OnGUI();
+            MSController.OnGUI();
         }
 
         /// <summary>

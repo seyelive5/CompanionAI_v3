@@ -60,13 +60,13 @@ namespace CompanionAI_v3.MachineSpirit
                 Timestamp = Time.time
             });
 
-            // TODO: Task 6 — Notify MachineSpirit of major events for spontaneous speech
-            // if (type == GameEventType.CombatStart ||
-            //     type == GameEventType.CombatEnd ||
-            //     type == GameEventType.UnitDeath)
-            // {
-            //     MachineSpirit.OnMajorEvent(_events[_events.Count - 1]);
-            // }
+            // ★ v3.52.0: Notify MachineSpirit of major events for spontaneous speech
+            if (type == GameEventType.CombatStart ||
+                type == GameEventType.CombatEnd ||
+                type == GameEventType.UnitDeath)
+            {
+                MachineSpirit.OnMajorEvent(_events[_events.Count - 1]);
+            }
         }
 
         public static void AddTurnPlanSummary(string unitName, string summary)
@@ -128,8 +128,8 @@ namespace CompanionAI_v3.MachineSpirit
         public static void Prefix(Entity entity, string text)
         {
             if (string.IsNullOrEmpty(text)) return;
-            // TODO: Task 6 — gate on MachineSpirit.IsActive
-            // if (!MachineSpirit.IsActive) return;
+            // ★ v3.52.0: Gate bark collection on MachineSpirit being active
+            if (!MachineSpirit.IsActive) return;
 
             string speaker = "Unknown";
             try
