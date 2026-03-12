@@ -7,6 +7,7 @@ using UnityEngine;
 using UnityEngine.Networking;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using CompanionAI_v3.Settings;
 
 namespace CompanionAI_v3.MachineSpirit
 {
@@ -43,13 +44,23 @@ namespace CompanionAI_v3.MachineSpirit
 
             _isRequesting = true;
 
+            // Gemini 2.5 "thinking" models count internal reasoning tokens against max_tokens,
+            // so a low cap (e.g. 750) leaves almost nothing for the visible response.
+            // Solution: don't send max_tokens at all — let the API use its default.
+            // The system prompt already instructs "2-3 sentences max" to keep responses short.
+            // Only include max_tokens for non-thinking providers (Ollama, Groq, OpenAI)
+            // where it acts as a reasonable safety cap.
+            bool isThinkingModel = config.Provider == ApiProvider.Gemini;
+
             var requestBody = new JObject
             {
                 ["model"] = config.Model,
                 ["messages"] = JArray.FromObject(messages),
-                ["max_tokens"] = config.MaxTokens,
                 ["temperature"] = config.Temperature
             };
+
+            if (!isThinkingModel)
+                requestBody["max_tokens"] = config.MaxTokens;
 
             string url = config.ApiUrl.TrimEnd('/') + "/chat/completions";
             string json = requestBody.ToString(Formatting.None);
@@ -79,7 +90,16 @@ namespace CompanionAI_v3.MachineSpirit
             try
             {
                 var response = JObject.Parse(request.downloadHandler.text);
-                var content = response["choices"]?[0]?["message"]?["content"]?.ToString();
+                var choice = response["choices"]?[0];
+                var content = choice?["message"]?["content"]?.ToString();
+                var finishReason = choice?["finish_reason"]?.ToString();
+
+                // Log truncation diagnostics
+                string tokensInfo = isThinkingModel ? "unlimited (thinking model)" : config.MaxTokens.ToString();
+                if (finishReason == "length")
+                    Main.Log($"[MachineSpirit] Response truncated (finish_reason=length, max_tokens={tokensInfo}).");
+                Main.LogDebug($"[MachineSpirit] finish_reason={finishReason}, max_tokens={tokensInfo}, response_len={content?.Length ?? 0}");
+
                 if (string.IsNullOrEmpty(content))
                     onError?.Invoke("Empty response from LLM");
                 else

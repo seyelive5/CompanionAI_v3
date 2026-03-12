@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CompanionAI_v3.MachineSpirit
@@ -16,15 +17,48 @@ namespace CompanionAI_v3.MachineSpirit
         public bool Enabled { get; set; } = false;
         public ApiProvider Provider { get; set; } = ApiProvider.Ollama;
         public string ApiUrl { get; set; } = "http://localhost:11434/v1";
-        public string ApiKey { get; set; } = "";
         public string Model { get; set; } = "llama3.2";
-        public int MaxTokens { get; set; } = 150;
+        public int MaxTokens { get; set; } = 500;
         public float Temperature { get; set; } = 0.8f;
         public KeyCode Hotkey { get; set; } = KeyCode.F2;
 
+        // ★ Per-provider API keys (each provider stores its own key)
+        public Dictionary<ApiProvider, string> ProviderApiKeys { get; set; } = new();
+
+        // ★ Legacy single ApiKey — kept for JSON migration only.
+        //   On first load, if this has a value and ProviderApiKeys is empty,
+        //   we migrate it to the current provider's slot.
+        public string ApiKey
+        {
+            get => GetCurrentApiKey();
+            set => SetCurrentApiKey(value);
+        }
+
+        private string GetCurrentApiKey()
+        {
+            return ProviderApiKeys.TryGetValue(Provider, out var key) ? key : "";
+        }
+
+        private void SetCurrentApiKey(string value)
+        {
+            ProviderApiKeys[Provider] = value ?? "";
+        }
+
+        /// <summary>
+        /// Migrate legacy single ApiKey to per-provider storage.
+        /// Called once after deserialization.
+        /// </summary>
+        public void MigrateApiKey(string legacyKey)
+        {
+            if (string.IsNullOrEmpty(legacyKey) || ProviderApiKeys.Count > 0)
+                return;
+            // Legacy key was most likely for the current provider
+            ProviderApiKeys[Provider] = legacyKey;
+        }
+
         /// <summary>
         /// Apply preset URL and model for the selected provider.
-        /// Does not overwrite ApiKey.
+        /// API keys are stored per-provider and preserved across switches.
         /// </summary>
         public void ApplyPreset(ApiProvider provider)
         {

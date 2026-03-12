@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using HarmonyLib;
 using Kingmaker.Code.UI.MVVM.VM.Bark;
+using Kingmaker.Controllers.Dialog;
 using Kingmaker.Controllers.TurnBased;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.EntitySystem.Entities.Base;
@@ -29,10 +30,20 @@ namespace CompanionAI_v3.MachineSpirit
         public string Text;
         public float Timestamp;
 
-        public override string ToString() =>
-            string.IsNullOrEmpty(Speaker)
-                ? $"[{Type}] {Text}"
-                : $"[{Type}] {Speaker}: {Text}";
+        public override string ToString()
+        {
+            // Format events as sensor observations, NOT as dialogue transcripts.
+            // Prevents LLMs from copying the format and generating character dialogue.
+            if (Type == GameEventType.Dialogue && !string.IsNullOrEmpty(Speaker))
+                return $"Cogitator log — {Speaker} said: \"{Text}\"";
+            if (Type == GameEventType.Bark && !string.IsNullOrEmpty(Speaker))
+                return $"Vox intercept — {Speaker} spoke: \"{Text}\"";
+            if (Type == GameEventType.TurnPlanSummary && !string.IsNullOrEmpty(Speaker))
+                return $"Tactical cogitator — {Speaker}: {Text}";
+            if (string.IsNullOrEmpty(Speaker))
+                return $"Sensor: {Text}";
+            return $"Sensor — {Speaker}: {Text}";
+        }
     }
 
     /// <summary>
@@ -97,7 +108,8 @@ namespace CompanionAI_v3.MachineSpirit
 
         private class CombatEventSubscriber :
             IUnitDeathHandler,
-            ITurnBasedModeHandler
+            ITurnBasedModeHandler,
+            IDialogCueHandler
         {
             public void HandleUnitDeath(AbstractUnitEntity unit)
             {
@@ -114,6 +126,32 @@ namespace CompanionAI_v3.MachineSpirit
                     AddEvent(GameEventType.CombatStart, null, "Combat initiated");
                 else
                     AddEvent(GameEventType.CombatEnd, null, "Combat concluded");
+            }
+
+            public void HandleOnCueShow(CueShowData cueShowData)
+            {
+                if (!MachineSpirit.IsActive) return;
+                if (cueShowData?.Cue == null) return;
+
+                try
+                {
+                    string text = cueShowData.Cue.DisplayText;
+                    if (string.IsNullOrEmpty(text)) return;
+
+                    string speaker = "Unknown";
+                    try
+                    {
+                        speaker = cueShowData.Cue.Speaker?.Blueprint?.CharacterName ?? "Unknown";
+                    }
+                    catch { /* safe fallback */ }
+
+                    // Truncate long dialogue to save tokens (keep first ~120 chars)
+                    if (text.Length > 120)
+                        text = text.Substring(0, 120) + "...";
+
+                    AddEvent(GameEventType.Dialogue, speaker, text);
+                }
+                catch { /* safe fallback */ }
             }
         }
     }

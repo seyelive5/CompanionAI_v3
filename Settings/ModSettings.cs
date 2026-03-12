@@ -1996,6 +1996,13 @@ namespace CompanionAI_v3.Settings
                 Instance = new ModSettings();
             }
 
+            // ★ v3.54.0: MaxTokens 마이그레이션 (구버전 150/300 → 신버전 500)
+            if (Instance.MachineSpirit.MaxTokens < 500)
+            {
+                Instance.MachineSpirit.MaxTokens = 500;
+                Save();
+            }
+
             // ★ v3.1.30: AI 설정 로드 (Response Curves, Role 가중치 등)
             AIConfig.Load(modEntry.Path);
         }
