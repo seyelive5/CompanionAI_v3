@@ -1411,6 +1411,14 @@ namespace CompanionAI_v3.Settings
             },
 
             // ── Machine Spirit settings ───────────────────────────
+            ["MSProvider"] = new() {
+                { Language.English, "Provider" }, { Language.Korean, "공급자" },
+                { Language.Russian, "Провайдер" }, { Language.Japanese, "プロバイダー" }
+            },
+            ["MSAutoSetup"] = new() {
+                { Language.English, "Auto Setup" }, { Language.Korean, "자동 설정" },
+                { Language.Russian, "Авто-настройка" }, { Language.Japanese, "自動セットアップ" }
+            },
             ["MSEnabled"] = new() {
                 { Language.English, "Enable Machine Spirit" }, { Language.Korean, "머신 스피릿 활성화" },
                 { Language.Russian, "Включить Дух Машины" }, { Language.Japanese, "マシンスピリットを有効化" }
@@ -1444,10 +1452,10 @@ namespace CompanionAI_v3.Settings
                 { Language.Russian, "Тест соединения" }, { Language.Japanese, "接続テスト" }
             },
             ["MSDescription"] = new() {
-                { Language.English, "Ancient Machine Spirit — LLM-powered voidship AI companion. Requires an OpenAI-compatible API endpoint." },
-                { Language.Korean, "고대 머신 스피릿 — LLM 기반 보이드쉽 AI 동반자. OpenAI 호환 API 엔드포인트 필요." },
-                { Language.Russian, "Древний Дух Машины — ИИ-компаньон корабля на основе LLM. Требуется OpenAI-совместимая конечная точка API." },
-                { Language.Japanese, "古のマシンスピリット — LLMベースの虚空船AIコンパニオン。OpenAI互換APIエンドポイントが必要。" }
+                { Language.English, "Ancient Machine Spirit — LLM-powered voidship AI companion. Select a provider below. Ollama is free and runs locally on your GPU." },
+                { Language.Korean, "고대 머신 스피릿 — LLM 기반 보이드쉽 AI 동반자. 아래에서 공급자를 선택하세요. Ollama는 무료이며 GPU에서 로컬 실행됩니다." },
+                { Language.Russian, "Древний Дух Машины — ИИ-компаньон корабля на основе LLM. Выберите провайдера ниже. Ollama бесплатен и работает локально на GPU." },
+                { Language.Japanese, "古のマシンスピリット — LLMベースの虚空船AIコンパニオン。以下からプロバイダーを選択。Ollamaは無料でGPUでローカル実行。" }
             },
 
             ["GameplaySettings"] = new() {

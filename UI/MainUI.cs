@@ -6,6 +6,7 @@ using Kingmaker.EntitySystem.Entities;
 using UnityEngine;
 using CompanionAI_v3.Data;
 using CompanionAI_v3.Settings;
+using MSp = CompanionAI_v3.MachineSpirit;
 
 namespace CompanionAI_v3.UI
 {
@@ -399,9 +400,17 @@ namespace CompanionAI_v3.UI
         // Machine Spirit Tab
         // ═════════════════════════════════════════════════════════
 
+        private static readonly string[] _providerNames = { "Ollama (Free, Local)", "Groq (Free Tier)", "OpenAI (Paid)", "Custom" };
+        private static readonly string[] _providerCosts = { "Free — runs on your GPU", "Free tier — requires API key", "Paid — requires API key", "" };
+        private static int _selectedProvider = -1;
+
         private static void DrawMachineSpiritTab()
         {
             var ms = Main.Settings.MachineSpirit;
+
+            // Sync dropdown index on first draw
+            if (_selectedProvider < 0)
+                _selectedProvider = (int)ms.Provider;
 
             // Description
             UIStyles.SectionTitle(L("TabMachineSpirit"));
@@ -418,21 +427,75 @@ namespace CompanionAI_v3.UI
             // API Settings (only show if enabled)
             if (ms.Enabled)
             {
-                // API URL
+                // ── Provider dropdown ──
                 GUILayout.BeginHorizontal();
-                GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSApiUrl")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
-                ms.ApiUrl = GUILayout.TextField(ms.ApiUrl, GUILayout.ExpandWidth(true));
+                GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSProvider")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
+                int newProvider = GUILayout.SelectionGrid(_selectedProvider, _providerNames, 4,
+                    UIStyles.Button, GUILayout.Height(BUTTON_HEIGHT));
                 GUILayout.EndHorizontal();
+
+                if (newProvider != _selectedProvider)
+                {
+                    _selectedProvider = newProvider;
+                    ms.ApplyPreset((MSp.ApiProvider)newProvider);
+                    MSp.OllamaSetup.Reset();
+                }
+
+                // Cost hint
+                if (_selectedProvider < _providerCosts.Length && !string.IsNullOrEmpty(_providerCosts[_selectedProvider]))
+                {
+                    GUILayout.Label($"<color={UIStyles.TextMid}>{_providerCosts[_selectedProvider]}</color>", UIStyles.Description);
+                }
                 GUILayout.Space(5);
 
-                // API Key (masked)
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSApiKey")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
-                ms.ApiKey = GUILayout.PasswordField(ms.ApiKey, '*', GUILayout.ExpandWidth(true));
-                GUILayout.EndHorizontal();
-                GUILayout.Space(5);
+                // ── Ollama Auto Setup ──
+                if (ms.Provider == MSp.ApiProvider.Ollama)
+                {
+                    GUILayout.BeginHorizontal();
+                    bool isRunning = MSp.OllamaSetup.State == MSp.OllamaSetup.SetupState.Checking
+                                  || MSp.OllamaSetup.State == MSp.OllamaSetup.SetupState.Starting
+                                  || MSp.OllamaSetup.State == MSp.OllamaSetup.SetupState.Pulling;
 
-                // Model
+                    GUI.enabled = !isRunning;
+                    if (GUILayout.Button($"<color={UIStyles.TextLight}>{L("MSAutoSetup")}</color>",
+                        UIStyles.Button, GUILayout.Width(UIStyles.Sd(180)), GUILayout.Height(BUTTON_HEIGHT)))
+                    {
+                        MSp.CoroutineRunner.Start(MSp.OllamaSetup.RunAutoSetup(ms.Model));
+                    }
+                    GUI.enabled = true;
+
+                    // Status text
+                    if (MSp.OllamaSetup.State != MSp.OllamaSetup.SetupState.Idle)
+                    {
+                        string statusColor = MSp.OllamaSetup.State == MSp.OllamaSetup.SetupState.Error
+                            ? UIStyles.RoleRed : UIStyles.Gold;
+                        GUILayout.Label($"<color={statusColor}>{MSp.OllamaSetup.StatusText}</color>", UIStyles.Label);
+                    }
+                    GUILayout.EndHorizontal();
+                    GUILayout.Space(5);
+                }
+
+                // ── API URL (Custom only) ──
+                if (ms.Provider == MSp.ApiProvider.Custom)
+                {
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSApiUrl")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
+                    ms.ApiUrl = GUILayout.TextField(ms.ApiUrl, GUILayout.ExpandWidth(true));
+                    GUILayout.EndHorizontal();
+                    GUILayout.Space(5);
+                }
+
+                // ── API Key (not for Ollama) ──
+                if (ms.Provider != MSp.ApiProvider.Ollama)
+                {
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSApiKey")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
+                    ms.ApiKey = GUILayout.PasswordField(ms.ApiKey, '*', GUILayout.ExpandWidth(true));
+                    GUILayout.EndHorizontal();
+                    GUILayout.Space(5);
+                }
+
+                // ── Model ──
                 GUILayout.BeginHorizontal();
                 GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSModel")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
                 ms.Model = GUILayout.TextField(ms.Model, GUILayout.ExpandWidth(true));
@@ -470,7 +533,7 @@ namespace CompanionAI_v3.UI
                 // Test Connection button
                 if (GUILayout.Button($"<color={UIStyles.TextLight}>{L("MSTestConnection")}</color>", UIStyles.Button, GUILayout.Width(UIStyles.Sd(180)), GUILayout.Height(BUTTON_HEIGHT)))
                 {
-                    CompanionAI_v3.MachineSpirit.MachineSpirit.OnUserMessage("Hello, Machine Spirit. Respond with a brief greeting.");
+                    MSp.MachineSpirit.OnUserMessage("Hello, Machine Spirit. Respond with a brief greeting.");
                 }
             }
         }
