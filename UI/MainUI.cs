@@ -401,7 +401,6 @@ namespace CompanionAI_v3.UI
         // ═════════════════════════════════════════════════════════
 
         private static readonly string[] _providerNames = { "Ollama (Free, Local)", "Groq (Free Tier)", "OpenAI (Paid)", "Custom" };
-        private static readonly string[] _providerCosts = { "Free — runs on your GPU", "Free tier — requires API key", "Paid — requires API key", "" };
         private static int _selectedProvider = -1;
 
         private static void DrawMachineSpiritTab()
@@ -441,11 +440,8 @@ namespace CompanionAI_v3.UI
                     MSp.OllamaSetup.Reset();
                 }
 
-                // Cost hint
-                if (_selectedProvider < _providerCosts.Length && !string.IsNullOrEmpty(_providerCosts[_selectedProvider]))
-                {
-                    GUILayout.Label($"<color={UIStyles.TextMid}>{_providerCosts[_selectedProvider]}</color>", UIStyles.Description);
-                }
+                // ── Provider guide text ──
+                GUILayout.Label($"<color={UIStyles.TextMid}>{L("MSGuide_" + ms.Provider)}</color>", UIStyles.Description);
                 GUILayout.Space(5);
 
                 // ── Ollama Auto Setup ──
@@ -475,6 +471,13 @@ namespace CompanionAI_v3.UI
                     GUILayout.Space(5);
                 }
 
+                // ── Groq/OpenAI setup steps ──
+                if (ms.Provider == MSp.ApiProvider.Groq || ms.Provider == MSp.ApiProvider.OpenAI)
+                {
+                    GUILayout.Label($"<color={UIStyles.Gold}>{L("MSSteps_" + ms.Provider)}</color>", UIStyles.Description);
+                    GUILayout.Space(5);
+                }
+
                 // ── API URL (Custom only) ──
                 if (ms.Provider == MSp.ApiProvider.Custom)
                 {
@@ -500,8 +503,14 @@ namespace CompanionAI_v3.UI
                 GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSModel")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
                 ms.Model = GUILayout.TextField(ms.Model, GUILayout.ExpandWidth(true));
                 GUILayout.EndHorizontal();
+                GUILayout.Label($"<color={UIStyles.TextDim}>{L("MSModelHint")}</color>", UIStyles.Description);
                 GUILayout.Space(10);
                 UIStyles.DrawDivider();
+                GUILayout.Space(5);
+
+                // ── Advanced Settings ──
+                GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSAdvanced")}</color>", UIStyles.BoldLabel);
+                GUILayout.Label($"<color={UIStyles.TextDim}>{L("MSAdvancedHint")}</color>", UIStyles.Description);
                 GUILayout.Space(5);
 
                 // Max Tokens slider (50-500)

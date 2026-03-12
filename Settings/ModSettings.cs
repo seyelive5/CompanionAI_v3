@@ -1419,6 +1419,58 @@ namespace CompanionAI_v3.Settings
                 { Language.English, "Auto Setup" }, { Language.Korean, "자동 설정" },
                 { Language.Russian, "Авто-настройка" }, { Language.Japanese, "自動セットアップ" }
             },
+            ["MSGuide_Ollama"] = new() {
+                { Language.English, "Runs AI locally on your PC (free, no internet needed after setup). Requires ~8GB VRAM GPU.\n1. Install Ollama from ollama.com  2. Click [Auto Setup] below" },
+                { Language.Korean, "PC에서 로컬로 AI 실행 (무료, 설치 후 인터넷 불필요). GPU VRAM 8GB 이상 권장.\n1. ollama.com에서 Ollama 설치  2. 아래 [자동 설정] 클릭" },
+                { Language.Russian, "Запускает ИИ локально на ПК (бесплатно, интернет не нужен). Требуется GPU ~8ГБ VRAM.\n1. Установите Ollama с ollama.com  2. Нажмите [Авто-настройка]" },
+                { Language.Japanese, "PCでAIをローカル実行（無料、セットアップ後はネット不要）。VRAM 8GB以上推奨。\n1. ollama.comからインストール  2. [自動セットアップ]をクリック" }
+            },
+            ["MSGuide_Groq"] = new() {
+                { Language.English, "Fast cloud AI — free tier available, no GPU needed. Recommended for most users.\nSign up at console.groq.com, create an API key, and paste it below." },
+                { Language.Korean, "빠른 클라우드 AI — 무료 사용 가능, GPU 불필요. 대부분의 사용자에게 추천.\nconsole.groq.com에서 가입 후 API 키를 발급받아 아래에 붙여넣으세요." },
+                { Language.Russian, "Быстрый облачный ИИ — бесплатный тариф, GPU не нужен. Лучший выбор.\nЗарегистрируйтесь на console.groq.com, создайте API-ключ и вставьте ниже." },
+                { Language.Japanese, "高速クラウドAI — 無料枠あり、GPU不要。ほとんどのユーザーにおすすめ。\nconsole.groq.comで登録しAPIキーを作成して下に貼り付け。" }
+            },
+            ["MSGuide_OpenAI"] = new() {
+                { Language.English, "OpenAI GPT models — highest quality, paid. Requires OpenAI account with billing.\nGet your API key at platform.openai.com/api-keys" },
+                { Language.Korean, "OpenAI GPT 모델 — 최고 품질, 유료. 결제 등록된 OpenAI 계정 필요.\nplatform.openai.com/api-keys에서 API 키 발급." },
+                { Language.Russian, "Модели GPT от OpenAI — высшее качество, платно. Нужен аккаунт с оплатой.\nAPI-ключ: platform.openai.com/api-keys" },
+                { Language.Japanese, "OpenAI GPTモデル — 最高品質、有料。課金済みOpenAIアカウント必要。\nAPIキー: platform.openai.com/api-keys" }
+            },
+            ["MSGuide_Custom"] = new() {
+                { Language.English, "For advanced users. Connect to any OpenAI-compatible API (LM Studio, text-generation-webui, etc)." },
+                { Language.Korean, "고급 사용자용. OpenAI 호환 API에 연결 (LM Studio, text-generation-webui 등)." },
+                { Language.Russian, "Для продвинутых. Любой OpenAI-совместимый API (LM Studio, text-generation-webui и т.д.)." },
+                { Language.Japanese, "上級者向け。OpenAI互換APIに接続（LM Studio、text-generation-webui等）。" }
+            },
+            ["MSSteps_Groq"] = new() {
+                { Language.English, "Step 1: console.groq.com > Step 2: Sign up (Google OK) > Step 3: API Keys > Create > Step 4: Paste below" },
+                { Language.Korean, "1: console.groq.com 접속 > 2: 가입 (구글 가능) > 3: API Keys > Create > 4: 아래 붙여넣기" },
+                { Language.Russian, "1: console.groq.com > 2: Регистрация (Google) > 3: API Keys > Create > 4: Вставить ниже" },
+                { Language.Japanese, "1: console.groq.com > 2: 登録(Google可) > 3: API Keys > Create > 4: 下に貼付" }
+            },
+            ["MSSteps_OpenAI"] = new() {
+                { Language.English, "Step 1: platform.openai.com > Step 2: Sign up + billing > Step 3: API Keys > Create > Step 4: Paste below" },
+                { Language.Korean, "1: platform.openai.com 접속 > 2: 가입 + 결제등록 > 3: API Keys > Create > 4: 아래 붙여넣기" },
+                { Language.Russian, "1: platform.openai.com > 2: Регистрация + оплата > 3: API Keys > Create > 4: Вставить ниже" },
+                { Language.Japanese, "1: platform.openai.com > 2: 登録+課金 > 3: API Keys > Create > 4: 下に貼付" }
+            },
+            ["MSModelHint"] = new() {
+                { Language.English, "Default is recommended. Change only if you know what you're doing." },
+                { Language.Korean, "기본값 권장. 잘 모르면 그대로 두세요." },
+                { Language.Russian, "По умолчанию рекомендуется. Меняйте только если знаете." },
+                { Language.Japanese, "デフォルト推奨。分からなければそのままで。" }
+            },
+            ["MSAdvanced"] = new() {
+                { Language.English, "Advanced Settings" }, { Language.Korean, "고급 설정" },
+                { Language.Russian, "Расширенные настройки" }, { Language.Japanese, "詳細設定" }
+            },
+            ["MSAdvancedHint"] = new() {
+                { Language.English, "Leave at defaults unless you want to fine-tune the AI's responses." },
+                { Language.Korean, "AI 응답을 세밀하게 조정하려는 게 아니면 기본값 그대로 두세요." },
+                { Language.Russian, "Оставьте по умолчанию, если не хотите настраивать ответы ИИ." },
+                { Language.Japanese, "AIの応答を微調整する場合以外はデフォルトで。" }
+            },
             ["MSEnabled"] = new() {
                 { Language.English, "Enable Machine Spirit" }, { Language.Korean, "머신 스피릿 활성화" },
                 { Language.Russian, "Включить Дух Машины" }, { Language.Japanese, "マシンスピリットを有効化" }
