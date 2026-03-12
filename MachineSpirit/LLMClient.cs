@@ -15,6 +15,9 @@ namespace CompanionAI_v3.MachineSpirit
         private static bool _isRequesting;
         public static bool IsRequesting => _isRequesting;
 
+        /// <summary>Reset state on mod shutdown (clears stuck request flag).</summary>
+        public static void Reset() => _isRequesting = false;
+
         // Message format for OpenAI chat completions
         public class ChatMessage
         {

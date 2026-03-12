@@ -6,8 +6,11 @@ namespace CompanionAI_v3.MachineSpirit
 {
     public static class MachineSpirit
     {
+        private const int MAX_CHAT_HISTORY = 100;
+        private const float SPONTANEOUS_COOLDOWN = 30f;
         private static readonly List<ChatMessage> _chatHistory = new List<ChatMessage>();
         private static MachineSpiritConfig Config => Main.Settings?.MachineSpirit;
+        private static float _lastSpontaneousTime;
 
         public static bool IsActive =>
             Config != null && Config.Enabled && !string.IsNullOrEmpty(Config.ApiUrl);
@@ -22,12 +25,19 @@ namespace CompanionAI_v3.MachineSpirit
             GameEventCollector.Unsubscribe();
             GameEventCollector.Clear();
             _chatHistory.Clear();
+            LLMClient.Reset();
         }
 
         public static void OnGUI()
         {
             if (!IsActive) return;
             ChatWindow.OnGUI(Config, _chatHistory);
+        }
+
+        private static void TrimHistory()
+        {
+            while (_chatHistory.Count > MAX_CHAT_HISTORY)
+                _chatHistory.RemoveAt(0);
         }
 
         public static void OnUserMessage(string text)
@@ -40,8 +50,9 @@ namespace CompanionAI_v3.MachineSpirit
                 Text = text,
                 Timestamp = Time.time
             });
+            TrimHistory();
 
-            var messages = ContextBuilder.Build(_chatHistory, text);
+            var messages = ContextBuilder.Build(_chatHistory);
             ChatWindow.SetThinking(true);
 
             CoroutineRunner.Start(LLMClient.SendChatRequest(
@@ -73,6 +84,8 @@ namespace CompanionAI_v3.MachineSpirit
         {
             if (!IsActive) return;
             if (LLMClient.IsRequesting) return;
+            if (Time.time - _lastSpontaneousTime < SPONTANEOUS_COOLDOWN) return;
+            _lastSpontaneousTime = Time.time;
 
             var messages = ContextBuilder.BuildForEvent(evt, _chatHistory);
             ChatWindow.SetThinking(true);
