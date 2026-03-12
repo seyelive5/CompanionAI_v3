@@ -18,6 +18,7 @@ namespace CompanionAI_v3.MachineSpirit
         public static void Initialize()
         {
             GameEventCollector.Subscribe();
+            CoroutineRunner.EnsureInstance(); // OnGUI 렌더링을 위해 즉시 생성
         }
 
         public static void Shutdown()
@@ -109,6 +110,7 @@ namespace CompanionAI_v3.MachineSpirit
 
     /// <summary>
     /// MonoBehaviour wrapper to run coroutines from static context.
+    /// Also handles OnGUI for ChatWindow (Main.OnGUI only fires when UMM settings are open).
     /// </summary>
     public class CoroutineRunner : MonoBehaviour
     {
@@ -120,13 +122,21 @@ namespace CompanionAI_v3.MachineSpirit
             _instance.StartCoroutine(coroutine);
         }
 
-        private static void EnsureInstance()
+        public static void EnsureInstance()
         {
             if (_instance != null) return;
             var go = new GameObject("CompanionAI_CoroutineRunner");
             go.hideFlags = HideFlags.HideAndDontSave;
             Object.DontDestroyOnLoad(go);
             _instance = go.AddComponent<CoroutineRunner>();
+        }
+
+        /// <summary>
+        /// Unity calls this every frame — renders ChatWindow independently of UMM settings panel.
+        /// </summary>
+        private void OnGUI()
+        {
+            MachineSpirit.OnGUI();
         }
     }
 }

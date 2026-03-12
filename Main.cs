@@ -122,7 +122,7 @@ namespace CompanionAI_v3
         private static void OnGUI(UnityModManager.ModEntry modEntry)
         {
             MainUI.OnGUI();
-            MSController.OnGUI();
+            // ChatWindow는 CoroutineRunner.OnGUI()에서 독립 렌더링 (UMM 설정 밖에서도 동작)
         }
 
         /// <summary>
