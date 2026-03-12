@@ -40,6 +40,10 @@
       <HintPath>$(ManagedPath)\UnityEngine.IMGUIModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.UnityWebRequestModule">
+      <HintPath>$(ManagedPath)\UnityEngine.UnityWebRequestModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.TextRenderingModule">
       <HintPath>$(ManagedPath)\UnityEngine.TextRenderingModule.dll</HintPath>
       <Private>False</Private>
