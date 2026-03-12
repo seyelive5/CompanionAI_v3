@@ -498,12 +498,8 @@ namespace CompanionAI_v3.UI
                     GUILayout.Space(5);
                 }
 
-                // ── Model ──
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSModel")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
-                ms.Model = GUILayout.TextField(ms.Model, GUILayout.ExpandWidth(true));
-                GUILayout.EndHorizontal();
-                GUILayout.Label($"<color={UIStyles.TextDim}>{L("MSModelHint")}</color>", UIStyles.Description);
+                // ── Model selection ──
+                DrawModelSelection(ms);
                 GUILayout.Space(10);
                 UIStyles.DrawDivider();
                 GUILayout.Space(5);
@@ -544,6 +540,91 @@ namespace CompanionAI_v3.UI
                 {
                     MSp.MachineSpirit.OnUserMessage("Hello, Machine Spirit. Respond with a brief greeting.");
                 }
+            }
+        }
+
+        // ═════════════════════════════════════════════════════════
+        // Model Selection
+        // ═════════════════════════════════════════════════════════
+
+        private struct ModelPreset
+        {
+            public string Id;       // model ID sent to API
+            public string Label;    // button display name
+            public string DescKey;  // localization key for description
+        }
+
+        private static readonly Dictionary<MSp.ApiProvider, ModelPreset[]> _modelPresets = new()
+        {
+            [MSp.ApiProvider.Ollama] = new[]
+            {
+                new ModelPreset { Id = "llama3.2",  Label = "Llama 3.2 (3B)",  DescKey = "MSModel_llama32" },
+                new ModelPreset { Id = "qwen2.5",   Label = "Qwen 2.5 (7B)",   DescKey = "MSModel_qwen25" },
+                new ModelPreset { Id = "gemma2",     Label = "Gemma 2 (9B)",     DescKey = "MSModel_gemma2" },
+            },
+            [MSp.ApiProvider.Gemini] = new[]
+            {
+                new ModelPreset { Id = "gemini-2.5-flash",      Label = "Gemini 2.5 Flash",      DescKey = "MSModel_gemini25flash" },
+                new ModelPreset { Id = "gemini-2.5-flash-lite", Label = "Gemini 2.5 Flash-Lite",  DescKey = "MSModel_gemini25lite" },
+                new ModelPreset { Id = "gemini-2.5-pro",        Label = "Gemini 2.5 Pro",         DescKey = "MSModel_gemini25pro" },
+            },
+            [MSp.ApiProvider.Groq] = new[]
+            {
+                new ModelPreset { Id = "llama-3.3-70b-versatile",                    Label = "Llama 3.3 70B",    DescKey = "MSModel_llama33" },
+                new ModelPreset { Id = "meta-llama/llama-4-scout-17b-16e-instruct",  Label = "Llama 4 Scout",    DescKey = "MSModel_llama4scout" },
+                new ModelPreset { Id = "qwen/qwen3-32b",                             Label = "Qwen 3 32B",       DescKey = "MSModel_qwen3" },
+            },
+            [MSp.ApiProvider.OpenAI] = new[]
+            {
+                new ModelPreset { Id = "gpt-4o-mini",  Label = "GPT-4o Mini",   DescKey = "MSModel_gpt4omini" },
+                new ModelPreset { Id = "gpt-4o",       Label = "GPT-4o",        DescKey = "MSModel_gpt4o" },
+            },
+        };
+
+        private static int _selectedModelIdx = -1;
+
+        private static void DrawModelSelection(MSp.MachineSpiritConfig ms)
+        {
+            GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSModel")}</color>", UIStyles.BoldLabel);
+
+            if (_modelPresets.TryGetValue(ms.Provider, out var presets))
+            {
+                // Sync selection index
+                if (_selectedModelIdx < 0 || _selectedModelIdx >= presets.Length || presets[_selectedModelIdx].Id != ms.Model)
+                {
+                    _selectedModelIdx = -1;
+                    for (int i = 0; i < presets.Length; i++)
+                    {
+                        if (presets[i].Id == ms.Model) { _selectedModelIdx = i; break; }
+                    }
+                }
+
+                // Model buttons
+                var labels = new string[presets.Length];
+                for (int i = 0; i < presets.Length; i++) labels[i] = presets[i].Label;
+
+                int newIdx = GUILayout.SelectionGrid(
+                    _selectedModelIdx >= 0 ? _selectedModelIdx : 0,
+                    labels, presets.Length,
+                    UIStyles.Button, GUILayout.Height(BUTTON_HEIGHT));
+
+                if (newIdx != _selectedModelIdx)
+                {
+                    _selectedModelIdx = newIdx;
+                    ms.Model = presets[newIdx].Id;
+                }
+
+                // Model description
+                if (_selectedModelIdx >= 0 && _selectedModelIdx < presets.Length)
+                {
+                    GUILayout.Label($"<color={UIStyles.TextMid}>{L(presets[_selectedModelIdx].DescKey)}</color>", UIStyles.Description);
+                }
+            }
+            else
+            {
+                // Custom provider — free text field
+                ms.Model = GUILayout.TextField(ms.Model, GUILayout.ExpandWidth(true));
+                GUILayout.Label($"<color={UIStyles.TextDim}>{L("MSModelHint")}</color>", UIStyles.Description);
             }
         }
 

@@ -1468,10 +1468,84 @@ namespace CompanionAI_v3.Settings
                 { Language.Japanese, "1: platform.openai.com > 2: 登録+課金 > 3: API Keys > Create > 4: 下に貼付" }
             },
             ["MSModelHint"] = new() {
-                { Language.English, "Default is recommended. Change only if you know what you're doing." },
-                { Language.Korean, "기본값 권장. 잘 모르면 그대로 두세요." },
-                { Language.Russian, "По умолчанию рекомендуется. Меняйте только если знаете." },
-                { Language.Japanese, "デフォルト推奨。分からなければそのままで。" }
+                { Language.English, "Enter any model ID supported by your provider." },
+                { Language.Korean, "사용 중인 공급자가 지원하는 모델 ID를 입력하세요." },
+                { Language.Russian, "Введите ID модели, поддерживаемой вашим провайдером." },
+                { Language.Japanese, "プロバイダーがサポートするモデルIDを入力。" }
+            },
+
+            // ── Ollama models ──
+            ["MSModel_llama32"] = new() {
+                { Language.English, "Fast & lightweight (2GB). English only. Best for low-end GPUs." },
+                { Language.Korean, "빠르고 가벼움 (2GB). 영어 전용. 저사양 GPU에 적합." },
+                { Language.Russian, "Быстрая и лёгкая (2ГБ). Только английский. Для слабых GPU." },
+                { Language.Japanese, "高速・軽量（2GB）。英語のみ。低スペGPU向け。" }
+            },
+            ["MSModel_qwen25"] = new() {
+                { Language.English, "Multilingual (Korean, Japanese, Chinese, English). 4.7GB. Recommended for non-English." },
+                { Language.Korean, "다국어 지원 (한국어, 일본어, 중국어, 영어). 4.7GB. 한국어 사용자 추천!" },
+                { Language.Russian, "Мультиязычная (рус., англ., кит., яп., кор.). 4.7ГБ. Рекомендуется." },
+                { Language.Japanese, "多言語対応（日本語、韓国語、中国語、英語）。4.7GB。日本語ユーザー推奨！" }
+            },
+            ["MSModel_gemma2"] = new() {
+                { Language.English, "Google's model. Good quality, multilingual. 5.4GB. Balanced choice." },
+                { Language.Korean, "Google 모델. 좋은 품질, 다국어. 5.4GB. 균형 잡힌 선택." },
+                { Language.Russian, "Модель Google. Хорошее качество, мультиязычная. 5.4ГБ." },
+                { Language.Japanese, "Googleモデル。高品質、多言語。5.4GB。バランス型。" }
+            },
+
+            // ── Gemini models ──
+            ["MSModel_gemini25flash"] = new() {
+                { Language.English, "Fast & smart. Best balance of speed and quality. Recommended." },
+                { Language.Korean, "빠르고 똑똑함. 속도와 품질의 최적 균형. 추천!" },
+                { Language.Russian, "Быстрая и умная. Лучший баланс скорости и качества. Рекомендуется." },
+                { Language.Japanese, "高速かつ賢い。速度と品質の最適バランス。推奨！" }
+            },
+            ["MSModel_gemini25lite"] = new() {
+                { Language.English, "Fastest responses. Slightly less smart. Higher daily limit (1,000/day)." },
+                { Language.Korean, "가장 빠른 응답. 약간 덜 똑똑함. 일일 한도 높음 (1,000회/일)." },
+                { Language.Russian, "Самые быстрые ответы. Чуть менее умная. Лимит выше (1000/день)." },
+                { Language.Japanese, "最速応答。やや精度低。日次制限多め（1,000回/日）。" }
+            },
+            ["MSModel_gemini25pro"] = new() {
+                { Language.English, "Smartest Gemini model. Slower, lower daily limit (100/day). For quality over speed." },
+                { Language.Korean, "가장 똑똑한 Gemini. 느리고 일일 한도 낮음 (100회/일). 품질 우선 시." },
+                { Language.Russian, "Самая умная Gemini. Медленнее, лимит ниже (100/день). Для качества." },
+                { Language.Japanese, "最も賢いGemini。低速、日次制限少(100回/日)。品質重視向け。" }
+            },
+
+            // ── Groq models ──
+            ["MSModel_llama33"] = new() {
+                { Language.English, "Large 70B model. High quality, multilingual. 1,000 requests/day free." },
+                { Language.Korean, "대형 70B 모델. 고품질, 다국어. 무료 1,000회/일." },
+                { Language.Russian, "Большая 70B модель. Высокое качество, мультиязычная. 1000 запросов/день." },
+                { Language.Japanese, "大型70Bモデル。高品質、多言語。無料1,000回/日。" }
+            },
+            ["MSModel_llama4scout"] = new() {
+                { Language.English, "Latest Llama 4. Fast, good quality. 1,000 requests/day free." },
+                { Language.Korean, "최신 Llama 4. 빠르고 좋은 품질. 무료 1,000회/일." },
+                { Language.Russian, "Новейшая Llama 4. Быстрая, хорошее качество. 1000 запросов/день." },
+                { Language.Japanese, "最新Llama 4。高速、高品質。無料1,000回/日。" }
+            },
+            ["MSModel_qwen3"] = new() {
+                { Language.English, "Alibaba 32B model. Excellent multilingual (Korean, Japanese, Chinese)." },
+                { Language.Korean, "Alibaba 32B 모델. 뛰어난 다국어 (한국어, 일본어, 중국어). 추천!" },
+                { Language.Russian, "Модель Alibaba 32B. Отличная мультиязычная (кор., яп., кит.)." },
+                { Language.Japanese, "Alibaba 32Bモデル。優れた多言語（韓国語、日本語、中国語）。推奨！" }
+            },
+
+            // ── OpenAI models ──
+            ["MSModel_gpt4omini"] = new() {
+                { Language.English, "Cheapest OpenAI model. Good quality for the price. ~$0.15/M tokens." },
+                { Language.Korean, "가장 저렴한 OpenAI. 가격 대비 좋은 품질. ~$0.15/M 토큰." },
+                { Language.Russian, "Самая дешёвая OpenAI. Хорошее качество за цену. ~$0.15/M токенов." },
+                { Language.Japanese, "最安のOpenAI。コスパ良好。~$0.15/Mトークン。" }
+            },
+            ["MSModel_gpt4o"] = new() {
+                { Language.English, "Full GPT-4o. Best quality, higher cost. ~$2.50/M tokens." },
+                { Language.Korean, "풀 GPT-4o. 최고 품질, 더 비쌈. ~$2.50/M 토큰." },
+                { Language.Russian, "Полная GPT-4o. Лучшее качество, дороже. ~$2.50/M токенов." },
+                { Language.Japanese, "フルGPT-4o。最高品質、高コスト。~$2.50/Mトークン。" }
             },
             ["MSAdvanced"] = new() {
                 { Language.English, "Advanced Settings" }, { Language.Korean, "고급 설정" },
