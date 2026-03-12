@@ -400,7 +400,7 @@ namespace CompanionAI_v3.UI
         // Machine Spirit Tab
         // ═════════════════════════════════════════════════════════
 
-        private static readonly string[] _providerNames = { "Ollama (Free, Local)", "Groq (Free)", "Gemini (Free)", "OpenAI (Paid)", "Custom" };
+        private static readonly string[] _providerNames = { "Ollama (Free, Local)", "Gemini (Free)", "Groq (Free)", "OpenAI (Paid)", "Custom" };
         private static int _selectedProvider = -1;
 
         private static void DrawMachineSpiritTab()

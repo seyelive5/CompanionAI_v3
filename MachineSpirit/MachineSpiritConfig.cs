@@ -5,8 +5,8 @@ namespace CompanionAI_v3.MachineSpirit
     public enum ApiProvider
     {
         Ollama,
-        Groq,
         Gemini,
+        Groq,
         OpenAI,
         Custom
     }

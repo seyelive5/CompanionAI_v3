@@ -1420,10 +1420,10 @@ namespace CompanionAI_v3.Settings
                 { Language.Russian, "Авто-настройка" }, { Language.Japanese, "自動セットアップ" }
             },
             ["MSGuide_Ollama"] = new() {
-                { Language.English, "Runs AI locally on your PC (free, no internet needed after setup). Requires ~8GB VRAM GPU.\n1. Install Ollama from ollama.com  2. Click [Auto Setup] below" },
-                { Language.Korean, "PC에서 로컬로 AI 실행 (무료, 설치 후 인터넷 불필요). GPU VRAM 8GB 이상 권장.\n1. ollama.com에서 Ollama 설치  2. 아래 [자동 설정] 클릭" },
-                { Language.Russian, "Запускает ИИ локально на ПК (бесплатно, интернет не нужен). Требуется GPU ~8ГБ VRAM.\n1. Установите Ollama с ollama.com  2. Нажмите [Авто-настройка]" },
-                { Language.Japanese, "PCでAIをローカル実行（無料、セットアップ後はネット不要）。VRAM 8GB以上推奨。\n1. ollama.comからインストール  2. [自動セットアップ]をクリック" }
+                { Language.English, "Runs AI locally on your PC (free, no internet needed after setup). Requires ~8GB VRAM GPU.\n1. Install Ollama from ollama.com  2. Click [Auto Setup] below\nNote: Default model (llama3.2) is English only. For other languages, change Model to: qwen2.5" },
+                { Language.Korean, "PC에서 로컬로 AI 실행 (무료, 설치 후 인터넷 불필요). GPU VRAM 8GB 이상 권장.\n1. ollama.com에서 Ollama 설치  2. 아래 [자동 설정] 클릭\n* 기본 모델(llama3.2)은 영어 전용입니다. 한국어는 Model을 qwen2.5로 변경하세요." },
+                { Language.Russian, "Запускает ИИ локально на ПК (бесплатно, интернет не нужен). Требуется GPU ~8ГБ VRAM.\n1. Установите Ollama с ollama.com  2. Нажмите [Авто-настройка]\n* Модель по умолчанию (llama3.2) только на английском. Для русского: измените Model на qwen2.5" },
+                { Language.Japanese, "PCでAIをローカル実行（無料、セットアップ後はネット不要）。VRAM 8GB以上推奨。\n1. ollama.comからインストール  2. [自動セットアップ]をクリック\n* デフォルトモデル(llama3.2)は英語のみ。日本語はModelをqwen2.5に変更。" }
             },
             ["MSGuide_Groq"] = new() {
                 { Language.English, "Fast cloud AI — free tier available, no GPU needed. Recommended for most users.\nSign up at console.groq.com, create an API key, and paste it below." },
