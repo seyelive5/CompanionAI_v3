@@ -59,6 +59,16 @@ namespace CompanionAI_v3.UI
         public static GUIStyle SliderLabel { get; private set; }
 
         private static bool _initialized;
+        private static float _lastScale;
+
+        /// <summary>Current UI scale factor. Call Reinit() if changed.</summary>
+        public static float Scale { get; private set; } = 1.5f;
+
+        /// <summary>Scaled font size helper.</summary>
+        private static int S(int baseSize) => Mathf.RoundToInt(baseSize * Scale);
+
+        /// <summary>Scaled dimension helper.</summary>
+        public static float Sd(float baseDim) => baseDim * Scale;
 
         // ── Init ───────────────────────────────────────────────
 
@@ -66,10 +76,13 @@ namespace CompanionAI_v3.UI
         /// Must be called from OnGUI() — requires GUI.skin to be available.
         /// Safe to call every frame; work only happens once.
         /// </summary>
-        public static void InitOnce()
+        public static void InitOnce(float scale = 1.5f)
         {
-            if (_initialized) return;
+            scale = Mathf.Clamp(scale, 0.8f, 2.5f);
+            if (_initialized && Mathf.Approximately(_lastScale, scale)) return;
             _initialized = true;
+            _lastScale = scale;
+            Scale = scale;
 
             // Textures
             _texBackground  = MakeTex(ColBackground);
@@ -91,9 +104,10 @@ namespace CompanionAI_v3.UI
             // ── TabActive ──────────────────────────────────────
             TabActive = new GUIStyle(GUI.skin.button)
             {
-                fontSize  = 15,
+                fontSize  = S(15),
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter,
+                padding   = new RectOffset(S(8), S(8), S(4), S(4)),
                 normal    = { background = _texTabActive,   textColor = Color.white },
                 hover     = { background = _texTabActive,   textColor = Color.white },
                 active    = { background = _texTabActive,   textColor = Color.white },
@@ -104,9 +118,10 @@ namespace CompanionAI_v3.UI
             var greyText = new Color(0.6f, 0.6f, 0.6f);
             TabInactive = new GUIStyle(GUI.skin.button)
             {
-                fontSize  = 15,
+                fontSize  = S(15),
                 fontStyle = FontStyle.Normal,
                 alignment = TextAnchor.MiddleCenter,
+                padding   = new RectOffset(S(8), S(8), S(4), S(4)),
                 normal    = { background = _texTabInactive, textColor = greyText },
                 hover     = { background = _texTabHover,    textColor = Color.white },
                 active    = { background = _texTabHover,    textColor = Color.white },
@@ -117,24 +132,24 @@ namespace CompanionAI_v3.UI
             SectionBox = new GUIStyle(GUI.skin.box)
             {
                 normal  = { background = _texSectionBg },
-                padding = new RectOffset(12, 12, 8, 8),
-                margin  = new RectOffset(0, 0, 4, 4)
+                padding = new RectOffset(S(12), S(12), S(8), S(8)),
+                margin  = new RectOffset(0, 0, S(4), S(4))
             };
 
-            // ── Header (size 20) ───────────────────────────────
+            // ── Header ─────────────────────────────────────────
             Header = new GUIStyle(GUI.skin.label)
             {
-                fontSize  = 20,
+                fontSize  = S(20),
                 fontStyle = FontStyle.Bold,
                 richText  = true,
                 alignment = TextAnchor.MiddleLeft,
                 normal    = { textColor = Color.white }
             };
 
-            // ── SubHeader (size 17) ────────────────────────────
+            // ── SubHeader ──────────────────────────────────────
             SubHeader = new GUIStyle(GUI.skin.label)
             {
-                fontSize  = 17,
+                fontSize  = S(17),
                 fontStyle = FontStyle.Bold,
                 richText  = true,
                 alignment = TextAnchor.MiddleLeft,
@@ -144,17 +159,17 @@ namespace CompanionAI_v3.UI
             // ── Description ────────────────────────────────────
             Description = new GUIStyle(GUI.skin.label)
             {
-                fontSize  = 14,
+                fontSize  = S(14),
                 wordWrap  = true,
                 richText  = true,
                 normal    = { textColor = greyText }
             };
 
-            // ── Label (size 15, light grey) ────────────────────
+            // ── Label ──────────────────────────────────────────
             var lightGrey = new Color(0.78f, 0.78f, 0.78f); // ~#C8C8C8
             Label = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 15,
+                fontSize = S(15),
                 richText = true,
                 normal   = { textColor = lightGrey }
             };
@@ -162,7 +177,7 @@ namespace CompanionAI_v3.UI
             // ── BoldLabel ──────────────────────────────────────
             BoldLabel = new GUIStyle(GUI.skin.label)
             {
-                fontSize  = 16,
+                fontSize  = S(16),
                 fontStyle = FontStyle.Bold,
                 richText  = true,
                 normal    = { textColor = lightGrey }
@@ -171,8 +186,9 @@ namespace CompanionAI_v3.UI
             // ── Button ─────────────────────────────────────────
             Button = new GUIStyle(GUI.skin.button)
             {
-                fontSize  = 14,
+                fontSize  = S(14),
                 alignment = TextAnchor.MiddleCenter,
+                padding   = new RectOffset(S(6), S(6), S(4), S(4)),
                 normal    = { background = _texButton,      textColor = lightGrey },
                 hover     = { background = _texButtonHover,  textColor = Color.white },
                 active    = { background = _texButtonHover,  textColor = Color.white },
@@ -182,8 +198,9 @@ namespace CompanionAI_v3.UI
             // ── Checkbox ───────────────────────────────────────
             Checkbox = new GUIStyle(GUI.skin.button)
             {
-                fontSize  = 20,
+                fontSize  = S(20),
                 alignment = TextAnchor.MiddleCenter,
+                padding   = new RectOffset(S(4), S(4), S(2), S(2)),
                 normal    = { background = _texButton,  textColor = lightGrey },
                 hover     = { background = _texButtonHover, textColor = Color.white },
                 active    = { background = _texCheckOn, textColor = Color.white },
@@ -194,8 +211,8 @@ namespace CompanionAI_v3.UI
             CharRow = new GUIStyle(GUI.skin.box)
             {
                 normal  = { background = _texSectionBg },
-                padding = new RectOffset(8, 8, 6, 6),
-                margin  = new RectOffset(0, 0, 2, 2)
+                padding = new RectOffset(S(8), S(8), S(6), S(6)),
+                margin  = new RectOffset(0, 0, S(2), S(2))
             };
 
             // ── Divider (1px line) ─────────────────────────────
@@ -203,14 +220,14 @@ namespace CompanionAI_v3.UI
             {
                 normal     = { background = _texDivider },
                 fixedHeight = 1,
-                margin     = new RectOffset(0, 0, 6, 6),
+                margin     = new RectOffset(0, 0, S(6), S(6)),
                 padding    = new RectOffset(0, 0, 0, 0)
             };
 
             // ── SliderLabel ────────────────────────────────────
             SliderLabel = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 16,
+                fontSize = S(16),
                 richText = true,
                 normal   = { textColor = lightGrey }
             };

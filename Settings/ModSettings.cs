@@ -1412,6 +1412,10 @@ namespace CompanionAI_v3.Settings
                 { Language.English, "Combat Settings" }, { Language.Korean, "전투 설정" },
                 { Language.Russian, "Настройки боя" }, { Language.Japanese, "戦闘設定" }
             },
+            ["UIScale"] = new() {
+                { Language.English, "UI Scale" }, { Language.Korean, "UI 크기" },
+                { Language.Russian, "Масштаб UI" }, { Language.Japanese, "UIスケール" }
+            },
         };
 
         public static string Get(string key)
@@ -1664,6 +1668,9 @@ namespace CompanionAI_v3.Settings
         public int MaxCombatReports { get; set; } = 10;
 
         public Language UILanguage { get; set; } = Language.English;
+
+        /// <summary>★ v3.50.0: UI 전체 크기 배율 (0.8 ~ 2.5, 기본 1.5)</summary>
+        public float UIScale { get; set; } = 1.5f;
 
         /// <summary>
         /// ★ v3.0.15: 주인공도 AI 제어 여부
