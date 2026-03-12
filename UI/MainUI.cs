@@ -15,7 +15,7 @@ namespace CompanionAI_v3.UI
     public static class MainUI
     {
         // ── Tab system ───────────────────────────────────────────
-        private enum UITab { Party, Gameplay, Combat, Performance, Language, Debug }
+        private enum UITab { Party, Gameplay, Combat, Performance, Language, Debug, MachineSpirit }
         private static UITab _activeTab = UITab.Party;
 
         private static readonly (UITab tab, string locKey)[] TabDefs = new[]
@@ -26,6 +26,7 @@ namespace CompanionAI_v3.UI
             (UITab.Performance, "TabPerformance"),
             (UITab.Language,    "TabLanguage"),
             (UITab.Debug,       "TabDebug"),
+            (UITab.MachineSpirit, "TabMachineSpirit"),
         };
 
         // ── State ────────────────────────────────────────────────
@@ -117,6 +118,7 @@ namespace CompanionAI_v3.UI
                 case UITab.Performance: DrawPerformanceTab(); break;
                 case UITab.Language:    DrawLanguageTab(); break;
                 case UITab.Debug:       DrawDebugTab(); break;
+                case UITab.MachineSpirit: DrawMachineSpiritTab(); break;
             }
             GUILayout.EndVertical();
         }
@@ -390,6 +392,86 @@ namespace CompanionAI_v3.UI
                 Main.Settings.DecisionOverlayScale = GUILayout.HorizontalSlider(
                     Main.Settings.DecisionOverlayScale, 0.8f, 2.0f, GUILayout.Width(UIStyles.Sd(134)));
                 GUILayout.EndHorizontal();
+            }
+        }
+
+        // ═════════════════════════════════════════════════════════
+        // Machine Spirit Tab
+        // ═════════════════════════════════════════════════════════
+
+        private static void DrawMachineSpiritTab()
+        {
+            var ms = Main.Settings.MachineSpirit;
+
+            // Description
+            UIStyles.SectionTitle(L("TabMachineSpirit"));
+            GUILayout.Label($"<color={UIStyles.TextMid}>{L("MSDescription")}</color>", UIStyles.Description);
+            UIStyles.DrawDivider();
+            GUILayout.Space(5);
+
+            // Enable toggle
+            ms.Enabled = DrawCheckbox(ms.Enabled, L("MSEnabled"));
+            GUILayout.Space(10);
+            UIStyles.DrawDivider();
+            GUILayout.Space(5);
+
+            // API Settings (only show if enabled)
+            if (ms.Enabled)
+            {
+                // API URL
+                GUILayout.BeginHorizontal();
+                GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSApiUrl")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
+                ms.ApiUrl = GUILayout.TextField(ms.ApiUrl, GUILayout.ExpandWidth(true));
+                GUILayout.EndHorizontal();
+                GUILayout.Space(5);
+
+                // API Key (masked)
+                GUILayout.BeginHorizontal();
+                GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSApiKey")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
+                ms.ApiKey = GUILayout.PasswordField(ms.ApiKey, '*', GUILayout.ExpandWidth(true));
+                GUILayout.EndHorizontal();
+                GUILayout.Space(5);
+
+                // Model
+                GUILayout.BeginHorizontal();
+                GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSModel")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
+                ms.Model = GUILayout.TextField(ms.Model, GUILayout.ExpandWidth(true));
+                GUILayout.EndHorizontal();
+                GUILayout.Space(10);
+                UIStyles.DrawDivider();
+                GUILayout.Space(5);
+
+                // Max Tokens slider (50-500)
+                GUILayout.BeginHorizontal();
+                GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSMaxTokens")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
+                ms.MaxTokens = Mathf.RoundToInt(GUILayout.HorizontalSlider(ms.MaxTokens, 50, 500, GUILayout.Width(UIStyles.Sd(200)), GUILayout.Height(UIStyles.Sd(15))));
+                GUILayout.Label($"<color={UIStyles.Gold}>{ms.MaxTokens}</color>", UIStyles.Label, GUILayout.Width(UIStyles.Sd(50)));
+                GUILayout.EndHorizontal();
+                GUILayout.Space(5);
+
+                // Temperature slider (0.0-2.0)
+                GUILayout.BeginHorizontal();
+                GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSTemperature")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
+                ms.Temperature = GUILayout.HorizontalSlider(ms.Temperature, 0f, 2f, GUILayout.Width(UIStyles.Sd(200)), GUILayout.Height(UIStyles.Sd(15)));
+                ms.Temperature = Mathf.Round(ms.Temperature * 10f) / 10f;
+                GUILayout.Label($"<color={UIStyles.Gold}>{ms.Temperature:F1}</color>", UIStyles.Label, GUILayout.Width(UIStyles.Sd(50)));
+                GUILayout.EndHorizontal();
+                GUILayout.Space(5);
+
+                // Hotkey display
+                GUILayout.BeginHorizontal();
+                GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSHotkey")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
+                GUILayout.Label($"<color={UIStyles.Gold}>{ms.Hotkey}</color>", UIStyles.Label);
+                GUILayout.EndHorizontal();
+                GUILayout.Space(10);
+                UIStyles.DrawDivider();
+                GUILayout.Space(5);
+
+                // Test Connection button
+                if (GUILayout.Button($"<color={UIStyles.TextLight}>{L("MSTestConnection")}</color>", UIStyles.Button, GUILayout.Width(UIStyles.Sd(180)), GUILayout.Height(BUTTON_HEIGHT)))
+                {
+                    CompanionAI_v3.MachineSpirit.MachineSpirit.OnUserMessage("Hello, Machine Spirit. Respond with a brief greeting.");
+                }
             }
         }
 
