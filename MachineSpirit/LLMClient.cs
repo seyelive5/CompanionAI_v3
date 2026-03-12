@@ -62,7 +62,8 @@ namespace CompanionAI_v3.MachineSpirit
             if (!string.IsNullOrEmpty(config.ApiKey))
                 request.SetRequestHeader("Authorization", $"Bearer {config.ApiKey}");
 
-            request.timeout = 30;
+            // Ollama needs 60-120s on first request (model loading into VRAM)
+            request.timeout = config.Provider == ApiProvider.Ollama ? 120 : 30;
 
             yield return request.SendWebRequest();
 
