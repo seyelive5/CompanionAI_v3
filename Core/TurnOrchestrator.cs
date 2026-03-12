@@ -262,6 +262,13 @@ namespace CompanionAI_v3.Core
                 var narratorStrategy = turnState.GetContext<TurnStrategy>(
                     StrategicContextKeys.TurnStrategyKey, default(TurnStrategy));
                 Diagnostics.TacticalNarrator.Narrate(unit, turnState.Plan, situation, narratorStrategy);
+
+                // ★ v3.52.0: Machine Spirit — feed plan summary
+                if (CompanionAI_v3.MachineSpirit.MachineSpirit.IsActive)
+                {
+                    string summary = $"Plan: {turnState.Plan.Priority}, Actions: {turnState.Plan.RemainingActionCount}";
+                    CompanionAI_v3.MachineSpirit.GameEventCollector.AddTurnPlanSummary(unitName, summary);
+                }
             }
 
             if (turnState.Plan.NeedsReplan(situation))
