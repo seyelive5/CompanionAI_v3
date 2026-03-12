@@ -1437,6 +1437,12 @@ namespace CompanionAI_v3.Settings
                 { Language.Russian, "Модели GPT от OpenAI — высшее качество, платно. Нужен аккаунт с оплатой.\nAPI-ключ: platform.openai.com/api-keys" },
                 { Language.Japanese, "OpenAI GPTモデル — 最高品質、有料。課金済みOpenAIアカウント必要。\nAPIキー: platform.openai.com/api-keys" }
             },
+            ["MSGuide_Gemini"] = new() {
+                { Language.English, "Google Gemini — free, fast cloud AI. Just need a Google account.\nGet API key at aistudio.google.com, no billing required." },
+                { Language.Korean, "Google Gemini — 무료, 빠른 클라우드 AI. 구글 계정만 있으면 됩니다.\naistudio.google.com에서 API 키 발급 (결제 불필요)." },
+                { Language.Russian, "Google Gemini — бесплатный, быстрый облачный ИИ. Нужен только аккаунт Google.\nAPI-ключ на aistudio.google.com, оплата не требуется." },
+                { Language.Japanese, "Google Gemini — 無料、高速クラウドAI。Googleアカウントだけで利用可能。\naistudio.google.comでAPIキー取得（課金不要）。" }
+            },
             ["MSGuide_Custom"] = new() {
                 { Language.English, "For advanced users. Connect to any OpenAI-compatible API (LM Studio, text-generation-webui, etc)." },
                 { Language.Korean, "고급 사용자용. OpenAI 호환 API에 연결 (LM Studio, text-generation-webui 등)." },
@@ -1448,6 +1454,12 @@ namespace CompanionAI_v3.Settings
                 { Language.Korean, "1: console.groq.com 접속 > 2: 가입 (구글 가능) > 3: API Keys > Create > 4: 아래 붙여넣기" },
                 { Language.Russian, "1: console.groq.com > 2: Регистрация (Google) > 3: API Keys > Create > 4: Вставить ниже" },
                 { Language.Japanese, "1: console.groq.com > 2: 登録(Google可) > 3: API Keys > Create > 4: 下に貼付" }
+            },
+            ["MSSteps_Gemini"] = new() {
+                { Language.English, "Step 1: aistudio.google.com > Step 2: Sign in with Google > Step 3: Get API Key > Step 4: Paste below" },
+                { Language.Korean, "1: aistudio.google.com 접속 > 2: 구글 로그인 > 3: API 키 발급 > 4: 아래 붙여넣기" },
+                { Language.Russian, "1: aistudio.google.com > 2: Войти через Google > 3: Получить API-ключ > 4: Вставить ниже" },
+                { Language.Japanese, "1: aistudio.google.com > 2: Googleログイン > 3: APIキー取得 > 4: 下に貼付" }
             },
             ["MSSteps_OpenAI"] = new() {
                 { Language.English, "Step 1: platform.openai.com > Step 2: Sign up + billing > Step 3: API Keys > Create > Step 4: Paste below" },

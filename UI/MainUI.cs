@@ -400,7 +400,7 @@ namespace CompanionAI_v3.UI
         // Machine Spirit Tab
         // ═════════════════════════════════════════════════════════
 
-        private static readonly string[] _providerNames = { "Ollama (Free, Local)", "Groq (Free Tier)", "OpenAI (Paid)", "Custom" };
+        private static readonly string[] _providerNames = { "Ollama (Free, Local)", "Groq (Free)", "Gemini (Free)", "OpenAI (Paid)", "Custom" };
         private static int _selectedProvider = -1;
 
         private static void DrawMachineSpiritTab()
@@ -429,7 +429,7 @@ namespace CompanionAI_v3.UI
                 // ── Provider dropdown ──
                 GUILayout.BeginHorizontal();
                 GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSProvider")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
-                int newProvider = GUILayout.SelectionGrid(_selectedProvider, _providerNames, 4,
+                int newProvider = GUILayout.SelectionGrid(_selectedProvider, _providerNames, 5,
                     UIStyles.Button, GUILayout.Height(BUTTON_HEIGHT));
                 GUILayout.EndHorizontal();
 
@@ -471,8 +471,8 @@ namespace CompanionAI_v3.UI
                     GUILayout.Space(5);
                 }
 
-                // ── Groq/OpenAI setup steps ──
-                if (ms.Provider == MSp.ApiProvider.Groq || ms.Provider == MSp.ApiProvider.OpenAI)
+                // ── Groq/Gemini/OpenAI setup steps ──
+                if (ms.Provider == MSp.ApiProvider.Groq || ms.Provider == MSp.ApiProvider.Gemini || ms.Provider == MSp.ApiProvider.OpenAI)
                 {
                     GUILayout.Label($"<color={UIStyles.Gold}>{L("MSSteps_" + ms.Provider)}</color>", UIStyles.Description);
                     GUILayout.Space(5);
