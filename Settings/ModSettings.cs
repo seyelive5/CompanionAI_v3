@@ -1378,6 +1378,40 @@ namespace CompanionAI_v3.Settings
                 { Language.Russian, "Мин. врагов для переключения на альт. комплект для AOE.\nНиже = чаще переключаться" },
                 { Language.Japanese, "AoEのために代替武器セットに切り替える最小敵数。\n低い=AoEのためにより頻繁に切り替え" }
             },
+
+            // ── Tab labels ───────────────────────────────────────
+            ["TabParty"] = new() {
+                { Language.English, "Party" }, { Language.Korean, "파티" },
+                { Language.Russian, "Отряд" }, { Language.Japanese, "パーティ" }
+            },
+            ["TabGameplay"] = new() {
+                { Language.English, "Gameplay" }, { Language.Korean, "게임플레이" },
+                { Language.Russian, "Геймплей" }, { Language.Japanese, "ゲームプレイ" }
+            },
+            ["TabCombat"] = new() {
+                { Language.English, "Combat" }, { Language.Korean, "전투" },
+                { Language.Russian, "Бой" }, { Language.Japanese, "戦闘" }
+            },
+            ["TabPerformance"] = new() {
+                { Language.English, "Performance" }, { Language.Korean, "성능" },
+                { Language.Russian, "Производительность" }, { Language.Japanese, "パフォーマンス" }
+            },
+            ["TabLanguage"] = new() {
+                { Language.English, "Language" }, { Language.Korean, "언어" },
+                { Language.Russian, "Язык" }, { Language.Japanese, "言語" }
+            },
+            ["TabDebug"] = new() {
+                { Language.English, "Debug" }, { Language.Korean, "디버그" },
+                { Language.Russian, "Отладка" }, { Language.Japanese, "デバッグ" }
+            },
+            ["GameplaySettings"] = new() {
+                { Language.English, "Gameplay Settings" }, { Language.Korean, "게임플레이 설정" },
+                { Language.Russian, "Настройки геймплея" }, { Language.Japanese, "ゲームプレイ設定" }
+            },
+            ["CombatSettings"] = new() {
+                { Language.English, "Combat Settings" }, { Language.Korean, "전투 설정" },
+                { Language.Russian, "Настройки боя" }, { Language.Japanese, "戦闘設定" }
+            },
         };
 
         public static string Get(string key)

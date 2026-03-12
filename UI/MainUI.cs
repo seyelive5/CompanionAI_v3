@@ -10,24 +10,31 @@ using CompanionAI_v3.Settings;
 namespace CompanionAI_v3.UI
 {
     /// <summary>
-    /// v3.0: 메인 UI
+    /// v3.0: 메인 UI — Imperial Dark tab system (6 tabs)
     /// </summary>
     public static class MainUI
     {
+        // ── Tab system ───────────────────────────────────────────
+        private enum UITab { Party, Gameplay, Combat, Performance, Language, Debug }
+        private static UITab _activeTab = UITab.Party;
+
+        private static readonly (UITab tab, string locKey)[] TabDefs = new[]
+        {
+            (UITab.Party,       "TabParty"),
+            (UITab.Gameplay,    "TabGameplay"),
+            (UITab.Combat,      "TabCombat"),
+            (UITab.Performance, "TabPerformance"),
+            (UITab.Language,    "TabLanguage"),
+            (UITab.Debug,       "TabDebug"),
+        };
+
+        // ── State ────────────────────────────────────────────────
         private static string _selectedCharacterId = "";
         private static CharacterSettings _editingSettings = null;
         private static Vector2 _scrollPosition = Vector2.zero;
         private static bool _showAdvancedSettings = false;  // ★ v3.5.13: 고급 설정 접기/펴기
-        private static bool _showPerformanceSettings = false;  // ★ v3.5.20: 성능 설정 접기/펴기
-        private static bool _showAoESettings = false;  // ★ v3.8.12: AOE 설정 접기/펴기
-        private static bool _showWeaponRotationSettings = false;
-        private static bool _showDebugSettings = false;  // ★ v3.20.2: 디버그 & 진단 섹션 접기/펴기
 
-        private static GUIStyle _headerStyle;
-        private static GUIStyle _boldLabelStyle;
-        private static GUIStyle _boxStyle;
-        private static GUIStyle _descriptionStyle;
-
+        // ── Constants ────────────────────────────────────────────
         private const float CHECKBOX_SIZE = 50f;
         private const float BUTTON_HEIGHT = 50f;
         private const float ROLE_BUTTON_WIDTH = 120f;
@@ -39,228 +46,240 @@ namespace CompanionAI_v3.UI
 
         private static string L(string key) => Localization.Get(key);
 
+        // ═════════════════════════════════════════════════════════
+        // OnGUI
+        // ═════════════════════════════════════════════════════════
+
         public static void OnGUI()
         {
             Localization.CurrentLanguage = Main.Settings.UILanguage;
-            InitStyles();
-
+            UIStyles.InitOnce();
             try
             {
                 _scrollPosition = GUILayout.BeginScrollView(_scrollPosition, GUILayout.Height(700));
-                GUILayout.BeginVertical("box");
-
+                GUILayout.BeginVertical(UIStyles.Background);
                 DrawHeader();
-                DrawDivider();
-                DrawGlobalSettings();
-                DrawDivider();
-                DrawCharacterSelection();
-
+                DrawTabBar();
+                GUILayout.Space(5);
+                DrawTabContent();
                 GUILayout.EndVertical();
                 GUILayout.EndScrollView();
             }
             catch (Exception ex)
             {
-                GUILayout.Label($"<color=#FF0000>UI Error: {ex.Message}</color>");
+                GUILayout.Label($"<color={UIStyles.Danger}>UI Error: {ex.Message}</color>");
             }
         }
 
-        private static void InitStyles()
-        {
-            if (_headerStyle == null)
-            {
-                _headerStyle = new GUIStyle(GUI.skin.label) { fontSize = 18, fontStyle = FontStyle.Bold, richText = true };
-            }
-            if (_boldLabelStyle == null)
-            {
-                _boldLabelStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, fontStyle = FontStyle.Bold, richText = true };
-            }
-            if (_descriptionStyle == null)
-            {
-                _descriptionStyle = new GUIStyle(GUI.skin.label) { fontSize = 16, richText = true, wordWrap = true };
-            }
-            if (_boxStyle == null)
-            {
-                _boxStyle = new GUIStyle(GUI.skin.box) { padding = new RectOffset(15, 15, 15, 15) };
-            }
-        }
-
-        private static void DrawDivider() => GUILayout.Space(15);
+        // ═════════════════════════════════════════════════════════
+        // Header + Tabs
+        // ═════════════════════════════════════════════════════════
 
         private static void DrawHeader()
         {
-            GUILayout.Label($"<color=#00FFFF><b>{L("Title")}</b></color>", _headerStyle);
-            GUILayout.Label($"<color=#D8D8D8>{L("Subtitle")}</color>", _descriptionStyle);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"<color={UIStyles.Gold}>COMPANION AI</color>", UIStyles.Header);
+            GUILayout.FlexibleSpace();
+            GUILayout.Label($"<color={UIStyles.TextDim}>v{GetVersion()}</color>", UIStyles.Label);
+            GUILayout.EndHorizontal();
+            GUILayout.Label($"<color={UIStyles.TextMid}>TurnPlanner-based Tactical AI System</color>", UIStyles.Description);
+            GUILayout.Space(5);
         }
 
-        private static void DrawGlobalSettings()
+        private static string GetVersion()
         {
-            GUILayout.BeginVertical(_boxStyle);
-            GUILayout.Label($"<b>{L("GlobalSettings")}</b>", _boldLabelStyle);
-            GUILayout.Space(10);
+            try { return UnityModManagerNet.UnityModManager.FindMod("CompanionAI_v3")?.Info?.Version ?? "?"; }
+            catch { return "?"; }
+        }
 
-            // Language
+        private static void DrawTabBar()
+        {
             GUILayout.BeginHorizontal();
-            GUILayout.Label($"<b>{L("Language")}:</b>", _boldLabelStyle, GUILayout.Width(100));
-            GUILayout.Space(10);
-
-            foreach (Language lang in Enum.GetValues(typeof(Language)))
+            foreach (var (tab, locKey) in TabDefs)
             {
-                bool isSelected = Main.Settings.UILanguage == lang;
-                string langName;
-                switch (lang)
-                {
-                    case Language.English:  langName = "English";  break;
-                    case Language.Korean:   langName = "한국어";    break;
-                    case Language.Russian:  langName = "Русский";  break;
-                    case Language.Japanese: langName = "日本語";    break;
-                    default:               langName = lang.ToString(); break;
-                }
-                string buttonText = isSelected ? $"<color=#00FF00><b>{langName}</b></color>" : $"<color=#D8D8D8>{langName}</color>";
-
-                if (GUILayout.Button(buttonText, GUI.skin.button, GUILayout.Width(LANG_BUTTON_WIDTH), GUILayout.Height(40)))
-                {
-                    Main.Settings.UILanguage = lang;
-                    Localization.CurrentLanguage = lang;
-                    // ★ v3.48.0: 언어 변경 시 Tactical Narrator 대사도 재로드
-                    Diagnostics.TacticalDialogueDB.ReloadFromJson();
-                }
+                var style = (_activeTab == tab) ? UIStyles.TabActive : UIStyles.TabInactive;
+                if (GUILayout.Button(L(locKey), style, GUILayout.Height(36)))
+                    _activeTab = tab;
             }
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
+        }
+
+        private static void DrawTabContent()
+        {
+            GUILayout.BeginVertical(UIStyles.SectionBox);
+            switch (_activeTab)
+            {
+                case UITab.Party:       DrawPartyTab(); break;
+                case UITab.Gameplay:    DrawGameplayTab(); break;
+                case UITab.Combat:      DrawCombatTab(); break;
+                case UITab.Performance: DrawPerformanceTab(); break;
+                case UITab.Language:    DrawLanguageTab(); break;
+                case UITab.Debug:       DrawDebugTab(); break;
+            }
+            GUILayout.EndVertical();
+        }
+
+        // ═════════════════════════════════════════════════════════
+        // Party Tab
+        // ═════════════════════════════════════════════════════════
+
+        private static void DrawPartyTab()
+        {
+            UIStyles.SectionTitle(L("PartyMembers"));
+            UIStyles.DrawDivider();
+            GUILayout.Space(5);
+
+            var characters = GetPartyMembers();
+            if (characters.Count == 0)
+            {
+                GUILayout.Label($"<color={UIStyles.TextMid}><i>{L("NoCharacters")}</i></color>", UIStyles.Description);
+                return;
+            }
+
+            // Header row
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"<color={UIStyles.TextLight}><b>{L("AI")}</b></color>", UIStyles.Label, GUILayout.Width(60));
+            GUILayout.Label($"<color={UIStyles.TextLight}><b>{L("Character")}</b></color>", UIStyles.Label, GUILayout.Width(CHAR_NAME_WIDTH));
+            GUILayout.Label($"<color={UIStyles.TextLight}><b>{L("Role")}</b></color>", UIStyles.Label, GUILayout.Width(ROLE_LABEL_WIDTH));
+            GUILayout.Label($"<color={UIStyles.TextLight}><b>{L("Range")}</b></color>", UIStyles.Label, GUILayout.Width(RANGE_LABEL_WIDTH));
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
             GUILayout.Space(10);
 
-            // ─── 게임플레이 옵션 ────────────────────────────────────────────
-            Main.Settings.EnableAISpeech = DrawCheckbox(Main.Settings.EnableAISpeech, L("EnableAISpeech"));  // ★ v3.9.32
+            foreach (var character in characters)
+                DrawCharacterRow(character);
+        }
 
-            // ★ v3.9.34: 대사 JSON 리로드 버튼
+        // ═════════════════════════════════════════════════════════
+        // Gameplay Tab
+        // ═════════════════════════════════════════════════════════
+
+        private static void DrawGameplayTab()
+        {
+            UIStyles.SectionTitle(L("GameplaySettings"));
+            UIStyles.DrawDivider();
+            GUILayout.Space(5);
+
+            // AI Speech
+            Main.Settings.EnableAISpeech = DrawCheckbox(Main.Settings.EnableAISpeech, L("EnableAISpeech"));
+
             if (Main.Settings.EnableAISpeech)
             {
                 GUILayout.BeginHorizontal();
-                GUILayout.Space(55);  // 체크박스 들여쓰기와 정렬
-                if (GUILayout.Button($"<color=#D8D8D8>{L("ReloadDialogue")}</color>", GUILayout.Width(250), GUILayout.Height(30)))
+                GUILayout.Space(55);
+                if (GUILayout.Button($"<color={UIStyles.TextLight}>{L("ReloadDialogue")}</color>", UIStyles.Button, GUILayout.Width(250), GUILayout.Height(30)))
                 {
                     DialogueLocalization.ReloadFromJson();
-                    Diagnostics.TacticalDialogueDB.ReloadFromJson();  // ★ v3.48.0
+                    Diagnostics.TacticalDialogueDB.ReloadFromJson();
                 }
                 GUILayout.EndHorizontal();
             }
-            Main.Settings.EnableVictoryBark = DrawCheckbox(Main.Settings.EnableVictoryBark, L("EnableVictoryBark"));  // ★ v3.9.80
+
+            // Victory Bark
+            Main.Settings.EnableVictoryBark = DrawCheckbox(Main.Settings.EnableVictoryBark, L("EnableVictoryBark"));
 
             GUILayout.Space(10);
+            UIStyles.DrawDivider();
+            GUILayout.Space(5);
 
-            // ★ v3.21.0: 비파티 아군 NPC AI 토글
+            // Allied NPC AI
             Main.Settings.EnableAlliedNPCAI = DrawCheckbox(Main.Settings.EnableAlliedNPCAI, L("EnableAlliedNPCAI"));
-            GUILayout.Label($"<color=#FF8C00><size=14>{L("EnableAlliedNPCAIDesc")}</size></color>", _descriptionStyle);
+            GUILayout.Label($"<color={UIStyles.Danger}>{L("EnableAlliedNPCAIDesc")}</color>", UIStyles.Description);
 
-            // ★ v3.21.4: 함선전투 AI 토글
+            // Ship Combat AI
             Main.Settings.EnableShipCombatAI = DrawCheckbox(Main.Settings.EnableShipCombatAI, L("EnableShipCombatAI"));
-            GUILayout.Label($"<color=#FF8C00><size=14>{L("EnableShipCombatAIDesc")}</size></color>", _descriptionStyle);
-
-            GUILayout.Space(15);
-            DrawDebugSettings();
-
-            GUILayout.Space(15);
-            DrawPerformanceSettings();
-
-            GUILayout.Space(15);
-            DrawAoESettings();
-
-            GUILayout.Space(15);
-            DrawWeaponRotationSettings();
-
-            GUILayout.EndVertical();
+            GUILayout.Label($"<color={UIStyles.Danger}>{L("EnableShipCombatAIDesc")}</color>", UIStyles.Description);
         }
 
-        /// <summary>
-        /// ★ v3.20.2: 디버그 & 진단 섹션 (전역)
-        /// </summary>
-        private static void DrawDebugSettings()
+        // ═════════════════════════════════════════════════════════
+        // Combat Tab
+        // ═════════════════════════════════════════════════════════
+
+        private static void DrawCombatTab()
         {
-            GUILayout.BeginHorizontal();
-            string toggleText = _showDebugSettings
-                ? $"<size=20><b><color=#888888>▼ {L("DebugDiagnostics")}</color></b></size>"
-                : $"<size=20><b><color=#666666>▶ {L("DebugDiagnostics")}</color></b></size>";
-
-            if (GUILayout.Button(toggleText, _boldLabelStyle, GUILayout.Height(40), GUILayout.Width(400)))
-                _showDebugSettings = !_showDebugSettings;
-            GUILayout.FlexibleSpace();
-            GUILayout.EndHorizontal();
-
-            if (!_showDebugSettings) return;
-
-            GUILayout.BeginVertical("box", GUILayout.MinWidth(700));
-
-            GUILayout.Label($"<size=16><color=#888888>{L("DebugDiagnosticsDesc")}</color></size>", _descriptionStyle);
-            GUILayout.Space(15);
-
-            // 기본 디버그 토글
-            Main.Settings.EnableDebugLogging = DrawCheckbox(Main.Settings.EnableDebugLogging, L("EnableDebugLogging"));
+            UIStyles.SectionTitle(L("CombatSettings"));
+            UIStyles.DrawDivider();
             GUILayout.Space(5);
-            Main.Settings.ShowAIThoughts = DrawCheckbox(Main.Settings.ShowAIThoughts, L("ShowAIDecisionLog"));
 
-            GUILayout.Space(15);
-            GUILayout.Label("<color=#555555>────────────────────────────────────────────────────</color>", _descriptionStyle);
-            GUILayout.Space(10);
+            // ── AoE Section ──────────────────────────────────────
+            GUILayout.Label($"<color={UIStyles.Gold}>{L("AoESettings")}</color>", UIStyles.BoldLabel);
+            GUILayout.Space(5);
 
-            // 전투 리포트 — 설명 강조
-            Main.Settings.EnableCombatReport = DrawCheckbox(Main.Settings.EnableCombatReport, L("EnableCombatReport"));
-            GUILayout.Label($"<size=15><color=#888888>{L("EnableCombatReportDesc")}</color></size>", _descriptionStyle);
-
-            GUILayout.Space(10);
-
-            // ★ v3.46.0: Strategic Directive UI
-            Main.Settings.EnableDecisionOverlay = DrawCheckbox(Main.Settings.EnableDecisionOverlay, L("EnableDecisionOverlay"));
-            GUILayout.Label($"<size=15><color=#888888>{L("EnableDecisionOverlayDesc")}</color></size>", _descriptionStyle);
-            if (Main.Settings.EnableDecisionOverlay)
+            var aoeConfig = AIConfig.GetAoEConfig();
+            if (aoeConfig != null)
             {
-                GUILayout.Space(5);
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"    {L("OverlayScale")}: {Main.Settings.DecisionOverlayScale:F1}x", GUILayout.Width(200));
-                Main.Settings.DecisionOverlayScale = GUILayout.HorizontalSlider(
-                    Main.Settings.DecisionOverlayScale, 0.8f, 2.0f, GUILayout.Width(200));
-                GUILayout.EndHorizontal();
+                if (GUILayout.Button($"<color={UIStyles.Gold}>{L("ResetAoEToDefault")}</color>", UIStyles.Button, GUILayout.Width(350), GUILayout.Height(40)))
+                {
+                    AIConfig.Instance.AoE = new AoEConfig();
+                    AIConfig.Save();
+                }
+                GUILayout.Space(10);
+
+                bool aoeChanged = false;
+                int iv;
+
+                iv = DrawSliderSettingIntLarge(L("MaxPlayerAlliesHit"), L("MaxPlayerAlliesHitDesc"), aoeConfig.MaxPlayerAlliesHit, 0, 3);
+                if (iv != aoeConfig.MaxPlayerAlliesHit) { aoeConfig.MaxPlayerAlliesHit = iv; aoeChanged = true; }
+
+                iv = DrawSliderSettingIntLarge(L("CfgMinClusterSize"), L("CfgMinClusterSizeDesc"), aoeConfig.MinClusterSize, 1, 5);
+                if (iv != aoeConfig.MinClusterSize) { aoeConfig.MinClusterSize = iv; aoeChanged = true; }
+
+                if (aoeChanged) AIConfig.Save();
             }
 
             GUILayout.Space(10);
-            GUILayout.EndVertical();
+            UIStyles.DrawDivider();
+            GUILayout.Space(5);
+
+            // ── Weapon Rotation Section ──────────────────────────
+            GUILayout.Label($"<color={UIStyles.Gold}>{L("WeaponRotationSettings")}</color>", UIStyles.BoldLabel);
+            GUILayout.Space(5);
+
+            var wrConfig = AIConfig.GetWeaponRotationConfig();
+            if (wrConfig != null)
+            {
+                GUILayout.Label($"<color={UIStyles.TextMid}>{L("WeaponRotationWarning")}</color>", UIStyles.Description);
+                GUILayout.Space(5);
+
+                if (GUILayout.Button($"<color={UIStyles.Gold}>{L("ResetWeaponRotationToDefault")}</color>", UIStyles.Button, GUILayout.Width(350), GUILayout.Height(40)))
+                {
+                    wrConfig.MaxSwitchesPerTurn = new WeaponRotationConfig().MaxSwitchesPerTurn;
+                    AIConfig.Save();
+                }
+                GUILayout.Space(10);
+
+                int iv = DrawSliderSettingIntLarge(L("MaxSwitchesPerTurn"), L("MaxSwitchesPerTurnDesc"), wrConfig.MaxSwitchesPerTurn, 1, 4);
+                if (iv != wrConfig.MaxSwitchesPerTurn)
+                {
+                    wrConfig.MaxSwitchesPerTurn = iv;
+                    AIConfig.Save();
+                }
+            }
         }
 
-        /// <summary>
-        /// ★ v3.5.20: 성능 설정 섹션 (전역)
-        /// </summary>
-        private static void DrawPerformanceSettings()
+        // ═════════════════════════════════════════════════════════
+        // Performance Tab
+        // ═════════════════════════════════════════════════════════
+
+        private static void DrawPerformanceTab()
         {
-            // ★ v3.5.21: 접기/펴기 버튼 - 크게, 눈에 띄게
-            GUILayout.BeginHorizontal();
-            string toggleText = _showPerformanceSettings
-                ? $"<size=20><b><color=#00BFFF>▼ {L("PerformanceSettings")}</color></b></size>"
-                : $"<size=20><b><color=#AAAAAA>▶ {L("PerformanceSettings")}</color></b></size>";
+            UIStyles.SectionTitle(L("PerformanceSettings"));
+            UIStyles.DrawDivider();
+            GUILayout.Space(5);
 
-            if (GUILayout.Button(toggleText, _boldLabelStyle, GUILayout.Height(40), GUILayout.Width(400)))
-                _showPerformanceSettings = !_showPerformanceSettings;
-            GUILayout.FlexibleSpace();
-            GUILayout.EndHorizontal();
+            GUILayout.Label($"<color={UIStyles.Danger}>{L("PerformanceWarning")}</color>", UIStyles.Description);
+            GUILayout.Space(10);
 
-            if (!_showPerformanceSettings) return;
-
-            // ★ v3.5.21: 박스 넓이 확대
-            GUILayout.BeginVertical("box", GUILayout.MinWidth(700));
-
-            // 경고 메시지 - 크게
-            GUILayout.Label($"<size=18><color=#00BFFF>{L("PerformanceWarning")}</color></size>", _descriptionStyle);
-            GUILayout.Space(15);
-
-            // 리셋 버튼 - 크게
-            if (GUILayout.Button($"<size=18><color=#FFFF00>{L("ResetPerformanceToDefault")}</color></size>", GUILayout.Width(350), GUILayout.Height(45)))
+            if (GUILayout.Button($"<color={UIStyles.Gold}>{L("ResetPerformanceToDefault")}</color>", UIStyles.Button, GUILayout.Width(350), GUILayout.Height(40)))
             {
                 Main.Settings.MaxEnemiesToAnalyze = 8;
                 Main.Settings.MaxPositionsToEvaluate = 25;
                 Main.Settings.MaxClusters = 5;
                 Main.Settings.MaxTilesPerEnemy = 100;
             }
-            GUILayout.Space(20);
+            GUILayout.Space(15);
 
-            // 슬라이더 옵션들 - 크게
             Main.Settings.MaxEnemiesToAnalyze = DrawSliderSettingIntLarge(
                 L("MaxEnemiesToAnalyze"),
                 L("MaxEnemiesToAnalyzeDesc"),
@@ -284,214 +303,129 @@ namespace CompanionAI_v3.UI
                 L("MaxTilesPerEnemyDesc"),
                 Main.Settings.MaxTilesPerEnemy,
                 30, 200);
-
-            GUILayout.EndVertical();
         }
 
-        /// <summary>
-        /// ★ v3.5.21: 큰 폰트 슬라이더 (성능 설정용)
-        /// </summary>
-        private static int DrawSliderSettingIntLarge(string label, string description, int value, int min, int max)
+        // ═════════════════════════════════════════════════════════
+        // Language Tab
+        // ═════════════════════════════════════════════════════════
+
+        private static void DrawLanguageTab()
         {
-            GUILayout.BeginVertical();
-
-            // 라벨 - 큰 폰트
-            GUILayout.Label($"<size=18><b>{label}</b>: <color=#00FF00>{value}</color></size>", _boldLabelStyle);
-
-            // 설명 - 중간 폰트
-            GUILayout.Label($"<size=16><color=#888888>{description}</color></size>", _descriptionStyle);
+            UIStyles.SectionTitle(L("Language"));
+            UIStyles.DrawDivider();
             GUILayout.Space(5);
 
-            // 슬라이더 - 넓게
-            GUILayout.BeginHorizontal();
-            GUILayout.Label($"<size=16>{min}</size>", GUILayout.Width(40));
-            value = (int)GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(500), GUILayout.Height(25));
-            GUILayout.Label($"<size=16>{max}</size>", GUILayout.Width(50));
-            GUILayout.EndHorizontal();
-
-            GUILayout.Space(15);
-            GUILayout.EndVertical();
-
-            return value;
-        }
-
-        /// <summary>
-        /// ★ v3.8.12: AOE 설정 섹션 (전역)
-        /// </summary>
-        private static void DrawAoESettings()
-        {
-            // 접기/펴기 버튼
-            GUILayout.BeginHorizontal();
-            string toggleText = _showAoESettings
-                ? $"<size=20><b><color=#FF6347>▼ {L("AoESettings")}</color></b></size>"
-                : $"<size=20><b><color=#AAAAAA>▶ {L("AoESettings")}</color></b></size>";
-
-            if (GUILayout.Button(toggleText, _boldLabelStyle, GUILayout.Height(40), GUILayout.Width(400)))
-                _showAoESettings = !_showAoESettings;
-            GUILayout.FlexibleSpace();
-            GUILayout.EndHorizontal();
-
-            if (!_showAoESettings) return;
-
-            var aoeConfig = AIConfig.GetAoEConfig();
-            if (aoeConfig == null) return;
-
-            GUILayout.BeginVertical("box", GUILayout.MinWidth(700));
-
-            // 경고 메시지
-            GUILayout.Label($"<size=18><color=#FF6347>{L("AoEWarning")}</color></size>", _descriptionStyle);
-            GUILayout.Space(15);
-
-            // 리셋 버튼
-            if (GUILayout.Button($"<size=18><color=#FFFF00>{L("ResetAoEToDefault")}</color></size>", GUILayout.Width(350), GUILayout.Height(45)))
+            foreach (Language lang in Enum.GetValues(typeof(Language)))
             {
-                AIConfig.Instance.AoE = new AoEConfig();
-                AIConfig.Save();
+                string langName;
+                switch (lang)
+                {
+                    case Language.English:  langName = "English";  break;
+                    case Language.Korean:   langName = "한국어";    break;
+                    case Language.Russian:  langName = "Русский";  break;
+                    case Language.Japanese: langName = "日本語";    break;
+                    default:               langName = lang.ToString(); break;
+                }
+
+                bool isSelected = Main.Settings.UILanguage == lang;
+                var style = isSelected ? UIStyles.TabActive : UIStyles.Button;
+
+                if (GUILayout.Button(langName, style, GUILayout.Width(300), GUILayout.Height(50)))
+                {
+                    Main.Settings.UILanguage = lang;
+                    Localization.CurrentLanguage = lang;
+                    Diagnostics.TacticalDialogueDB.ReloadFromJson();
+                }
+                GUILayout.Space(5);
             }
-            GUILayout.Space(20);
-
-            bool aoeChanged = false;
-            int iv;
-
-            iv = DrawSliderSettingIntLarge(L("MaxPlayerAlliesHit"), L("MaxPlayerAlliesHitDesc"), aoeConfig.MaxPlayerAlliesHit, 0, 3);
-            if (iv != aoeConfig.MaxPlayerAlliesHit) { aoeConfig.MaxPlayerAlliesHit = iv; aoeChanged = true; }
-
-            iv = DrawSliderSettingIntLarge(L("CfgMinClusterSize"), L("CfgMinClusterSizeDesc"), aoeConfig.MinClusterSize, 1, 5);
-            if (iv != aoeConfig.MinClusterSize) { aoeConfig.MinClusterSize = iv; aoeChanged = true; }
-
-            if (aoeChanged) AIConfig.Save();
-
-            GUILayout.EndVertical();
         }
 
-        /// <summary>
-        /// ★ v3.16.2: 무기 로테이션 설정 섹션
-        /// </summary>
-        private static void DrawWeaponRotationSettings()
+        // ═════════════════════════════════════════════════════════
+        // Debug Tab
+        // ═════════════════════════════════════════════════════════
+
+        private static void DrawDebugTab()
         {
-            GUILayout.BeginHorizontal();
-            string toggleText = _showWeaponRotationSettings
-                ? $"<size=20><b><color=#DAA520>▼ {L("WeaponRotationSettings")}</color></b></size>"
-                : $"<size=20><b><color=#AAAAAA>▶ {L("WeaponRotationSettings")}</color></b></size>";
+            UIStyles.SectionTitle(L("DebugDiagnostics"));
+            UIStyles.DrawDivider();
+            GUILayout.Space(5);
 
-            if (GUILayout.Button(toggleText, _boldLabelStyle, GUILayout.Height(40), GUILayout.Width(400)))
-                _showWeaponRotationSettings = !_showWeaponRotationSettings;
-            GUILayout.FlexibleSpace();
-            GUILayout.EndHorizontal();
-
-            if (!_showWeaponRotationSettings) return;
-
-            var wrConfig = AIConfig.GetWeaponRotationConfig();
-            if (wrConfig == null) return;
-
-            GUILayout.BeginVertical("box", GUILayout.MinWidth(680));
-            GUILayout.Label($"<size=16><color=#DAA520>{L("WeaponRotationWarning")}</color></size>", _descriptionStyle);
+            GUILayout.Label($"<color={UIStyles.TextMid}>{L("DebugDiagnosticsDesc")}</color>", UIStyles.Description);
             GUILayout.Space(10);
 
-            if (GUILayout.Button($"<size=18><color=#FFFF00>{L("ResetWeaponRotationToDefault")}</color></size>", GUILayout.Width(350), GUILayout.Height(45)))
-            {
-                wrConfig.MaxSwitchesPerTurn = new WeaponRotationConfig().MaxSwitchesPerTurn;
-                AIConfig.Save();
-            }
-            GUILayout.Space(15);
+            Main.Settings.EnableDebugLogging = DrawCheckbox(Main.Settings.EnableDebugLogging, L("EnableDebugLogging"));
+            GUILayout.Space(5);
+            Main.Settings.ShowAIThoughts = DrawCheckbox(Main.Settings.ShowAIThoughts, L("ShowAIDecisionLog"));
 
-            int iv = DrawSliderSettingIntLarge(L("MaxSwitchesPerTurn"), L("MaxSwitchesPerTurnDesc"), wrConfig.MaxSwitchesPerTurn, 1, 4);
-            if (iv != wrConfig.MaxSwitchesPerTurn)
-            {
-                wrConfig.MaxSwitchesPerTurn = iv;
-                AIConfig.Save();
-            }
-
-            GUILayout.EndVertical();
-        }
-
-        /// <summary>
-        /// ★ v3.8.12: 큰 폰트 float 슬라이더 (AOE 설정용)
-        /// </summary>
-        private static float DrawSliderSettingFloatLarge(string label, string description, float value, float min, float max)
-        {
-            GUILayout.BeginVertical();
-
-            GUILayout.Label($"<size=18><b>{label}</b>: <color=#00FF00>{value:F0}</color></size>", _boldLabelStyle);
-            GUILayout.Label($"<size=16><color=#888888>{description}</color></size>", _descriptionStyle);
+            GUILayout.Space(10);
+            UIStyles.DrawDivider();
             GUILayout.Space(5);
 
-            GUILayout.BeginHorizontal();
-            GUILayout.Label($"<size=16>{min:F0}</size>", GUILayout.Width(40));
-            value = GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(500), GUILayout.Height(25));
-            GUILayout.Label($"<size=16>{max:F0}</size>", GUILayout.Width(50));
-            GUILayout.EndHorizontal();
+            // Combat Report
+            Main.Settings.EnableCombatReport = DrawCheckbox(Main.Settings.EnableCombatReport, L("EnableCombatReport"));
+            GUILayout.Label($"<color={UIStyles.TextMid}>{L("EnableCombatReportDesc")}</color>", UIStyles.Description);
 
-            GUILayout.Space(15);
-            GUILayout.EndVertical();
+            GUILayout.Space(10);
 
-            return value;
+            // Tactical Narrator / Decision Overlay
+            Main.Settings.EnableDecisionOverlay = DrawCheckbox(Main.Settings.EnableDecisionOverlay, L("EnableDecisionOverlay"));
+            GUILayout.Label($"<color={UIStyles.TextMid}>{L("EnableDecisionOverlayDesc")}</color>", UIStyles.Description);
+            if (Main.Settings.EnableDecisionOverlay)
+            {
+                GUILayout.Space(5);
+                GUILayout.BeginHorizontal();
+                GUILayout.Label($"<color={UIStyles.TextLight}>    {L("OverlayScale")}: {Main.Settings.DecisionOverlayScale:F1}x</color>", UIStyles.SliderLabel, GUILayout.Width(200));
+                Main.Settings.DecisionOverlayScale = GUILayout.HorizontalSlider(
+                    Main.Settings.DecisionOverlayScale, 0.8f, 2.0f, GUILayout.Width(200));
+                GUILayout.EndHorizontal();
+            }
         }
+
+        // ═════════════════════════════════════════════════════════
+        // Shared Controls
+        // ═════════════════════════════════════════════════════════
 
         private static bool DrawCheckbox(bool value, string label)
         {
             GUILayout.BeginHorizontal();
-            string checkIcon = value ? "<size=22><b><color=green>☑</color></b></size>" : "<size=22><b>☐</b></size>";
-
-            if (GUILayout.Button(checkIcon, GUI.skin.box, GUILayout.Width(CHECKBOX_SIZE), GUILayout.Height(CHECKBOX_SIZE)))
+            string checkIcon = value
+                ? $"<color={UIStyles.Gold}>\u2611</color>"
+                : $"<color={UIStyles.TextDim}>\u2610</color>";
+            if (GUILayout.Button(checkIcon, UIStyles.Checkbox, GUILayout.Width(40), GUILayout.Height(40)))
                 value = !value;
-
-            GUILayout.Space(10);
-            if (GUILayout.Button($"<size=16>{label}</size>", GUI.skin.label, GUILayout.Height(CHECKBOX_SIZE)))
+            GUILayout.Space(8);
+            if (GUILayout.Button($"<color={UIStyles.TextLight}>{label}</color>", UIStyles.Label, GUILayout.Height(40)))
                 value = !value;
-
             GUILayout.EndHorizontal();
             return value;
         }
 
-        private static void DrawCharacterSelection()
-        {
-            GUILayout.BeginVertical(_boxStyle);
-            GUILayout.Label($"<b>{L("PartyMembers")}</b>", _boldLabelStyle);
-            GUILayout.Space(10);
-
-            var characters = GetPartyMembers();
-            if (characters.Count == 0)
-            {
-                GUILayout.Label($"<color=#D8D8D8><i>{L("NoCharacters")}</i></color>", _descriptionStyle);
-                GUILayout.EndVertical();
-                return;
-            }
-
-            // Header
-            GUILayout.BeginHorizontal();
-            GUILayout.Label($"<b>{L("AI")}</b>", GUILayout.Width(60));
-            GUILayout.Label($"<b>{L("Character")}</b>", GUILayout.Width(CHAR_NAME_WIDTH));
-            GUILayout.Label($"<b>{L("Role")}</b>", GUILayout.Width(ROLE_LABEL_WIDTH));
-            GUILayout.Label($"<b>{L("Range")}</b>", GUILayout.Width(RANGE_LABEL_WIDTH));
-            GUILayout.FlexibleSpace();
-            GUILayout.EndHorizontal();
-            GUILayout.Space(10);
-
-            foreach (var character in characters)
-                DrawCharacterRow(character);
-
-            GUILayout.EndVertical();
-        }
+        // ═════════════════════════════════════════════════════════
+        // Character Row + Settings (Party Tab)
+        // ═════════════════════════════════════════════════════════
 
         private static void DrawCharacterRow(CharacterInfo character)
         {
             var settings = Main.Settings.GetOrCreateSettings(character.Id, character.Name);
 
-            GUILayout.BeginHorizontal("box");
+            GUILayout.BeginHorizontal(UIStyles.CharRow);
 
             // AI Toggle
-            string checkIcon = settings.EnableCustomAI ? "<size=20><b><color=green>☑</color></b></size>" : "<size=20><b>☐</b></size>";
-            if (GUILayout.Button(checkIcon, GUI.skin.box, GUILayout.Width(CHECKBOX_SIZE), GUILayout.Height(CHECKBOX_SIZE)))
+            string checkIcon = settings.EnableCustomAI
+                ? $"<color={UIStyles.Gold}>\u2611</color>"
+                : $"<color={UIStyles.TextDim}>\u2610</color>";
+            if (GUILayout.Button(checkIcon, UIStyles.Checkbox, GUILayout.Width(CHECKBOX_SIZE), GUILayout.Height(CHECKBOX_SIZE)))
             {
                 settings.EnableCustomAI = !settings.EnableCustomAI;
-                Main.Settings.SaveCharacterSettings();  // ★ v3.5.89: 세이브에 저장
+                Main.Settings.SaveCharacterSettings();
             }
 
             // Character name
             bool isSelected = _selectedCharacterId == character.Id;
-            string buttonText = isSelected ? $"<b>▼ {character.Name}</b>" : $"▶ {character.Name}";
-            if (GUILayout.Button(buttonText, GUI.skin.button, GUILayout.Width(CHAR_NAME_WIDTH), GUILayout.Height(CHECKBOX_SIZE)))
+            string buttonText = isSelected
+                ? $"<color={UIStyles.Gold}><b>\u25BC {character.Name}</b></color>"
+                : $"<color={UIStyles.TextLight}>\u25B6 {character.Name}</color>";
+            if (GUILayout.Button(buttonText, UIStyles.Button, GUILayout.Width(CHAR_NAME_WIDTH), GUILayout.Height(CHECKBOX_SIZE)))
             {
                 if (isSelected) { _selectedCharacterId = ""; _editingSettings = null; }
                 else { _selectedCharacterId = character.Id; _editingSettings = settings; }
@@ -499,17 +433,17 @@ namespace CompanionAI_v3.UI
 
             // Role
             string roleColor = GetRoleColor(settings.Role);
-            GUILayout.Label($"<color={roleColor}><b>{Localization.GetRoleName(settings.Role)}</b></color>", GUILayout.Width(ROLE_LABEL_WIDTH), GUILayout.Height(CHECKBOX_SIZE));
+            GUILayout.Label($"<color={roleColor}><b>{Localization.GetRoleName(settings.Role)}</b></color>", UIStyles.Label, GUILayout.Width(ROLE_LABEL_WIDTH), GUILayout.Height(CHECKBOX_SIZE));
 
             // Range
-            GUILayout.Label(Localization.GetRangeName(settings.RangePreference), GUILayout.Width(RANGE_LABEL_WIDTH), GUILayout.Height(CHECKBOX_SIZE));
+            GUILayout.Label($"<color={UIStyles.TextLight}>{Localization.GetRangeName(settings.RangePreference)}</color>", UIStyles.Label, GUILayout.Width(RANGE_LABEL_WIDTH), GUILayout.Height(CHECKBOX_SIZE));
 
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
 
             if (isSelected && _editingSettings != null)
             {
-                GUILayout.BeginVertical("box");
+                GUILayout.BeginVertical(UIStyles.SectionBox);
                 DrawCharacterAISettings();
                 GUILayout.EndVertical();
             }
@@ -517,11 +451,11 @@ namespace CompanionAI_v3.UI
 
         private static string GetRoleColor(AIRole role) => role switch
         {
-            AIRole.Tank => "#4169E1",
-            AIRole.DPS => "#FF6347",
-            AIRole.Support => "#FFD700",
-            AIRole.Auto => "#98FB98",  // ★ v3.0.92: Auto - Light Green
-            _ => "#FFFFFF"
+            AIRole.Tank => UIStyles.RoleBlue,
+            AIRole.DPS => UIStyles.RoleRed,
+            AIRole.Support => UIStyles.RoleGold,
+            AIRole.Auto => UIStyles.RoleGreen,
+            _ => UIStyles.TextLight
         };
 
         private static void DrawCharacterAISettings()
@@ -534,40 +468,36 @@ namespace CompanionAI_v3.UI
             DrawRangePreferenceSelection();
             GUILayout.Space(15);
 
-            // ★ v3.9.72: Weapon Set Rotation — 캐릭터별 토글
+            // Weapon Set Rotation — per-character toggle
             _editingSettings.EnableWeaponSetRotation = DrawCheckbox(_editingSettings.EnableWeaponSetRotation, L("EnableWeaponSetRotation"));
-            GUILayout.Label($"<color=#888888><size=14>{L("EnableWeaponSetRotationDesc")}</size></color>", _descriptionStyle);
+            GUILayout.Label($"<color={UIStyles.TextMid}>{L("EnableWeaponSetRotationDesc")}</color>", UIStyles.Description);
             GUILayout.Space(15);
 
             DrawAdvancedSettings();
             GUILayout.Space(10);
         }
 
-        /// <summary>
-        /// ★ v3.5.13: 고급 설정 섹션 (경고 + 리셋 버튼 포함)
-        /// </summary>
         private static void DrawAdvancedSettings()
         {
             if (_editingSettings == null) return;
 
-            // 접기/펴기 버튼
             string toggleText = _showAdvancedSettings
-                ? $"<color=#FFA500>▼ {L("AdvancedSettings")}</color>"
-                : $"<color=#888888>▶ {L("AdvancedSettings")}</color>";
+                ? $"<color={UIStyles.Gold}>\u25BC {L("AdvancedSettings")}</color>"
+                : $"<color={UIStyles.TextMid}>\u25B6 {L("AdvancedSettings")}</color>";
 
-            if (GUILayout.Button(toggleText, GUI.skin.label, GUILayout.Height(30)))
+            if (GUILayout.Button(toggleText, UIStyles.Label, GUILayout.Height(30)))
                 _showAdvancedSettings = !_showAdvancedSettings;
 
             if (!_showAdvancedSettings) return;
 
-            GUILayout.BeginVertical("box");
+            GUILayout.BeginVertical(UIStyles.SectionBox);
 
-            // 경고 메시지
-            GUILayout.Label($"<color=#FF6600>{L("AdvancedWarning")}</color>", _descriptionStyle);
+            // Warning
+            GUILayout.Label($"<color={UIStyles.Danger}>{L("AdvancedWarning")}</color>", UIStyles.Description);
             GUILayout.Space(10);
 
-            // 리셋 버튼
-            if (GUILayout.Button($"<color=#FFFF00>{L("ResetToDefault")}</color>", GUILayout.Width(200), GUILayout.Height(35)))
+            // Reset button
+            if (GUILayout.Button($"<color={UIStyles.Gold}>{L("ResetToDefault")}</color>", UIStyles.Button, GUILayout.Width(200), GUILayout.Height(35)))
             {
                 _editingSettings.MinSafeDistance = 7.0f;
                 _editingSettings.HealAtHPPercent = 50;
@@ -575,24 +505,24 @@ namespace CompanionAI_v3.UI
                 _editingSettings.UseKillSimulator = true;
                 _editingSettings.UseAoEOptimization = true;
                 _editingSettings.UsePredictiveMovement = true;
-                _editingSettings.EnableWeaponSetRotation = false;  // ★ 기본값 OFF
+                _editingSettings.EnableWeaponSetRotation = false;
             }
             GUILayout.Space(15);
 
-            // 토글 옵션들
+            // Toggle options
             _editingSettings.UseKillSimulator = DrawCheckbox(_editingSettings.UseKillSimulator, L("UseKillSimulator"));
-            GUILayout.Label($"<color=#888888><size=14>{L("UseKillSimulatorDesc")}</size></color>", _descriptionStyle);
+            GUILayout.Label($"<color={UIStyles.TextMid}>{L("UseKillSimulatorDesc")}</color>", UIStyles.Description);
             GUILayout.Space(8);
 
             _editingSettings.UseAoEOptimization = DrawCheckbox(_editingSettings.UseAoEOptimization, L("UseAoEOptimization"));
-            GUILayout.Label($"<color=#888888><size=14>{L("UseAoEOptimizationDesc")}</size></color>", _descriptionStyle);
+            GUILayout.Label($"<color={UIStyles.TextMid}>{L("UseAoEOptimizationDesc")}</color>", UIStyles.Description);
             GUILayout.Space(8);
 
             _editingSettings.UsePredictiveMovement = DrawCheckbox(_editingSettings.UsePredictiveMovement, L("UsePredictiveMovement"));
-            GUILayout.Label($"<color=#888888><size=14>{L("UsePredictiveMovementDesc")}</size></color>", _descriptionStyle);
+            GUILayout.Label($"<color={UIStyles.TextMid}>{L("UsePredictiveMovementDesc")}</color>", UIStyles.Description);
             GUILayout.Space(15);
 
-            // 슬라이더 옵션들
+            // Sliders
             _editingSettings.MinSafeDistance = DrawSliderSetting(
                 L("MinSafeDistance"),
                 L("MinSafeDistanceDesc"),
@@ -614,34 +544,14 @@ namespace CompanionAI_v3.UI
             GUILayout.EndVertical();
         }
 
-        private static float DrawSliderSetting(string label, string desc, float value, float min, float max, string format, string suffix)
-        {
-            GUILayout.BeginHorizontal();
-            GUILayout.Label($"<b>{label}:</b>", _boldLabelStyle, GUILayout.Width(180));
-            float newValue = GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(200));
-            GUILayout.Label($"<color=#00FF00>{newValue.ToString(format)}{suffix}</color>", GUILayout.Width(80));
-            GUILayout.EndHorizontal();
-            GUILayout.Label($"<color=#888888><size=14>{desc}</size></color>", _descriptionStyle);
-            GUILayout.Space(10);
-            return newValue;
-        }
-
-        private static int DrawSliderSettingInt(string label, string desc, int value, int min, int max, string suffix)
-        {
-            GUILayout.BeginHorizontal();
-            GUILayout.Label($"<b>{label}:</b>", _boldLabelStyle, GUILayout.Width(180));
-            int newValue = (int)GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(200));
-            GUILayout.Label($"<color=#00FF00>{newValue}{suffix}</color>", GUILayout.Width(80));
-            GUILayout.EndHorizontal();
-            GUILayout.Label($"<color=#888888><size=14>{desc}</size></color>", _descriptionStyle);
-            GUILayout.Space(10);
-            return newValue;
-        }
+        // ═════════════════════════════════════════════════════════
+        // Role / Range Selection
+        // ═════════════════════════════════════════════════════════
 
         private static void DrawRoleSelection()
         {
-            GUILayout.Label($"<b>{L("CombatRole")}</b>", _boldLabelStyle);
-            GUILayout.Label($"<color=#D8D8D8><i>{L("CombatRoleDesc")}</i></color>", _descriptionStyle);
+            GUILayout.Label($"<color={UIStyles.TextLight}><b>{L("CombatRole")}</b></color>", UIStyles.BoldLabel);
+            GUILayout.Label($"<color={UIStyles.TextMid}><i>{L("CombatRoleDesc")}</i></color>", UIStyles.Description);
             GUILayout.Space(8);
 
             GUILayout.BeginHorizontal();
@@ -650,23 +560,25 @@ namespace CompanionAI_v3.UI
                 string roleColor = GetRoleColor(role);
                 bool isSelected = _editingSettings.Role == role;
                 string roleName = Localization.GetRoleName(role);
-                string buttonText = isSelected ? $"<color={roleColor}><b>{roleName}</b></color>" : $"<color=#D8D8D8>{roleName}</color>";
+                string buttonText = isSelected
+                    ? $"<color={roleColor}><b>{roleName}</b></color>"
+                    : $"<color={UIStyles.TextMid}>{roleName}</color>";
 
-                if (GUILayout.Toggle(isSelected, buttonText, GUI.skin.button, GUILayout.Width(ROLE_BUTTON_WIDTH), GUILayout.Height(BUTTON_HEIGHT)) && !isSelected)
+                if (GUILayout.Toggle(isSelected, buttonText, UIStyles.Button, GUILayout.Width(ROLE_BUTTON_WIDTH), GUILayout.Height(BUTTON_HEIGHT)) && !isSelected)
                 {
                     _editingSettings.Role = role;
-                    Main.Settings.SaveCharacterSettings();  // ★ v3.5.89: 세이브에 저장
+                    Main.Settings.SaveCharacterSettings();
                 }
             }
             GUILayout.EndHorizontal();
             GUILayout.Space(8);
-            GUILayout.Label($"<color=#D8D8D8><i>{Localization.GetRoleDescription(_editingSettings.Role)}</i></color>", _descriptionStyle);
+            GUILayout.Label($"<color={UIStyles.TextMid}><i>{Localization.GetRoleDescription(_editingSettings.Role)}</i></color>", UIStyles.Description);
         }
 
         private static void DrawRangePreferenceSelection()
         {
-            GUILayout.Label($"<b>{L("RangePreference")}</b>", _boldLabelStyle);
-            GUILayout.Label($"<color=#D8D8D8><i>{L("RangePreferenceDesc")}</i></color>", _descriptionStyle);
+            GUILayout.Label($"<color={UIStyles.TextLight}><b>{L("RangePreference")}</b></color>", UIStyles.BoldLabel);
+            GUILayout.Label($"<color={UIStyles.TextMid}><i>{L("RangePreferenceDesc")}</i></color>", UIStyles.Description);
             GUILayout.Space(8);
 
             GUILayout.BeginHorizontal();
@@ -674,18 +586,92 @@ namespace CompanionAI_v3.UI
             {
                 bool isSelected = _editingSettings.RangePreference == pref;
                 string prefName = Localization.GetRangeName(pref);
-                string buttonText = isSelected ? $"<b>{prefName}</b>" : $"<color=#D8D8D8>{prefName}</color>";
+                string buttonText = isSelected
+                    ? $"<color={UIStyles.Gold}><b>{prefName}</b></color>"
+                    : $"<color={UIStyles.TextMid}>{prefName}</color>";
 
-                if (GUILayout.Toggle(isSelected, buttonText, GUI.skin.button, GUILayout.Width(RANGE_BUTTON_WIDTH), GUILayout.Height(BUTTON_HEIGHT)) && !isSelected)
+                if (GUILayout.Toggle(isSelected, buttonText, UIStyles.Button, GUILayout.Width(RANGE_BUTTON_WIDTH), GUILayout.Height(BUTTON_HEIGHT)) && !isSelected)
                 {
                     _editingSettings.RangePreference = pref;
-                    Main.Settings.SaveCharacterSettings();  // ★ v3.5.89: 세이브에 저장
+                    Main.Settings.SaveCharacterSettings();
                 }
             }
             GUILayout.EndHorizontal();
             GUILayout.Space(8);
-            GUILayout.Label($"<color=#D8D8D8><i>{Localization.GetRangeDescription(_editingSettings.RangePreference)}</i></color>", _descriptionStyle);
+            GUILayout.Label($"<color={UIStyles.TextMid}><i>{Localization.GetRangeDescription(_editingSettings.RangePreference)}</i></color>", UIStyles.Description);
         }
+
+        // ═════════════════════════════════════════════════════════
+        // Slider Helpers
+        // ═════════════════════════════════════════════════════════
+
+        private static float DrawSliderSetting(string label, string desc, float value, float min, float max, string format, string suffix)
+        {
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"<b>{label}:</b>", UIStyles.BoldLabel, GUILayout.Width(180));
+            float newValue = GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(200));
+            GUILayout.Label($"<color={UIStyles.Gold}>{newValue.ToString(format)}{suffix}</color>", UIStyles.SliderLabel, GUILayout.Width(80));
+            GUILayout.EndHorizontal();
+            GUILayout.Label($"<color={UIStyles.TextMid}>{desc}</color>", UIStyles.Description);
+            GUILayout.Space(10);
+            return newValue;
+        }
+
+        private static int DrawSliderSettingInt(string label, string desc, int value, int min, int max, string suffix)
+        {
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"<b>{label}:</b>", UIStyles.BoldLabel, GUILayout.Width(180));
+            int newValue = (int)GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(200));
+            GUILayout.Label($"<color={UIStyles.Gold}>{newValue}{suffix}</color>", UIStyles.SliderLabel, GUILayout.Width(80));
+            GUILayout.EndHorizontal();
+            GUILayout.Label($"<color={UIStyles.TextMid}>{desc}</color>", UIStyles.Description);
+            GUILayout.Space(10);
+            return newValue;
+        }
+
+        private static int DrawSliderSettingIntLarge(string label, string description, int value, int min, int max)
+        {
+            GUILayout.BeginVertical();
+
+            GUILayout.Label($"<size=18><b>{label}</b>: <color={UIStyles.Gold}>{value}</color></size>", UIStyles.BoldLabel);
+            GUILayout.Label($"<color={UIStyles.TextMid}>{description}</color>", UIStyles.Description);
+            GUILayout.Space(5);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"<color={UIStyles.TextMid}>{min}</color>", UIStyles.SliderLabel, GUILayout.Width(40));
+            value = (int)GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(500), GUILayout.Height(25));
+            GUILayout.Label($"<color={UIStyles.TextMid}>{max}</color>", UIStyles.SliderLabel, GUILayout.Width(50));
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(15);
+            GUILayout.EndVertical();
+
+            return value;
+        }
+
+        private static float DrawSliderSettingFloatLarge(string label, string description, float value, float min, float max)
+        {
+            GUILayout.BeginVertical();
+
+            GUILayout.Label($"<size=18><b>{label}</b>: <color={UIStyles.Gold}>{value:F0}</color></size>", UIStyles.BoldLabel);
+            GUILayout.Label($"<color={UIStyles.TextMid}>{description}</color>", UIStyles.Description);
+            GUILayout.Space(5);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"<color={UIStyles.TextMid}>{min:F0}</color>", UIStyles.SliderLabel, GUILayout.Width(40));
+            value = GUILayout.HorizontalSlider(value, min, max, GUILayout.Width(500), GUILayout.Height(25));
+            GUILayout.Label($"<color={UIStyles.TextMid}>{max:F0}</color>", UIStyles.SliderLabel, GUILayout.Width(50));
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(15);
+            GUILayout.EndVertical();
+
+            return value;
+        }
+
+        // ═════════════════════════════════════════════════════════
+        // Helpers
+        // ═════════════════════════════════════════════════════════
 
         private static List<CharacterInfo> GetPartyMembers()
         {
@@ -699,7 +685,7 @@ namespace CompanionAI_v3.UI
                 // ★ v3.7.15: 사역마(Familiar/Pet) 제외 - IsPet 체크
                 return partyMembers
                     .Where(unit => unit != null)
-                    .Where(unit => !unit.IsPet)  // 사역마 제외
+                    .Where(unit => !unit.IsPet)
                     .Select(unit => new CharacterInfo { Id = unit.UniqueId ?? "unknown", Name = unit.CharacterName ?? "Unnamed", Unit = unit })
                     .ToList();
             }
@@ -709,7 +695,7 @@ namespace CompanionAI_v3.UI
         private class CharacterInfo
         {
             public string Id { get; set; } = "";
-            public string Name { get; set; } = "Unknown";  // ★ v3.0.46: 기본값 추가
+            public string Name { get; set; } = "Unknown";
             public BaseUnitEntity Unit { get; set; }
         }
     }
