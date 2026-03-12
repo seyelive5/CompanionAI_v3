@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using CompanionAI_v3.MachineSpirit;
 using Newtonsoft.Json;
 using UnityModManagerNet;
 
@@ -1404,6 +1405,51 @@ namespace CompanionAI_v3.Settings
                 { Language.English, "Debug" }, { Language.Korean, "디버그" },
                 { Language.Russian, "Отладка" }, { Language.Japanese, "デバッグ" }
             },
+            ["TabMachineSpirit"] = new() {
+                { Language.English, "Machine Spirit" }, { Language.Korean, "머신 스피릿" },
+                { Language.Russian, "Дух Машины" }, { Language.Japanese, "マシンスピリット" }
+            },
+
+            // ── Machine Spirit settings ───────────────────────────
+            ["MSEnabled"] = new() {
+                { Language.English, "Enable Machine Spirit" }, { Language.Korean, "머신 스피릿 활성화" },
+                { Language.Russian, "Включить Дух Машины" }, { Language.Japanese, "マシンスピリットを有効化" }
+            },
+            ["MSApiUrl"] = new() {
+                { Language.English, "API URL" }, { Language.Korean, "API URL" },
+                { Language.Russian, "URL API" }, { Language.Japanese, "API URL" }
+            },
+            ["MSApiKey"] = new() {
+                { Language.English, "API Key" }, { Language.Korean, "API 키" },
+                { Language.Russian, "Ключ API" }, { Language.Japanese, "APIキー" }
+            },
+            ["MSModel"] = new() {
+                { Language.English, "Model" }, { Language.Korean, "모델" },
+                { Language.Russian, "Модель" }, { Language.Japanese, "モデル" }
+            },
+            ["MSMaxTokens"] = new() {
+                { Language.English, "Max Tokens" }, { Language.Korean, "최대 토큰" },
+                { Language.Russian, "Макс. токенов" }, { Language.Japanese, "最大トークン" }
+            },
+            ["MSTemperature"] = new() {
+                { Language.English, "Temperature" }, { Language.Korean, "온도" },
+                { Language.Russian, "Температура" }, { Language.Japanese, "温度" }
+            },
+            ["MSHotkey"] = new() {
+                { Language.English, "Chat Hotkey" }, { Language.Korean, "채팅 핫키" },
+                { Language.Russian, "Горячая клавиша" }, { Language.Japanese, "チャットホットキー" }
+            },
+            ["MSTestConnection"] = new() {
+                { Language.English, "Test Connection" }, { Language.Korean, "연결 테스트" },
+                { Language.Russian, "Тест соединения" }, { Language.Japanese, "接続テスト" }
+            },
+            ["MSDescription"] = new() {
+                { Language.English, "Ancient Machine Spirit — LLM-powered voidship AI companion. Requires an OpenAI-compatible API endpoint." },
+                { Language.Korean, "고대 머신 스피릿 — LLM 기반 보이드쉽 AI 동반자. OpenAI 호환 API 엔드포인트 필요." },
+                { Language.Russian, "Древний Дух Машины — ИИ-компаньон корабля на основе LLM. Требуется OpenAI-совместимая конечная точка API." },
+                { Language.Japanese, "古のマシンスピリット — LLMベースの虚空船AIコンパニオン。OpenAI互換APIエンドポイントが必要。" }
+            },
+
             ["GameplaySettings"] = new() {
                 { Language.English, "Gameplay Settings" }, { Language.Korean, "게임플레이 설정" },
                 { Language.Russian, "Настройки геймплея" }, { Language.Japanese, "ゲームプレイ設定" }
@@ -1671,6 +1717,9 @@ namespace CompanionAI_v3.Settings
 
         /// <summary>★ v3.50.0: UI 전체 크기 배율 (0.8 ~ 2.5, 기본 1.5)</summary>
         public float UIScale { get; set; } = 1.5f;
+
+        /// <summary>Machine Spirit (LLM-powered voidship AI companion) settings</summary>
+        public MachineSpiritConfig MachineSpirit { get; set; } = new MachineSpiritConfig();
 
         /// <summary>
         /// ★ v3.0.15: 주인공도 AI 제어 여부
