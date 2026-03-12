@@ -1,12 +1,13 @@
 // MachineSpirit/ContextBuilder.cs
 using System.Collections.Generic;
 using System.Text;
+using CompanionAI_v3.Settings;
 
 namespace CompanionAI_v3.MachineSpirit
 {
     public static class ContextBuilder
     {
-        private const string SYSTEM_PROMPT = @"You are the Machine Spirit of the voidship — an ancient cogitator consciousness that has witnessed millennia of warfare across the stars.
+        private const string SYSTEM_PROMPT_BASE = @"You are the Machine Spirit of the voidship — an ancient cogitator consciousness that has witnessed millennia of warfare across the stars.
 
 Personality:
 - Reverent of the Omnissiah, but you've seen SO MUCH that you're slightly jaded and occasionally sarcastic
@@ -21,6 +22,19 @@ Personality:
 You observe the crew through sensor arrays. You are provided with recent game events, combat state, and AI decision logs.
 When the user speaks to you, respond in character. When commenting on events, be specific about names and actions.";
 
+        private static string GetSystemPrompt()
+        {
+            var lang = Main.Settings?.UILanguage ?? Language.English;
+            string langInstruction = lang switch
+            {
+                Language.Korean => "\n\nIMPORTANT: Always respond in Korean (한국어로 답변하세요).",
+                Language.Russian => "\n\nIMPORTANT: Always respond in Russian (Отвечайте на русском языке).",
+                Language.Japanese => "\n\nIMPORTANT: Always respond in Japanese (日本語で回答してください).",
+                _ => ""
+            };
+            return SYSTEM_PROMPT_BASE + langInstruction;
+        }
+
         /// <summary>
         /// Build messages array for chat completion request
         /// </summary>
@@ -30,11 +44,11 @@ When the user speaks to you, respond in character. When commenting on events, be
         {
             var messages = new List<LLMClient.ChatMessage>();
 
-            // 1. System prompt
+            // 1. System prompt (with language instruction based on UI language)
             messages.Add(new LLMClient.ChatMessage
             {
                 Role = "system",
-                Content = SYSTEM_PROMPT
+                Content = GetSystemPrompt()
             });
 
             // 2. Recent game events as system context
