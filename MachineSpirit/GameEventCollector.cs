@@ -101,7 +101,8 @@ namespace CompanionAI_v3.MachineSpirit
         {
             public void HandleUnitDeath(AbstractUnitEntity unit)
             {
-                string name = unit?.CharacterName ?? "Unknown";
+                if (unit == null) return;
+                string name = unit.CharacterName ?? "Unknown";
                 bool isEnemy = !unit.IsPlayerFaction;
                 string desc = isEnemy ? $"{name} was destroyed" : $"{name} has fallen";
                 AddEvent(GameEventType.UnitDeath, null, desc);
