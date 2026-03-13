@@ -859,7 +859,7 @@ Example responses (mimic this exact style):
         /// <summary>
         /// Build the full system content string (prompt + summary + sensor data).
         /// </summary>
-        private static string BuildSystemContent(string conversationSummary)
+        private static string BuildSystemContent(string conversationSummary, MachineSpiritConfig config = null)
         {
             var systemSb = new StringBuilder(GetSystemPrompt());
 
@@ -922,7 +922,9 @@ Example responses (mimic this exact style):
                     systemSb.AppendLine("--- SENSOR DATA (read-only observations, do NOT copy or repeat these) ---");
                 }
                 systemSb.AppendLine("[Sensor log]");
-                int start = events.Count > 20 ? events.Count - 20 : 0;
+                // ★ v3.64.0: Dynamic sensor log size — fewer events for small models
+                int maxEvents = (config?.Provider == ApiProvider.Ollama && IsSmallModel(config)) ? 10 : 20;
+                int start = events.Count > maxEvents ? events.Count - maxEvents : 0;
                 for (int i = start; i < events.Count; i++)
                     systemSb.AppendLine(events[i].ToString());
             }
@@ -941,6 +943,32 @@ Example responses (mimic this exact style):
         }
 
         /// <summary>
+        /// ★ v3.64.0: Dynamic history window — smaller models get fewer messages to stay within context.
+        /// </summary>
+        private static int GetHistoryWindow(MachineSpiritConfig config)
+        {
+            if (config == null) return 20;
+
+            // Cloud providers: generous window (large context)
+            if (config.Provider != ApiProvider.Ollama) return 20;
+
+            // Ollama: model size determines window
+            string model = config.Model?.ToLowerInvariant() ?? "";
+            if (model.Contains("1b") || model.Contains("3b") || model.Contains("4b"))
+                return 12; // Small models: 6 turns
+            if (model.Contains("27b") || model.Contains("70b"))
+                return 20; // Large models: 10 turns
+            return 16; // Mid-range (7B-12B): 8 turns
+        }
+
+        private static bool IsSmallModel(MachineSpiritConfig config)
+        {
+            if (config?.Model == null) return false;
+            string m = config.Model.ToLowerInvariant();
+            return m.Contains("1b") || m.Contains("3b") || m.Contains("4b");
+        }
+
+        /// <summary>
         /// Build messages array for chat completion request.
         /// </summary>
         /// <param name="chatHistory">Full chat history</param>
@@ -954,7 +982,7 @@ Example responses (mimic this exact style):
             string conversationSummary = null)
         {
             var messages = new List<LLMClient.ChatMessage>();
-            string systemContent = BuildSystemContent(conversationSummary);
+            string systemContent = BuildSystemContent(conversationSummary, config);
 
             // ★ Gemma workaround: embed system prompt in first user message
             // Gemma 3 ignores the "system" role entirely — the parser merges it into the first
@@ -972,8 +1000,9 @@ Example responses (mimic this exact style):
                 });
             }
 
-            // Chat history (last 10 turns = 20 messages)
-            int histStart = chatHistory.Count > 20 ? chatHistory.Count - 20 : 0;
+            // ★ v3.64.0: Dynamic history window based on model context size
+            int maxHistory = GetHistoryWindow(config);
+            int histStart = chatHistory.Count > maxHistory ? chatHistory.Count - maxHistory : 0;
             bool systemInjected = false;
 
             for (int i = histStart; i < chatHistory.Count; i++)
