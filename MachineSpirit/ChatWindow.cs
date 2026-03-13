@@ -17,6 +17,7 @@ namespace CompanionAI_v3.MachineSpirit
         private static string _inputText = "";
         private static bool _isThinking;
         private static int _lastMessageCount;
+        private static int _lastMsgTextLen; // ★ v3.58.0: Track last message length for streaming auto-scroll
 
         // Styles (created once per scale change)
         private static GUIStyle _chatBubbleStyle;
@@ -105,11 +106,21 @@ namespace CompanionAI_v3.MachineSpirit
             GUILayout.Label($"<color={UIStyles.Gold}><b>\u2014 Machine Spirit \u2014</b></color>", UIStyles.Header);
             UIStyles.DrawDivider();
 
-            // Auto-scroll when new messages arrive
+            // Auto-scroll when new messages arrive OR when streaming updates last message
             if (chatHistory.Count != _lastMessageCount)
             {
                 _lastMessageCount = chatHistory.Count;
                 _scrollPos.y = float.MaxValue;
+            }
+            else if (chatHistory.Count > 0)
+            {
+                // ★ v3.58.0: Streaming auto-scroll — detect text changes in last message
+                int curLen = chatHistory[chatHistory.Count - 1].Text?.Length ?? 0;
+                if (curLen != _lastMsgTextLen)
+                {
+                    _lastMsgTextLen = curLen;
+                    _scrollPos.y = float.MaxValue;
+                }
             }
 
             // Message area (scrollable)

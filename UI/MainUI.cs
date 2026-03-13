@@ -339,6 +339,7 @@ namespace CompanionAI_v3.UI
                     case Language.Korean:   langName = "한국어";    break;
                     case Language.Russian:  langName = "Русский";  break;
                     case Language.Japanese: langName = "日本語";    break;
+                    case Language.Chinese:  langName = "中文";      break;
                     default:               langName = lang.ToString(); break;
                 }
 
@@ -400,16 +401,27 @@ namespace CompanionAI_v3.UI
         // Machine Spirit Tab
         // ═════════════════════════════════════════════════════════
 
-        private static readonly string[] _providerNames = { "Ollama (Free, Local)", "Gemini (Free)", "Groq (Free)", "OpenAI (Paid)", "Custom" };
-        private static int _selectedProvider = -1;
+        private static int _mainProviderChoice = -1; // 0=Ollama, 1=Cloud
+        private static int _selectedCloudIdx = -1;   // 0=Gemini, 1=Groq, 2=OpenAI, 3=Custom
 
         private static void DrawMachineSpiritTab()
         {
             var ms = Main.Settings.MachineSpirit;
 
-            // Sync dropdown index on first draw
-            if (_selectedProvider < 0)
-                _selectedProvider = (int)ms.Provider;
+            // Sync state on first draw
+            if (_mainProviderChoice < 0)
+            {
+                if (ms.Provider == MSp.ApiProvider.Ollama)
+                {
+                    _mainProviderChoice = 0;
+                    _selectedCloudIdx = 0;
+                }
+                else
+                {
+                    _mainProviderChoice = 1;
+                    _selectedCloudIdx = (int)ms.Provider - 1;
+                }
+            }
 
             // Description
             UIStyles.SectionTitle(L("TabMachineSpirit"));
@@ -426,80 +438,83 @@ namespace CompanionAI_v3.UI
             // API Settings (only show if enabled)
             if (ms.Enabled)
             {
-                // ── Provider dropdown ──
+                // ── Main choice: Ollama vs Cloud ──
                 GUILayout.BeginHorizontal();
                 GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSProvider")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
-                int newProvider = GUILayout.SelectionGrid(_selectedProvider, _providerNames, 5,
+                int newChoice = GUILayout.SelectionGrid(_mainProviderChoice,
+                    new[] { "\u2605 Ollama (Local, Free)", "Cloud / Custom" }, 2,
                     UIStyles.Button, GUILayout.Height(BUTTON_HEIGHT));
                 GUILayout.EndHorizontal();
 
-                if (newProvider != _selectedProvider)
+                if (newChoice != _mainProviderChoice)
                 {
-                    _selectedProvider = newProvider;
-                    ms.ApplyPreset((MSp.ApiProvider)newProvider);
-                    MSp.OllamaSetup.Reset();
+                    _mainProviderChoice = newChoice;
+                    if (newChoice == 0)
+                    {
+                        ms.ApplyPreset(MSp.ApiProvider.Ollama);
+                        MSp.OllamaSetup.Reset();
+                    }
+                    else
+                    {
+                        ms.ApplyPreset((MSp.ApiProvider)(_selectedCloudIdx + 1));
+                    }
                 }
 
-                // ── Provider guide text ──
-                GUILayout.Label($"<color={UIStyles.TextMid}>{L("MSGuide_" + ms.Provider)}</color>", UIStyles.Description);
                 GUILayout.Space(5);
 
-                // ── Ollama Auto Setup ──
-                if (ms.Provider == MSp.ApiProvider.Ollama)
-                {
-                    GUILayout.BeginHorizontal();
-                    bool isRunning = MSp.OllamaSetup.State == MSp.OllamaSetup.SetupState.Checking
-                                  || MSp.OllamaSetup.State == MSp.OllamaSetup.SetupState.Starting
-                                  || MSp.OllamaSetup.State == MSp.OllamaSetup.SetupState.Pulling;
+                if (_mainProviderChoice == 0)
+                    DrawOllamaSection(ms);
+                else
+                    DrawCloudSection(ms);
 
-                    GUI.enabled = !isRunning;
-                    if (GUILayout.Button($"<color={UIStyles.TextLight}>{L("MSAutoSetup")}</color>",
-                        UIStyles.Button, GUILayout.Width(UIStyles.Sd(180)), GUILayout.Height(BUTTON_HEIGHT)))
+                // ★ v3.60.0: Personality preset
+                GUILayout.Space(8);
+                GUILayout.Label($"<color={UIStyles.Gold}>{L("MSPersonality")}</color>", UIStyles.SubHeader);
+
+                string[] personalityNames = { "Mechanicus", "Heretic", "Feral", "Magickal" };
+                string[] personalityDescs = {
+                    L("MSPersonality_Mechanicus"),
+                    L("MSPersonality_Heretic"),
+                    L("MSPersonality_Feral"),
+                    L("MSPersonality_Magickal")
+                };
+                int curPersonality = (int)ms.Personality;
+                int newPersonality = GUILayout.SelectionGrid(curPersonality, personalityNames, 4,
+                    UIStyles.Button, GUILayout.Height(UIStyles.Sd(32f)));
+                if (newPersonality != curPersonality)
+                {
+                    ms.Personality = (MSp.PersonalityType)newPersonality;
+                    MachineSpirit.MachineSpirit.ClearChatHistory();
+                }
+                GUILayout.Label($"<color={UIStyles.TextMid}>{personalityDescs[newPersonality]}</color>", UIStyles.Description);
+
+                // ★ v3.60.0: Idle Commentary
+                GUILayout.Space(8);
+                GUILayout.Label($"<color={UIStyles.Gold}>{L("MSIdleMode")}</color>", UIStyles.SubHeader);
+
+                string[] idleNames = { "Off", "Low", "Medium", "High" };
+                int curIdle = (int)ms.IdleMode;
+                int newIdle = GUILayout.SelectionGrid(curIdle, idleNames, 4,
+                    UIStyles.Button, GUILayout.Height(UIStyles.Sd(32f)));
+                if (newIdle != curIdle)
+                    ms.IdleMode = (MSp.IdleFrequency)newIdle;
+                GUILayout.Label($"<color={UIStyles.TextMid}>{L("MSIdleDesc")}</color>", UIStyles.Description);
+
+                // ★ v3.60.0: Vision (Ollama only)
+                if (ms.Provider == MSp.ApiProvider.Ollama && ms.IdleMode != MSp.IdleFrequency.Off)
+                {
+                    GUILayout.Space(4);
+                    ms.EnableVision = DrawCheckbox(ms.EnableVision, L("MSEnableVision"));
+                    if (ms.EnableVision)
                     {
-                        MSp.CoroutineRunner.Start(MSp.OllamaSetup.RunAutoSetup(ms.Model));
+                        GUILayout.Label($"<color={UIStyles.TextMid}>{L("MSVisionDesc")}</color>", UIStyles.Description);
                     }
-                    GUI.enabled = true;
-
-                    // Status text
-                    if (MSp.OllamaSetup.State != MSp.OllamaSetup.SetupState.Idle)
-                    {
-                        string statusColor = MSp.OllamaSetup.State == MSp.OllamaSetup.SetupState.Error
-                            ? UIStyles.RoleRed : UIStyles.Gold;
-                        GUILayout.Label($"<color={statusColor}>{MSp.OllamaSetup.StatusText}</color>", UIStyles.Label);
-                    }
-                    GUILayout.EndHorizontal();
-                    GUILayout.Space(5);
                 }
-
-                // ── Groq/Gemini/OpenAI setup steps ──
-                if (ms.Provider == MSp.ApiProvider.Groq || ms.Provider == MSp.ApiProvider.Gemini || ms.Provider == MSp.ApiProvider.OpenAI)
+                else
                 {
-                    GUILayout.Label($"<color={UIStyles.Gold}>{L("MSSteps_" + ms.Provider)}</color>", UIStyles.Description);
-                    GUILayout.Space(5);
+                    ms.EnableVision = false;
                 }
 
-                // ── API URL (Custom only) ──
-                if (ms.Provider == MSp.ApiProvider.Custom)
-                {
-                    GUILayout.BeginHorizontal();
-                    GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSApiUrl")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
-                    ms.ApiUrl = GUILayout.TextField(ms.ApiUrl, GUILayout.ExpandWidth(true));
-                    GUILayout.EndHorizontal();
-                    GUILayout.Space(5);
-                }
-
-                // ── API Key (not for Ollama) ──
-                if (ms.Provider != MSp.ApiProvider.Ollama)
-                {
-                    GUILayout.BeginHorizontal();
-                    GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSApiKey")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
-                    ms.ApiKey = GUILayout.PasswordField(ms.ApiKey, '*', GUILayout.ExpandWidth(true));
-                    GUILayout.EndHorizontal();
-                    GUILayout.Space(5);
-                }
-
-                // ── Model selection ──
-                DrawModelSelection(ms);
                 GUILayout.Space(10);
                 UIStyles.DrawDivider();
                 GUILayout.Space(5);
@@ -544,6 +559,92 @@ namespace CompanionAI_v3.UI
         }
 
         // ═════════════════════════════════════════════════════════
+        // Ollama / Cloud Sections
+        // ═════════════════════════════════════════════════════════
+
+        private static void DrawOllamaSection(MSp.MachineSpiritConfig ms)
+        {
+            // Guide text
+            GUILayout.Label($"<color={UIStyles.TextMid}>{L("MSGuide_Ollama")}</color>", UIStyles.Description);
+            GUILayout.Space(5);
+
+            // Auto Setup button
+            GUILayout.BeginHorizontal();
+            bool isRunning = MSp.OllamaSetup.State == MSp.OllamaSetup.SetupState.Checking
+                          || MSp.OllamaSetup.State == MSp.OllamaSetup.SetupState.Starting
+                          || MSp.OllamaSetup.State == MSp.OllamaSetup.SetupState.Pulling;
+
+            GUI.enabled = !isRunning;
+            if (GUILayout.Button($"<color={UIStyles.TextLight}>{L("MSAutoSetup")}</color>",
+                UIStyles.Button, GUILayout.Width(UIStyles.Sd(180)), GUILayout.Height(BUTTON_HEIGHT)))
+            {
+                MSp.CoroutineRunner.Start(MSp.OllamaSetup.RunAutoSetup(ms.Model));
+            }
+            GUI.enabled = true;
+
+            // Status text
+            if (MSp.OllamaSetup.State != MSp.OllamaSetup.SetupState.Idle)
+            {
+                string statusColor = MSp.OllamaSetup.State == MSp.OllamaSetup.SetupState.Error
+                    ? UIStyles.RoleRed : UIStyles.Gold;
+                GUILayout.Label($"<color={statusColor}>{MSp.OllamaSetup.StatusText}</color>", UIStyles.Label);
+            }
+            GUILayout.EndHorizontal();
+            GUILayout.Space(5);
+
+            // Model selection (Ollama presets + scan installed)
+            DrawModelSelection(ms);
+        }
+
+        private static void DrawCloudSection(MSp.MachineSpiritConfig ms)
+        {
+            // Cloud provider sub-selection
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSProvider")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
+            int newCloudIdx = GUILayout.SelectionGrid(_selectedCloudIdx,
+                new[] { "Gemini", "Groq", "OpenAI", "Custom" }, 4,
+                UIStyles.Button, GUILayout.Height(BUTTON_HEIGHT));
+            GUILayout.EndHorizontal();
+
+            if (newCloudIdx != _selectedCloudIdx)
+            {
+                _selectedCloudIdx = newCloudIdx;
+                ms.ApplyPreset((MSp.ApiProvider)(newCloudIdx + 1));
+            }
+
+            // Provider guide
+            GUILayout.Label($"<color={UIStyles.TextMid}>{L("MSGuide_" + ms.Provider)}</color>", UIStyles.Description);
+            GUILayout.Space(5);
+
+            // Setup steps (Groq/Gemini/OpenAI)
+            if (ms.Provider == MSp.ApiProvider.Groq || ms.Provider == MSp.ApiProvider.Gemini || ms.Provider == MSp.ApiProvider.OpenAI)
+            {
+                GUILayout.Label($"<color={UIStyles.Gold}>{L("MSSteps_" + ms.Provider)}</color>", UIStyles.Description);
+                GUILayout.Space(5);
+            }
+
+            // API URL (Custom only)
+            if (ms.Provider == MSp.ApiProvider.Custom)
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSApiUrl")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
+                ms.ApiUrl = GUILayout.TextField(ms.ApiUrl, GUILayout.ExpandWidth(true));
+                GUILayout.EndHorizontal();
+                GUILayout.Space(5);
+            }
+
+            // API Key (all cloud providers)
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSApiKey")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
+            ms.ApiKey = GUILayout.PasswordField(ms.ApiKey, '*', GUILayout.ExpandWidth(true));
+            GUILayout.EndHorizontal();
+            GUILayout.Space(5);
+
+            // Model selection (cloud presets)
+            DrawModelSelection(ms);
+        }
+
+        // ═════════════════════════════════════════════════════════
         // Model Selection
         // ═════════════════════════════════════════════════════════
 
@@ -558,9 +659,11 @@ namespace CompanionAI_v3.UI
         {
             [MSp.ApiProvider.Ollama] = new[]
             {
-                new ModelPreset { Id = "llama3.2",  Label = "Llama 3.2 (3B)",  DescKey = "MSModel_llama32" },
-                new ModelPreset { Id = "qwen2.5",   Label = "Qwen 2.5 (7B)",   DescKey = "MSModel_qwen25" },
-                new ModelPreset { Id = "gemma2",     Label = "Gemma 2 (9B)",     DescKey = "MSModel_gemma2" },
+                new ModelPreset { Id = "gemma3:4b-it-qat", Label = "Gemma 3 4B QAT",   DescKey = "MSModel_gemma3_4b" },
+                new ModelPreset { Id = "gemma3:12b",       Label = "Gemma 3 12B",       DescKey = "MSModel_gemma3_12b" },
+                new ModelPreset { Id = "gemma3:27b",       Label = "Gemma 3 27B",       DescKey = "MSModel_gemma3_27b" },
+                new ModelPreset { Id = "qwen2.5",          Label = "Qwen 2.5 (7B)",     DescKey = "MSModel_qwen25" },
+                new ModelPreset { Id = "llama3.2",         Label = "Llama 3.2 (3B)",    DescKey = "MSModel_llama32" },
             },
             [MSp.ApiProvider.Gemini] = new[]
             {
@@ -625,6 +728,54 @@ namespace CompanionAI_v3.UI
                 // Custom provider — free text field
                 ms.Model = GUILayout.TextField(ms.Model, GUILayout.ExpandWidth(true));
                 GUILayout.Label($"<color={UIStyles.TextDim}>{L("MSModelHint")}</color>", UIStyles.Description);
+            }
+
+            // ★ v3.58.0: Ollama installed model auto-detection
+            if (ms.Provider == MSp.ApiProvider.Ollama)
+            {
+                GUILayout.Space(5);
+                GUILayout.BeginHorizontal();
+
+                // Scan button
+                GUI.enabled = !MSp.OllamaSetup.IsFetchingModels;
+                if (GUILayout.Button($"<color={UIStyles.TextLight}>{L("MSScanModels")}</color>",
+                    UIStyles.Button, GUILayout.Width(UIStyles.Sd(140)), GUILayout.Height(BUTTON_HEIGHT)))
+                {
+                    MSp.CoroutineRunner.Start(MSp.OllamaSetup.FetchInstalledModels());
+                }
+                GUI.enabled = true;
+
+                if (MSp.OllamaSetup.IsFetchingModels)
+                    GUILayout.Label($"<color={UIStyles.TextMid}>Scanning...</color>", UIStyles.Label);
+                GUILayout.EndHorizontal();
+
+                // Show installed models as selectable buttons
+                var installed = MSp.OllamaSetup.InstalledModels;
+                if (installed.Count > 0)
+                {
+                    GUILayout.Space(3);
+                    GUILayout.Label($"<color={UIStyles.TextMid}>{L("MSInstalledModels")} ({installed.Count}):</color>", UIStyles.Description);
+
+                    // Build button labels
+                    var modelLabels = new string[installed.Count];
+                    int currentIdx = -1;
+                    for (int i = 0; i < installed.Count; i++)
+                    {
+                        modelLabels[i] = installed[i];
+                        if (installed[i] == ms.Model) currentIdx = i;
+                    }
+
+                    // Selection grid (max 3 columns)
+                    int cols = System.Math.Min(installed.Count, 3);
+                    int selected = GUILayout.SelectionGrid(currentIdx, modelLabels, cols,
+                        UIStyles.Button, GUILayout.Height(BUTTON_HEIGHT));
+
+                    if (selected != currentIdx && selected >= 0 && selected < installed.Count)
+                    {
+                        ms.Model = installed[selected];
+                        _selectedModelIdx = -1; // Clear preset selection
+                    }
+                }
             }
         }
 

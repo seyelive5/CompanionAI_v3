@@ -1,6 +1,7 @@
 // MachineSpirit/OllamaSetup.cs
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using UnityEngine;
@@ -244,6 +245,64 @@ namespace CompanionAI_v3.MachineSpirit
         {
             _state = SetupState.Idle;
             _statusText = "";
+        }
+
+        // ════════════════════════════════════════════════════════════
+        // ★ v3.58.0: Installed Model Detection
+        // ════════════════════════════════════════════════════════════
+
+        private static readonly List<string> _installedModels = new List<string>();
+        private static bool _isFetchingModels;
+
+        public static IReadOnlyList<string> InstalledModels => _installedModels;
+        public static bool IsFetchingModels => _isFetchingModels;
+
+        /// <summary>
+        /// Fetch list of installed Ollama models via /api/tags endpoint.
+        /// </summary>
+        public static IEnumerator FetchInstalledModels()
+        {
+            if (_isFetchingModels) yield break;
+            _isFetchingModels = true;
+
+            var request = UnityWebRequest.Get("http://localhost:11434/api/tags");
+            request.timeout = 5;
+            yield return request.SendWebRequest();
+
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                try
+                {
+                    var json = Newtonsoft.Json.Linq.JObject.Parse(request.downloadHandler.text);
+                    var models = json["models"];
+                    _installedModels.Clear();
+
+                    if (models != null)
+                    {
+                        foreach (var model in models)
+                        {
+                            // "name" field contains "model:tag" format (e.g., "llama3.2:latest")
+                            string name = model["name"]?.ToString();
+                            if (!string.IsNullOrEmpty(name))
+                            {
+                                // Strip ":latest" tag for cleaner display
+                                if (name.EndsWith(":latest"))
+                                    name = name.Substring(0, name.Length - 7);
+                                _installedModels.Add(name);
+                            }
+                        }
+                    }
+
+                    Main.LogDebug($"[MachineSpirit] Found {_installedModels.Count} installed Ollama models");
+                }
+                catch (System.Exception ex)
+                {
+                    Main.LogDebug($"[MachineSpirit] Failed to parse Ollama models: {ex.Message}");
+                }
+            }
+
+            request.Dispose();
+            _isFetchingModels = false;
         }
     }
 }

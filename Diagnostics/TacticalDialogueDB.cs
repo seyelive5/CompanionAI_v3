@@ -58,7 +58,8 @@ namespace CompanionAI_v3.Diagnostics
             var lang = ModSettings.Instance?.UILanguage ?? Language.English;
             string langCode = lang == Language.Korean ? "ko" :
                               lang == Language.Japanese ? "ja" :
-                              lang == Language.Russian ? "ru" : "en";
+                              lang == Language.Russian ? "ru" :
+                              lang == Language.Chinese ? "zh" : "en";
 
             string filePath = Path.Combine(modPath, "Dialogue", $"tactical_{langCode}.json");
 

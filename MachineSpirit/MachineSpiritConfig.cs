@@ -12,15 +12,36 @@ namespace CompanionAI_v3.MachineSpirit
         Custom
     }
 
+    public enum PersonalityType
+    {
+        Mechanicus,  // Omnissiah-worshipping tech-priest (default)
+        Heretic,     // Outwardly warm, subtly nudges toward darker choices
+        Feral,       // Aggressive but good-hearted primitive AI
+        Magickal     // Dark Age of Technology girl AI
+    }
+
+    public enum IdleFrequency
+    {
+        Off,
+        Low,     // Text: 5min, Vision: 15min
+        Medium,  // Text: 3min, Vision: 8min
+        High     // Text: 1.5min, Vision: 5min
+    }
+
     public class MachineSpiritConfig
     {
         public bool Enabled { get; set; } = false;
         public ApiProvider Provider { get; set; } = ApiProvider.Ollama;
         public string ApiUrl { get; set; } = "http://localhost:11434/v1";
-        public string Model { get; set; } = "llama3.2";
+        public string Model { get; set; } = "gemma3:4b-it-qat";
         public int MaxTokens { get; set; } = 500;
         public float Temperature { get; set; } = 0.8f;
         public KeyCode Hotkey { get; set; } = KeyCode.F2;
+
+        // ★ v3.60.0: Personality, Idle Commentary, Vision
+        public PersonalityType Personality { get; set; } = PersonalityType.Mechanicus;
+        public IdleFrequency IdleMode { get; set; } = IdleFrequency.Off;
+        public bool EnableVision { get; set; } = false;
 
         // ★ Per-provider API keys (each provider stores its own key)
         public Dictionary<ApiProvider, string> ProviderApiKeys { get; set; } = new();
@@ -67,7 +88,7 @@ namespace CompanionAI_v3.MachineSpirit
             {
                 case ApiProvider.Ollama:
                     ApiUrl = "http://localhost:11434/v1";
-                    Model = "llama3.2";
+                    Model = "gemma3:4b-it-qat";
                     break;
                 case ApiProvider.Groq:
                     ApiUrl = "https://api.groq.com/openai/v1";

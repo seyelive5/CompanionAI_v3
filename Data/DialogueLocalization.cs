@@ -28,6 +28,7 @@ namespace CompanionAI_v3.Data
         private static Dictionary<CompanionId, Dictionary<SpeechCategory, string[]>> _loadedKorean;
         private static Dictionary<CompanionId, Dictionary<SpeechCategory, string[]>> _loadedRussian;
         private static Dictionary<CompanionId, Dictionary<SpeechCategory, string[]>> _loadedJapanese;
+        private static Dictionary<CompanionId, Dictionary<SpeechCategory, string[]>> _loadedChinese;
 
         private static readonly Dictionary<Language, string> LanguageFileNames = new Dictionary<Language, string>
         {
@@ -35,6 +36,7 @@ namespace CompanionAI_v3.Data
             [Language.Korean]   = "dialogue_ko.json",
             [Language.Russian]  = "dialogue_ru.json",
             [Language.Japanese] = "dialogue_ja.json",
+            [Language.Chinese]  = "dialogue_zh.json",
         };
 
         /// <summary>현재 언어 설정에 맞는 대사 DB 반환 (JSON 우선, 하드코딩 fallback)</summary>
@@ -45,6 +47,7 @@ namespace CompanionAI_v3.Data
                 case Language.Korean:   return _loadedKorean   ?? KoreanDialogue;
                 case Language.Russian:  return _loadedRussian  ?? RussianDialogue;
                 case Language.Japanese: return _loadedJapanese ?? JapaneseDialogue;
+                case Language.Chinese:  return _loadedChinese  ?? ChineseDialogue;
                 default:                return _loadedEnglish  ?? EnglishDialogue;
             }
         }
@@ -161,6 +164,7 @@ namespace CompanionAI_v3.Data
                 case Language.Korean:   _loadedKorean   = db; break;
                 case Language.Russian:  _loadedRussian  = db; break;
                 case Language.Japanese: _loadedJapanese = db; break;
+                case Language.Chinese:  _loadedChinese  = db; break;
             }
         }
 
@@ -176,6 +180,7 @@ namespace CompanionAI_v3.Data
                     case Language.Korean:   hardcoded = KoreanDialogue;   break;
                     case Language.Russian:  hardcoded = RussianDialogue;  break;
                     case Language.Japanese: hardcoded = JapaneseDialogue; break;
+                    case Language.Chinese:  hardcoded = ChineseDialogue;  break;
                     default:               hardcoded = EnglishDialogue;   break;
                 }
 
@@ -220,6 +225,7 @@ namespace CompanionAI_v3.Data
             _loadedKorean = null;
             _loadedRussian = null;
             _loadedJapanese = null;
+            _loadedChinese = null;
 
             int loaded = 0;
             foreach (var kvp in LanguageFileNames)
@@ -3342,6 +3348,786 @@ namespace CompanionAI_v3.Data
                 [SpeechCategory.Reload] = new[]     { "装填！", "弾薬交換！", "マガジン交換！", "少し待て \u2014 装填中！" },
                 [SpeechCategory.Support] = new[]    { "[ally]を支援！", "[ally]を援護！" },
                 [SpeechCategory.Victory] = new[]    { "地域掃討完了。", "敵排除完了。", "戦闘終了。" },
+            },
+        };
+
+        #endregion
+
+        #region ═══ CHINESE (中文) ═══
+        // 语气设计:
+        //   Abelard: 正式军事用语，忠诚恭敬 — 忠诚的护卫
+        //   Heinrix: 冷酷威严，审判者口吻 — 审判官
+        //   Argenta: 狂热激昂，大量感叹号 — 战斗修女
+        //   Pasqal:  干燥的报告体，机械化用语 — 机械教徒
+        //   Idira:   胆怯犹豫，省略号频繁 — 未授权灵能者
+        //   Cassia:  高傲优雅，贵族小姐口吻 — 领航员
+        //   Yrliet:  超然冷漠，居高临下 — 灵族游侠
+        //   Jae:     随意洒脱，商人口吻 — 走私者
+        //   Marazhai: 嗜虐美学，黑暗享乐 — 暗灵族
+        //   Ulfar:   豪迈粗犷，战士本色 — 太空狼
+        //   Kibellah: 简洁仪式化，死亡教团 — 暗灵族刺客
+        //   Solomorne: 公式化执法用语 — 仲裁者
+        //   Unknown: 简洁军事用语 — 默认
+
+        public static readonly Dictionary<CompanionId, Dictionary<SpeechCategory, string[]>> ChineseDialogue
+            = new Dictionary<CompanionId, Dictionary<SpeechCategory, string[]>>
+        {
+            // ── Abelard ── 正式军事用语
+            [CompanionId.Abelard] = new Dictionary<SpeechCategory, string[]>
+            {
+                [SpeechCategory.Attack] = new[]
+                {
+                    "为了领主舰长！向[target]开火！",
+                    "以您的权威，[target]必将倒下！",
+                    "职责所命，击溃敌人。",
+                    "以我的荣誉起誓，[target]绝不能站立！",
+                    "领主舰长之敌即是吾敌。[target]\u2014准备受死。"
+                },
+                [SpeechCategory.MoveAndAttack] = new[]
+                {
+                    "遵照您的命令前进，领主舰长！",
+                    "缩短距离\u2014他们将为这无礼付出代价。",
+                    "前往拦截[target]。绝不让他们突破防线。",
+                    "前进！总管亲自率领冲锋！"
+                },
+                [SpeechCategory.Heal] = new[]
+                {
+                    "正在救治[ally]。坚持住。",
+                    "[ally]，稳住。我来了。"
+                },
+                [SpeechCategory.Buff] = new[]
+                {
+                    "加固阵地。保持警惕。",
+                    "布置防线\u2014领主舰长的意志必将贯彻。",
+                    "收紧阵型。要么同生，要么共死。",
+                    "各就各位\u2014领主舰长正在注视着我们。"
+                },
+                [SpeechCategory.Taunt] = new[]
+                {
+                    "你面对的是星际商人的总管！投降或被碾碎！",
+                    "来吧\u2014我经历过比你更可怕的考验。"
+                },
+                [SpeechCategory.Retreat] = new[]
+                {
+                    "战术撤退。此事未了。",
+                    "后撤\u2014向领主舰长靠拢重组。",
+                    "撤回。我们会找到更好的地形。",
+                    "有序撤退\u2014保持纪律！"
+                },
+                [SpeechCategory.Reload] = new[]
+                {
+                    "装填弹药。请掩护我。",
+                    "稍等\u2014武器需要补给。",
+                    "更换弹匣。坚守防线！",
+                    "短暂停顿\u2014我马上回到战斗中。"
+                },
+                [SpeechCategory.Support] = new[]
+                {
+                    "支援[ally]！坚守阵地！",
+                    "我掩护你，[ally]！"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "帝皇庇佑，我等亦然。",
+                    "又一场属于星际商人的胜利。",
+                    "打得漂亮。确保区域安全。"
+                },
+            },
+
+            // ── Heinrix ── 冷酷审判者
+            [CompanionId.Heinrix] = new Dictionary<SpeechCategory, string[]>
+            {
+                [SpeechCategory.Attack] = new[]
+                {
+                    "帝皇审判你不配存活，[target]。",
+                    "燃烧吧。",
+                    "你的异端到此为止。",
+                    "没有赦免留给你，[target]。",
+                    "火刑柱在等着你，[target]。我只是加速你的赴约。"
+                },
+                [SpeechCategory.MoveAndAttack] = new[]
+                {
+                    "逼近中。审判无可逃避。",
+                    "审判庭驾临。",
+                    "接近中。每一步都是一道宣判。",
+                    "我来取你性命，[target]。帝皇如此意愿。"
+                },
+                [SpeechCategory.Heal] = new[]
+                {
+                    "你还有用，[ally]。不要浪费这份仁慈。",
+                    "起来。帝皇对你还有安排。"
+                },
+                [SpeechCategory.Buff] = new[]
+                {
+                    "坚定意志。信仰是我们的盾牌。",
+                    "帝皇庇佑\u2014但准备工作也不可少。",
+                    "让帝皇之光坚固你的决心。",
+                    "集中精神。怀疑是敌人的武器。"
+                },
+                [SpeechCategory.Taunt] = new[]
+                {
+                    "我在审讯室里击溃过比你更坚强的意志。",
+                    "面对我吧，异端。让我看看你会招供什么。"
+                },
+                [SpeechCategory.Retreat] = new[]
+                {
+                    "重新部署。不要误解为软弱。",
+                    "战略性撤退\u2014仅此而已。",
+                    "后撤。即便审判庭也知道何时该重整旗鼓。",
+                    "这片土地不值得为之赴死。暂时。"
+                },
+                [SpeechCategory.Reload] = new[]
+                {
+                    "装填中。帝皇的事业在继续。",
+                    "短暂停顿。随后审判继续。",
+                    "为祂意志的工具补给弹药。",
+                    "即便是正义之怒也需要弹药。"
+                },
+                [SpeechCategory.Support] = new[]
+                {
+                    "帝皇希望你活下来，[ally]。",
+                    "你还有用处，[ally]。"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "帝皇的审判已经宣告。",
+                    "又一桩异端被清除。",
+                    "正义已得伸张。暂时如此。"
+                },
+            },
+
+            // ── Argenta ── 狂热战斗修女
+            [CompanionId.Argenta] = new Dictionary<SpeechCategory, string[]>
+            {
+                [SpeechCategory.Attack] = new[]
+                {
+                    "在圣火中燃烧吧，[target]！",
+                    "帝皇之怒的化身！",
+                    "净化不洁之物！",
+                    "感受祂的审判吧，[target]！",
+                    "对无信者绝不仁慈！向[target]开火！"
+                },
+                [SpeechCategory.MoveAndAttack] = new[]
+                {
+                    "冲入战阵！信徒无所畏惧！",
+                    "冲锋\u2014让他们见识帝皇的怒火！",
+                    "逼近至神圣射程！为了帝皇！",
+                    "战斗修女会前进！颤抖吧，异端！"
+                },
+                [SpeechCategory.Heal] = new[]
+                {
+                    "帝皇希望你活下来，[ally]！",
+                    "祂的光芒修复敌人所造成的一切！"
+                },
+                [SpeechCategory.Buff] = new[]
+                {
+                    "让信仰成为你的铠甲！",
+                    "帝皇坚固我们的决心！",
+                    "祂的火焰在我们心中燃烧！我们坚不可摧！",
+                    "接受祂的祝福\u2014然后以双倍的力量战斗！"
+                },
+                [SpeechCategory.Taunt] = new[]
+                {
+                    "我是祂的器具！有胆就来打我！",
+                    "来吧，无信的可悲虫豸！来试试战斗修女会的实力！"
+                },
+                [SpeechCategory.Retreat] = new[]
+                {
+                    "……撤退。但我会以双倍的怒火归来。",
+                    "火焰暂时减弱，只为更加猛烈地燃烧。",
+                    "我撤退只是为了重新聚集祂的怒火！",
+                    "这片阵地失守了\u2014但战争没有！绝不！"
+                },
+                [SpeechCategory.Reload] = new[]
+                {
+                    "装填中\u2014帝皇的火焰永不止息！",
+                    "为祂的怒火补充燃料！",
+                    "添加火种！稍等！",
+                    "即便是圣火也需要添柴！装填中！"
+                },
+                [SpeechCategory.Support] = new[]
+                {
+                    "帝皇庇护祂的忠仆，[ally]！",
+                    "站稳了，[ally]！信仰就是你的力量！"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "借帝皇之光，我们胜利了！",
+                    "异端已被净化！",
+                    "祂的审判已经降下！"
+                },
+            },
+
+            // ── Pasqal ── 机械化报告体
+            [CompanionId.Pasqal] = new Dictionary<SpeechCategory, string[]>
+            {
+                [SpeechCategory.Attack] = new[]
+                {
+                    "锁定目标[target]。终结概率：可接受。",
+                    "对生物学问题施加动能解决方案。",
+                    "开始敌对行动。目标：[target]。",
+                    "目标[target]标记为清除。武器上线。",
+                    "弹道轨迹计算完成。交战[target]。"
+                },
+                [SpeechCategory.MoveAndAttack] = new[]
+                {
+                    "优化交战向量。逼近有效射程。",
+                    "重新定位伺服驱动器。目标已获取。",
+                    "调整射击弧线。运动与瞄准已同步。",
+                    "逼近最佳交战距离。[target]无法逃脱。"
+                },
+                [SpeechCategory.Heal] = new[]
+                {
+                    "对[ally]执行修复协议。请保持静止。",
+                    "检测到生物损伤。施加矫正措施。"
+                },
+                [SpeechCategory.Buff] = new[]
+                {
+                    "激活战斗子程序。效率：提升中。",
+                    "万机之神，赐福这些战争机器。",
+                    "上传增强型瞄准算法。性能提升：显著。",
+                    "增强输出。机魂已就绪。"
+                },
+                [SpeechCategory.Taunt] = new[]
+                {
+                    "你对我的威胁评估……存在严重误判。",
+                    "我已替换了73%的有机组件。你做了什么？"
+                },
+                [SpeechCategory.Retreat] = new[]
+                {
+                    "撤退以重新评估最优参数。",
+                    "需要战术重新计算。脱离接触。",
+                    "当前位置次优。重新定位至改良坐标。",
+                    "威胁密度超出交战阈值。后撤。"
+                },
+                [SpeechCategory.Reload] = new[]
+                {
+                    "弹药储备耗尽。启动装填序列。",
+                    "循环弹药供给。请待机。",
+                    "补充动能投送系统。3.7秒。",
+                    "弹匣已空。更换中。万机之神供给一切。"
+                },
+                [SpeechCategory.Support] = new[]
+                {
+                    "为[ally]提供战术增强。",
+                    "优化[ally]的战斗参数。"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "战斗效率：最优。所有目标已消灭。",
+                    "胜利已记录。赞美万机之神。",
+                    "任务目标达成。系统正常。"
+                },
+            },
+
+            // ── Idira ── 胆怯犹豫的灵能者
+            [CompanionId.Idira] = new Dictionary<SpeechCategory, string[]>
+            {
+                [SpeechCategory.Attack] = new[]
+                {
+                    "我能感受到他们的恐惧……攻击[target]。",
+                    "亚空间在回应……不管我愿不愿意。",
+                    "伸出手去……这会很痛的。对他们来说。",
+                    "那些声音在[target]的事情上达成了一致……这很……罕见。",
+                    "抱歉了，[target]。嗯……其实也不太抱歉。"
+                },
+                [SpeechCategory.MoveAndAttack] = new[]
+                {
+                    "有什么在拉着我向前……朝向[target]。",
+                    "靠近一些。那些声音说这样做是对的……我想。",
+                    "越来越近了……亚空间的声音在这里更响了。",
+                    "我的脚自己在动。朝向[target]。"
+                },
+                [SpeechCategory.Heal] = new[]
+                {
+                    "让我帮忙，[ally]。至少这点我还能做到。",
+                    "撑住……我能修补这个。希望如此。"
+                },
+                [SpeechCategory.Buff] = new[]
+                {
+                    "从亚空间汲取力量……小心地。非常小心地。",
+                    "我会分享我拥有的力量。只是……待在附近。",
+                    "亚空间在搅动……但我能塑造它。暂时。",
+                    "让我给你一点我仅有的温暖。"
+                },
+                [SpeechCategory.Taunt] = new[]
+                {
+                    "你不会想知道我脑子里有什么。相信我。",
+                    "看着我。看着我！……看到了吗？你应该跑。"
+                },
+                [SpeechCategory.Retreat] = new[]
+                {
+                    "太多了……我需要退后。",
+                    "那些低语声越来越响了。撤退。",
+                    "我不能……不在这里。后撤。",
+                    "这里的帷幕太薄了……危险地薄。移开。"
+                },
+                [SpeechCategory.Reload] = new[]
+                {
+                    "需要片刻……就一小会儿。",
+                    "装填中。那些声音可以等一等。",
+                    "等等……手在发抖。快好了。",
+                    "暂停一下……亚空间可以填充这段沉默。"
+                },
+                [SpeechCategory.Support] = new[]
+                {
+                    "我能感受到你的痛苦，[ally]……让我缓解它。",
+                    "亚空间可以帮忙，[ally]。有时候。"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "结……结束了？哦，感谢黄金王座……",
+                    "我们活下来了……不知怎么地……",
+                    "那些声音安静下来了……我们赢了……"
+                },
+            },
+
+            // ── Cassia ── 高傲贵族领航员
+            [CompanionId.Cassia] = new Dictionary<SpeechCategory, string[]>
+            {
+                [SpeechCategory.Attack] = new[]
+                {
+                    "我见过亚空间本身\u2014你吓不到我，[target]。",
+                    "交战。尽量别让我无聊。",
+                    "这根本不需要领航员的才能。",
+                    "真烦人。[target]，你没给我别的选择。",
+                    "[target]，你不值得我注意。然而\u2014我们到了这一步。"
+                },
+                [SpeechCategory.MoveAndAttack] = new[]
+                {
+                    "前进\u2014是的，这种事我自己能处理。",
+                    "靠近中。我不仅仅是个领航员，知道吗。",
+                    "接近中。别那么惊讶。",
+                    "一个领航员在前线。父亲大人会昏过去的。"
+                },
+                [SpeechCategory.Heal] = new[]
+                {
+                    "撑住，[ally]。死了的话可太不方便了。",
+                    "[ally]，我可不是大老远跑来看你倒下的。"
+                },
+                [SpeechCategory.Buff] = new[]
+                {
+                    "让我来提高我们的胜算。",
+                    "领航员的礼物。不用谢。",
+                    "希望你能体会这需要多大的努力。",
+                    "就当这是我的贡献吧。别浪费了。"
+                },
+                [SpeechCategory.Taunt] = new[]
+                {
+                    "我的第三只眼凝视过你无法想象的恐怖。你……挺别致的。",
+                    "这边。让我们看看你能否对付一位奥赛里奥家族的千金。"
+                },
+                [SpeechCategory.Retreat] = new[]
+                {
+                    "战略性重新部署\u2014奥赛里奥家族不会'逃跑'。",
+                    "撤退。这身裙子可不便宜。",
+                    "看够了。转移到更……文明的地方。",
+                    "后撤。这实在有失体面。"
+                },
+                [SpeechCategory.Reload] = new[]
+                {
+                    "装填中。真是无聊。",
+                    "一点小小的不便。",
+                    "稍等。显然即便是领航员也得装填弹药。",
+                    "什么都得我自己来吗？……装填中。"
+                },
+                [SpeechCategory.Support] = new[]
+                {
+                    "别习以为常，[ally]。",
+                    "我想我还是帮你一把吧，[ally]。"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "嗯，这还挺刺激的，不是吗？",
+                    "有什么好怀疑的吗？",
+                    "结果还算令人满意吧，我想。"
+                },
+            },
+
+            // ── Yrliet ── 超然冷漠的灵族游侠
+            [CompanionId.Yrliet] = new Dictionary<SpeechCategory, string[]>
+            {
+                [SpeechCategory.Attack] = new[]
+                {
+                    "如道途所求，精准无误。向[target]射击。",
+                    "[target]不会痛苦太久。我……很有效率。",
+                    "又一个需要我来解决的mon-keigh问题。",
+                    "一枪。一命。向[target]射击。",
+                    "流浪者之道再添一魂。[target]。"
+                },
+                [SpeechCategory.MoveAndAttack] = new[]
+                {
+                    "重新定位。你们的种族称之为'侧翼包抄'。",
+                    "滑入射位。看好了学着点，mon-keigh。",
+                    "移动中。你甚至不会看到我动过。",
+                    "更好的角度浮现了。前进。"
+                },
+                [SpeechCategory.Heal] = new[]
+                {
+                    "别流血流得那么……夸张好吗，[ally]。",
+                    "救治[ally]中。人类真是脆弱。"
+                },
+                [SpeechCategory.Buff] = new[]
+                {
+                    "增强我们的能力。你比我更需要。",
+                    "来自一个万古之前就精通战争的文明的馈赠。",
+                    "接受这份优势。对我来说微不足道。",
+                    "就连mon-keigh在得到适当辅助后也能打得更好。"
+                },
+                [SpeechCategory.Taunt] = new[]
+                {
+                    "我走过比你的物种更古老的道路。你真的想试试我吗？",
+                    "你的瞄准和你的建筑一样糟糕。"
+                },
+                [SpeechCategory.Retreat] = new[]
+                {
+                    "我选择更好的制高点。这不是撤退\u2014是耐心。",
+                    "撤退中。一个游侠知道何时该重新部署。",
+                    "后撤。一个你的种族很少能及时领悟的概念。",
+                    "这个位置不再有用。移动。"
+                },
+                [SpeechCategory.Reload] = new[]
+                {
+                    "装填中。即便灵族武器也需要维护。",
+                    "短暂的停顿。下一枪将是完美的。",
+                    "补充中。别浪费我为你争取的时间。",
+                    "一刻寂静。然后完美再现。"
+                },
+                [SpeechCategory.Support] = new[]
+                {
+                    "就当这是一份礼节吧，[ally]。",
+                    "协助[ally]。请尽量跟上。"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "尚可。对mon-keigh而言。",
+                    "命运之网预示了这个结局。",
+                    "意料之中。继续前进？"
+                },
+            },
+
+            // ── Jae ── 随意洒脱的走私者
+            [CompanionId.Jae] = new Dictionary<SpeechCategory, string[]>
+            {
+                [SpeechCategory.Attack] = new[]
+                {
+                    "别往心里去，[target]。其实\u2014不，就是针对你的。",
+                    "来算算这笔账吧。",
+                    "[target]，你最好值得我花时间。",
+                    "你惹错了交易商，[target]。",
+                    "发薪日。[target]来买单。"
+                },
+                [SpeechCategory.MoveAndAttack] = new[]
+                {
+                    "近距离谈判。[target]不会喜欢这些条款的。",
+                    "缩短距离\u2014近距离利润更高。",
+                    "进入射程。该用铅弹来谈判了。",
+                    "火速逼近。[target]马上就能收到退款\u2014用痛苦支付。"
+                },
+                [SpeechCategory.Heal] = new[]
+                {
+                    "帮你包扎一下，[ally]。你欠我一次。",
+                    "死掉的搭档可没法还账，[ally]。别动。"
+                },
+                [SpeechCategory.Buff] = new[]
+                {
+                    "在星海里学的小把戏。",
+                    "免费的\u2014仅此一次。",
+                    "给你\u2014一点小优势。就当是投资吧。",
+                    "商业机密。别问我在哪儿学的。"
+                },
+                [SpeechCategory.Taunt] = new[]
+                {
+                    "这边，丑八怪！我骗过比你更厉害的家伙！",
+                    "嘿！你的赏金连我的时间都不值\u2014但还是来玩玩吧。"
+                },
+                [SpeechCategory.Retreat] = new[]
+                {
+                    "不划算的买卖\u2014撤出。",
+                    "知道什么时候该收手。后退。",
+                    "及时止损。战术性撤退。",
+                    "聪明人都会说：撤退。"
+                },
+                [SpeechCategory.Reload] = new[]
+                {
+                    "装填中。别走开。",
+                    "需要新弹药。这笔交易最好值得。",
+                    "补货中。缺货对生意可不好。",
+                    "等一下\u2014再好的枪也得喂弹。"
+                },
+                [SpeechCategory.Support] = new[]
+                {
+                    "帮[ally]一把\u2014记我账上。",
+                    "掩护[ally]。你欠我的。"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "搞定了。战利品在哪？",
+                    "不错嘛，各位。真的不错。",
+                    "我们还活着。这就够赚了。"
+                },
+            },
+
+            // ── Marazhai ── 嗜虐美学的暗灵族
+            [CompanionId.Marazhai] = new Dictionary<SpeechCategory, string[]>
+            {
+                [SpeechCategory.Attack] = new[]
+                {
+                    "哦，[target]……这将会无比精妙。",
+                    "为我尖叫吧，[target]。尖叫。",
+                    "终于\u2014有值得一切的东西了。",
+                    "来吧，[target]。让我们一起创造……美丽的事物。",
+                    "你的痛苦将是我的杰作，[target]。"
+                },
+                [SpeechCategory.MoveAndAttack] = new[]
+                {
+                    "靠近一点，小东西。别跑\u2014那只会让一切更加甜美。",
+                    "猎杀进入尾声。美味。",
+                    "每一步都在接近那个高潮。",
+                    "我几乎能品尝到你的恐惧了，[target]。再近一些……"
+                },
+                [SpeechCategory.Heal] = new[]
+                {
+                    "呃。好吧。别让我后悔留你一命，[ally]。",
+                    "你活着的时候更有趣，[ally]。勉强。"
+                },
+                [SpeechCategory.Buff] = new[]
+                {
+                    "让我磨利你的锋刃。我如此喜爱锋利之物。",
+                    "来自科莫拉赫的一点馈赠。",
+                    "接受这份……强化。它会让杀戮更加甜美。",
+                    "我赐予你毒液。好好利用\u2014至少要有趣。"
+                },
+                [SpeechCategory.Taunt] = new[]
+                {
+                    "这就是你能给予的最好的痛苦？可悲！",
+                    "打我。用力点。……令人失望。"
+                },
+                [SpeechCategory.Retreat] = new[]
+                {
+                    "细细品味那份期待……我会回来找你的。",
+                    "不是逃跑\u2014是在延长你的苦难。",
+                    "距离只会磨锐饥渴。我暂且退下……",
+                    "最精妙的酷刑需要耐心。后撤。"
+                },
+                [SpeechCategory.Reload] = new[]
+                {
+                    "装填中。痛苦即将恢复。",
+                    "短暂的幕间休息。第二幕马上开始。",
+                    "为折磨的工具补充弹药。稍等。",
+                    "即便是残酷也需要准备。"
+                },
+                [SpeechCategory.Support] = new[]
+                {
+                    "别急着死，[ally]。我还没看够呢。",
+                    "协助[ally]。别把这误解为感情。"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "嗯……多么令人愉悦。细细品味这一刻。",
+                    "已经结束了？我才刚开始享受呢。",
+                    "他们的尖叫声……尚可接受。"
+                },
+            },
+
+            // ── Ulfar ── 豪迈粗犷的太空狼
+            [CompanionId.Ulfar] = new Dictionary<SpeechCategory, string[]>
+            {
+                [SpeechCategory.Attack] = new[]
+                {
+                    "FENRIS HJOLDA！[target]，来尝尝我的战斧！",
+                    "为了全父！撕碎[target]！",
+                    "以Russ之名！[target]今日必亡！",
+                    "尝尝芬里斯钢铁的味道，[target]！",
+                    "传说又添一颅！[target]\u2014轮到你了！"
+                },
+                [SpeechCategory.MoveAndAttack] = new[]
+                {
+                    "饿狼扑向猎物！",
+                    "追上去撕碎他们！哈哈！",
+                    "狩猎开始了！向你扑来，[target]！",
+                    "听到狼嚎了吗？！狼已经到了！"
+                },
+                [SpeechCategory.Heal] = new[]
+                {
+                    "撑住，[ally]！狼可没那么容易死！",
+                    "舔舔伤口吧，[ally]\u2014我们很快再战。"
+                },
+                [SpeechCategory.Buff] = new[]
+                {
+                    "让芬里斯之魂充满你！",
+                    "磨利你们的獠牙，狼群伙伴们！",
+                    "心中的狼在躁动！拥抱它！",
+                    "芬里斯赐予你力量！好好用！"
+                },
+                [SpeechCategory.Taunt] = new[]
+                {
+                    "来！面对Vlka Fenryka，体面地死去！",
+                    "就这点本事？！我家狼崽打得都比你狠！"
+                },
+                [SpeechCategory.Retreat] = new[]
+                {
+                    "呸！后撤\u2014但饿狼不会忘记！",
+                    "撤退……暂时。传说还没结束。",
+                    "即便是狼也知道何时该迂回！后撤！",
+                    "猎物也有獠牙啊。重新部署！"
+                },
+                [SpeechCategory.Reload] = new[]
+                {
+                    "装填中！帮我挡住他们！",
+                    "要更多弹药！哈哈，打得真痛快！",
+                    "弹药打完了！但战意还在！装填中！",
+                    "喂饱这头野兽！稍等，伙伴们！"
+                },
+                [SpeechCategory.Support] = new[]
+                {
+                    "和我并肩作战，[ally]！狼群共进退！",
+                    "我守你侧翼，[ally]！冲啊！"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "哈！又一场大胜，伙伴们！",
+                    "以Russ之名！打得真痛快！",
+                    "胜利！传说会将此歌颂！"
+                },
+            },
+
+            // ── Kibellah (DLC) ── 仪式化的暗灵族刺客
+            [CompanionId.Kibellah] = new Dictionary<SpeechCategory, string[]>
+            {
+                [SpeechCategory.Attack] = new[]
+                {
+                    "仪式开始。[target]是祭品。",
+                    "我的刀刃为[target]而歌。",
+                    "死亡之舞的又一步。",
+                    "殿堂召唤[target]的鲜血。",
+                    "[target]……刀刃选中了你。"
+                },
+                [SpeechCategory.MoveAndAttack] = new[]
+                {
+                    "缩短距离。祭品无处可逃。",
+                    "我随刀刃之意而动。[target]在等待。",
+                    "舞步带我向前。朝向[target]。",
+                    "一步一步。靠近祭品。"
+                },
+                [SpeechCategory.Heal] = new[]
+                {
+                    "你还不被允许倒下，[ally]。",
+                    "[ally]……我不愿看你就此终结。不是这样。"
+                },
+                [SpeechCategory.Buff] = new[]
+                {
+                    "准备仪式。每一刃都必须磨利。",
+                    "舞步需要准备。",
+                    "淬炼。仪式要求完美。",
+                    "祭品即将到来。我们必须就绪。"
+                },
+                [SpeechCategory.Taunt] = new[]
+                {
+                    "我是暗中的利刃。来\u2014看你能否找到我。",
+                    "你以为你了解死亡？我在它的殿堂中长大。"
+                },
+                [SpeechCategory.Retreat] = new[]
+                {
+                    "撤退。仪式尚未完成\u2014我会回来的。",
+                    "耐心。猎手不会急于最后一刀。",
+                    "后撤。舞步未终\u2014只是暂停。",
+                    "刀刃退去……是为了刺得更深。"
+                },
+                [SpeechCategory.Reload] = new[]
+                {
+                    "舞步中的短暂停顿。",
+                    "准备中。",
+                    "节奏需要一次呼吸。准备中。",
+                    "节拍之间。准备中。"
+                },
+                [SpeechCategory.Support] = new[]
+                {
+                    "我会守护你的步伐，[ally]。",
+                    "舞步继续\u2014一起，[ally]。"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "舞步结束。暂时。",
+                    "死亡今日选定了它的舞伴。",
+                    "最后一步已迈出。"
+                },
+            },
+
+            // ── Solomorne (DLC) ── 公式化执法者
+            [CompanionId.Solomorne] = new Dictionary<SpeechCategory, string[]>
+            {
+                [SpeechCategory.Attack] = new[]
+                {
+                    "交战敌对目标。已授权使用致命武力。",
+                    "[target]\u2014判定有罪。刑罚：立即执行。",
+                    "Lex Imperialis要求你服从。否则就是灭亡。",
+                    "敌对目标[target]\u2014已提起指控。执行判决。",
+                    "以Adeptus Arbites之权：[target]，你已被定罪。"
+                },
+                [SpeechCategory.MoveAndAttack] = new[]
+                {
+                    "前进以执行对[target]的判决。",
+                    "逼近中。抵抗行为已记录在案。",
+                    "前往逮捕\u2014或消灭。[target]自行选择。",
+                    "追击开始。法律绝不退让。"
+                },
+                [SpeechCategory.Heal] = new[]
+                {
+                    "对[ally]施以战地救治。保持行动能力。",
+                    "[ally]，你仍被职责所需。撑住。"
+                },
+                [SpeechCategory.Buff] = new[]
+                {
+                    "加固我方阵地。标准执法程序。",
+                    "准备战术优势。按照条例行事。",
+                    "依据第七条第三款加强戒备。坚守。",
+                    "提升战备状态。仲裁者从不留有疏漏。"
+                },
+                [SpeechCategory.Taunt] = new[]
+                {
+                    "我是Lex Imperialis的化身。来试试看。",
+                    "你面对的是Adeptus Arbites的执法官。投降或被消灭。"
+                },
+                [SpeechCategory.Retreat] = new[]
+                {
+                    "战术性重新部署。这是程序，不是撤退。",
+                    "后撤至可防守地形。法律有的是耐心。",
+                    "撤至加固阵地。追击将会恢复。",
+                    "暂时让出阵地\u2014正义绝不遗忘。"
+                },
+                [SpeechCategory.Reload] = new[]
+                {
+                    "装填中。正义需要弹药。",
+                    "循环装弹。短暂休庭。",
+                    "补给中。判决尚未执行完毕。",
+                    "装填中。庭审仍在进行。"
+                },
+                [SpeechCategory.Support] = new[]
+                {
+                    "为[ally]提供支援。符合条例规定。",
+                    "掩护[ally]。Glaito，跟我来。好孩子。"
+                },
+                [SpeechCategory.Victory] = new[]
+                {
+                    "区域已确保。正在撰写行动报告。",
+                    "敌对目标已消灭。秩序已恢复。",
+                    "正义已得伸张。结案。"
+                },
+            },
+
+            // ── Unknown (默认) ──
+            [CompanionId.Unknown] = new Dictionary<SpeechCategory, string[]>
+            {
+                [SpeechCategory.Attack] = new[]     { "向[target]交战！", "向[target]开火！", "开枪！", "瞄准[target]！", "开火！" },
+                [SpeechCategory.MoveAndAttack] = new[] { "向[target]移动交战！", "朝[target]前进！", "向前突破！", "逼近[target]！" },
+                [SpeechCategory.Heal] = new[]       { "治疗[ally]！", "救治[ally]！" },
+                [SpeechCategory.Buff] = new[]       { "强化准备！", "提升战斗力！", "备战！", "增强优势！" },
+                [SpeechCategory.Taunt] = new[]      { "吸引火力！", "看这边！" },
+                [SpeechCategory.Retreat] = new[]    { "撤退！", "后撤！", "战术撤退！", "重新部署！" },
+                [SpeechCategory.Reload] = new[]     { "装填！", "更换弹药！", "更换弹匣！", "稍等\u2014装填中！" },
+                [SpeechCategory.Support] = new[]    { "支援[ally]！", "掩护[ally]！" },
+                [SpeechCategory.Victory] = new[]    { "区域清除。", "敌人已消灭。", "战斗结束。" },
             },
         };
 
