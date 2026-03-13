@@ -7,6 +7,7 @@ using System.Text;
 using Kingmaker;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic;
+using Kingmaker.EntitySystem.Stats.Base;
 using CompanionAI_v3.GameInterface;
 using CompanionAI_v3.Settings;
 
@@ -531,6 +532,27 @@ Example responses (mimic this exact style):
                 var sb = new StringBuilder();
                 sb.AppendLine("[CREW ROSTER — Current Party]");
 
+                // ★ v3.64.0: Party health summary
+                float totalHpPct = 0f;
+                int memberCount = 0;
+                bool anyWounded = false;
+                foreach (var u in party)
+                {
+                    if (u == null || u.IsPet) continue;
+                    memberCount++;
+                    try
+                    {
+                        float pct = u.Health.HitPointsLeft / (float)Math.Max(1, u.Health.MaxHitPoints);
+                        totalHpPct += pct;
+                        if (pct < 0.9f) anyWounded = true;
+                    }
+                    catch { }
+                }
+                if (memberCount > 0 && !anyWounded)
+                {
+                    sb.AppendLine($"All crew operational (avg {totalHpPct / memberCount:P0} HP)");
+                }
+
                 foreach (var unit in party)
                 {
                     if (unit == null) continue;
@@ -582,6 +604,14 @@ Example responses (mimic this exact style):
                     sb.AppendLine();
                     if (!string.IsNullOrEmpty(buffs))
                         sb.AppendLine($"  Buffs: {buffs}");
+
+                    // ★ v3.64.0: Stats summary (exploration only, saves tokens in combat)
+                    if (!inCombat && !unit.IsPet)
+                    {
+                        string stats = GetUnitStats(unit);
+                        if (!string.IsNullOrEmpty(stats))
+                            sb.AppendLine($"  Stats: {stats}");
+                    }
                 }
 
                 return sb.ToString();
@@ -787,6 +817,22 @@ Example responses (mimic this exact style):
                     if (names.Count >= 4) break;
                 }
                 return names.Count > 0 ? string.Join(", ", names) : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// ★ v3.64.0: Core Warhammer stats for exploration context.
+        /// </summary>
+        private static string GetUnitStats(BaseUnitEntity unit)
+        {
+            try
+            {
+                int bs = CombatAPI.GetStatValue(unit, StatType.WarhammerBallisticSkill);
+                int ws = CombatAPI.GetStatValue(unit, StatType.WarhammerWeaponSkill);
+                int t = CombatAPI.GetStatValue(unit, StatType.WarhammerToughness);
+                if (bs == 0 && ws == 0 && t == 0) return null;
+                return $"BS:{bs} WS:{ws} T:{t}";
             }
             catch { return null; }
         }
