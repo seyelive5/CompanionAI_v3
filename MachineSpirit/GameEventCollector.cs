@@ -9,6 +9,7 @@ using Kingmaker.EntitySystem.Entities.Base;
 using Kingmaker.Mechanics.Entities;
 using Kingmaker.PubSubSystem;
 using Kingmaker.PubSubSystem.Core;
+using Kingmaker.RuleSystem.Rules.Damage;
 using UnityEngine;
 
 namespace CompanionAI_v3.MachineSpirit
@@ -20,7 +21,11 @@ namespace CompanionAI_v3.MachineSpirit
         CombatStart,
         CombatEnd,
         UnitDeath,
-        TurnPlanSummary
+        TurnPlanSummary,
+        DamageDealt,
+        HealingDone,
+        RoundStart,
+        VisionObservation
     }
 
     public struct GameEvent
@@ -40,6 +45,14 @@ namespace CompanionAI_v3.MachineSpirit
                 return $"Vox intercept — {Speaker} spoke: \"{Text}\"";
             if (Type == GameEventType.TurnPlanSummary && !string.IsNullOrEmpty(Speaker))
                 return $"Tactical cogitator — {Speaker}: {Text}";
+            if (Type == GameEventType.DamageDealt)
+                return $"Weapon array — {Text}";
+            if (Type == GameEventType.HealingDone)
+                return $"Medicae bay — {Text}";
+            if (Type == GameEventType.RoundStart)
+                return $"Chrono — {Text}";
+            if (Type == GameEventType.VisionObservation)
+                return $"Pict-capture — {Text}";
             if (string.IsNullOrEmpty(Speaker))
                 return $"Sensor: {Text}";
             return $"Sensor — {Speaker}: {Text}";
@@ -52,8 +65,13 @@ namespace CompanionAI_v3.MachineSpirit
     /// </summary>
     public static class GameEventCollector
     {
-        private const int MAX_EVENTS = 30;
+        private const int MAX_EVENTS = 50;
         private static readonly List<GameEvent> _events = new List<GameEvent>(MAX_EVENTS + 5);
+
+        // ★ v3.64.0: Kill tracker per combat encounter
+        private static readonly Dictionary<string, int> _killCounts = new Dictionary<string, int>();
+        public static IReadOnlyDictionary<string, int> KillCounts => _killCounts;
+
         private static bool _subscribed;
 
         public static IReadOnlyList<GameEvent> RecentEvents => _events;
@@ -106,10 +124,15 @@ namespace CompanionAI_v3.MachineSpirit
             _subscribed = false;
         }
 
+        private static int _combatRound;
+
         private class CombatEventSubscriber :
             IUnitDeathHandler,
             ITurnBasedModeHandler,
-            IDialogCueHandler
+            IDialogCueHandler,
+            IDamageHandler,
+            IHealingHandler,
+            IRoundStartHandler
         {
             public void HandleUnitDeath(AbstractUnitEntity unit)
             {
@@ -118,14 +141,39 @@ namespace CompanionAI_v3.MachineSpirit
                 bool isEnemy = !unit.IsPlayerFaction;
                 string desc = isEnemy ? $"{name} was destroyed" : $"{name} has fallen";
                 AddEvent(GameEventType.UnitDeath, null, desc);
+
+                // ★ v3.64.0: Track kills by party members
+                if (isEnemy)
+                {
+                    for (int i = _events.Count - 1; i >= Math.Max(0, _events.Count - 10); i--)
+                    {
+                        var evt = _events[i];
+                        if (evt.Type == GameEventType.DamageDealt && evt.Text.Contains(name))
+                        {
+                            string killer = evt.Speaker;
+                            if (!string.IsNullOrEmpty(killer) && killer != "Unknown")
+                            {
+                                _killCounts.TryGetValue(killer, out int count);
+                                _killCounts[killer] = count + 1;
+                            }
+                            break;
+                        }
+                    }
+                }
             }
 
             public void HandleTurnBasedModeSwitched(bool isTurnBased)
             {
                 if (isTurnBased)
+                {
+                    _combatRound = 0;
+                    _killCounts.Clear();  // ★ v3.64.0
                     AddEvent(GameEventType.CombatStart, null, "Combat initiated");
+                }
                 else
+                {
                     AddEvent(GameEventType.CombatEnd, null, "Combat concluded");
+                }
             }
 
             public void HandleOnCueShow(CueShowData cueShowData)
@@ -152,6 +200,83 @@ namespace CompanionAI_v3.MachineSpirit
                     AddEvent(GameEventType.Dialogue, speaker, text);
                 }
                 catch { /* safe fallback */ }
+            }
+
+            // ★ v3.58.0: Combat detail events for Machine Spirit context
+
+            public void HandleDamageDealt(RuleDealDamage dealDamage)
+            {
+                if (!MachineSpirit.IsActive) return;
+                if (dealDamage == null) return;
+                if (dealDamage.IsDot || dealDamage.IsCollisionDamage) return;
+
+                try
+                {
+                    var attacker = dealDamage.Initiator as BaseUnitEntity;
+                    var target = dealDamage.Target as BaseUnitEntity;
+                    if (attacker == null || target == null) return;
+
+                    int damage = dealDamage.Result;
+                    if (damage <= 0) return;
+
+                    string attackerName = attacker.CharacterName ?? "Unknown";
+                    string targetName = target.CharacterName ?? "Unknown";
+
+                    // Only track significant damage (>15% of target max HP) or killing blows
+                    int maxHp = 1;
+                    try { maxHp = System.Math.Max(1, target.Health.MaxHitPoints); } catch { }
+                    float damagePercent = damage / (float)maxHp;
+                    bool isKill = dealDamage.HPBeforeDamage > 0 && dealDamage.HPBeforeDamage <= damage;
+
+                    if (damagePercent < 0.15f && !isKill) return;
+
+                    string desc;
+                    if (isKill)
+                        desc = $"{attackerName} destroyed {targetName} ({damage} damage, killing blow)";
+                    else
+                        desc = $"{attackerName} dealt {damage} damage to {targetName} ({damagePercent:P0} HP)";
+
+                    AddEvent(GameEventType.DamageDealt, attackerName, desc);
+
+                    // Spontaneous trigger when party member takes massive damage (>30% HP)
+                    if (target.IsPlayerFaction && damagePercent >= 0.3f)
+                    {
+                        MachineSpirit.OnMajorEvent(_events[_events.Count - 1]);
+                    }
+                }
+                catch { /* safe fallback */ }
+            }
+
+            public void HandleHealing(RuleHealDamage healDamage)
+            {
+                if (!MachineSpirit.IsActive) return;
+                if (healDamage == null) return;
+
+                try
+                {
+                    var healer = healDamage.Initiator as BaseUnitEntity;
+                    var target = healDamage.Target as BaseUnitEntity;
+                    if (healer == null || target == null) return;
+
+                    int value = healDamage.Value;
+                    if (value <= 0) return;
+                    if (!target.IsPlayerFaction) return; // Only track party healing
+
+                    string healerName = healer.CharacterName ?? "Unknown";
+                    string targetName = target.CharacterName ?? "Unknown";
+
+                    AddEvent(GameEventType.HealingDone, healerName, $"{healerName} healed {targetName} for {value} HP");
+                }
+                catch { /* safe fallback */ }
+            }
+
+            public void HandleRoundStart(bool isTurnBased)
+            {
+                if (!MachineSpirit.IsActive) return;
+                if (!isTurnBased) return;
+
+                _combatRound++;
+                AddEvent(GameEventType.RoundStart, null, $"Combat round {_combatRound}");
             }
         }
     }
