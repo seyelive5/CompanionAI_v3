@@ -25,15 +25,11 @@ namespace CompanionAI_v3.MachineSpirit
         public static string StatusText => _statusText;
 
         /// <summary>
-        /// Run the full auto-setup sequence as a coroutine.
+        /// Find the ollama executable path. Checks PATH first, then common install locations.
         /// </summary>
-        public static IEnumerator RunAutoSetup(string model)
+        private static string FindOllamaPath()
         {
-            _state = SetupState.Checking;
-            _statusText = "Checking Ollama installation...";
-
-            // Step 1: Check if ollama is installed
-            bool installed = false;
+            // 1) Check PATH via 'where' command
             try
             {
                 var psi = new ProcessStartInfo
@@ -46,36 +42,66 @@ namespace CompanionAI_v3.MachineSpirit
                     CreateNoWindow = true
                 };
                 var proc = Process.Start(psi);
+                string output = proc.StandardOutput.ReadToEnd().Trim();
                 proc.WaitForExit(5000);
-                installed = proc.ExitCode == 0;
+                if (proc.ExitCode == 0 && !string.IsNullOrEmpty(output))
+                {
+                    // 'where' may return multiple lines; take the first
+                    string firstLine = output.Split('\n')[0].Trim();
+                    proc.Dispose();
+                    return firstLine;
+                }
                 proc.Dispose();
             }
-            catch
+            catch { /* where command failed — try known paths */ }
+
+            // 2) Check common Windows install locations
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string[] candidates = new[]
             {
-                installed = false;
+                System.IO.Path.Combine(localAppData, "Programs", "Ollama", "ollama.exe"),
+                System.IO.Path.Combine(localAppData, "Ollama", "ollama.exe"),
+                @"C:\Program Files\Ollama\ollama.exe",
+                @"C:\Program Files (x86)\Ollama\ollama.exe",
+            };
+
+            foreach (string path in candidates)
+            {
+                if (System.IO.File.Exists(path)) return path;
             }
 
-            if (!installed)
-            {
-                _state = SetupState.Error;
-                _statusText = "Ollama not found. Install from https://ollama.com";
-                yield break;
-            }
+            return null;
+        }
 
-            // Step 2: Check if server is running
+        /// <summary>
+        /// Run the full auto-setup sequence as a coroutine.
+        /// </summary>
+        public static IEnumerator RunAutoSetup(string model)
+        {
+            _state = SetupState.Checking;
             _statusText = "Checking Ollama server...";
-            bool serverRunning = false;
 
+            // Step 1: Check if server is already running (HTTP — works regardless of PATH)
+            bool serverRunning = false;
             var request = UnityWebRequest.Get("http://localhost:11434/api/tags");
             request.timeout = 3;
             yield return request.SendWebRequest();
-
             serverRunning = request.result == UnityWebRequest.Result.Success;
             request.Dispose();
 
-            // Step 3: Start server if not running
+            // Step 2: If server not running, find executable and start it
             if (!serverRunning)
             {
+                _statusText = "Checking Ollama installation...";
+                string ollamaPath = FindOllamaPath();
+
+                if (ollamaPath == null)
+                {
+                    _state = SetupState.Error;
+                    _statusText = "Ollama not found. Install from https://ollama.com";
+                    yield break;
+                }
+
                 _state = SetupState.Starting;
                 _statusText = "Starting Ollama server...";
 
@@ -83,7 +109,7 @@ namespace CompanionAI_v3.MachineSpirit
                 {
                     var psi = new ProcessStartInfo
                     {
-                        FileName = "ollama",
+                        FileName = ollamaPath,
                         Arguments = "serve",
                         UseShellExecute = false,
                         RedirectStandardOutput = true,
@@ -150,9 +176,10 @@ namespace CompanionAI_v3.MachineSpirit
 
                 try
                 {
+                    string pullExe = FindOllamaPath() ?? "ollama";
                     var psi = new ProcessStartInfo
                     {
-                        FileName = "ollama",
+                        FileName = pullExe,
                         Arguments = $"pull {model}",
                         UseShellExecute = false,
                         RedirectStandardOutput = true,
