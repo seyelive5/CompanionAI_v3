@@ -14,12 +14,17 @@ namespace CompanionAI_v3.MachineSpirit
     {
         private const int MAX_CHAT_HISTORY = 100;
         private const float SPONTANEOUS_COOLDOWN = 15f;
+        private const float DIALOGUE_COOLDOWN = 30f; // ★ v3.66.0: Separate cooldown for dialogue reactions
+        private const float AREA_TRANSITION_COOLDOWN = 30f;
         private const int SUMMARY_THRESHOLD = 30; // Summarize when history exceeds this
         private const int SUMMARY_WINDOW = 20;    // Number of old messages to summarize
 
         private static readonly List<ChatMessage> _chatHistory = new List<ChatMessage>();
         private static MachineSpiritConfig Config => Main.Settings?.MachineSpirit;
         private static float _lastSpontaneousTime;
+        private static float _lastDialogueCommentTime; // ★ v3.66.0
+        private static float _lastAreaTransitionTime;
+        private static bool _hasGreeted;
 
         // ★ v3.60.0: Idle commentary
         private static float _lastActivityTime;
@@ -31,9 +36,9 @@ namespace CompanionAI_v3.MachineSpirit
             = new Dictionary<IdleFrequency, (float, float)>
         {
             { IdleFrequency.Off,    (float.MaxValue, float.MaxValue) },
-            { IdleFrequency.Low,    (300f, 900f) },
-            { IdleFrequency.Medium, (180f, 480f) },
-            { IdleFrequency.High,   (90f,  300f) },
+            { IdleFrequency.Low,    (240f, 600f) },
+            { IdleFrequency.Medium, (120f, 360f) },
+            { IdleFrequency.High,   (60f,  180f) },
         };
 
         // ★ Conversation summary (background summarization of old messages)
@@ -58,6 +63,7 @@ namespace CompanionAI_v3.MachineSpirit
             LoadChatHistory();
             _lastActivityTime = Time.time;
             ResetIdleTimers();
+            _hasGreeted = false;
         }
 
         public static void Shutdown()
@@ -261,7 +267,7 @@ namespace CompanionAI_v3.MachineSpirit
 
             if (Config.Provider == ApiProvider.Ollama)
             {
-                _chatHistory.Add(new ChatMessage { IsUser = false, Text = "", Timestamp = Time.time });
+                _chatHistory.Add(new ChatMessage { IsUser = false, Text = "", Timestamp = Time.time, Category = MessageCategory.Combat });
                 int responseIdx = _chatHistory.Count - 1;
 
                 CoroutineRunner.Start(LLMClient.SendOllamaStreaming(
@@ -296,7 +302,150 @@ namespace CompanionAI_v3.MachineSpirit
                         {
                             IsUser = false,
                             Text = response,
-                            Timestamp = Time.time
+                            Timestamp = Time.time,
+                            Category = MessageCategory.Combat
+                        });
+                        ChatWindow.SetThinking(false);
+                    },
+                    onError: _ => ChatWindow.SetThinking(false)
+                ));
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════
+        // ★ v3.66.0: Dialogue Reaction — comment on NPC conversations
+        // ════════════════════════════════════════════════════════════
+
+        public static void OnDialogueEvent(GameEvent evt)
+        {
+            if (!IsActive) return;
+            if (LLMClient.IsRequesting) return;
+            if (Config?.IdleMode == IdleFrequency.Off) return; // Respect idle setting
+            if (Time.time - _lastDialogueCommentTime < DIALOGUE_COOLDOWN) return;
+            if (Time.time - _lastSpontaneousTime < SPONTANEOUS_COOLDOWN) return;
+            _lastDialogueCommentTime = Time.time;
+            _lastSpontaneousTime = Time.time;
+            _lastActivityTime = Time.time;
+            ResetIdleTimers();
+
+            var messages = ContextBuilder.BuildForDialogue(evt, _chatHistory, Config, _conversationSummary);
+            ChatWindow.SetThinking(true);
+
+            if (Config.Provider == ApiProvider.Ollama)
+            {
+                _chatHistory.Add(new ChatMessage { IsUser = false, Text = "", Timestamp = Time.time, Category = MessageCategory.Vox });
+                int responseIdx = _chatHistory.Count - 1;
+
+                CoroutineRunner.Start(LLMClient.SendOllamaStreaming(
+                    Config, messages,
+                    onToken: tokens =>
+                    {
+                        var msg = _chatHistory[responseIdx];
+                        msg.Text += tokens;
+                        _chatHistory[responseIdx] = msg;
+                        ChatWindow.SetThinking(false);
+                    },
+                    onComplete: () =>
+                    {
+                        ChatWindow.SetThinking(false);
+                        // Check for [SKIP] response — LLM may decide dialogue is uninteresting
+                        var msg = _chatHistory[responseIdx];
+                        if (msg.Text.Trim().Contains("[SKIP]"))
+                        {
+                            _chatHistory.RemoveAt(responseIdx);
+                            Main.LogDebug("[MachineSpirit] Dialogue: skipped (uninteresting)");
+                        }
+                    },
+                    onError: error =>
+                    {
+                        var msg = _chatHistory[responseIdx];
+                        if (string.IsNullOrEmpty(msg.Text))
+                            _chatHistory.RemoveAt(responseIdx);
+                        ChatWindow.SetThinking(false);
+                    }
+                ));
+            }
+            else
+            {
+                CoroutineRunner.Start(LLMClient.SendChatRequest(
+                    Config, messages,
+                    onResponse: response =>
+                    {
+                        if (!response.Trim().Contains("[SKIP]"))
+                        {
+                            _chatHistory.Add(new ChatMessage
+                            {
+                                IsUser = false,
+                                Text = response,
+                                Timestamp = Time.time,
+                                Category = MessageCategory.Vox
+                            });
+                        }
+                        ChatWindow.SetThinking(false);
+                    },
+                    onError: _ => ChatWindow.SetThinking(false)
+                ));
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════
+        // ★ v3.66.0: Area Transition — scan new locations
+        // ════════════════════════════════════════════════════════════
+
+        public static void OnAreaTransition(GameEvent evt)
+        {
+            if (!IsActive) return;
+            if (LLMClient.IsRequesting) return;
+            if (Time.time - _lastAreaTransitionTime < AREA_TRANSITION_COOLDOWN) return;
+
+            // Skip during combat
+            bool inCombat = false;
+            try { inCombat = Kingmaker.Game.Instance?.Player?.IsInCombat ?? false; } catch { }
+            if (inCombat) return;
+
+            _lastAreaTransitionTime = Time.time;
+            _lastActivityTime = Time.time;
+            ResetIdleTimers();
+
+            var messages = ContextBuilder.BuildForAreaTransition(evt, _chatHistory, Config, _conversationSummary);
+            ChatWindow.SetThinking(true);
+
+            if (Config.Provider == ApiProvider.Ollama)
+            {
+                _chatHistory.Add(new ChatMessage { IsUser = false, Text = "", Timestamp = Time.time, Category = MessageCategory.Scan });
+                int responseIdx = _chatHistory.Count - 1;
+
+                CoroutineRunner.Start(LLMClient.SendOllamaStreaming(
+                    Config, messages,
+                    onToken: tokens =>
+                    {
+                        var msg = _chatHistory[responseIdx];
+                        msg.Text += tokens;
+                        _chatHistory[responseIdx] = msg;
+                        ChatWindow.SetThinking(false);
+                    },
+                    onComplete: () => ChatWindow.SetThinking(false),
+                    onError: error =>
+                    {
+                        var msg = _chatHistory[responseIdx];
+                        if (string.IsNullOrEmpty(msg.Text))
+                            _chatHistory.RemoveAt(responseIdx);
+                        ChatWindow.SetThinking(false);
+                    }
+                ));
+            }
+            else
+            {
+                CoroutineRunner.Start(LLMClient.SendChatRequest(
+                    Config, messages,
+                    onResponse: response =>
+                    {
+                        _chatHistory.Add(new ChatMessage
+                        {
+                            IsUser = false,
+                            Text = response,
+                            Timestamp = Time.time,
+                            Category = MessageCategory.Scan
                         });
                         ChatWindow.SetThinking(false);
                     },
@@ -315,6 +464,15 @@ namespace CompanionAI_v3.MachineSpirit
         public static void Update()
         {
             if (!IsActive) return;
+
+            // ★ v3.66.0: Session greeting — wait 3 seconds after init for provider readiness
+            if (!_hasGreeted && Time.time - _lastActivityTime > 3f)
+            {
+                _hasGreeted = true;
+                TriggerGreeting();
+                return;
+            }
+
             if (LLMClient.IsRequesting) return;
             if (_idleVisionPending) return;
 
@@ -342,20 +500,103 @@ namespace CompanionAI_v3.MachineSpirit
             }
         }
 
+        private static void TriggerGreeting()
+        {
+            if (LLMClient.IsRequesting) return;
+
+            ChatWindow.SetVisible(true);
+            ChatWindow.SetThinking(true);
+            _lastActivityTime = Time.time;
+            ResetIdleTimers();
+
+            var messages = ContextBuilder.BuildForGreeting(_chatHistory, Config, _conversationSummary);
+
+            if (Config.Provider == ApiProvider.Ollama)
+            {
+                _chatHistory.Add(new ChatMessage { IsUser = false, Text = "", Timestamp = Time.time, Category = MessageCategory.Greeting });
+                int responseIdx = _chatHistory.Count - 1;
+
+                CoroutineRunner.Start(LLMClient.SendOllamaStreaming(
+                    Config, messages,
+                    onToken: tokens =>
+                    {
+                        var msg = _chatHistory[responseIdx];
+                        msg.Text += tokens;
+                        _chatHistory[responseIdx] = msg;
+                        ChatWindow.SetThinking(false);
+                    },
+                    onComplete: () => ChatWindow.SetThinking(false),
+                    onError: error =>
+                    {
+                        // Silent fail for greeting
+                        var msg = _chatHistory[responseIdx];
+                        if (string.IsNullOrEmpty(msg.Text))
+                            _chatHistory.RemoveAt(responseIdx);
+                        ChatWindow.SetThinking(false);
+                    }
+                ));
+            }
+            else
+            {
+                CoroutineRunner.Start(LLMClient.SendChatRequest(
+                    Config, messages,
+                    onResponse: response =>
+                    {
+                        _chatHistory.Add(new ChatMessage
+                        {
+                            IsUser = false,
+                            Text = response,
+                            Timestamp = Time.time,
+                            Category = MessageCategory.Greeting
+                        });
+                        ChatWindow.SetThinking(false);
+                    },
+                    onError: _ => ChatWindow.SetThinking(false) // Silent fail
+                ));
+            }
+        }
+
         private static void TriggerIdleText()
         {
             _lastActivityTime = Time.time;
             ResetIdleTimers();
 
-            var lang = Main.Settings?.UILanguage ?? Language.English;
-            string instruction = lang switch
+            // ★ v3.66.0: Context-aware idle prompt — check if recent sensor log has dialogue
+            bool hasRecentDialogue = false;
+            var events = GameEventCollector.RecentEvents;
+            for (int i = events.Count - 1; i >= Math.Max(0, events.Count - 5); i--)
             {
-                Language.Korean => "잠시 조용했다. 현재 상황이나 지역에 대해 짧게 한마디 하라. 흥미로운 게 없다면 [SKIP]으로만 응답하라.",
-                Language.Russian => "Было тихо. Кратко прокомментируй текущую ситуацию или местоположение. Если нечего сказать — ответь только [SKIP].",
-                Language.Japanese => "しばらく静かだった。現在の状況や場所について短くコメントせよ。特に何もなければ[SKIP]とだけ答えよ。",
-                Language.Chinese => "沉寂了一段时间。对当前情况或所在区域简短评论一句。如果没什么有趣的，只回复[SKIP]。",
-                _ => "It's been quiet. Comment briefly on the current situation or location. If nothing interesting, respond with [SKIP] only."
-            };
+                if (events[i].Type == GameEventType.Dialogue || events[i].Type == GameEventType.Bark)
+                {
+                    hasRecentDialogue = true;
+                    break;
+                }
+            }
+
+            var lang = Main.Settings?.UILanguage ?? Language.English;
+            string instruction;
+            if (hasRecentDialogue)
+            {
+                instruction = lang switch
+                {
+                    Language.Korean => "센서 로그에 최근 대화가 기록되었다. 이 대화나 현재 상황에 대해 네 성격에 맞게 짧게 코멘트하라. 특별히 할 말이 없다면 [SKIP]으로만 응답하라.",
+                    Language.Russian => "В сенсорном журнале есть недавний разговор. Кратко прокомментируй его или текущую ситуацию в образе. Если нечего сказать — ответь только [SKIP].",
+                    Language.Japanese => "センサーログに最近の会話が記録された。この会話や現在の状況についてキャラクターに合わせて短くコメントせよ。特に何もなければ[SKIP]とだけ答えよ。",
+                    Language.Chinese => "传感器日志记录了近期的对话。简短评论这段对话或当前情况。如果没什么可说的，只回复[SKIP]。",
+                    _ => "Sensor log recorded recent dialogue. Comment briefly on the conversation or current situation, in character. If nothing to add, respond with [SKIP] only."
+                };
+            }
+            else
+            {
+                instruction = lang switch
+                {
+                    Language.Korean => "잠시 조용했다. 현재 상황이나 지역에 대해 짧게 한마디 하라. 흥미로운 게 없다면 [SKIP]으로만 응답하라.",
+                    Language.Russian => "Было тихо. Кратко прокомментируй текущую ситуацию или местоположение. Если нечего сказать — ответь только [SKIP].",
+                    Language.Japanese => "しばらく静かだった。現在の状況や場所について短くコメントせよ。特に何もなければ[SKIP]とだけ答えよ。",
+                    Language.Chinese => "沉寂了一段时间。对当前情况或所在区域简短评论一句。如果没什么有趣的，只回复[SKIP]。",
+                    _ => "It's been quiet. Comment briefly on the current situation or location. If nothing interesting, respond with [SKIP] only."
+                };
+            }
 
             var messages = ContextBuilder.Build(_chatHistory, Config, instruction, _conversationSummary);
             SendIdleRequest(messages);
@@ -405,7 +646,7 @@ namespace CompanionAI_v3.MachineSpirit
 
             if (Config.Provider == ApiProvider.Ollama)
             {
-                _chatHistory.Add(new ChatMessage { IsUser = false, Text = "", Timestamp = Time.time });
+                _chatHistory.Add(new ChatMessage { IsUser = false, Text = "", Timestamp = Time.time, Category = MessageCategory.Scan });
                 int responseIdx = _chatHistory.Count - 1;
 
                 CoroutineRunner.Start(LLMClient.SendOllamaStreaming(
@@ -462,7 +703,8 @@ namespace CompanionAI_v3.MachineSpirit
                             {
                                 IsUser = false,
                                 Text = response,
-                                Timestamp = Time.time
+                                Timestamp = Time.time,
+                                Category = MessageCategory.Scan
                             });
                             _lastActivityTime = Time.time;
                             ResetIdleTimers();

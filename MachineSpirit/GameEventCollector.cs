@@ -25,7 +25,8 @@ namespace CompanionAI_v3.MachineSpirit
         DamageDealt,
         HealingDone,
         RoundStart,
-        VisionObservation
+        VisionObservation,
+        AreaTransition  // ★ v3.66.0
     }
 
     public struct GameEvent
@@ -53,6 +54,8 @@ namespace CompanionAI_v3.MachineSpirit
                 return $"Chrono — {Text}";
             if (Type == GameEventType.VisionObservation)
                 return $"Pict-capture — {Text}";
+            if (Type == GameEventType.AreaTransition)
+                return $"Navigation — {Text}";
             if (string.IsNullOrEmpty(Speaker))
                 return $"Sensor: {Text}";
             return $"Sensor — {Speaker}: {Text}";
@@ -96,6 +99,16 @@ namespace CompanionAI_v3.MachineSpirit
             {
                 MachineSpirit.OnMajorEvent(_events[_events.Count - 1]);
             }
+            // ★ v3.66.0: Dialogue triggers Machine Spirit reaction (separate cooldown)
+            else if (type == GameEventType.Dialogue)
+            {
+                MachineSpirit.OnDialogueEvent(_events[_events.Count - 1]);
+            }
+            // ★ v3.66.0: Area transition triggers Machine Spirit scan
+            else if (type == GameEventType.AreaTransition)
+            {
+                MachineSpirit.OnAreaTransition(_events[_events.Count - 1]);
+            }
         }
 
         public static void AddTurnPlanSummary(string unitName, string summary)
@@ -125,6 +138,7 @@ namespace CompanionAI_v3.MachineSpirit
         }
 
         private static int _combatRound;
+        private static string _lastAreaName;
 
         private class CombatEventSubscriber :
             IUnitDeathHandler,
@@ -132,7 +146,8 @@ namespace CompanionAI_v3.MachineSpirit
             IDialogCueHandler,
             IDamageHandler,
             IHealingHandler,
-            IRoundStartHandler
+            IRoundStartHandler,
+            IAreaHandler  // ★ v3.66.0
         {
             public void HandleUnitDeath(AbstractUnitEntity unit)
             {
@@ -277,6 +292,27 @@ namespace CompanionAI_v3.MachineSpirit
 
                 _combatRound++;
                 AddEvent(GameEventType.RoundStart, null, $"Combat round {_combatRound}");
+            }
+
+            // ★ v3.66.0: IAreaHandler — detect area transitions
+            public void OnAreaBeginUnloading() { }
+
+            public void OnAreaDidLoad()
+            {
+                if (!MachineSpirit.IsActive) return;
+
+                try
+                {
+                    string areaName = Kingmaker.Game.Instance?.CurrentlyLoadedArea?.AreaDisplayName;
+                    if (string.IsNullOrEmpty(areaName)) return;
+
+                    // Skip if same area (save load, etc.)
+                    if (areaName == _lastAreaName) return;
+                    _lastAreaName = areaName;
+
+                    AddEvent(GameEventType.AreaTransition, null, $"Entered {areaName}");
+                }
+                catch { /* safe fallback */ }
             }
         }
     }

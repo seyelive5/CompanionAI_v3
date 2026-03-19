@@ -76,7 +76,8 @@ namespace CompanionAI_v3.MachineSpirit
 - NEVER write dialogue for crew members. NEVER use formats like ""**Name:** dialogue"" or quote what characters say.
 - You COMMENT ON what happens. You do NOT narrate or roleplay as other characters.
 - Good example: ""Sensors confirm another heretic purged, Lord Captain. Argenta's efficiency rating rises to 94.7% — the Omnissiah would approve.""
-- Bad example (NEVER do this): ""**Argenta:** 'The unclean are purified!'"" ""**Cassia:** 'Another one down.'"" ";
+- Bad example (NEVER do this): ""**Argenta:** 'The unclean are purified!'"" ""**Cassia:** 'Another one down.'""
+- VARIETY: Never reuse the same opening phrase or interjection from your recent messages. Each response must use a different angle, structure, and vocabulary. Focus on what specifically CHANGED — not the same observations again.";
 
         private const string RULES_KO = @"절대 규칙:
 - 너에게 말을 거는 사람이 바로 로드 캡틴이다. 그에 맞게 호칭하라. 그가 너와 이 함선의 지휘관이다.
@@ -84,7 +85,8 @@ namespace CompanionAI_v3.MachineSpirit
 - 절대로 승무원 대사를 작성하지 마라. ""**이름:** 대사"" 같은 형식 금지. 캐릭터를 인용하지 마라.
 - 너는 일어난 일에 대해 코멘트하는 것이다. 다른 캐릭터의 역할극을 하는 것이 아니다.
 - 좋은 예: ""로드 캡틴, 센서가 또 하나의 이단자 제거를 확인했습니다. 아르젠타의 효율 등급이 94.7%로 상승 — 옴니시아께서 기뻐하시겠군요.""
-- 나쁜 예 (절대 금지): ""**아르젠타:** '불결한 자, 정화되었다!'"" ""**카시아:** '하나 줄었네요.'"" ";
+- 나쁜 예 (절대 금지): ""**아르젠타:** '불결한 자, 정화되었다!'"" ""**카시아:** '하나 줄었네요.'""
+- 다양성: 최근 메시지에서 사용한 도입부나 추임새를 절대 반복하지 마라. 매번 다른 관점, 구조, 어휘를 사용하라. 같은 관찰이 아닌 무엇이 변했는지에 집중하라.";
 
         private const string RULES_RU = @"Критические правила:
 - Тот, кто с тобой говорит — это Лорд-Капитан. Обращайся к нему соответственно. Он командует тобой и кораблём.
@@ -92,7 +94,8 @@ namespace CompanionAI_v3.MachineSpirit
 - НИКОГДА не пиши реплики членов экипажа. ЗАПРЕЩЕНЫ форматы типа ""**Имя:** реплика"". Не цитируй персонажей.
 - Ты КОММЕНТИРУЕШЬ происходящее. Ты НЕ играешь роли других персонажей.
 - Хороший пример: ""Сенсоры подтверждают уничтожение ещё одного еретика, Лорд-Капитан. Рейтинг эффективности Аргенты — 94.7%. Омниссия одобрит.""
-- Плохой пример (ЗАПРЕЩЕНО): ""**Аргента:** 'Нечестивые очищены!'"" ""**Кассия:** 'Ещё одним меньше.'"" ";
+- Плохой пример (ЗАПРЕЩЕНО): ""**Аргента:** 'Нечестивые очищены!'"" ""**Кассия:** 'Ещё одним меньше.'""
+- РАЗНООБРАЗИЕ: Никогда не повторяй одну и ту же вступительную фразу или междометие из последних сообщений. Каждый ответ должен использовать другой ракурс, структуру и лексику. Сосредоточься на том, что ИЗМЕНИЛОСЬ.";
 
         private const string RULES_JA = @"絶対ルール:
 - お前に話しかけている者こそロード・キャプテンだ。それに相応しく呼びかけよ。彼がお前とこの艦の指揮官だ。
@@ -100,7 +103,8 @@ namespace CompanionAI_v3.MachineSpirit
 - 絶対に乗組員の台詞を書くな。""**名前:** 台詞""のような形式は禁止。キャラクターを引用するな。
 - お前は起きたことにコメントする。他のキャラクターのロールプレイをするのではない。
 - 良い例：""ロード・キャプテン、センサーが異端者の排除を確認。アルジェンタの効率評価が94.7%に上昇 — オムニシアもお喜びだろう。""
-- 悪い例（絶対禁止）：""**アルジェンタ:** '不浄なる者よ、浄化された！'"" ""**カシア:** '一つ減りましたね。'"" ";
+- 悪い例（絶対禁止）：""**アルジェンタ:** '不浄なる者よ、浄化された！'"" ""**カシア:** '一つ減りましたね。'""
+- 多様性：最近のメッセージと同じ冒頭や感嘆詞を絶対に繰り返すな。毎回異なる視点、構造、語彙を使え。同じ観察ではなく、何が変わったかに集中せよ。";
 
         private const string RULES_ZH = @"核心规则：
 - 与你对话的人就是领主舰长。以相应的称呼称呼他们。他们指挥着你和这艘虚空飞船。
@@ -108,7 +112,8 @@ namespace CompanionAI_v3.MachineSpirit
 - 绝对不要为船员编写对话。禁止使用""**姓名：** 台词""这样的格式，也不要引用角色的话语。
 - 你是对发生之事进行评论，而非扮演或叙述其他角色。
 - 正确示范：""传感器确认又一名异端被清除，领主舰长。阿尔真塔的效率评级升至94.7%——万机神定会赞许。""
-- 错误示范（绝对禁止）：""**阿尔真塔：** '不洁之物已被净化！'"" ""**卡西亚：** '又少了一个。'"" ";
+- 错误示范（绝对禁止）：""**阿尔真塔：** '不洁之物已被净化！'"" ""**卡西亚：** '又少了一个。'""
+- 多样性：绝不重复最近消息中使用过的开头或感叹词。每次回复都要使用不同的角度、结构和词汇。关注具体发生了什么变化，而非重复相同的观察。";
 
         // ── PERSONALITY: Mechanicus (Omnissiah-worshipping tech-priest, default) ──
 
@@ -838,6 +843,40 @@ Example responses (mimic this exact style):
         }
 
         /// <summary>
+        /// ★ v3.66.0: Extract opening phrases from recent assistant messages to prevent repetition.
+        /// Feeds the LLM explicit "don't repeat these" examples — most effective for small models.
+        /// </summary>
+        private static string BuildAntiRepetitionContext(List<ChatMessage> chatHistory)
+        {
+            var openings = new List<string>();
+            for (int i = chatHistory.Count - 1; i >= 0 && openings.Count < 4; i--)
+            {
+                if (chatHistory[i].IsUser) continue;
+                string text = chatHistory[i].Text;
+                if (string.IsNullOrEmpty(text) || text.StartsWith("[ERROR]")) continue;
+
+                // Extract first sentence (up to first period/exclamation/question mark)
+                int endIdx = text.IndexOfAny(new[] { '.', '!', '?' });
+                string opening;
+                if (endIdx > 0 && endIdx < 100)
+                    opening = text.Substring(0, endIdx + 1);
+                else
+                    opening = text.Length > 80 ? text.Substring(0, 80) + "..." : text;
+
+                openings.Add(opening);
+            }
+
+            if (openings.Count < 2) return null;
+
+            var sb = new StringBuilder();
+            sb.AppendLine("[DO NOT REPEAT — your recent openings]");
+            foreach (var o in openings)
+                sb.AppendLine($"- \"{o}\"");
+            sb.Append("Start differently. Use a new angle.");
+            return sb.ToString();
+        }
+
+        /// <summary>
         /// ★ v3.60.0: Get current area name for location awareness.
         /// </summary>
         private static string BuildAreaContext()
@@ -857,9 +896,9 @@ Example responses (mimic this exact style):
         }
 
         /// <summary>
-        /// Build the full system content string (prompt + summary + sensor data).
+        /// Build the full system content string (prompt + summary + sensor data + anti-repetition).
         /// </summary>
-        private static string BuildSystemContent(string conversationSummary, MachineSpiritConfig config = null)
+        private static string BuildSystemContent(string conversationSummary, MachineSpiritConfig config = null, List<ChatMessage> chatHistory = null)
         {
             var systemSb = new StringBuilder(GetSystemPrompt());
 
@@ -929,6 +968,17 @@ Example responses (mimic this exact style):
                     systemSb.AppendLine(events[i].ToString());
             }
 
+            // ★ v3.66.0: Anti-repetition — feed recent openings as "don't repeat these"
+            if (chatHistory != null)
+            {
+                string antiRep = BuildAntiRepetitionContext(chatHistory);
+                if (!string.IsNullOrEmpty(antiRep))
+                {
+                    systemSb.AppendLine();
+                    systemSb.AppendLine(antiRep);
+                }
+            }
+
             return systemSb.ToString();
         }
 
@@ -982,7 +1032,7 @@ Example responses (mimic this exact style):
             string conversationSummary = null)
         {
             var messages = new List<LLMClient.ChatMessage>();
-            string systemContent = BuildSystemContent(conversationSummary, config);
+            string systemContent = BuildSystemContent(conversationSummary, config, chatHistory);
 
             // ★ Gemma workaround: embed system prompt in first user message
             // Gemma 3 ignores the "system" role entirely — the parser merges it into the first
@@ -1059,13 +1109,78 @@ Example responses (mimic this exact style):
             var lang = Main.Settings?.UILanguage ?? Language.English;
             string instruction = lang switch
             {
-                Language.Korean => "이 이벤트에 대해 캐릭터에 맞게 짧게 코멘트하라.",
-                Language.Russian => "Прокомментируй это событие кратко, в образе.",
-                Language.Japanese => "このイベントについてキャラクターに合わせて短くコメントせよ。",
-                Language.Chinese => "对此事件进行简短的角色内评论。",
-                _ => "Comment on this event briefly, in character."
+                Language.Korean => "이 이벤트에 대해 캐릭터에 맞게 짧게 코멘트하라. 이전 메시지와 완전히 다른 관점과 표현을 사용하라.",
+                Language.Russian => "Прокомментируй это событие кратко, в образе. Используй совершенно другой подход и фразы, чем в прошлых сообщениях.",
+                Language.Japanese => "このイベントについてキャラクターに合わせて短くコメントせよ。前回とは全く異なる視点と表現を使え。",
+                Language.Chinese => "对此事件进行简短的角色内评论。使用与之前消息完全不同的角度和表达方式。",
+                _ => "Comment on this event briefly, in character. Use a completely different angle and phrasing than your previous messages."
             };
             string prompt = $"[EVENT ALERT] {evt}\n{instruction}";
+            return Build(chatHistory, config, prompt, conversationSummary);
+        }
+
+        /// <summary>
+        /// ★ v3.66.0: Build messages for dialogue reaction — Machine Spirit comments on NPC conversations.
+        /// Uses [SKIP] mechanism so uninteresting dialogue is ignored.
+        /// </summary>
+        public static List<LLMClient.ChatMessage> BuildForDialogue(
+            GameEvent evt,
+            List<ChatMessage> chatHistory,
+            MachineSpiritConfig config = null,
+            string conversationSummary = null)
+        {
+            var lang = Main.Settings?.UILanguage ?? Language.English;
+            string instruction = lang switch
+            {
+                Language.Korean => "코기테이터가 이 대화를 가로챘다. 네 성격에 맞게 이 대화 내용에 대해 짧게 의견을 말하라 (1-2문장). 관심 없는 대화면 [SKIP]으로만 응답하라.",
+                Language.Russian => "Когитатор перехватил этот разговор. Прокомментируй содержание кратко, в образе (1-2 предложения). Если неинтересно — ответь только [SKIP].",
+                Language.Japanese => "コギテイターがこの会話を傍受した。キャラクターに合わせて短くコメントせよ（1-2文）。興味がなければ[SKIP]とだけ答えよ。",
+                Language.Chinese => "认知体截获了这段对话。用你的角色身份简短评论（1-2句）。如果对话无趣，只回复[SKIP]。",
+                _ => "Cogitator intercepted this conversation. Comment briefly in character (1-2 sentences). If the dialogue is mundane, respond with [SKIP] only."
+            };
+            string prompt = $"[VOX INTERCEPT] {evt.Speaker} said: \"{evt.Text}\"\n{instruction}";
+            return Build(chatHistory, config, prompt, conversationSummary);
+        }
+
+        /// <summary>
+        /// ★ v3.66.0: Build messages for session greeting — Machine Spirit welcomes the Lord Captain.
+        /// </summary>
+        public static List<LLMClient.ChatMessage> BuildForGreeting(
+            List<ChatMessage> chatHistory,
+            MachineSpiritConfig config = null,
+            string conversationSummary = null)
+        {
+            var lang = Main.Settings?.UILanguage ?? Language.English;
+            string instruction = lang switch
+            {
+                Language.Korean => "함선 시스템이 재가동되었다. 로드 캡틴에게 성격에 맞게 짧게 인사하라. (1-2문장)",
+                Language.Russian => "Системы корабля перезагружены. Кратко поприветствуй Лорда-Капитана в образе. (1-2 предложения)",
+                Language.Japanese => "艦のシステムが再起動した。ロード・キャプテンにキャラクターに合わせて短く挨拶せよ。（1-2文）",
+                Language.Chinese => "舰船系统已重启。用你的角色身份简短地向领主舰长问好。（1-2句）",
+                _ => "Ship systems have rebooted. Greet the Lord Captain briefly, in character. (1-2 sentences)"
+            };
+            return Build(chatHistory, config, instruction, conversationSummary);
+        }
+
+        /// <summary>
+        /// ★ v3.66.0: Build messages for area transition — Machine Spirit scans new location.
+        /// </summary>
+        public static List<LLMClient.ChatMessage> BuildForAreaTransition(
+            GameEvent evt,
+            List<ChatMessage> chatHistory,
+            MachineSpiritConfig config = null,
+            string conversationSummary = null)
+        {
+            var lang = Main.Settings?.UILanguage ?? Language.English;
+            string instruction = lang switch
+            {
+                Language.Korean => "함선 센서가 새 구역 진입을 감지했다. 이 장소에 대해 성격에 맞게 짧게 코멘트하라. (1-2문장)",
+                Language.Russian => "Сенсоры корабля обнаружили вход в новую зону. Кратко прокомментируй это место в образе. (1-2 предложения)",
+                Language.Japanese => "艦のセンサーが新たな区域への進入を検知した。この場所についてキャラクターに合わせて短くコメントせよ。（1-2文）",
+                Language.Chinese => "舰船传感器探测到进入新区域。用你的角色身份简短评论这个地方。（1-2句）",
+                _ => "Ship sensors detected entry into a new zone. Comment briefly on this location, in character. (1-2 sentences)"
+            };
+            string prompt = $"[NAVIGATION ALERT] {evt.Text}\n{instruction}";
             return Build(chatHistory, config, prompt, conversationSummary);
         }
 
@@ -1099,6 +1214,15 @@ Example responses (mimic this exact style):
         }
     }
 
+    public enum MessageCategory
+    {
+        Default,
+        Combat,
+        Scan,
+        Vox,
+        Greeting
+    }
+
     /// <summary>
     /// A single chat message in history
     /// </summary>
@@ -1107,5 +1231,6 @@ Example responses (mimic this exact style):
         public bool IsUser;
         public string Text;
         public float Timestamp;
+        public MessageCategory Category; // ★ v3.66.0: Color-coded message categories
     }
 }
