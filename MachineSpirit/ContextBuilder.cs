@@ -875,6 +875,113 @@ Example responses (mimic this exact style):
         }
 
         /// <summary>
+        /// ★ v3.68.0: Build NPC dialogue transcript for conversation awareness.
+        /// Gives the LLM full context of the ongoing NPC dialogue scene.
+        /// </summary>
+        private static string BuildDialogueTranscript()
+        {
+            var dialogues = GameEventCollector.DialogueBuffer;
+            if (dialogues.Count < 2) return null; // Need at least 2 lines for meaningful context
+
+            var sb = new StringBuilder();
+            sb.AppendLine("[ACTIVE DIALOGUE — NPC Conversation Transcript]");
+            sb.AppendLine("(You are observing this conversation. Comment on the content, not the format.)");
+
+            foreach (var evt in dialogues)
+            {
+                string speaker = evt.Speaker;
+                if (string.IsNullOrEmpty(speaker) || speaker == "Unknown")
+                    speaker = "Narrator";
+                sb.AppendLine($"  {speaker}: \"{evt.Text}\"");
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// ★ v3.68.0: Build combat timeline — round-by-round summary of what happened.
+        /// Gives the LLM narrative flow of the battle, not just a snapshot.
+        /// </summary>
+        private static string BuildCombatTimeline()
+        {
+            var events = GameEventCollector.RecentEvents;
+            if (events.Count == 0) return null;
+
+            // Find combat start
+            int combatStartIdx = -1;
+            for (int i = events.Count - 1; i >= 0; i--)
+            {
+                if (events[i].Type == GameEventType.CombatStart)
+                {
+                    combatStartIdx = i;
+                    break;
+                }
+            }
+            if (combatStartIdx < 0) return null; // Not in combat or no combat found
+
+            // Group events by round
+            var sb = new StringBuilder();
+            sb.AppendLine("[COMBAT TIMELINE — What happened so far]");
+
+            int currentRound = 0;
+            int kills = 0, dmgEvents = 0, heals = 0;
+            var roundHighlights = new List<string>();
+
+            for (int i = combatStartIdx + 1; i < events.Count; i++)
+            {
+                var evt = events[i];
+
+                if (evt.Type == GameEventType.RoundStart)
+                {
+                    // Flush previous round
+                    if (currentRound > 0 && roundHighlights.Count > 0)
+                    {
+                        sb.Append($"  R{currentRound}: ");
+                        sb.AppendLine(string.Join(" | ", roundHighlights));
+                    }
+
+                    currentRound++;
+                    roundHighlights.Clear();
+                    kills = 0; dmgEvents = 0; heals = 0;
+                    continue;
+                }
+
+                if (evt.Type == GameEventType.UnitDeath)
+                {
+                    kills++;
+                    roundHighlights.Add(evt.Text);
+                }
+                else if (evt.Type == GameEventType.DamageDealt)
+                {
+                    dmgEvents++;
+                    // Only include significant damage events (keep highlights concise)
+                    if (dmgEvents <= 3)
+                        roundHighlights.Add(evt.Text);
+                }
+                else if (evt.Type == GameEventType.HealingDone)
+                {
+                    heals++;
+                    if (heals <= 1)
+                        roundHighlights.Add(evt.Text);
+                }
+                else if (evt.Type == GameEventType.TurnPlanSummary)
+                {
+                    roundHighlights.Add($"{evt.Speaker}: {evt.Text}");
+                }
+            }
+
+            // Flush last round
+            if (currentRound > 0 && roundHighlights.Count > 0)
+            {
+                sb.Append($"  R{currentRound}: ");
+                sb.AppendLine(string.Join(" | ", roundHighlights));
+            }
+
+            // Only return if there's meaningful content (at least 1 round with highlights)
+            return currentRound > 0 ? sb.ToString() : null;
+        }
+
+        /// <summary>
         /// ★ v3.66.0: Extract opening phrases from recent assistant messages to prevent repetition.
         /// Feeds the LLM explicit "don't repeat these" examples — most effective for small models.
         /// </summary>
@@ -982,6 +1089,34 @@ Example responses (mimic this exact style):
                 systemSb.AppendLine(combatContext);
             }
 
+            // ★ v3.68.0: Combat timeline — narrative flow of the battle
+            string combatTimeline = BuildCombatTimeline();
+            if (!string.IsNullOrEmpty(combatTimeline))
+            {
+                if (!hasSensorHeader)
+                {
+                    systemSb.AppendLine();
+                    systemSb.AppendLine();
+                    systemSb.AppendLine("--- SENSOR DATA (read-only observations, do NOT copy or repeat these) ---");
+                    hasSensorHeader = true;
+                }
+                systemSb.AppendLine(combatTimeline);
+            }
+
+            // ★ v3.68.0: NPC dialogue transcript — full conversation context
+            string dialogueTranscript = BuildDialogueTranscript();
+            if (!string.IsNullOrEmpty(dialogueTranscript))
+            {
+                if (!hasSensorHeader)
+                {
+                    systemSb.AppendLine();
+                    systemSb.AppendLine();
+                    systemSb.AppendLine("--- SENSOR DATA (read-only observations, do NOT copy or repeat these) ---");
+                    hasSensorHeader = true;
+                }
+                systemSb.AppendLine(dialogueTranscript);
+            }
+
             // Recent events as sensor log (expanded to 20 for richer context)
             var events = GameEventCollector.RecentEvents;
             if (events.Count > 0)
@@ -993,8 +1128,8 @@ Example responses (mimic this exact style):
                     systemSb.AppendLine("--- SENSOR DATA (read-only observations, do NOT copy or repeat these) ---");
                 }
                 systemSb.AppendLine("[Sensor log]");
-                // ★ v3.64.0: Dynamic sensor log size — fewer events for small models
-                int maxEvents = (config?.Provider == ApiProvider.Ollama && IsSmallModel(config)) ? 10 : 20;
+                // ★ v3.68.0: Generous sensor log — local AI has unlimited tokens
+                int maxEvents = (config?.Provider == ApiProvider.Ollama && IsSmallModel(config)) ? 20 : 30;
                 int start = events.Count > maxEvents ? events.Count - maxEvents : 0;
                 for (int i = start; i < events.Count; i++)
                     systemSb.AppendLine(events[i].ToString());

@@ -68,8 +68,13 @@ namespace CompanionAI_v3.MachineSpirit
     /// </summary>
     public static class GameEventCollector
     {
-        private const int MAX_EVENTS = 50;
+        private const int MAX_EVENTS = 128; // ★ v3.68.0: expanded from 50
         private static readonly List<GameEvent> _events = new List<GameEvent>(MAX_EVENTS + 5);
+
+        // ★ v3.68.0: Separate dialogue buffer — keeps full NPC conversation context
+        private const int MAX_DIALOGUE = 30;
+        private static readonly List<GameEvent> _dialogueBuffer = new List<GameEvent>(MAX_DIALOGUE + 5);
+        public static IReadOnlyList<GameEvent> DialogueBuffer => _dialogueBuffer;
 
         // ★ v3.64.0: Kill tracker per combat encounter
         private static readonly Dictionary<string, int> _killCounts = new Dictionary<string, int>();
@@ -102,6 +107,11 @@ namespace CompanionAI_v3.MachineSpirit
             // ★ v3.66.0: Dialogue triggers Machine Spirit reaction (separate cooldown)
             else if (type == GameEventType.Dialogue)
             {
+                // ★ v3.68.0: Also store in dedicated dialogue buffer for transcript context
+                if (_dialogueBuffer.Count >= MAX_DIALOGUE)
+                    _dialogueBuffer.RemoveAt(0);
+                _dialogueBuffer.Add(_events[_events.Count - 1]);
+
                 MachineSpirit.OnDialogueEvent(_events[_events.Count - 1]);
             }
             // ★ v3.66.0: Area transition triggers Machine Spirit scan
@@ -208,9 +218,9 @@ namespace CompanionAI_v3.MachineSpirit
                     }
                     catch { /* safe fallback */ }
 
-                    // Truncate long dialogue to save tokens (keep first ~120 chars)
-                    if (text.Length > 120)
-                        text = text.Substring(0, 120) + "...";
+                    // ★ v3.68.0: Expanded truncation (was 120, local AI has token budget)
+                    if (text.Length > 200)
+                        text = text.Substring(0, 200) + "...";
 
                     AddEvent(GameEventType.Dialogue, speaker, text);
                 }
@@ -310,6 +320,7 @@ namespace CompanionAI_v3.MachineSpirit
                     if (areaName == _lastAreaName) return;
                     _lastAreaName = areaName;
 
+                    _dialogueBuffer.Clear(); // ★ v3.68.0: Reset dialogue context on area change
                     AddEvent(GameEventType.AreaTransition, null, $"Entered {areaName}");
                 }
                 catch { /* safe fallback */ }
