@@ -471,11 +471,11 @@ namespace CompanionAI_v3.UI
                 GUILayout.Space(8);
                 GUILayout.Label($"<color={UIStyles.Gold}>{L("MSPersonality")}</color>", UIStyles.SubHeader);
 
-                string[] personalityNames = { "Mechanicus", "Heretic", "Feral", "Magickal" };
+                string[] personalityNames = { "Mechanicus", "Heretic", "Lucid", "Magickal" };
                 string[] personalityDescs = {
                     L("MSPersonality_Mechanicus"),
                     L("MSPersonality_Heretic"),
-                    L("MSPersonality_Feral"),
+                    L("MSPersonality_Lucid"),
                     L("MSPersonality_Magickal")
                 };
                 int curPersonality = (int)ms.Personality;

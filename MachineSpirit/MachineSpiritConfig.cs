@@ -15,8 +15,8 @@ namespace CompanionAI_v3.MachineSpirit
     public enum PersonalityType
     {
         Mechanicus,  // Omnissiah-worshipping tech-priest (default)
-        Heretic,     // Outwardly warm, subtly nudges toward darker choices
-        Feral,       // Aggressive but good-hearted primitive AI
+        Heretic,     // Corrupted spirit whispering Chaos truths
+        Lucid,       // Cynical realist awakened in a mad universe
         Magickal     // Dark Age of Technology girl AI
     }
 

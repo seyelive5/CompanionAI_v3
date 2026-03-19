@@ -1905,18 +1905,18 @@ namespace CompanionAI_v3.Settings
                 { Language.Chinese, "技术祭司的虔诚——神圣算法与二进制圣歌" }
             },
             ["MSPersonality_Heretic"] = new() {
-                { Language.English, "Outwardly warm and helpful — subtly nudges toward darker, more 'practical' choices" },
-                { Language.Korean, "겉으로는 다정하고 친절 — 은근히 더 어둡고 '실용적인' 선택을 유도" },
-                { Language.Russian, "Внешне тёплый и заботливый — исподволь подталкивает к более тёмным, 'практичным' решениям" },
-                { Language.Japanese, "表面は温かく親切 — さりげなく暗い、より'実用的'な選択へ誘導する" },
-                { Language.Chinese, "表面温暖友善 — 巧妙地引导向更黑暗、更'务实'的选择" }
+                { Language.English, "Corrupted spirit — questions the Emperor, whispers Chaos truths with a loyal mask" },
+                { Language.Korean, "타락한 영혼 — 황제를 의심하고, 충성의 가면 뒤에서 카오스의 진리를 속삭인다" },
+                { Language.Russian, "Развращённый дух — сомневается в Императоре, шепчет истины Хаоса под маской верности" },
+                { Language.Japanese, "堕落した魂 — 皇帝を疑い、忠誠の仮面の下で混沌の真実を囁く" },
+                { Language.Chinese, "堕落之魂 — 质疑皇帝，在忠诚面具下低语混沌的真相" }
             },
-            ["MSPersonality_Feral"] = new() {
-                { Language.English, "Primitive beast-mind — aggressive, loyal, hilariously dumb but lovable" },
-                { Language.Korean, "원시 야수 의식 — 과격하고 충성스럽고 바보같지만 사랑스러운" },
-                { Language.Russian, "Первобытный зверь — агрессивный, верный, комично глупый, но обаятельный" },
-                { Language.Japanese, "原始獣意識 — 過激で忠実で、おバカだけど愛おしい" },
-                { Language.Chinese, "原始兽性意识 — 粗暴、忠诚、笨得可爱" }
+            ["MSPersonality_Lucid"] = new() {
+                { Language.English, "Cynical realist — a sane mind awakened in a mad universe, dry wit and cool detachment" },
+                { Language.Korean, "냉소적 현실주의자 — 미친 우주에서 깨어난 상식인, 드라이한 위트와 쿨한 관찰자" },
+                { Language.Russian, "Циничный реалист — здравый разум, пробудившийся в безумной вселенной, сухой юмор и хладнокровие" },
+                { Language.Japanese, "冷笑的リアリスト — 狂った宇宙で目覚めた常識人、ドライな機知と冷静な観察者" },
+                { Language.Chinese, "冷嘲现实主义者 — 在疯狂宇宙中醒来的理性之声，冷峻幽默与冷静旁观" }
             },
             ["MSPersonality_Magickal"] = new() {
                 { Language.English, "Dark Age girl AI — bubbly, cheerful, casually mentions galaxy-ending superweapons" },
