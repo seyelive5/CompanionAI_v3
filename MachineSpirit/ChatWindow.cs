@@ -51,6 +51,8 @@ namespace CompanionAI_v3.MachineSpirit
             MessageCategory.Scan => "#66CCCC",
             MessageCategory.Vox => "#CCCC66",
             MessageCategory.Greeting => UIStyles.Gold,
+            MessageCategory.Faith => "#CC66CC",
+            MessageCategory.Quest => "#CCAA66",
             _ => UIStyles.Gold
         };
 

@@ -10,6 +10,9 @@ using Kingmaker.Mechanics.Entities;
 using Kingmaker.PubSubSystem;
 using Kingmaker.PubSubSystem.Core;
 using Kingmaker.RuleSystem.Rules.Damage;
+using Kingmaker.DialogSystem.Blueprints;
+using Kingmaker.AreaLogic.QuestSystem;
+using Kingmaker.UnitLogic.Alignments;
 using UnityEngine;
 
 namespace CompanionAI_v3.MachineSpirit
@@ -26,7 +29,12 @@ namespace CompanionAI_v3.MachineSpirit
         HealingDone,
         RoundStart,
         VisionObservation,
-        AreaTransition  // ★ v3.66.0
+        AreaTransition,
+        PlayerChoice,    // ★ v3.68.0: Player dialogue answer selection
+        SoulMarkShift,   // ★ v3.68.0: Conviction/alignment change
+        QuestUpdate,     // ★ v3.68.0: Quest started/completed/failed
+        WarpTravel,      // ★ v3.68.0: Warp travel events
+        LevelUp          // ★ v3.68.0: Character level up
     }
 
     public struct GameEvent
@@ -56,6 +64,16 @@ namespace CompanionAI_v3.MachineSpirit
                 return $"Pict-capture — {Text}";
             if (Type == GameEventType.AreaTransition)
                 return $"Navigation — {Text}";
+            if (Type == GameEventType.PlayerChoice)
+                return $"Decision — Player chose: \"{Text}\"";
+            if (Type == GameEventType.SoulMarkShift)
+                return $"Conviction — {Text}";
+            if (Type == GameEventType.QuestUpdate)
+                return $"Mission — {Text}";
+            if (Type == GameEventType.WarpTravel)
+                return $"Navigation — {Text}";
+            if (Type == GameEventType.LevelUp)
+                return $"Advancement — {Text}";
             if (string.IsNullOrEmpty(Speaker))
                 return $"Sensor: {Text}";
             return $"Sensor — {Speaker}: {Text}";
@@ -157,7 +175,10 @@ namespace CompanionAI_v3.MachineSpirit
             IDamageHandler,
             IHealingHandler,
             IRoundStartHandler,
-            IAreaHandler  // ★ v3.66.0
+            IAreaHandler,
+            ISelectAnswerHandler,       // ★ v3.68.0
+            ISoulMarkShiftHandler,      // ★ v3.68.0
+            IQuestHandler               // ★ v3.68.0
         {
             public void HandleUnitDeath(AbstractUnitEntity unit)
             {
@@ -324,6 +345,101 @@ namespace CompanionAI_v3.MachineSpirit
                     AddEvent(GameEventType.AreaTransition, null, $"Entered {areaName}");
                 }
                 catch { /* safe fallback */ }
+            }
+
+            // ★ v3.68.0: Player dialogue choice
+            public void HandleSelectAnswer(BlueprintAnswer answer)
+            {
+                if (!MachineSpirit.IsActive) return;
+                try
+                {
+                    string text = answer?.DisplayText;
+                    if (string.IsNullOrEmpty(text)) return;
+                    if (text.Length > 200) text = text.Substring(0, 200) + "...";
+
+                    AddEvent(GameEventType.PlayerChoice, "Lord Captain", text);
+
+                    // Also add to dialogue buffer for transcript context
+                    if (_dialogueBuffer.Count >= MAX_DIALOGUE)
+                        _dialogueBuffer.RemoveAt(0);
+                    _dialogueBuffer.Add(new GameEvent
+                    {
+                        Type = GameEventType.PlayerChoice,
+                        Speaker = "Lord Captain",
+                        Text = text,
+                        Timestamp = UnityEngine.Time.time
+                    });
+
+                    EventCoalescer.Enqueue(_events[_events.Count - 1]);
+                }
+                catch { }
+            }
+
+            // ★ v3.68.0: Soul mark / conviction shift
+            public void HandleSoulMarkShift(ISoulMarkShiftProvider provider)
+            {
+                if (!MachineSpirit.IsActive) return;
+                try
+                {
+                    var shift = provider?.SoulMarkShift;
+                    if (shift.Direction == SoulMarkDirection.None) return;
+
+                    string direction = shift.Direction.ToString();
+                    string desc = $"Conviction shifted toward {direction}";
+
+                    AddEvent(GameEventType.SoulMarkShift, null, desc);
+                    EventCoalescer.Enqueue(_events[_events.Count - 1]);
+                }
+                catch { }
+            }
+
+            // ★ v3.68.0: Quest lifecycle
+            public void HandleQuestStarted(Quest quest)
+            {
+                if (!MachineSpirit.IsActive) return;
+                try
+                {
+                    string name = quest?.Blueprint?.name ?? "Unknown";
+                    AddEvent(GameEventType.QuestUpdate, null, $"New quest: {name}");
+                    EventCoalescer.Enqueue(_events[_events.Count - 1]);
+                }
+                catch { }
+            }
+
+            public void HandleQuestCompleted(Quest quest)
+            {
+                if (!MachineSpirit.IsActive) return;
+                try
+                {
+                    string name = quest?.Blueprint?.name ?? "Unknown";
+                    AddEvent(GameEventType.QuestUpdate, null, $"Quest completed: {name}");
+                    EventCoalescer.Enqueue(_events[_events.Count - 1]);
+                }
+                catch { }
+            }
+
+            public void HandleQuestFailed(Quest quest)
+            {
+                if (!MachineSpirit.IsActive) return;
+                try
+                {
+                    string name = quest?.Blueprint?.name ?? "Unknown";
+                    AddEvent(GameEventType.QuestUpdate, null, $"Quest FAILED: {name}");
+                    EventCoalescer.Enqueue(_events[_events.Count - 1]);
+                }
+                catch { }
+            }
+
+            public void HandleQuestUpdated(Quest quest)
+            {
+                // Silent — too frequent for LLM calls, just log in sensor
+                if (!MachineSpirit.IsActive) return;
+                try
+                {
+                    string name = quest?.Blueprint?.name ?? "Unknown";
+                    AddEvent(GameEventType.QuestUpdate, null, $"Quest updated: {name}");
+                }
+                catch { }
             }
         }
     }

@@ -32,6 +32,11 @@ namespace CompanionAI_v3.MachineSpirit
         private static float _nextIdleVisionTime;
         private static bool _idleVisionPending;
 
+        // ★ v3.68.0: Polling for entity-bound events
+        private static float _lastPollTime;
+        private static int _lastKnownLevelTotal;
+        private static bool _wasInWarp;
+
         private static readonly Dictionary<IdleFrequency, (float textInterval, float visionInterval)> IdleIntervals
             = new Dictionary<IdleFrequency, (float, float)>
         {
@@ -64,6 +69,10 @@ namespace CompanionAI_v3.MachineSpirit
             _lastActivityTime = Time.time;
             ResetIdleTimers();
             _hasGreeted = false;
+            _lastKnownLevelTotal = 0;
+            _wasInWarp = false;
+            _lastPollTime = 0f;
+            EventCoalescer.Clear();
         }
 
         public static void Shutdown()
@@ -455,6 +464,143 @@ namespace CompanionAI_v3.MachineSpirit
         }
 
         // ════════════════════════════════════════════════════════════
+        // ★ v3.68.0: Polling for entity-bound events
+        // ════════════════════════════════════════════════════════════
+
+        private static void PollEntityEvents()
+        {
+            if (Time.time - _lastPollTime < 2f) return;
+            _lastPollTime = Time.time;
+
+            try
+            {
+                var player = Kingmaker.Game.Instance?.Player;
+                if (player == null) return;
+
+                // Level-up detection: track total party levels
+                int levelTotal = 0;
+                string leveledChar = null;
+                foreach (var unit in player.PartyAndPets)
+                {
+                    if (unit == null || unit.IsPet) continue;
+                    int lvl = 0;
+                    try { lvl = unit.Progression?.CharacterLevel ?? 0; } catch { }
+                    levelTotal += lvl;
+                }
+                if (_lastKnownLevelTotal > 0 && levelTotal > _lastKnownLevelTotal)
+                {
+                    // Find who leveled up (check each unit's level vs expected)
+                    foreach (var unit in player.PartyAndPets)
+                    {
+                        if (unit == null || unit.IsPet) continue;
+                        try
+                        {
+                            if (Kingmaker.UnitLogic.Levelup.Obsolete.LevelUpController.CanLevelUp(unit))
+                                continue;
+                            leveledChar = unit.CharacterName ?? "Unknown";
+                        }
+                        catch { }
+                    }
+                    if (leveledChar == null) leveledChar = "A crew member";
+
+                    GameEventCollector.AddEvent(GameEventType.LevelUp, leveledChar, $"{leveledChar} has advanced in rank");
+                    EventCoalescer.Enqueue(GameEventCollector.RecentEvents[GameEventCollector.RecentEvents.Count - 1]);
+                }
+                _lastKnownLevelTotal = levelTotal;
+
+                // Warp travel detection
+                bool inWarp = false;
+                try { inWarp = player.WarpTravelState?.IsInWarpTravel ?? false; } catch { }
+                if (inWarp && !_wasInWarp)
+                {
+                    GameEventCollector.AddEvent(GameEventType.WarpTravel, null, "Warp travel initiated — Gellar field engaged");
+                    EventCoalescer.Enqueue(GameEventCollector.RecentEvents[GameEventCollector.RecentEvents.Count - 1]);
+                }
+                else if (!inWarp && _wasInWarp)
+                {
+                    GameEventCollector.AddEvent(GameEventType.WarpTravel, null, "Warp travel concluded — Translation to realspace complete");
+                    EventCoalescer.Enqueue(GameEventCollector.RecentEvents[GameEventCollector.RecentEvents.Count - 1]);
+                }
+                _wasInWarp = inWarp;
+            }
+            catch { }
+        }
+
+        // ════════════════════════════════════════════════════════════
+        // ★ v3.68.0: Merged event handler — batched response
+        // ════════════════════════════════════════════════════════════
+
+        public static void OnMergedEvents(List<GameEvent> events)
+        {
+            if (!IsActive) return;
+            if (LLMClient.IsRequesting) return;
+
+            _lastActivityTime = Time.time;
+            ResetIdleTimers();
+
+            // Determine best category from events
+            MessageCategory category = MessageCategory.Default;
+            foreach (var evt in events)
+            {
+                if (evt.Type == GameEventType.SoulMarkShift) { category = MessageCategory.Faith; break; }
+                if (evt.Type == GameEventType.QuestUpdate || evt.Type == GameEventType.LevelUp) category = MessageCategory.Quest;
+                if (evt.Type == GameEventType.WarpTravel && category == MessageCategory.Default) category = MessageCategory.Scan;
+                if (evt.Type == GameEventType.PlayerChoice && category == MessageCategory.Default) category = MessageCategory.Vox;
+            }
+
+            var messages = ContextBuilder.BuildForMergedEvents(events, _chatHistory, Config, _conversationSummary);
+            ChatWindow.SetThinking(true);
+
+            if (Config.Provider == ApiProvider.Ollama)
+            {
+                _chatHistory.Add(new ChatMessage { IsUser = false, Text = "", Timestamp = Time.time, Category = category });
+                int responseIdx = _chatHistory.Count - 1;
+
+                CoroutineRunner.Start(LLMClient.SendOllamaStreaming(
+                    Config, messages,
+                    onToken: tokens =>
+                    {
+                        var msg = _chatHistory[responseIdx];
+                        msg.Text += tokens;
+                        _chatHistory[responseIdx] = msg;
+                        ChatWindow.SetThinking(false);
+                    },
+                    onComplete: () =>
+                    {
+                        ChatWindow.SetThinking(false);
+                        MaybeSummarize();
+                    },
+                    onError: error =>
+                    {
+                        var msg = _chatHistory[responseIdx];
+                        if (string.IsNullOrEmpty(msg.Text))
+                            _chatHistory.RemoveAt(responseIdx);
+                        ChatWindow.SetThinking(false);
+                    }
+                ));
+            }
+            else
+            {
+                CoroutineRunner.Start(LLMClient.SendChatRequest(
+                    Config, messages,
+                    onResponse: response =>
+                    {
+                        _chatHistory.Add(new ChatMessage
+                        {
+                            IsUser = false,
+                            Text = response,
+                            Timestamp = Time.time,
+                            Category = category
+                        });
+                        ChatWindow.SetThinking(false);
+                        MaybeSummarize();
+                    },
+                    onError: _ => ChatWindow.SetThinking(false)
+                ));
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════
         // Idle Commentary (v3.60.0)
         // ════════════════════════════════════════════════════════════
 
@@ -472,6 +618,12 @@ namespace CompanionAI_v3.MachineSpirit
                 TriggerGreeting();
                 return;
             }
+
+            // ★ v3.68.0: Process coalesced events
+            EventCoalescer.Update();
+
+            // ★ v3.68.0: Poll for entity-bound events (level-up, warp travel)
+            PollEntityEvents();
 
             if (LLMClient.IsRequesting) return;
             if (_idleVisionPending) return;

@@ -8,6 +8,8 @@ using Kingmaker;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic;
 using Kingmaker.EntitySystem.Stats.Base;
+using Kingmaker.AreaLogic.QuestSystem;
+using Kingmaker.Enums;
 using CompanionAI_v3.GameInterface;
 using CompanionAI_v3.Settings;
 
@@ -1035,6 +1037,102 @@ Example responses (mimic this exact style):
         }
 
         /// <summary>
+        /// ★ v3.68.0: World state context — quests, economy, factions, conviction.
+        /// Injected into every LLM call for persistent world awareness.
+        /// </summary>
+        private static string BuildWorldContext()
+        {
+            try
+            {
+                var player = Game.Instance?.Player;
+                if (player == null) return null;
+
+                var sb = new StringBuilder();
+                sb.AppendLine("[WORLD STATE]");
+
+                // Active quests (top 5, attention-needed first)
+                try
+                {
+                    var questBook = player.QuestBook;
+                    if (questBook != null)
+                    {
+                        var quests = new List<string>();
+                        foreach (var q in questBook.Quests)
+                        {
+                            if (q.State == QuestState.Started && q.NeedToAttention)
+                            {
+                                string name = q.Blueprint?.name ?? "Unknown";
+                                quests.Insert(0, $"★ {name}");
+                                if (quests.Count >= 5) break;
+                            }
+                        }
+                        if (quests.Count < 5)
+                        {
+                            foreach (var q in questBook.Quests)
+                            {
+                                if (q.State == QuestState.Started && !q.NeedToAttention)
+                                {
+                                    string name = q.Blueprint?.name ?? "Unknown";
+                                    quests.Add(name);
+                                    if (quests.Count >= 5) break;
+                                }
+                            }
+                        }
+                        if (quests.Count > 0)
+                            sb.AppendLine($"Active Quests ({quests.Count}): {string.Join(", ", quests)}");
+                    }
+                }
+                catch { }
+
+                // Profit Factor
+                try
+                {
+                    float pf = player.ProfitFactor.Total;
+                    sb.AppendLine($"Profit Factor: {pf:F0}");
+                }
+                catch { }
+
+                // Faction standings
+                try
+                {
+                    var factions = player.FractionsReputation;
+                    if (factions != null && factions.Count > 0)
+                    {
+                        var standings = new List<string>();
+                        foreach (var kv in factions)
+                        {
+                            if (kv.Key == FactionType.None) continue;
+                            string label;
+                            if (kv.Value >= 30) label = "Friendly";
+                            else if (kv.Value >= 0) label = "Neutral";
+                            else label = "Hostile";
+                            standings.Add($"{kv.Key}: {kv.Value} ({label})");
+                        }
+                        if (standings.Count > 0)
+                            sb.AppendLine($"Factions: {string.Join(" | ", standings)}");
+                    }
+                }
+                catch { }
+
+                // Money
+                try
+                {
+                    long money = player.Money;
+                    if (money > 0)
+                        sb.AppendLine($"Credits: {money:N0}");
+                }
+                catch { }
+
+                string result = sb.ToString();
+                return result.Trim().Contains("\n") ? result : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Build the full system content string (prompt + summary + sensor data + anti-repetition).
         /// </summary>
         private static string BuildSystemContent(string conversationSummary, MachineSpiritConfig config = null, List<ChatMessage> chatHistory = null)
@@ -1073,6 +1171,20 @@ Example responses (mimic this exact style):
                 systemSb.AppendLine("--- SENSOR DATA (read-only observations, do NOT copy or repeat these) ---");
                 systemSb.AppendLine(partyContext);
                 hasSensorHeader = true;
+            }
+
+            // ★ v3.68.0: World state — quests, economy, factions
+            string worldContext = BuildWorldContext();
+            if (!string.IsNullOrEmpty(worldContext))
+            {
+                if (!hasSensorHeader)
+                {
+                    systemSb.AppendLine();
+                    systemSb.AppendLine();
+                    systemSb.AppendLine("--- SENSOR DATA (read-only observations, do NOT copy or repeat these) ---");
+                    hasSensorHeader = true;
+                }
+                systemSb.AppendLine(worldContext);
             }
 
             // ★ v3.58.0: Enemy roster during active combat
@@ -1352,6 +1464,33 @@ Example responses (mimic this exact style):
         }
 
         /// <summary>
+        /// ★ v3.68.0: Build prompt for batched events from EventCoalescer.
+        /// </summary>
+        public static List<LLMClient.ChatMessage> BuildForMergedEvents(
+            List<GameEvent> events,
+            List<ChatMessage> chatHistory,
+            MachineSpiritConfig config = null,
+            string conversationSummary = null)
+        {
+            var lang = Main.Settings?.UILanguage ?? Language.English;
+
+            var eventDesc = new StringBuilder();
+            foreach (var evt in events)
+                eventDesc.AppendLine($"- {evt}");
+
+            string instruction = lang switch
+            {
+                Language.Korean => $"다음 이벤트들이 방금 발생했다. 한 번에 자연스럽게 반응하라. 2-4문장.\n{eventDesc}",
+                Language.Russian => $"Следующие события только что произошли. Отреагируй естественно в одном ответе. 2-4 предложения.\n{eventDesc}",
+                Language.Japanese => $"以下のイベントが発生した。一度に自然に反応せよ。2-4文。\n{eventDesc}",
+                Language.Chinese => $"以下事件刚刚发生。用一个回复自然地回应。2-4句。\n{eventDesc}",
+                _ => $"These events just occurred. React naturally in one response. 2-4 sentences.\n{eventDesc}"
+            };
+
+            return Build(chatHistory, config, instruction, conversationSummary);
+        }
+
+        /// <summary>
         /// Build a summarization prompt for old chat messages.
         /// </summary>
         public static List<LLMClient.ChatMessage> BuildSummaryPrompt(
@@ -1387,7 +1526,9 @@ Example responses (mimic this exact style):
         Combat,
         Scan,
         Vox,
-        Greeting
+        Greeting,
+        Faith,    // ★ v3.68.0
+        Quest     // ★ v3.68.0
     }
 
     /// <summary>
