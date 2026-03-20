@@ -42,6 +42,26 @@ namespace CompanionAI_v3.MachineSpirit.Knowledge
 
         private static IEnumerator IndexCoroutine()
         {
+            // ★ Wait for game to fully load — BlueprintsCache needs Init() to complete
+            Main.LogDebug("[KnowledgeIndex] Waiting for game to finish loading...");
+            StatusText = "Waiting for game...";
+            yield return new WaitForSeconds(15f);
+
+            // Verify BlueprintsCache has data
+            int retries = 0;
+            while (retries < 5)
+            {
+                int guidCount = CountCacheEntries();
+                if (guidCount > 0)
+                {
+                    Main.LogDebug($"[KnowledgeIndex] BlueprintsCache has {guidCount} entries, proceeding");
+                    break;
+                }
+                retries++;
+                Main.LogDebug($"[KnowledgeIndex] BlueprintsCache empty, retry {retries}/5 in 10s...");
+                yield return new WaitForSeconds(10f);
+            }
+
             Main.LogDebug("[KnowledgeIndex] Starting background indexing...");
             _entries.Clear();
             _indexedCount = 0;
@@ -126,48 +146,73 @@ namespace CompanionAI_v3.MachineSpirit.Knowledge
             catch { }
         }
 
+        // Cached GUID list — collected once, shared across all IndexBlueprints calls
+        private static List<string> _allGuids;
+
+        private static int CountCacheEntries()
+        {
+            try
+            {
+                var dict = GetBlueprintsDictionary();
+                return dict?.Count ?? 0;
+            }
+            catch { return 0; }
+        }
+
+        private static System.Collections.IDictionary GetBlueprintsDictionary()
+        {
+            try
+            {
+                // ResourcesLibrary.BlueprintsCache is public static readonly
+                var cache = ResourcesLibrary.BlueprintsCache;
+                if (cache == null) return null;
+
+                var dictField = cache.GetType().GetField("m_LoadedBlueprints",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                return dictField?.GetValue(cache) as System.Collections.IDictionary;
+            }
+            catch { return null; }
+        }
+
+        private static List<string> CollectAllGuids()
+        {
+            if (_allGuids != null && _allGuids.Count > 0) return _allGuids;
+
+            _allGuids = new List<string>();
+            try
+            {
+                var dict = GetBlueprintsDictionary();
+                if (dict == null)
+                {
+                    Main.LogDebug("[KnowledgeIndex] m_LoadedBlueprints dictionary is null");
+                    return _allGuids;
+                }
+
+                foreach (var key in dict.Keys)
+                    _allGuids.Add(key.ToString());
+
+                Main.LogDebug($"[KnowledgeIndex] Collected {_allGuids.Count} blueprint GUIDs from cache");
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[KnowledgeIndex] CollectAllGuids failed: {ex.Message}");
+            }
+            return _allGuids;
+        }
+
         /// <summary>
-        /// Index blueprints by enumerating all loaded blueprints from BlueprintsCache via Reflection,
-        /// then filtering by type T. SimpleBlueprint does NOT extend UnityEngine.Object,
-        /// so GetLoadedResourcesOfType cannot be used.
+        /// Index blueprints by iterating all cached GUIDs and filtering by type T.
         /// </summary>
         private static IEnumerator IndexBlueprints<T>(string category, Func<T, string> textExtractor)
             where T : BlueprintScriptableObject
         {
-            // Access BlueprintsCache.m_LoadedBlueprints via Reflection
-            List<string> guids = null;
-            try
+            var guids = CollectAllGuids();
+            if (guids.Count == 0)
             {
-                var cacheField = typeof(ResourcesLibrary).GetField("BlueprintsCache",
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                var cache = cacheField?.GetValue(null);
-                if (cache == null)
-                {
-                    Main.LogDebug("[KnowledgeIndex] BlueprintsCache is null");
-                    yield break;
-                }
-
-                var dictField = cache.GetType().GetField("m_LoadedBlueprints",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                var dict = dictField?.GetValue(cache) as System.Collections.IDictionary;
-                if (dict == null)
-                {
-                    Main.LogDebug("[KnowledgeIndex] m_LoadedBlueprints is null");
-                    yield break;
-                }
-
-                guids = new List<string>();
-                foreach (var key in dict.Keys)
-                    guids.Add(key.ToString());
-
-                _totalEstimate = guids.Count; // Update progress estimate
-                Main.LogDebug($"[KnowledgeIndex] Found {guids.Count} total blueprint GUIDs in cache");
-            }
-            catch (Exception ex)
-            {
-                Main.LogDebug($"[KnowledgeIndex] Reflection failed: {ex.Message}");
+                Main.LogDebug($"[KnowledgeIndex] No GUIDs available for {category}");
                 yield break;
             }
+            _totalEstimate = guids.Count;
 
             int batch = 0;
             int typeMatches = 0;
