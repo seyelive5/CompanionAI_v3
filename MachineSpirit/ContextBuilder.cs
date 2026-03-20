@@ -1187,6 +1187,15 @@ Example responses (mimic this exact style):
                 systemSb.AppendLine(worldContext);
             }
 
+            // ★ v3.68.0: Location intel — area + active quests from blueprints
+            try
+            {
+                string locationIntel = GameKnowledge.BuildLocationIntel();
+                if (!string.IsNullOrEmpty(locationIntel))
+                    systemSb.Append(locationIntel);
+            }
+            catch { }
+
             // ★ v3.58.0: Enemy roster during active combat
             string combatContext = BuildCombatContext();
             if (!string.IsNullOrEmpty(combatContext))
@@ -1200,6 +1209,15 @@ Example responses (mimic this exact style):
                 }
                 systemSb.AppendLine(combatContext);
             }
+
+            // ★ v3.68.0: Tactical intel — enemy/weapon knowledge from blueprints
+            try
+            {
+                string tacticalIntel = GameKnowledge.BuildTacticalIntel();
+                if (!string.IsNullOrEmpty(tacticalIntel))
+                    systemSb.Append(tacticalIntel);
+            }
+            catch { }
 
             // ★ v3.68.0: Combat timeline — narrative flow of the battle
             string combatTimeline = BuildCombatTimeline();
