@@ -1422,8 +1422,13 @@ Example responses (mimic this exact style):
             refSb.AppendLine("[/REFERENCE DATA]");
             refSb.AppendLine("Answer based on the reference data above. Be accurate and specific. Keep your personality tone.");
             refSb.AppendLine("If the reference data doesn't contain the answer, say you don't have that information.");
-            refSb.AppendLine("IMPORTANT: Do NOT reveal future events, story spoilers, or character fates that the player has not yet experienced.");
-            refSb.AppendLine("Only discuss what is relevant to the player's CURRENT situation. If the data contains future plot points, ignore them.");
+            refSb.AppendLine();
+            refSb.AppendLine("CRITICAL SPOILER RULES (NEVER BREAK THESE):");
+            refSb.AppendLine("- NEVER reveal future events, deaths, betrayals, plot twists, or character fates.");
+            refSb.AppendLine("- NEVER say 'I heard that...', 'rumor says...', 'some say...', or ANY indirect way to spoil.");
+            refSb.AppendLine("- If the reference data contains story spoilers, COMPLETELY IGNORE that information.");
+            refSb.AppendLine("- Only discuss: stats, abilities, combat mechanics, current quest objectives, lore background.");
+            refSb.AppendLine("- If asked about a character's future, say 'That remains to be seen' or similar.");
 
             systemContent += refSb.ToString();
 
