@@ -155,12 +155,28 @@ namespace CompanionAI_v3.MachineSpirit
         // ★ v3.62.0: Clear history on personality change to prevent style bleed
         public static void ClearChatHistory()
         {
+            // ★ v3.70.0: Cancel any in-flight LLM request before clearing
+            LLMClient.Reset();
+            ChatWindow.SetThinking(false);
+
             _chatHistory.Clear();
             _conversationSummary = null;
             _summarizedUpToIndex = 0;
             try { File.Delete(GetChatHistoryPath()); }
             catch { /* ignore */ }
             Main.LogDebug("[MachineSpirit] Chat history cleared (personality change)");
+        }
+
+        /// <summary>Add a system notification to chat (not from LLM, just info text).</summary>
+        public static void AddSystemMessage(string text)
+        {
+            _chatHistory.Add(new ChatMessage
+            {
+                IsUser = false,
+                Text = text,
+                Timestamp = UnityEngine.Time.time,
+                Category = MessageCategory.Scan
+            });
         }
 
         public static void OnGUI()

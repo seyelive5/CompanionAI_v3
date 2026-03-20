@@ -148,7 +148,18 @@ namespace CompanionAI_v3.MachineSpirit
         private static void DrawWindow(List<ChatMessage> chatHistory)
         {
             // Title bar
-            GUILayout.Label($"<color={UIStyles.Gold}><b>\u2014 Machine Spirit \u2014</b></color>", UIStyles.Header);
+            // ★ v3.70.0: Title with knowledge indexing progress
+            string titleExtra = "";
+            if (Knowledge.KnowledgeIndex.IsIndexing)
+            {
+                int pct = Mathf.RoundToInt(Knowledge.KnowledgeIndex.Progress * 100f);
+                titleExtra = $"  <color={UIStyles.TextMid}><size={Mathf.RoundToInt(11 * UIStyles.Scale)}>[{Knowledge.KnowledgeIndex.StatusText} {pct}%]</size></color>";
+            }
+            else if (Knowledge.KnowledgeIndex.IsReady && Knowledge.KnowledgeIndex.IndexedCount > 0)
+            {
+                titleExtra = $"  <color=#66CC66><size={Mathf.RoundToInt(11 * UIStyles.Scale)}>\u2713</size></color>";
+            }
+            GUILayout.Label($"<color={UIStyles.Gold}><b>\u2014 Machine Spirit \u2014</b></color>{titleExtra}", UIStyles.Header);
             UIStyles.DrawDivider();
 
             // Auto-scroll

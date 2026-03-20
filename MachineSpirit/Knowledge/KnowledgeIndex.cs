@@ -16,15 +16,26 @@ namespace CompanionAI_v3.MachineSpirit.Knowledge
         private static bool _isIndexing;
         private static bool _isReady;
         private static int _indexedCount;
+        private static int _totalEstimate;
 
         public static bool IsReady => _isReady;
         public static bool IsIndexing => _isIndexing;
         public static int IndexedCount => _indexedCount;
         public static IReadOnlyList<KnowledgeEntry> Entries => _entries;
+        public static float Progress => _totalEstimate > 0 ? (float)_indexedCount / _totalEstimate : 0f;
+        public static string StatusText { get; private set; } = "";
 
         public static void StartIndexing()
         {
             if (_isIndexing || _isReady) return;
+
+            // Try loading from cache first
+            if (TryLoadCache())
+            {
+                MachineSpirit.AddSystemMessage($"[Knowledge base loaded — {_entries.Count} entries]");
+                return;
+            }
+
             _isIndexing = true;
             CoroutineRunner.Start(IndexCoroutine());
         }
@@ -36,6 +47,7 @@ namespace CompanionAI_v3.MachineSpirit.Knowledge
             _indexedCount = 0;
 
             // Phase 1: Weapons
+            StatusText = "Indexing weapon...";
             yield return IndexBlueprints<Kingmaker.Blueprints.Items.Weapons.BlueprintItemWeapon>("weapon", bp =>
             {
                 string text = "";
@@ -57,6 +69,7 @@ namespace CompanionAI_v3.MachineSpirit.Knowledge
             });
 
             // Phase 2: Abilities
+            StatusText = "Indexing ability...";
             yield return IndexBlueprints<Kingmaker.UnitLogic.Abilities.Blueprints.BlueprintAbility>("ability", bp =>
             {
                 string text = "";
@@ -65,6 +78,7 @@ namespace CompanionAI_v3.MachineSpirit.Knowledge
             });
 
             // Phase 3: Units (enemies/NPCs)
+            StatusText = "Indexing enemy...";
             yield return IndexBlueprints<Kingmaker.Blueprints.BlueprintUnit>("enemy", bp =>
             {
                 string text = "";
@@ -73,6 +87,7 @@ namespace CompanionAI_v3.MachineSpirit.Knowledge
             });
 
             // Phase 4: Quests
+            StatusText = "Indexing quest...";
             yield return IndexBlueprints<Kingmaker.Blueprints.Quests.BlueprintQuest>("quest", bp =>
             {
                 string text = "";
@@ -80,7 +95,9 @@ namespace CompanionAI_v3.MachineSpirit.Knowledge
                 return text;
             });
 
-            // Phase 5: Encyclopedia
+            // Phase 5: Encyclopedia (delay to let game finish loading)
+            StatusText = "Indexing lore...";
+            yield return new WaitForSeconds(5f);
             yield return IndexEncyclopedia();
 
             // Build BM25 index
@@ -97,50 +114,83 @@ namespace CompanionAI_v3.MachineSpirit.Knowledge
             _bm25.BuildIndex(_entries);
             _isReady = true;
             _isIndexing = false;
+            StatusText = $"Ready ({_entries.Count} entries)";
             Main.LogDebug($"[KnowledgeIndex] Indexing complete: {_entries.Count} entries, BM25 ready");
+            SaveCache();
+
+            // ★ v3.70.0: Notify user that knowledge base is ready
+            try
+            {
+                MachineSpirit.AddSystemMessage($"[Knowledge base ready — {_entries.Count} entries indexed]");
+            }
+            catch { }
         }
 
         /// <summary>
-        /// Index all blueprints of type T. Constraint is BlueprintScriptableObject
-        /// because Kingmaker.Cheats.Utilities.GetBlueprintGuids requires it.
+        /// Index blueprints by enumerating all loaded blueprints from BlueprintsCache via Reflection,
+        /// then filtering by type T. SimpleBlueprint does NOT extend UnityEngine.Object,
+        /// so GetLoadedResourcesOfType cannot be used.
         /// </summary>
         private static IEnumerator IndexBlueprints<T>(string category, Func<T, string> textExtractor)
             where T : BlueprintScriptableObject
         {
-            IEnumerable<string> guids = null;
+            // Access BlueprintsCache.m_LoadedBlueprints via Reflection
+            List<string> guids = null;
             try
             {
-                guids = Kingmaker.Cheats.Utilities.GetBlueprintGuids<T>();
+                var cacheField = typeof(ResourcesLibrary).GetField("BlueprintsCache",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                var cache = cacheField?.GetValue(null);
+                if (cache == null)
+                {
+                    Main.LogDebug("[KnowledgeIndex] BlueprintsCache is null");
+                    yield break;
+                }
+
+                var dictField = cache.GetType().GetField("m_LoadedBlueprints",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                var dict = dictField?.GetValue(cache) as System.Collections.IDictionary;
+                if (dict == null)
+                {
+                    Main.LogDebug("[KnowledgeIndex] m_LoadedBlueprints is null");
+                    yield break;
+                }
+
+                guids = new List<string>();
+                foreach (var key in dict.Keys)
+                    guids.Add(key.ToString());
+
+                _totalEstimate = guids.Count; // Update progress estimate
+                Main.LogDebug($"[KnowledgeIndex] Found {guids.Count} total blueprint GUIDs in cache");
             }
             catch (Exception ex)
             {
-                Main.LogDebug($"[KnowledgeIndex] Failed to get GUIDs for {typeof(T).Name}: {ex.Message}");
+                Main.LogDebug($"[KnowledgeIndex] Reflection failed: {ex.Message}");
                 yield break;
             }
 
-            if (guids == null) yield break;
-
             int batch = 0;
+            int typeMatches = 0;
             foreach (string guid in guids)
             {
                 try
                 {
                     var bp = ResourcesLibrary.TryGetBlueprint<T>(guid);
-                    if (bp == null) continue;
+                    if (bp == null) continue; // Not this type — skip
 
-                    string title = bp.name;
-                    if (string.IsNullOrEmpty(title)) continue;
+                    typeMatches++;
+                    string internalName = bp.name;
+                    if (string.IsNullOrEmpty(internalName)) continue;
 
                     string text = "";
                     try { text = textExtractor(bp); } catch { }
 
-                    // Skip entries with no meaningful text
-                    if (string.IsNullOrEmpty(text) && string.IsNullOrEmpty(title)) continue;
+                    if (string.IsNullOrEmpty(text) && string.IsNullOrEmpty(internalName)) continue;
 
                     _entries.Add(new KnowledgeEntry
                     {
-                        Id = guid,
-                        Title = title,
+                        Id = bp.AssetGuid ?? "",
+                        Title = internalName,
                         Text = text ?? "",
                         Category = category
                     });
@@ -148,10 +198,10 @@ namespace CompanionAI_v3.MachineSpirit.Knowledge
                 }
                 catch { }
 
-                if (++batch % 10 == 0) yield return null; // yield every 10
+                if (++batch % 10 == 0) yield return null;
             }
 
-            Main.LogDebug($"[KnowledgeIndex] Indexed {_indexedCount} entries (after {category})");
+            Main.LogDebug($"[KnowledgeIndex] Indexed {_indexedCount} entries (after {category}, {typeMatches} type matches)");
         }
 
         private static IEnumerator IndexEncyclopedia()
@@ -161,7 +211,7 @@ namespace CompanionAI_v3.MachineSpirit.Knowledge
 
             try
             {
-                var chapterList = Kingmaker.Blueprints.Root.UIConfig.Instance?.ChapterList;
+                var chapterList = Game.Instance?.BlueprintRoot?.UIConfig?.ChapterList;
                 if (chapterList == null)
                 {
                     Main.LogDebug("[KnowledgeIndex] Encyclopedia ChapterList not available");
@@ -267,6 +317,75 @@ namespace CompanionAI_v3.MachineSpirit.Knowledge
                 }
             }
             catch { }
+        }
+
+        private static string GetCachePath()
+        {
+            return System.IO.Path.Combine(
+                System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),
+                "knowledge_cache.json");
+        }
+
+        public static bool TryLoadCache()
+        {
+            try
+            {
+                string path = GetCachePath();
+                if (!System.IO.File.Exists(path)) return false;
+
+                string json = System.IO.File.ReadAllText(path);
+                var cached = Newtonsoft.Json.JsonConvert.DeserializeObject<List<KnowledgeEntry>>(json);
+                if (cached == null || cached.Count == 0) return false;
+
+                _entries = cached;
+                _indexedCount = _entries.Count;
+
+                // Rebuild BM25 tokens (not saved in cache to reduce file size)
+                foreach (var entry in _entries)
+                {
+                    string combined = (entry.Title ?? "") + " " + (entry.Text ?? "");
+                    entry.Tokens = BM25Search.Tokenize(combined);
+                }
+
+                _bm25.BuildIndex(_entries);
+                _isReady = true;
+                StatusText = $"Loaded from cache ({_entries.Count} entries)";
+                Main.LogDebug($"[KnowledgeIndex] Loaded {_entries.Count} entries from cache");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[KnowledgeIndex] Cache load failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static void SaveCache()
+        {
+            try
+            {
+                // Clear tokens and embeddings before saving (rebuilt on load)
+                var saveEntries = new List<KnowledgeEntry>();
+                foreach (var entry in _entries)
+                {
+                    saveEntries.Add(new KnowledgeEntry
+                    {
+                        Id = entry.Id,
+                        Title = entry.Title,
+                        Text = entry.Text,
+                        Category = entry.Category
+                        // Tokens and Embedding are NOT saved
+                    });
+                }
+
+                string json = Newtonsoft.Json.JsonConvert.SerializeObject(saveEntries, Newtonsoft.Json.Formatting.None);
+                System.IO.File.WriteAllText(GetCachePath(), json);
+                Main.LogDebug($"[KnowledgeIndex] Saved {_entries.Count} entries to cache");
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[KnowledgeIndex] Cache save failed: {ex.Message}");
+            }
         }
 
         /// <summary>
