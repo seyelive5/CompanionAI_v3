@@ -66,58 +66,96 @@ namespace CompanionAI_v3.MachineSpirit.Knowledge
             _entries.Clear();
             _indexedCount = 0;
 
-            // Phase 1: Weapons
-            StatusText = "Indexing weapon...";
-            yield return IndexBlueprints<Kingmaker.Blueprints.Items.Weapons.BlueprintItemWeapon>("weapon", bp =>
+            // ★ Single-pass indexing: iterate all GUIDs once, classify by type
+            // 157K GUIDs × 4 type checks = too slow. Instead: load once, check type.
+            var guids = CollectAllGuids();
+            _totalEstimate = guids.Count;
+            Main.LogDebug($"[KnowledgeIndex] Single-pass indexing {guids.Count} blueprints...");
+
+            StatusText = "Indexing blueprints...";
+            int processed = 0;
+            int weapons = 0, abilities = 0, enemies = 0, quests = 0;
+
+            foreach (string guid in guids)
             {
-                string text = "";
-                try { text = bp.Description; } catch { }
-                if (string.IsNullOrEmpty(text))
+                try
                 {
-                    try
+                    // Load as base type — one load per GUID, not four
+                    var bp = ResourcesLibrary.TryGetBlueprint(guid);
+                    if (bp == null) { processed++; continue; }
+
+                    string category = null;
+                    string text = "";
+                    string title = bp.name;
+
+                    if (string.IsNullOrEmpty(title)) { processed++; continue; }
+
+                    // Classify by type (check most specific first)
+                    if (bp is Kingmaker.Blueprints.Items.Weapons.BlueprintItemWeapon weapon)
                     {
-                        var sb = new System.Text.StringBuilder();
-                        try { sb.Append($"Damage: {bp.WarhammerDamage}-{bp.WarhammerMaxDamage}. "); } catch { }
-                        try { sb.Append($"Penetration: {bp.WarhammerPenetration}. "); } catch { }
-                        try { sb.Append($"Range: {bp.WarhammerMaxDistance}. "); } catch { }
-                        try { if (bp.DamageType?.Type != null) sb.Append($"Type: {bp.DamageType.Type}. "); } catch { }
-                        text = sb.ToString();
+                        category = "weapon";
+                        try { text = weapon.Description; } catch { }
+                        if (string.IsNullOrEmpty(text))
+                        {
+                            try
+                            {
+                                var sb = new System.Text.StringBuilder();
+                                try { sb.Append($"Damage: {weapon.WarhammerDamage}-{weapon.WarhammerMaxDamage}. "); } catch { }
+                                try { sb.Append($"Penetration: {weapon.WarhammerPenetration}. "); } catch { }
+                                try { sb.Append($"Range: {weapon.WarhammerMaxDistance}. "); } catch { }
+                                try { if (weapon.DamageType?.Type != null) sb.Append($"Type: {weapon.DamageType.Type}. "); } catch { }
+                                text = sb.ToString();
+                            }
+                            catch { }
+                        }
+                        weapons++;
                     }
-                    catch { }
+                    else if (bp is Kingmaker.UnitLogic.Abilities.Blueprints.BlueprintAbility ability)
+                    {
+                        category = "ability";
+                        try { text = ability.Description; } catch { }
+                        abilities++;
+                    }
+                    else if (bp is Kingmaker.Blueprints.BlueprintUnit unit)
+                    {
+                        category = "enemy";
+                        try { text = unit.Description; } catch { }
+                        enemies++;
+                    }
+                    else if (bp is Kingmaker.Blueprints.Quests.BlueprintQuest quest)
+                    {
+                        category = "quest";
+                        try { text = quest.GetDescription(); } catch { }
+                        quests++;
+                    }
+                    // Skip types we don't care about
+                    else { processed++; continue; }
+
+                    if (string.IsNullOrEmpty(text) && string.IsNullOrEmpty(title)) { processed++; continue; }
+
+                    _entries.Add(new KnowledgeEntry
+                    {
+                        Id = bp.AssetGuid ?? "",
+                        Title = title,
+                        Text = text ?? "",
+                        Category = category
+                    });
+                    _indexedCount++;
                 }
-                return text;
-            });
+                catch { }
 
-            // Phase 2: Abilities
-            StatusText = "Indexing ability...";
-            yield return IndexBlueprints<Kingmaker.UnitLogic.Abilities.Blueprints.BlueprintAbility>("ability", bp =>
-            {
-                string text = "";
-                try { text = bp.Description; } catch { }
-                return text;
-            });
+                processed++;
+                if (processed % 100 == 0)
+                {
+                    StatusText = $"Indexing... {processed * 100 / guids.Count}%";
+                    yield return null; // yield every 100
+                }
+            }
 
-            // Phase 3: Units (enemies/NPCs)
-            StatusText = "Indexing enemy...";
-            yield return IndexBlueprints<Kingmaker.Blueprints.BlueprintUnit>("enemy", bp =>
-            {
-                string text = "";
-                try { text = bp.Description; } catch { }
-                return text;
-            });
+            Main.LogDebug($"[KnowledgeIndex] Blueprint pass: {weapons} weapons, {abilities} abilities, {enemies} enemies, {quests} quests");
 
-            // Phase 4: Quests
-            StatusText = "Indexing quest...";
-            yield return IndexBlueprints<Kingmaker.Blueprints.Quests.BlueprintQuest>("quest", bp =>
-            {
-                string text = "";
-                try { text = bp.GetDescription(); } catch { }
-                return text;
-            });
-
-            // Phase 5: Encyclopedia (delay to let game finish loading)
+            // Phase 5: Encyclopedia
             StatusText = "Indexing lore...";
-            yield return new WaitForSeconds(5f);
             yield return IndexEncyclopedia();
 
             // Build BM25 index
