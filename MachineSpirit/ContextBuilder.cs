@@ -1422,6 +1422,8 @@ Example responses (mimic this exact style):
             refSb.AppendLine("[/REFERENCE DATA]");
             refSb.AppendLine("Answer based on the reference data above. Be accurate and specific. Keep your personality tone.");
             refSb.AppendLine("If the reference data doesn't contain the answer, say you don't have that information.");
+            refSb.AppendLine("IMPORTANT: Do NOT reveal future events, story spoilers, or character fates that the player has not yet experienced.");
+            refSb.AppendLine("Only discuss what is relevant to the player's CURRENT situation. If the data contains future plot points, ignore them.");
 
             systemContent += refSb.ToString();
 
