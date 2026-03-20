@@ -73,6 +73,9 @@ namespace CompanionAI_v3.MachineSpirit
             _wasInWarp = false;
             _lastPollTime = 0f;
             EventCoalescer.Clear();
+
+            // ★ v3.70.0: Start background knowledge indexing
+            Knowledge.KnowledgeIndex.StartIndexing();
         }
 
         public static void Shutdown()
@@ -187,7 +190,16 @@ namespace CompanionAI_v3.MachineSpirit
             });
             TrimHistory();
 
-            var messages = ContextBuilder.Build(_chatHistory, Config, conversationSummary: _conversationSummary);
+            // ★ v3.70.0: RAG — detect game knowledge questions and inject search results
+            List<Knowledge.SearchResult> searchResults = null;
+            if (Knowledge.KnowledgeIndex.IsReady)
+            {
+                searchResults = Knowledge.KnowledgeIndex.DetectAndSearch(text);
+            }
+
+            var messages = (searchResults != null && searchResults.Count > 0)
+                ? ContextBuilder.BuildForKnowledgeQuery(text, searchResults, _chatHistory, Config, _conversationSummary)
+                : ContextBuilder.Build(_chatHistory, Config, conversationSummary: _conversationSummary);
             ChatWindow.SetThinking(true);
 
             if (Config.Provider == ApiProvider.Ollama)

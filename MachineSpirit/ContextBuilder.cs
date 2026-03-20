@@ -1394,6 +1394,55 @@ Example responses (mimic this exact style):
             return messages;
         }
 
+        // ★ v3.70.0: RAG — build prompt with search results for knowledge queries
+        public static List<LLMClient.ChatMessage> BuildForKnowledgeQuery(
+            string query, List<Knowledge.SearchResult> results,
+            List<ChatMessage> chatHistory, MachineSpiritConfig config, string conversationSummary)
+        {
+            // Build the same way as Build() but add [REFERENCE DATA] section
+            var messages = new List<LLMClient.ChatMessage>();
+
+            // System prompt — same as normal but with reference data appended
+            string systemContent = BuildSystemContent(conversationSummary, config, chatHistory);
+
+            // Add reference data section
+            var refSb = new StringBuilder();
+            refSb.AppendLine("\n[REFERENCE DATA]");
+            foreach (var result in results)
+            {
+                refSb.AppendLine($"Source: \"{result.Entry.Title}\" ({result.Entry.Category})");
+                if (!string.IsNullOrEmpty(result.Entry.Text))
+                {
+                    string text = result.Entry.Text;
+                    if (text.Length > 300) text = text.Substring(0, 300) + "...";
+                    refSb.AppendLine(text);
+                }
+                refSb.AppendLine();
+            }
+            refSb.AppendLine("[/REFERENCE DATA]");
+            refSb.AppendLine("Answer based on the reference data above. Be accurate and specific. Keep your personality tone.");
+            refSb.AppendLine("If the reference data doesn't contain the answer, say you don't have that information.");
+
+            systemContent += refSb.ToString();
+
+            messages.Add(new LLMClient.ChatMessage { Role = "system", Content = systemContent });
+
+            // Add conversation history (same as Build)
+            int historyWindow = GetHistoryWindow(config);
+            int start = Math.Max(0, chatHistory.Count - historyWindow);
+            for (int i = start; i < chatHistory.Count; i++)
+            {
+                var msg = chatHistory[i];
+                messages.Add(new LLMClient.ChatMessage
+                {
+                    Role = msg.IsUser ? "user" : "assistant",
+                    Content = msg.Text
+                });
+            }
+
+            return messages;
+        }
+
         /// <summary>
         /// Build messages for spontaneous comment on a major event
         /// </summary>
