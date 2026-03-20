@@ -13,6 +13,7 @@ using Kingmaker.RuleSystem.Rules.Damage;
 using Kingmaker.DialogSystem.Blueprints;
 using Kingmaker.AreaLogic.QuestSystem;
 using Kingmaker.UnitLogic.Alignments;
+using Kingmaker.UnitLogic.Levelup.Obsolete;
 using UnityEngine;
 
 namespace CompanionAI_v3.MachineSpirit
@@ -178,7 +179,8 @@ namespace CompanionAI_v3.MachineSpirit
             IAreaHandler,
             ISelectAnswerHandler,       // ★ v3.68.0
             ISoulMarkShiftHandler,      // ★ v3.68.0
-            IQuestHandler               // ★ v3.68.0
+            IQuestHandler,              // ★ v3.68.0
+            ILevelUpInitiateUIHandler   // ★ v3.68.0
         {
             public void HandleUnitDeath(AbstractUnitEntity unit)
             {
@@ -438,6 +440,20 @@ namespace CompanionAI_v3.MachineSpirit
                 {
                     string name = quest?.Blueprint?.name ?? "Unknown";
                     AddEvent(GameEventType.QuestUpdate, null, $"Quest updated: {name}");
+                }
+                catch { }
+            }
+
+            // ★ v3.68.0: Level up detection (ILevelUpInitiateUIHandler — global subscriber)
+            public void HandleLevelUpStart(BaseUnitEntity unit, Action onCommit = null, Action onStop = null, LevelUpState.CharBuildMode mode = LevelUpState.CharBuildMode.LevelUp)
+            {
+                if (!MachineSpirit.IsActive) return;
+                if (mode != LevelUpState.CharBuildMode.LevelUp) return; // Skip chargen
+                try
+                {
+                    string unitName = unit?.CharacterName ?? "Unknown";
+                    AddEvent(GameEventType.LevelUp, null, $"{unitName} reached a new level");
+                    EventCoalescer.Enqueue(_events[_events.Count - 1]);
                 }
                 catch { }
             }

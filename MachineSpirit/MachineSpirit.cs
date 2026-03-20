@@ -620,7 +620,11 @@ namespace CompanionAI_v3.MachineSpirit
             }
 
             // ★ v3.68.0: Process coalesced events
-            EventCoalescer.Update();
+            var mergedEvents = EventCoalescer.TryFlush();
+            if (mergedEvents != null && mergedEvents.Count > 0)
+            {
+                OnMergedEvents(mergedEvents);
+            }
 
             // ★ v3.68.0: Poll for entity-bound events (level-up, warp travel)
             PollEntityEvents();
