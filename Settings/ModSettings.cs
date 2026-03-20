@@ -1953,6 +1953,27 @@ namespace CompanionAI_v3.Settings
                 { Language.Japanese, "長い沈黙の後、スクリーンショットを撮影してGemma 3がコメントします。Ollamaのみ。" },
                 { Language.Chinese, "长时间沉默后，截取屏幕画面供Gemma 3评论。仅限Ollama。" }
             },
+            ["MSKnowledge"] = new() {
+                { Language.English, "Game Knowledge" },
+                { Language.Korean, "게임 지식" },
+                { Language.Russian, "Игровые знания" },
+                { Language.Japanese, "ゲーム知識" },
+                { Language.Chinese, "游戏知识" }
+            },
+            ["MSKnowledgeEnable"] = new() {
+                { Language.English, "Enable Knowledge Base (indexes game data for smarter answers)" },
+                { Language.Korean, "지식 베이스 활성화 (게임 데이터를 인덱싱하여 더 정확한 답변)" },
+                { Language.Russian, "Включить базу знаний (индексирует данные игры для умных ответов)" },
+                { Language.Japanese, "ナレッジベース有効化（ゲームデータをインデックスして賢い回答）" },
+                { Language.Chinese, "启用知识库（索引游戏数据以提供更智能的回答）" }
+            },
+            ["MSKnowledgeWarn"] = new() {
+                { Language.English, "⚠ Warning: Knowledge Base may cause spoilers. Disable if you prefer a spoiler-free experience." },
+                { Language.Korean, "⚠ 경고: 지식 베이스는 스포일러를 유발할 수 있습니다. 스포일러 없는 경험을 원하시면 비활성화하세요." },
+                { Language.Russian, "⚠ Внимание: База знаний может содержать спойлеры. Отключите, если хотите избежать спойлеров." },
+                { Language.Japanese, "⚠ 警告：ナレッジベースはネタバレを引き起こす可能性があります。ネタバレなしの体験を望む場合は無効にしてください。" },
+                { Language.Chinese, "⚠ 警告：知识库可能导致剧透。如果您希望无剧透体验，请禁用此功能。" }
+            },
         };
 
         public static string Get(string key)

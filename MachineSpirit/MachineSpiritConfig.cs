@@ -43,6 +43,9 @@ namespace CompanionAI_v3.MachineSpirit
         public IdleFrequency IdleMode { get; set; } = IdleFrequency.Off;
         public bool EnableVision { get; set; } = false;
 
+        // ★ v3.70.0: Knowledge Base (RAG)
+        public bool EnableKnowledge { get; set; } = true;
+
         // ★ Per-provider API keys (each provider stores its own key)
         public Dictionary<ApiProvider, string> ProviderApiKeys { get; set; } = new();
 

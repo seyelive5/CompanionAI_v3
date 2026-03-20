@@ -74,8 +74,9 @@ namespace CompanionAI_v3.MachineSpirit
             _lastPollTime = 0f;
             EventCoalescer.Clear();
 
-            // ★ v3.70.0: Start background knowledge indexing
-            Knowledge.KnowledgeIndex.StartIndexing();
+            // ★ v3.70.0: Start background knowledge indexing (if enabled)
+            if (Config.EnableKnowledge)
+                Knowledge.KnowledgeIndex.StartIndexing();
         }
 
         public static void Shutdown()
@@ -208,7 +209,7 @@ namespace CompanionAI_v3.MachineSpirit
 
             // ★ v3.70.0: RAG — detect game knowledge questions and inject search results
             List<Knowledge.SearchResult> searchResults = null;
-            if (Knowledge.KnowledgeIndex.IsReady)
+            if (Config.EnableKnowledge && Knowledge.KnowledgeIndex.IsReady)
             {
                 searchResults = Knowledge.KnowledgeIndex.DetectAndSearch(text);
             }

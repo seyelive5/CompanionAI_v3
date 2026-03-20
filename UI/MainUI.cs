@@ -515,6 +515,12 @@ namespace CompanionAI_v3.UI
                     ms.EnableVision = false;
                 }
 
+                // ★ v3.70.0: Knowledge Base toggle
+                GUILayout.Space(8);
+                GUILayout.Label($"<color={UIStyles.Gold}>{L("MSKnowledge")}</color>", UIStyles.SubHeader);
+                ms.EnableKnowledge = DrawCheckbox(ms.EnableKnowledge, L("MSKnowledgeEnable"));
+                GUILayout.Label($"<color=#CC6666>{L("MSKnowledgeWarn")}</color>", UIStyles.Description);
+
                 GUILayout.Space(10);
                 UIStyles.DrawDivider();
                 GUILayout.Space(5);

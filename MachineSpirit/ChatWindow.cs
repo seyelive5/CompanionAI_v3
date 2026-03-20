@@ -159,7 +159,22 @@ namespace CompanionAI_v3.MachineSpirit
             {
                 titleExtra = $"  <color=#66CC66><size={Mathf.RoundToInt(11 * UIStyles.Scale)}>\u2713</size></color>";
             }
+            // Title + close button row
+            GUILayout.BeginHorizontal();
             GUILayout.Label($"<color={UIStyles.Gold}><b>\u2014 Machine Spirit \u2014</b></color>{titleExtra}", UIStyles.Header);
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("<color=#FF6666><b>\u2715</b></color>", new GUIStyle(GUI.skin.label)
+            {
+                richText = true,
+                fontSize = Mathf.RoundToInt(16 * UIStyles.Scale),
+                alignment = TextAnchor.MiddleCenter,
+                hover = { textColor = Color.red },
+                normal = { textColor = new Color(1f, 0.4f, 0.4f) }
+            }, GUILayout.Width(UIStyles.Sd(24f)), GUILayout.Height(UIStyles.Sd(24f))))
+            {
+                _visible = false;
+            }
+            GUILayout.EndHorizontal();
             UIStyles.DrawDivider();
 
             // Auto-scroll
