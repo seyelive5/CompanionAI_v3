@@ -35,7 +35,9 @@ namespace CompanionAI_v3.MachineSpirit
         SoulMarkShift,   // ★ v3.68.0: Conviction/alignment change
         QuestUpdate,     // ★ v3.68.0: Quest started/completed/failed
         WarpTravel,      // ★ v3.68.0: Warp travel events
-        LevelUp          // ★ v3.68.0: Character level up
+        LevelUp,         // ★ v3.68.0: Character level up
+        DialogueStart,   // ★ v3.70.0: Dialogue scene started
+        DialogueEnd      // ★ v3.70.0: Dialogue scene ended
     }
 
     public struct GameEvent
@@ -75,6 +77,10 @@ namespace CompanionAI_v3.MachineSpirit
                 return $"Navigation — {Text}";
             if (Type == GameEventType.LevelUp)
                 return $"Advancement — {Text}";
+            if (Type == GameEventType.DialogueStart)
+                return $"Dialogue — {Text}";
+            if (Type == GameEventType.DialogueEnd)
+                return "Dialogue — Scene concluded";
             if (string.IsNullOrEmpty(Speaker))
                 return $"Sensor: {Text}";
             return $"Sensor — {Speaker}: {Text}";
@@ -123,15 +129,12 @@ namespace CompanionAI_v3.MachineSpirit
             {
                 MachineSpirit.OnMajorEvent(_events[_events.Count - 1]);
             }
-            // ★ v3.66.0: Dialogue triggers Machine Spirit reaction (separate cooldown)
+            // ★ v3.70.0: Dialogue lines only go to buffer (smart timing triggers LLM at scene start/end)
             else if (type == GameEventType.Dialogue)
             {
-                // ★ v3.68.0: Also store in dedicated dialogue buffer for transcript context
                 if (_dialogueBuffer.Count >= MAX_DIALOGUE)
                     _dialogueBuffer.RemoveAt(0);
                 _dialogueBuffer.Add(_events[_events.Count - 1]);
-
-                MachineSpirit.OnDialogueEvent(_events[_events.Count - 1]);
             }
             // ★ v3.66.0: Area transition triggers Machine Spirit scan
             else if (type == GameEventType.AreaTransition)
@@ -180,7 +183,9 @@ namespace CompanionAI_v3.MachineSpirit
             ISelectAnswerHandler,       // ★ v3.68.0
             ISoulMarkShiftHandler,      // ★ v3.68.0
             IQuestHandler,              // ★ v3.68.0
-            ILevelUpInitiateUIHandler   // ★ v3.68.0
+            ILevelUpInitiateUIHandler,  // ★ v3.68.0
+            IDialogStartHandler,        // ★ v3.70.0
+            IDialogFinishHandler        // ★ v3.70.0
         {
             public void HandleUnitDeath(AbstractUnitEntity unit)
             {
@@ -241,11 +246,12 @@ namespace CompanionAI_v3.MachineSpirit
                     }
                     catch { /* safe fallback */ }
 
-                    // ★ v3.68.0: Expanded truncation (was 120, local AI has token budget)
                     if (text.Length > 200)
                         text = text.Substring(0, 200) + "...";
 
+                    // ★ v3.70.0: Only log + buffer, don't trigger LLM reaction (smart timing handles this)
                     AddEvent(GameEventType.Dialogue, speaker, text);
+                    // Removed: MachineSpirit.OnDialogueEvent() — reactions now happen at scene start/end only
                 }
                 catch { /* safe fallback */ }
             }
@@ -454,6 +460,30 @@ namespace CompanionAI_v3.MachineSpirit
                     string unitName = unit?.CharacterName ?? "Unknown";
                     AddEvent(GameEventType.LevelUp, null, $"{unitName} reached a new level");
                     EventCoalescer.Enqueue(_events[_events.Count - 1]);
+                }
+                catch { }
+            }
+
+            // ★ v3.70.0: Dialogue scene start/end — smart timing for LLM reactions
+            public void HandleDialogStarted(BlueprintDialog dialog)
+            {
+                if (!MachineSpirit.IsActive) return;
+                try
+                {
+                    string dialogName = dialog?.name ?? "Unknown";
+                    AddEvent(GameEventType.DialogueStart, null, $"Dialogue started: {dialogName}");
+                    MachineSpirit.OnDialogueStarted();
+                }
+                catch { }
+            }
+
+            public void HandleDialogFinished(BlueprintDialog dialog, bool success)
+            {
+                if (!MachineSpirit.IsActive) return;
+                try
+                {
+                    AddEvent(GameEventType.DialogueEnd, null, "Dialogue ended");
+                    MachineSpirit.OnDialogueEnded();
                 }
                 catch { }
             }

@@ -427,6 +427,76 @@ namespace CompanionAI_v3.MachineSpirit
         }
 
         // ════════════════════════════════════════════════════════════
+        // ★ v3.70.0: Smart Dialogue Timing — react at scene start/end
+        // ════════════════════════════════════════════════════════════
+
+        public static void OnDialogueStarted()
+        {
+            if (!IsActive) return;
+            if (LLMClient.IsRequesting) return;
+            if (Config?.IdleMode == IdleFrequency.Off) return;
+
+            _lastDialogueCommentTime = Time.time;
+            _lastActivityTime = Time.time;
+            ResetIdleTimers();
+
+            var messages = ContextBuilder.BuildForDialogueStart(_chatHistory, Config, _conversationSummary);
+            ChatWindow.SetThinking(true);
+
+            if (Config.Provider == ApiProvider.Ollama)
+            {
+                _chatHistory.Add(new ChatMessage { IsUser = false, Text = "", Timestamp = Time.time, Category = MessageCategory.Vox });
+                int responseIdx = _chatHistory.Count - 1;
+                CoroutineRunner.Start(LLMClient.SendOllamaStreaming(
+                    Config, messages,
+                    onToken: tokens => { var msg = _chatHistory[responseIdx]; msg.Text += tokens; _chatHistory[responseIdx] = msg; ChatWindow.SetThinking(false); },
+                    onComplete: () => { ChatWindow.SetThinking(false); var msg = _chatHistory[responseIdx]; if (msg.Text.Trim().Contains("[SKIP]")) { _chatHistory.RemoveAt(responseIdx); } },
+                    onError: error => { var msg = _chatHistory[responseIdx]; if (string.IsNullOrEmpty(msg.Text)) _chatHistory.RemoveAt(responseIdx); ChatWindow.SetThinking(false); }
+                ));
+            }
+            else
+            {
+                CoroutineRunner.Start(LLMClient.SendChatRequest(Config, messages,
+                    onResponse: response => { if (!response.Contains("[SKIP]")) _chatHistory.Add(new ChatMessage { IsUser = false, Text = response, Timestamp = Time.time, Category = MessageCategory.Vox }); ChatWindow.SetThinking(false); },
+                    onError: _ => ChatWindow.SetThinking(false)
+                ));
+            }
+        }
+
+        public static void OnDialogueEnded()
+        {
+            if (!IsActive) return;
+            if (LLMClient.IsRequesting) return;
+            if (Config?.IdleMode == IdleFrequency.Off) return;
+
+            _lastDialogueCommentTime = Time.time;
+            _lastActivityTime = Time.time;
+            ResetIdleTimers();
+
+            var messages = ContextBuilder.BuildForDialogueEnd(_chatHistory, Config, _conversationSummary);
+            ChatWindow.SetThinking(true);
+
+            if (Config.Provider == ApiProvider.Ollama)
+            {
+                _chatHistory.Add(new ChatMessage { IsUser = false, Text = "", Timestamp = Time.time, Category = MessageCategory.Vox });
+                int responseIdx = _chatHistory.Count - 1;
+                CoroutineRunner.Start(LLMClient.SendOllamaStreaming(
+                    Config, messages,
+                    onToken: tokens => { var msg = _chatHistory[responseIdx]; msg.Text += tokens; _chatHistory[responseIdx] = msg; ChatWindow.SetThinking(false); },
+                    onComplete: () => { ChatWindow.SetThinking(false); var msg = _chatHistory[responseIdx]; if (msg.Text.Trim().Contains("[SKIP]")) { _chatHistory.RemoveAt(responseIdx); } },
+                    onError: error => { var msg = _chatHistory[responseIdx]; if (string.IsNullOrEmpty(msg.Text)) _chatHistory.RemoveAt(responseIdx); ChatWindow.SetThinking(false); }
+                ));
+            }
+            else
+            {
+                CoroutineRunner.Start(LLMClient.SendChatRequest(Config, messages,
+                    onResponse: response => { if (!response.Contains("[SKIP]")) _chatHistory.Add(new ChatMessage { IsUser = false, Text = response, Timestamp = Time.time, Category = MessageCategory.Vox }); ChatWindow.SetThinking(false); },
+                    onError: _ => ChatWindow.SetThinking(false)
+                ));
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════
         // ★ v3.66.0: Area Transition — scan new locations
         // ════════════════════════════════════════════════════════════
 

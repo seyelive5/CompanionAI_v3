@@ -569,6 +569,7 @@ Example responses (mimic this exact style):
                 try { mainChar = Game.Instance?.Player?.MainCharacterEntity; } catch { /* ignore */ }
 
                 var sb = new StringBuilder();
+                sb.AppendLine("== ALLIES (YOUR PARTY) ==");
                 sb.AppendLine("[CREW ROSTER — Current Party]");
 
                 // ★ v3.64.0: Party health summary
@@ -673,6 +674,7 @@ Example responses (mimic this exact style):
                 if (allUnits == null) return null;
 
                 var sb = new StringBuilder();
+                sb.AppendLine("== ENEMIES (HOSTILE) ==");
                 sb.AppendLine("[HOSTILE FORCES — Active Combat]");
 
                 // ★ v3.64.0: Combat round from GameEventCollector
@@ -990,30 +992,72 @@ Example responses (mimic this exact style):
         private static string BuildAntiRepetitionContext(List<ChatMessage> chatHistory)
         {
             var openings = new List<string>();
-            for (int i = chatHistory.Count - 1; i >= 0 && openings.Count < 4; i--)
+            var endings = new List<string>();
+            for (int i = chatHistory.Count - 1; i >= 0 && (openings.Count < 4 || endings.Count < 3); i--)
             {
                 if (chatHistory[i].IsUser) continue;
                 string text = chatHistory[i].Text;
                 if (string.IsNullOrEmpty(text) || text.StartsWith("[ERROR]")) continue;
 
                 // Extract first sentence (up to first period/exclamation/question mark)
-                int endIdx = text.IndexOfAny(new[] { '.', '!', '?' });
-                string opening;
-                if (endIdx > 0 && endIdx < 100)
-                    opening = text.Substring(0, endIdx + 1);
-                else
-                    opening = text.Length > 80 ? text.Substring(0, 80) + "..." : text;
+                if (openings.Count < 4)
+                {
+                    int endIdx = text.IndexOfAny(new[] { '.', '!', '?' });
+                    string opening;
+                    if (endIdx > 0 && endIdx < 100)
+                        opening = text.Substring(0, endIdx + 1);
+                    else
+                        opening = text.Length > 80 ? text.Substring(0, 80) + "..." : text;
 
-                openings.Add(opening);
+                    openings.Add(opening);
+                }
+
+                // ★ Extract last sentence for closing pattern tracking
+                if (endings.Count < 3)
+                {
+                    string trimmed = text.TrimEnd();
+                    if (trimmed.Length > 0)
+                    {
+                        // Find the start of the last sentence
+                        int lastSentenceStart = -1;
+                        for (int j = trimmed.Length - 2; j >= 0; j--)
+                        {
+                            char c = trimmed[j];
+                            if (c == '.' || c == '!' || c == '?')
+                            {
+                                lastSentenceStart = j + 1;
+                                break;
+                            }
+                        }
+                        string ending;
+                        if (lastSentenceStart > 0)
+                            ending = trimmed.Substring(lastSentenceStart).TrimStart();
+                        else
+                            ending = trimmed.Length > 80 ? trimmed.Substring(trimmed.Length - 80) : trimmed;
+
+                        if (ending.Length > 3)
+                            endings.Add(ending);
+                    }
+                }
             }
 
-            if (openings.Count < 2) return null;
+            if (openings.Count < 2 && endings.Count < 2) return null;
 
             var sb = new StringBuilder();
-            sb.AppendLine("[DO NOT REPEAT — your recent openings]");
-            foreach (var o in openings)
-                sb.AppendLine($"- \"{o}\"");
-            sb.Append("Start differently. Use a new angle.");
+            if (openings.Count >= 2)
+            {
+                sb.AppendLine("[DO NOT REPEAT — your recent openings]");
+                foreach (var o in openings)
+                    sb.AppendLine($"- \"{o}\"");
+            }
+            if (endings.Count >= 2)
+            {
+                sb.AppendLine("[Also avoid these recent closing patterns]");
+                foreach (var e in endings)
+                    sb.AppendLine($"- \"{e}\"");
+            }
+            sb.AppendLine("Start differently. End differently. Use a new angle.");
+            sb.Append("Avoid generic phrases like 'Interesting...', 'Noted.', 'How fascinating.', 'Acknowledged.'");
             return sb.ToString();
         }
 
@@ -1496,6 +1540,68 @@ Example responses (mimic this exact style):
         }
 
         /// <summary>
+        /// ★ v3.70.0: Build prompt for dialogue scene START — introduce the NPC/situation.
+        /// </summary>
+        public static List<LLMClient.ChatMessage> BuildForDialogueStart(
+            List<ChatMessage> chatHistory,
+            MachineSpiritConfig config = null,
+            string conversationSummary = null)
+        {
+            var dialogueLines = GameEventCollector.DialogueBuffer;
+            var sb = new StringBuilder();
+            sb.AppendLine("[DIALOGUE SCENE STARTING]");
+            if (dialogueLines.Count > 0)
+            {
+                foreach (var line in dialogueLines)
+                    sb.AppendLine($"  {line.Speaker}: {line.Text}");
+            }
+
+            var lang = Main.Settings?.UILanguage ?? Language.English;
+            string instruction = lang switch
+            {
+                Language.Korean => "대화 장면이 시작되었다. 누구와 대화하는지, 상황이 어떤지 짧게 소개하라 (1-2문장). 지식 기반이 있으면 활용하라. 할 말이 없으면 [SKIP]으로만 응답하라.",
+                Language.Russian => "Началась сцена диалога. Кратко представь, кто говорит и какова ситуация (1-2 предложения). Используй базу знаний, если доступна. Если нечего сказать — ответь [SKIP].",
+                Language.Japanese => "対話シーンが始まった。誰と話しているか、状況を簡潔に紹介せよ（1-2文）。ナレッジベースがあれば活用せよ。言うことがなければ[SKIP]とだけ答えよ。",
+                Language.Chinese => "对话场景开始了。简要介绍正在和谁对话及情况（1-2句）。如有知识库请活用。无话可说则只回复[SKIP]。",
+                _ => "A dialogue scene has just started. Briefly introduce who is speaking and the situation (1-2 sentences). Use knowledge base if available. If you have nothing meaningful to say, respond with [SKIP]."
+            };
+            sb.AppendLine(instruction);
+
+            return Build(chatHistory, config, sb.ToString(), conversationSummary);
+        }
+
+        /// <summary>
+        /// ★ v3.70.0: Build prompt for dialogue scene END — summarize reaction.
+        /// </summary>
+        public static List<LLMClient.ChatMessage> BuildForDialogueEnd(
+            List<ChatMessage> chatHistory,
+            MachineSpiritConfig config = null,
+            string conversationSummary = null)
+        {
+            var dialogueLines = GameEventCollector.DialogueBuffer;
+            var sb = new StringBuilder();
+            sb.AppendLine("[DIALOGUE SCENE CONCLUDED — FULL TRANSCRIPT]");
+            if (dialogueLines.Count > 0)
+            {
+                foreach (var line in dialogueLines)
+                    sb.AppendLine($"  {line.Speaker}: {line.Text}");
+            }
+
+            var lang = Main.Settings?.UILanguage ?? Language.English;
+            string instruction = lang switch
+            {
+                Language.Korean => "대화 장면이 방금 끝났다. 논의된 내용에 대해 짧게 전체적인 반응이나 코멘트를 하라 (1-2문장). 사소한 대화였으면 [SKIP]으로만 응답하라.",
+                Language.Russian => "Сцена диалога завершилась. Дай краткую общую реакцию или комментарий о том, что обсуждалось (1-2 предложения). Если разговор тривиальный — ответь [SKIP].",
+                Language.Japanese => "対話シーンが終了した。議論された内容について簡潔に全体的な反応やコメントをせよ（1-2文）。些細な会話であれば[SKIP]とだけ答えよ。",
+                Language.Chinese => "对话场景刚结束。简要评论讨论的内容（1-2句）。如果对话微不足道，只回复[SKIP]。",
+                _ => "The dialogue scene just ended. Give a brief overall reaction or comment on what was discussed (1-2 sentences). If the conversation was trivial, respond with [SKIP]."
+            };
+            sb.AppendLine(instruction);
+
+            return Build(chatHistory, config, sb.ToString(), conversationSummary);
+        }
+
+        /// <summary>
         /// ★ v3.66.0: Build messages for session greeting — Machine Spirit welcomes the Lord Captain.
         /// </summary>
         public static List<LLMClient.ChatMessage> BuildForGreeting(
@@ -1575,6 +1681,8 @@ Example responses (mimic this exact style):
             var sb = new StringBuilder();
             sb.AppendLine("Summarize the following conversation between the Lord Captain and Machine Spirit in 2-3 concise bullet points.");
             sb.AppendLine("Focus on: key topics discussed, important decisions, and any notable events mentioned.");
+            sb.AppendLine("Always attribute statements to their speaker (e.g., 'Lord Captain said X', 'Player chose Y', 'Machine Spirit commented Z'). Never mix up who said what.");
+            sb.AppendLine("When a dialogue scene ends, note it as concluded — do not carry forward unfinished impressions.");
             sb.AppendLine("Write in third person, past tense. Be brief.");
             sb.AppendLine();
             sb.AppendLine("--- CONVERSATION ---");
