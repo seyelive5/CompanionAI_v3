@@ -70,7 +70,7 @@ namespace CompanionAI_v3.MachineSpirit.Knowledge
         /// </summary>
         public static IEnumerator GetEmbedding(string text, Action<float[]> onResult, Action<string> onError)
         {
-            string payload = $"{{\"model\":\"nomic-embed-text\",\"input\":\"{EscapeJson(text)}\"}}";
+            string payload = $"{{\"model\":\"nomic-embed-text\",\"input\":\"{EscapeJson(text)}\",\"keep_alive\":-1}}";
             var request = new UnityWebRequest("http://localhost:11434/api/embed", "POST");
             request.uploadHandler = new UploadHandlerRaw(System.Text.Encoding.UTF8.GetBytes(payload));
             request.downloadHandler = new DownloadHandlerBuffer();

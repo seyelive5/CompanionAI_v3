@@ -131,6 +131,7 @@ namespace CompanionAI_v3.MachineSpirit
                 ["model"] = config.Model,
                 ["messages"] = JArray.FromObject(messages),
                 ["stream"] = true,
+                ["keep_alive"] = -1, // ★ v3.70.0: Keep model in VRAM permanently — prevents cold start after idle
                 ["options"] = new JObject
                 {
                     ["temperature"] = config.Temperature,
@@ -297,6 +298,7 @@ namespace CompanionAI_v3.MachineSpirit
                     ["model"] = config.Model,
                     ["messages"] = JArray.FromObject(messages),
                     ["stream"] = false,
+                    ["keep_alive"] = -1, // ★ v3.70.0: Keep model in VRAM permanently
                     ["options"] = new JObject
                     {
                         ["temperature"] = 0.3, // Low temperature for factual summary
