@@ -275,14 +275,25 @@ namespace CompanionAI_v3.MachineSpirit
         }
 
         // ════════════════════════════════════════════════════════════
-        // ★ v3.58.0: Installed Model Detection
+        // ★ v3.70.0: Installed Model Detection + Management
         // ════════════════════════════════════════════════════════════
 
-        private static readonly List<string> _installedModels = new List<string>();
-        private static bool _isFetchingModels;
+        public struct InstalledModel
+        {
+            public string Name;     // display name (e.g., "gemma3:4b-it-qat")
+            public string FullName; // full name for API calls (e.g., "gemma3:4b-it-qat")
+            public float SizeGB;    // size in GB
+        }
 
-        public static IReadOnlyList<string> InstalledModels => _installedModels;
+        private static readonly List<InstalledModel> _installedModels = new List<InstalledModel>();
+        private static bool _isFetchingModels;
+        private static bool _isDeletingModel;
+        private static string _deleteConfirmModel; // model name pending deletion confirmation
+
+        public static IReadOnlyList<InstalledModel> InstalledModels => _installedModels;
         public static bool IsFetchingModels => _isFetchingModels;
+        public static bool IsDeletingModel => _isDeletingModel;
+        public static string DeleteConfirmModel { get => _deleteConfirmModel; set => _deleteConfirmModel = value; }
 
         /// <summary>
         /// Fetch list of installed Ollama models via /api/tags endpoint.
@@ -308,15 +319,21 @@ namespace CompanionAI_v3.MachineSpirit
                     {
                         foreach (var model in models)
                         {
-                            // "name" field contains "model:tag" format (e.g., "llama3.2:latest")
                             string name = model["name"]?.ToString();
-                            if (!string.IsNullOrEmpty(name))
+                            if (string.IsNullOrEmpty(name)) continue;
+
+                            string displayName = name.EndsWith(":latest")
+                                ? name.Substring(0, name.Length - 7) : name;
+
+                            long sizeBytes = (long)(model["size"] ?? 0);
+                            float sizeGB = sizeBytes / (1024f * 1024f * 1024f);
+
+                            _installedModels.Add(new InstalledModel
                             {
-                                // Strip ":latest" tag for cleaner display
-                                if (name.EndsWith(":latest"))
-                                    name = name.Substring(0, name.Length - 7);
-                                _installedModels.Add(name);
-                            }
+                                Name = displayName,
+                                FullName = name,
+                                SizeGB = sizeGB
+                            });
                         }
                     }
 
@@ -331,5 +348,180 @@ namespace CompanionAI_v3.MachineSpirit
             request.Dispose();
             _isFetchingModels = false;
         }
+
+        /// <summary>
+        /// Delete an Ollama model via /api/delete endpoint.
+        /// </summary>
+        public static IEnumerator DeleteModel(string modelName)
+        {
+            if (_isDeletingModel) yield break;
+            _isDeletingModel = true;
+            _deleteConfirmModel = null;
+
+            var url = "http://localhost:11434/api/delete";
+            // Use full name with :latest if no tag specified
+            string fullName = modelName.Contains(":") ? modelName : modelName + ":latest";
+            var body = $"{{\"name\":\"{fullName}\"}}";
+
+            var request = new UnityWebRequest(url, "DELETE");
+            request.uploadHandler = new UploadHandlerRaw(System.Text.Encoding.UTF8.GetBytes(body));
+            request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("Content-Type", "application/json");
+            request.timeout = 30;
+
+            yield return request.SendWebRequest();
+
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                Main.LogDebug($"[MachineSpirit] Model '{modelName}' deleted successfully");
+                // Refresh model list
+                request.Dispose();
+                _isDeletingModel = false;
+                yield return FetchInstalledModels();
+            }
+            else
+            {
+                Main.LogDebug($"[MachineSpirit] Model delete failed: {request.error}");
+                request.Dispose();
+                _isDeletingModel = false;
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════
+        // ★ v3.71.0: Auto-template fix for template-less community models
+        // ════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Check if an installed model has a chat template. If not, create a wrapper
+        /// model with the correct template for its family (Mistral Instruct, ChatML, etc.)
+        /// </summary>
+        public static IEnumerator CheckAndFixTemplate(string modelName)
+        {
+            // Step 1: Check if model has a template via /api/show
+            var showUrl = "http://localhost:11434/api/show";
+            var showBody = $"{{\"name\":\"{modelName}\"}}";
+
+            var request = new UnityWebRequest(showUrl, "POST");
+            request.uploadHandler = new UploadHandlerRaw(System.Text.Encoding.UTF8.GetBytes(showBody));
+            request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("Content-Type", "application/json");
+            request.timeout = 10;
+
+            yield return request.SendWebRequest();
+
+            if (request.result != UnityWebRequest.Result.Success)
+            {
+                Main.LogDebug($"[MachineSpirit] Cannot check template for '{modelName}': {request.error}");
+                request.Dispose();
+                yield break;
+            }
+
+            bool hasTemplate = false;
+            string existingTemplate = "";
+            try
+            {
+                var json = Newtonsoft.Json.Linq.JObject.Parse(request.downloadHandler.text);
+                existingTemplate = json["template"]?.ToString() ?? "";
+                // A bare model has empty template or just "{{ .Prompt }}"
+                hasTemplate = !string.IsNullOrEmpty(existingTemplate)
+                    && !existingTemplate.Trim().Equals("{{ .Prompt }}", System.StringComparison.OrdinalIgnoreCase);
+            }
+            catch { }
+
+            request.Dispose();
+
+            if (hasTemplate)
+            {
+                Main.LogDebug($"[MachineSpirit] Model '{modelName}' has template — no fix needed");
+                yield break;
+            }
+
+            Main.LogDebug($"[MachineSpirit] Model '{modelName}' has NO template — applying auto-fix");
+
+            // Step 2: Detect model family and choose appropriate template
+            var family = LLMClient.DetectFamily(modelName);
+            string template;
+            string stopTokens;
+
+            switch (family)
+            {
+                case LLMClient.ModelFamily.Mistral:
+                    // Mistral Instruct v2/v3 format
+                    template = "[INST] {{ if .System }}{{ .System }}\n{{ end }}{{ .Prompt }} [/INST]";
+                    stopTokens = "[INST], [/INST], </s>";
+                    break;
+                case LLMClient.ModelFamily.Qwen3:
+                case LLMClient.ModelFamily.Qwen2:
+                    // ChatML format
+                    template = "<|im_start|>system\n{{ .System }}<|im_end|>\n<|im_start|>user\n{{ .Prompt }}<|im_end|>\n<|im_start|>assistant\n";
+                    stopTokens = "<|im_start|>, <|im_end|>";
+                    break;
+                default:
+                    // Generic ChatML fallback
+                    template = "<|im_start|>system\n{{ .System }}<|im_end|>\n<|im_start|>user\n{{ .Prompt }}<|im_end|>\n<|im_start|>assistant\n";
+                    stopTokens = "<|im_start|>, <|im_end|>";
+                    break;
+            }
+
+            // Step 3: Create wrapper model with template via /api/create
+            var createUrl = "http://localhost:11434/api/create";
+
+            // Use a clean local name (strip namespace for readability)
+            string localName = modelName;
+            if (localName.Contains("/"))
+            {
+                string afterSlash = localName.Substring(localName.IndexOf('/') + 1);
+                if (afterSlash.Contains(":"))
+                    afterSlash = afterSlash.Substring(0, afterSlash.IndexOf(':'));
+                localName = afterSlash;
+            }
+
+            // Parse stop tokens into JArray
+            var stopArray = new Newtonsoft.Json.Linq.JArray();
+            foreach (var s in stopTokens.Split(','))
+                stopArray.Add(s.Trim().Trim('"'));
+
+            var createBody = new Newtonsoft.Json.Linq.JObject
+            {
+                ["model"] = localName,
+                ["from"] = modelName,
+                ["template"] = template,
+                ["stream"] = false,
+                ["parameters"] = new Newtonsoft.Json.Linq.JObject
+                {
+                    ["stop"] = stopArray,
+                    ["num_ctx"] = 8192
+                }
+            };
+
+            var createRequest = new UnityWebRequest(createUrl, "POST");
+            createRequest.uploadHandler = new UploadHandlerRaw(System.Text.Encoding.UTF8.GetBytes(createBody.ToString()));
+            createRequest.downloadHandler = new DownloadHandlerBuffer();
+            createRequest.SetRequestHeader("Content-Type", "application/json");
+            createRequest.timeout = 60;
+
+            yield return createRequest.SendWebRequest();
+
+            if (createRequest.result == UnityWebRequest.Result.Success)
+            {
+                Main.LogDebug($"[MachineSpirit] Created template-fixed model '{localName}' from '{modelName}'");
+                // Update the config to use the fixed local model
+                _templateFixedModel = localName;
+            }
+            else
+            {
+                Main.LogDebug($"[MachineSpirit] Template fix failed: {createRequest.error}");
+            }
+
+            createRequest.Dispose();
+        }
+
+        /// <summary>After template fix, this holds the local model name to switch to.</summary>
+        public static string TemplateFixedModel
+        {
+            get => _templateFixedModel;
+            set => _templateFixedModel = value;
+        }
+        private static string _templateFixedModel;
     }
 }

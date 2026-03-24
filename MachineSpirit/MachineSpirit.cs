@@ -77,6 +77,31 @@ namespace CompanionAI_v3.MachineSpirit
             // ★ v3.70.0: Start background knowledge indexing (if enabled)
             if (Config.EnableKnowledge)
                 Knowledge.KnowledgeIndex.StartIndexing();
+
+            // ★ v3.71.0: Auto-fix template for community models on Ollama
+            if (Config.Provider == ApiProvider.Ollama && !string.IsNullOrEmpty(Config.Model))
+                CoroutineRunner.Start(CheckAndApplyTemplateFix());
+        }
+
+        /// <summary>
+        /// ★ v3.71.0: Check current Ollama model's template and auto-fix if missing.
+        /// Runs on Initialize and when model selection changes.
+        /// </summary>
+        private static IEnumerator CheckAndApplyTemplateFix()
+        {
+            // Small delay to let Ollama server be ready
+            yield return new UnityEngine.WaitForSeconds(2f);
+
+            if (Config == null || Config.Provider != ApiProvider.Ollama) yield break;
+
+            yield return OllamaSetup.CheckAndFixTemplate(Config.Model);
+
+            if (!string.IsNullOrEmpty(OllamaSetup.TemplateFixedModel))
+            {
+                Main.LogDebug($"[MachineSpirit] Switching to template-fixed model: {OllamaSetup.TemplateFixedModel}");
+                Config.Model = OllamaSetup.TemplateFixedModel;
+                OllamaSetup.TemplateFixedModel = null;
+            }
         }
 
         public static void Shutdown()
@@ -168,6 +193,62 @@ namespace CompanionAI_v3.MachineSpirit
             Main.LogDebug("[MachineSpirit] Chat history cleared (personality change)");
         }
 
+        /// <summary>
+        /// ★ v3.72.0: Handle model switch — reset state for clean transition.
+        /// Called from UI when user selects a different model.
+        /// </summary>
+        public static void OnModelChanged(string newModel)
+        {
+            if (Config == null) return;
+            string oldModel = Config.Model;
+            if (oldModel == newModel) return;
+
+            Main.LogDebug($"[MachineSpirit] Model changed: {oldModel} → {newModel}");
+
+            // 1. Cancel any in-flight request
+            LLMClient.Reset();
+            ChatWindow.SetThinking(false);
+
+            // 2. Clear chat history (old model's responses will confuse new model)
+            _chatHistory.Clear();
+            _conversationSummary = null;
+            _summarizedUpToIndex = 0;
+
+            // 3. Set new model
+            Config.Model = newModel;
+
+            // 4. Re-check template for community models
+            if (Config.Provider == ApiProvider.Ollama)
+                CoroutineRunner.Start(CheckAndApplyTemplateFix());
+
+            // 5. Trigger fresh greeting
+            _hasGreeted = false;
+            _lastActivityTime = Time.time;
+            ResetIdleTimers();
+        }
+
+        /// <summary>★ v3.72.0: Reset and re-greet when personality changes.</summary>
+        public static void OnPersonalityChanged()
+        {
+            if (Config == null) return;
+
+            Main.LogDebug($"[MachineSpirit] Personality changed to: {Config.Personality}");
+
+            // 1. Cancel any in-flight request
+            LLMClient.Reset();
+            ChatWindow.SetThinking(false);
+
+            // 2. Clear chat history (old personality responses will confuse new one)
+            _chatHistory.Clear();
+            _conversationSummary = null;
+            _summarizedUpToIndex = 0;
+
+            // 3. Trigger fresh greeting with new personality
+            _hasGreeted = false;
+            _lastActivityTime = Time.time;
+            ResetIdleTimers();
+        }
+
         /// <summary>Add a system notification to chat (not from LLM, just info text).</summary>
         public static void AddSystemMessage(string text)
         {
@@ -236,28 +317,25 @@ namespace CompanionAI_v3.MachineSpirit
                     },
                     onComplete: () =>
                     {
+                        if (responseIdx < _chatHistory.Count)
+                        {
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                                _chatHistory.RemoveAt(responseIdx);
+                        }
                         ChatWindow.SetThinking(false);
                         MaybeSummarize();
                     },
                     onError: error =>
                     {
-                        // If empty response, replace with error; otherwise append
-                        var msg = _chatHistory[responseIdx];
-                        if (string.IsNullOrEmpty(msg.Text))
+                        if (responseIdx < _chatHistory.Count)
                         {
-                            msg.Text = $"[ERROR] {error}";
-                            _chatHistory[responseIdx] = msg;
-                        }
-                        else
-                        {
-                            _chatHistory.Add(new ChatMessage
-                            {
-                                IsUser = false,
-                                Text = $"[ERROR] {error}",
-                                Timestamp = Time.time
-                            });
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                                _chatHistory.RemoveAt(responseIdx);
                         }
                         ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
                     }
                 ));
             }
@@ -268,24 +346,22 @@ namespace CompanionAI_v3.MachineSpirit
                     Config, messages,
                     onResponse: response =>
                     {
-                        _chatHistory.Add(new ChatMessage
+                        if (!string.IsNullOrEmpty(response?.Trim()))
                         {
-                            IsUser = false,
-                            Text = response,
-                            Timestamp = Time.time
-                        });
+                            _chatHistory.Add(new ChatMessage
+                            {
+                                IsUser = false,
+                                Text = response,
+                                Timestamp = Time.time
+                            });
+                        }
                         ChatWindow.SetThinking(false);
                         MaybeSummarize();
                     },
                     onError: error =>
                     {
-                        _chatHistory.Add(new ChatMessage
-                        {
-                            IsUser = false,
-                            Text = $"[ERROR] {error}",
-                            Timestamp = Time.time
-                        });
                         ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
                     }
                 ));
             }
@@ -317,16 +393,26 @@ namespace CompanionAI_v3.MachineSpirit
                         _chatHistory[responseIdx] = msg;
                         ChatWindow.SetThinking(false);
                     },
-                    onComplete: () => ChatWindow.SetThinking(false),
-                    onError: error =>
+                    onComplete: () =>
                     {
-                        var msg = _chatHistory[responseIdx];
-                        if (string.IsNullOrEmpty(msg.Text))
+                        if (responseIdx < _chatHistory.Count)
                         {
-                            msg.Text = $"[ERROR] {error}";
-                            _chatHistory[responseIdx] = msg;
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                                _chatHistory.RemoveAt(responseIdx);
                         }
                         ChatWindow.SetThinking(false);
+                    },
+                    onError: error =>
+                    {
+                        if (responseIdx < _chatHistory.Count)
+                        {
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                                _chatHistory.RemoveAt(responseIdx);
+                        }
+                        ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
                     }
                 ));
             }
@@ -336,16 +422,23 @@ namespace CompanionAI_v3.MachineSpirit
                     Config, messages,
                     onResponse: response =>
                     {
-                        _chatHistory.Add(new ChatMessage
+                        if (!string.IsNullOrEmpty(response?.Trim()))
                         {
-                            IsUser = false,
-                            Text = response,
-                            Timestamp = Time.time,
-                            Category = MessageCategory.Combat
-                        });
+                            _chatHistory.Add(new ChatMessage
+                            {
+                                IsUser = false,
+                                Text = response,
+                                Timestamp = Time.time,
+                                Category = MessageCategory.Combat
+                            });
+                        }
                         ChatWindow.SetThinking(false);
                     },
-                    onError: _ => ChatWindow.SetThinking(false)
+                    onError: error =>
+                    {
+                        ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
+                    }
                 ));
             }
         }
@@ -385,21 +478,27 @@ namespace CompanionAI_v3.MachineSpirit
                     },
                     onComplete: () =>
                     {
-                        ChatWindow.SetThinking(false);
-                        // Check for [SKIP] response — LLM may decide dialogue is uninteresting
-                        var msg = _chatHistory[responseIdx];
-                        if (msg.Text.Trim().Contains("[SKIP]"))
+                        if (responseIdx < _chatHistory.Count)
                         {
-                            _chatHistory.RemoveAt(responseIdx);
-                            Main.LogDebug("[MachineSpirit] Dialogue: skipped (uninteresting)");
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()) || msg.Text.Trim().Contains("[SKIP]"))
+                            {
+                                _chatHistory.RemoveAt(responseIdx);
+                                Main.LogDebug("[MachineSpirit] Dialogue: skipped (uninteresting)");
+                            }
                         }
+                        ChatWindow.SetThinking(false);
                     },
                     onError: error =>
                     {
-                        var msg = _chatHistory[responseIdx];
-                        if (string.IsNullOrEmpty(msg.Text))
-                            _chatHistory.RemoveAt(responseIdx);
+                        if (responseIdx < _chatHistory.Count)
+                        {
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                                _chatHistory.RemoveAt(responseIdx);
+                        }
                         ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
                     }
                 ));
             }
@@ -409,7 +508,7 @@ namespace CompanionAI_v3.MachineSpirit
                     Config, messages,
                     onResponse: response =>
                     {
-                        if (!response.Trim().Contains("[SKIP]"))
+                        if (!string.IsNullOrEmpty(response?.Trim()) && !response.Trim().Contains("[SKIP]"))
                         {
                             _chatHistory.Add(new ChatMessage
                             {
@@ -421,7 +520,11 @@ namespace CompanionAI_v3.MachineSpirit
                         }
                         ChatWindow.SetThinking(false);
                     },
-                    onError: _ => ChatWindow.SetThinking(false)
+                    onError: error =>
+                    {
+                        ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
+                    }
                 ));
             }
         }
@@ -450,15 +553,43 @@ namespace CompanionAI_v3.MachineSpirit
                 CoroutineRunner.Start(LLMClient.SendOllamaStreaming(
                     Config, messages,
                     onToken: tokens => { var msg = _chatHistory[responseIdx]; msg.Text += tokens; _chatHistory[responseIdx] = msg; ChatWindow.SetThinking(false); },
-                    onComplete: () => { ChatWindow.SetThinking(false); var msg = _chatHistory[responseIdx]; if (msg.Text.Trim().Contains("[SKIP]")) { _chatHistory.RemoveAt(responseIdx); } },
-                    onError: error => { var msg = _chatHistory[responseIdx]; if (string.IsNullOrEmpty(msg.Text)) _chatHistory.RemoveAt(responseIdx); ChatWindow.SetThinking(false); }
+                    onComplete: () =>
+                    {
+                        if (responseIdx < _chatHistory.Count)
+                        {
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()) || msg.Text.Trim().Contains("[SKIP]"))
+                                _chatHistory.RemoveAt(responseIdx);
+                        }
+                        ChatWindow.SetThinking(false);
+                    },
+                    onError: error =>
+                    {
+                        if (responseIdx < _chatHistory.Count)
+                        {
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                                _chatHistory.RemoveAt(responseIdx);
+                        }
+                        ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
+                    }
                 ));
             }
             else
             {
                 CoroutineRunner.Start(LLMClient.SendChatRequest(Config, messages,
-                    onResponse: response => { if (!response.Contains("[SKIP]")) _chatHistory.Add(new ChatMessage { IsUser = false, Text = response, Timestamp = Time.time, Category = MessageCategory.Vox }); ChatWindow.SetThinking(false); },
-                    onError: _ => ChatWindow.SetThinking(false)
+                    onResponse: response =>
+                    {
+                        if (!string.IsNullOrEmpty(response?.Trim()) && !response.Contains("[SKIP]"))
+                            _chatHistory.Add(new ChatMessage { IsUser = false, Text = response, Timestamp = Time.time, Category = MessageCategory.Vox });
+                        ChatWindow.SetThinking(false);
+                    },
+                    onError: error =>
+                    {
+                        ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
+                    }
                 ));
             }
         }
@@ -483,15 +614,43 @@ namespace CompanionAI_v3.MachineSpirit
                 CoroutineRunner.Start(LLMClient.SendOllamaStreaming(
                     Config, messages,
                     onToken: tokens => { var msg = _chatHistory[responseIdx]; msg.Text += tokens; _chatHistory[responseIdx] = msg; ChatWindow.SetThinking(false); },
-                    onComplete: () => { ChatWindow.SetThinking(false); var msg = _chatHistory[responseIdx]; if (msg.Text.Trim().Contains("[SKIP]")) { _chatHistory.RemoveAt(responseIdx); } },
-                    onError: error => { var msg = _chatHistory[responseIdx]; if (string.IsNullOrEmpty(msg.Text)) _chatHistory.RemoveAt(responseIdx); ChatWindow.SetThinking(false); }
+                    onComplete: () =>
+                    {
+                        if (responseIdx < _chatHistory.Count)
+                        {
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()) || msg.Text.Trim().Contains("[SKIP]"))
+                                _chatHistory.RemoveAt(responseIdx);
+                        }
+                        ChatWindow.SetThinking(false);
+                    },
+                    onError: error =>
+                    {
+                        if (responseIdx < _chatHistory.Count)
+                        {
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                                _chatHistory.RemoveAt(responseIdx);
+                        }
+                        ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
+                    }
                 ));
             }
             else
             {
                 CoroutineRunner.Start(LLMClient.SendChatRequest(Config, messages,
-                    onResponse: response => { if (!response.Contains("[SKIP]")) _chatHistory.Add(new ChatMessage { IsUser = false, Text = response, Timestamp = Time.time, Category = MessageCategory.Vox }); ChatWindow.SetThinking(false); },
-                    onError: _ => ChatWindow.SetThinking(false)
+                    onResponse: response =>
+                    {
+                        if (!string.IsNullOrEmpty(response?.Trim()) && !response.Contains("[SKIP]"))
+                            _chatHistory.Add(new ChatMessage { IsUser = false, Text = response, Timestamp = Time.time, Category = MessageCategory.Vox });
+                        ChatWindow.SetThinking(false);
+                    },
+                    onError: error =>
+                    {
+                        ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
+                    }
                 ));
             }
         }
@@ -532,13 +691,26 @@ namespace CompanionAI_v3.MachineSpirit
                         _chatHistory[responseIdx] = msg;
                         ChatWindow.SetThinking(false);
                     },
-                    onComplete: () => ChatWindow.SetThinking(false),
+                    onComplete: () =>
+                    {
+                        if (responseIdx < _chatHistory.Count)
+                        {
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                                _chatHistory.RemoveAt(responseIdx);
+                        }
+                        ChatWindow.SetThinking(false);
+                    },
                     onError: error =>
                     {
-                        var msg = _chatHistory[responseIdx];
-                        if (string.IsNullOrEmpty(msg.Text))
-                            _chatHistory.RemoveAt(responseIdx);
+                        if (responseIdx < _chatHistory.Count)
+                        {
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                                _chatHistory.RemoveAt(responseIdx);
+                        }
                         ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
                     }
                 ));
             }
@@ -548,16 +720,23 @@ namespace CompanionAI_v3.MachineSpirit
                     Config, messages,
                     onResponse: response =>
                     {
-                        _chatHistory.Add(new ChatMessage
+                        if (!string.IsNullOrEmpty(response?.Trim()))
                         {
-                            IsUser = false,
-                            Text = response,
-                            Timestamp = Time.time,
-                            Category = MessageCategory.Scan
-                        });
+                            _chatHistory.Add(new ChatMessage
+                            {
+                                IsUser = false,
+                                Text = response,
+                                Timestamp = Time.time,
+                                Category = MessageCategory.Scan
+                            });
+                        }
                         ChatWindow.SetThinking(false);
                     },
-                    onError: _ => ChatWindow.SetThinking(false)
+                    onError: error =>
+                    {
+                        ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
+                    }
                 ));
             }
         }
@@ -666,15 +845,25 @@ namespace CompanionAI_v3.MachineSpirit
                     },
                     onComplete: () =>
                     {
+                        if (responseIdx < _chatHistory.Count)
+                        {
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                                _chatHistory.RemoveAt(responseIdx);
+                        }
                         ChatWindow.SetThinking(false);
                         MaybeSummarize();
                     },
                     onError: error =>
                     {
-                        var msg = _chatHistory[responseIdx];
-                        if (string.IsNullOrEmpty(msg.Text))
-                            _chatHistory.RemoveAt(responseIdx);
+                        if (responseIdx < _chatHistory.Count)
+                        {
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                                _chatHistory.RemoveAt(responseIdx);
+                        }
                         ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
                     }
                 ));
             }
@@ -684,17 +873,24 @@ namespace CompanionAI_v3.MachineSpirit
                     Config, messages,
                     onResponse: response =>
                     {
-                        _chatHistory.Add(new ChatMessage
+                        if (!string.IsNullOrEmpty(response?.Trim()))
                         {
-                            IsUser = false,
-                            Text = response,
-                            Timestamp = Time.time,
-                            Category = category
-                        });
+                            _chatHistory.Add(new ChatMessage
+                            {
+                                IsUser = false,
+                                Text = response,
+                                Timestamp = Time.time,
+                                Category = category
+                            });
+                        }
                         ChatWindow.SetThinking(false);
                         MaybeSummarize();
                     },
-                    onError: _ => ChatWindow.SetThinking(false)
+                    onError: error =>
+                    {
+                        ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
+                    }
                 ));
             }
         }
@@ -780,14 +976,26 @@ namespace CompanionAI_v3.MachineSpirit
                         _chatHistory[responseIdx] = msg;
                         ChatWindow.SetThinking(false);
                     },
-                    onComplete: () => ChatWindow.SetThinking(false),
+                    onComplete: () =>
+                    {
+                        if (responseIdx < _chatHistory.Count)
+                        {
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                                _chatHistory.RemoveAt(responseIdx);
+                        }
+                        ChatWindow.SetThinking(false);
+                    },
                     onError: error =>
                     {
-                        // Silent fail for greeting
-                        var msg = _chatHistory[responseIdx];
-                        if (string.IsNullOrEmpty(msg.Text))
-                            _chatHistory.RemoveAt(responseIdx);
+                        if (responseIdx < _chatHistory.Count)
+                        {
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                                _chatHistory.RemoveAt(responseIdx);
+                        }
                         ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
                     }
                 ));
             }
@@ -797,16 +1005,23 @@ namespace CompanionAI_v3.MachineSpirit
                     Config, messages,
                     onResponse: response =>
                     {
-                        _chatHistory.Add(new ChatMessage
+                        if (!string.IsNullOrEmpty(response?.Trim()))
                         {
-                            IsUser = false,
-                            Text = response,
-                            Timestamp = Time.time,
-                            Category = MessageCategory.Greeting
-                        });
+                            _chatHistory.Add(new ChatMessage
+                            {
+                                IsUser = false,
+                                Text = response,
+                                Timestamp = Time.time,
+                                Category = MessageCategory.Greeting
+                            });
+                        }
                         ChatWindow.SetThinking(false);
                     },
-                    onError: _ => ChatWindow.SetThinking(false) // Silent fail
+                    onError: error =>
+                    {
+                        ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
+                    }
                 ));
             }
         }
@@ -918,31 +1133,37 @@ namespace CompanionAI_v3.MachineSpirit
                         ChatWindow.SetThinking(false);
                         _idleVisionPending = false;
 
-                        // Check for [SKIP] response
-                        var msg = _chatHistory[responseIdx];
-                        if (msg.Text.Trim().Contains("[SKIP]"))
+                        if (responseIdx < _chatHistory.Count)
                         {
-                            _chatHistory.RemoveAt(responseIdx);
-                            Main.LogDebug("[MachineSpirit] Idle: skipped (nothing interesting)");
-                        }
-                        else
-                        {
-                            _lastActivityTime = Time.time;
-                            ResetIdleTimers();
-                            if (isVision && !string.IsNullOrEmpty(msg.Text))
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()) || msg.Text.Trim().Contains("[SKIP]"))
                             {
-                                string summary = msg.Text.Length > 80 ? msg.Text.Substring(0, 80) + "..." : msg.Text;
-                                GameEventCollector.AddEvent(GameEventType.VisionObservation, null, summary);
+                                _chatHistory.RemoveAt(responseIdx);
+                                Main.LogDebug("[MachineSpirit] Idle: skipped (nothing interesting)");
+                            }
+                            else
+                            {
+                                _lastActivityTime = Time.time;
+                                ResetIdleTimers();
+                                if (isVision && !string.IsNullOrEmpty(msg.Text))
+                                {
+                                    string summary = msg.Text.Length > 80 ? msg.Text.Substring(0, 80) + "..." : msg.Text;
+                                    GameEventCollector.AddEvent(GameEventType.VisionObservation, null, summary);
+                                }
                             }
                         }
                     },
                     onError: error =>
                     {
-                        var msg = _chatHistory[responseIdx];
-                        if (string.IsNullOrEmpty(msg.Text))
-                            _chatHistory.RemoveAt(responseIdx);
+                        if (responseIdx < _chatHistory.Count)
+                        {
+                            var msg = _chatHistory[responseIdx];
+                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                                _chatHistory.RemoveAt(responseIdx);
+                        }
                         ChatWindow.SetThinking(false);
                         _idleVisionPending = false;
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
                     }
                 ));
             }
@@ -952,7 +1173,7 @@ namespace CompanionAI_v3.MachineSpirit
                     Config, messages,
                     onResponse: response =>
                     {
-                        if (!response.Trim().Contains("[SKIP]"))
+                        if (!string.IsNullOrEmpty(response?.Trim()) && !response.Trim().Contains("[SKIP]"))
                         {
                             _chatHistory.Add(new ChatMessage
                             {
@@ -966,7 +1187,11 @@ namespace CompanionAI_v3.MachineSpirit
                         }
                         ChatWindow.SetThinking(false);
                     },
-                    onError: _ => ChatWindow.SetThinking(false)
+                    onError: error =>
+                    {
+                        ChatWindow.SetThinking(false);
+                        Main.LogDebug($"[MachineSpirit] LLM error (silent): {error}");
+                    }
                 ));
             }
         }

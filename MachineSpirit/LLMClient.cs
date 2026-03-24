@@ -93,13 +93,112 @@ namespace CompanionAI_v3.MachineSpirit
         /// 12B models: 8192 (balanced)
         /// 27B+ models: 16384 (maximum context for deep reasoning)
         /// </summary>
+        /// <summary>
+        /// Classify model into size tier: 0=small(1-4B), 1=mid(7-14B), 2=large(27B+).
+        /// Handles both parameter-count naming (gemma3:4b) and known model names (mistral-nemo).
+        /// </summary>
+        public static int GetModelSizeClass(string model)
+        {
+            if (string.IsNullOrEmpty(model)) return 1;
+            string m = model.ToLowerInvariant();
+
+            // Known model name → size mapping (models without size in name)
+            if (m.Contains("mistral-nemo") || m.Contains("nemomix")) return 1;  // 12B
+
+            // Parameter count in name
+            if (m.Contains("27b") || m.Contains("32b") || m.Contains("70b") || m.Contains("big-tiger")) return 2;
+            if (m.Contains("4b") || m.Contains("3b") || m.Contains("1b") || m.Contains("0.6b")) return 0;
+            if (m.Contains("12b") || m.Contains("14b") || m.Contains("7b") || m.Contains("8b")) return 1;
+
+            return 1; // Default: mid-range
+        }
+
         private static int GetOllamaContextSize(string model)
         {
-            if (string.IsNullOrEmpty(model)) return 8192;
+            switch (GetModelSizeClass(model))
+            {
+                case 0: return 4096;   // Small (1-4B)
+                case 2: return 16384;  // Large (27B+)
+                default: return 8192;  // Mid (7-14B)
+            }
+        }
+
+        // ★ v3.71.0: Model family detection for per-family sampling profiles
+        internal enum ModelFamily { Gemma, Mistral, Qwen3, Qwen2, Other }
+
+        internal static ModelFamily DetectFamily(string model)
+        {
+            if (string.IsNullOrEmpty(model)) return ModelFamily.Other;
             string m = model.ToLowerInvariant();
-            if (m.Contains("27b") || m.Contains("70b")) return 16384;
-            if (m.Contains("4b") || m.Contains("3b") || m.Contains("1b")) return 4096;
-            return 8192; // Default for 7B-12B range
+            if (m.Contains("gemma") || m.Contains("big-tiger")) return ModelFamily.Gemma;
+            if (m.Contains("qwen3") || m.Contains("qwq")) return ModelFamily.Qwen3;
+            if (m.Contains("qwen")) return ModelFamily.Qwen2;
+            if (m.Contains("mistral") || m.Contains("nemo") || m.Contains("nemomix") || m.Contains("mixtral")) return ModelFamily.Mistral;
+            return ModelFamily.Other;
+        }
+
+        /// <summary>
+        /// Per-family sampling profile. Each model family has different optimal parameters.
+        /// </summary>
+        private static JObject BuildSamplingOptions(MachineSpiritConfig config, string model)
+        {
+            int numCtx = GetOllamaContextSize(model);
+            var family = DetectFamily(model);
+
+            // ★ v3.71.0: Research-backed optimal parameters per family
+            // Sources: Google official (Gemma), community RP benchmarks (Mistral/NemoMix),
+            //          Qwen official docs, Ollama GitHub issues (#9871, #14493, #10159)
+            switch (family)
+            {
+                case ModelFamily.Gemma:
+                    return new JObject
+                    {
+                        ["temperature"] = 1.0,    // Google official — Ollama may default to 0.1 (bug #9871)
+                        ["top_k"] = 64,            // Google official — Ollama default 40 is too low
+                        ["top_p"] = 0.95,
+                        ["min_p"] = 0.01,
+                        ["repeat_penalty"] = 1.0,  // Must be 1.0 — Gemma degrades with penalty
+                        ["repeat_last_n"] = 256,
+                        ["num_ctx"] = numCtx,
+                        ["num_predict"] = config.MaxTokens
+                    };
+                case ModelFamily.Mistral:
+                    return new JObject
+                    {
+                        ["temperature"] = 1.0,     // Mistral/NeMo: high temp for creative RP
+                        ["top_k"] = 40,
+                        ["top_p"] = 0.95,
+                        ["min_p"] = 0.1,            // Critical — below 0.1 causes logic breakdown
+                        ["repeat_penalty"] = 1.1,   // NeMo has inherent repetition tendency
+                        ["repeat_last_n"] = 128,
+                        ["num_ctx"] = numCtx,
+                        ["num_predict"] = config.MaxTokens
+                    };
+                case ModelFamily.Qwen3:
+                    return new JObject
+                    {
+                        ["temperature"] = 0.7,     // Qwen official — >0.8 causes repetition loops
+                        ["top_k"] = 20,             // Conservative for stability
+                        ["top_p"] = 0.8,
+                        ["min_p"] = 0.05,
+                        ["repeat_penalty"] = 1.05,
+                        ["repeat_last_n"] = 64,
+                        ["num_ctx"] = numCtx,
+                        ["num_predict"] = config.MaxTokens
+                    };
+                default: // Qwen2, Other
+                    return new JObject
+                    {
+                        ["temperature"] = 0.7,     // Qwen2.5 official
+                        ["top_k"] = 20,
+                        ["top_p"] = 0.8,
+                        ["min_p"] = 0.05,
+                        ["repeat_penalty"] = 1.05,
+                        ["repeat_last_n"] = 128,
+                        ["num_ctx"] = numCtx,
+                        ["num_predict"] = config.MaxTokens
+                    };
+            }
         }
 
         /// <summary>
@@ -121,27 +220,19 @@ namespace CompanionAI_v3.MachineSpirit
             }
             _isRequesting = true;
 
-            // Build native Ollama API request with full parameter control
-            // Sampling params based on Gemma 3 research + community best practices:
-            //   top_p=0.95, min_p=0.01 → suppress hallucination without killing creativity
-            //   repeat_penalty=1.0 → Gemma models produce more natural text with penalty disabled
-            //   num_ctx: model-specific (4B→4096, 12B→8192, 27B→16384)
+            // ★ v3.71.0: Per-family sampling profiles
             var requestBody = new JObject
             {
                 ["model"] = config.Model,
                 ["messages"] = JArray.FromObject(messages),
                 ["stream"] = true,
-                ["keep_alive"] = -1, // ★ v3.70.0: Keep model in VRAM permanently — prevents cold start after idle
-                ["options"] = new JObject
-                {
-                    ["temperature"] = config.Temperature,
-                    ["top_p"] = 0.95,
-                    ["min_p"] = 0.01,
-                    ["repeat_penalty"] = 1.0,
-                    ["num_ctx"] = GetOllamaContextSize(config.Model),
-                    ["num_predict"] = config.MaxTokens
-                }
+                ["keep_alive"] = -1,
+                ["options"] = BuildSamplingOptions(config, config.Model)
             };
+
+            // Qwen3: disable thinking mode (outputs <think> blocks otherwise)
+            if (DetectFamily(config.Model) == ModelFamily.Qwen3)
+                requestBody["think"] = false;
 
             // Convert OpenAI-compatible URL (/v1) to native Ollama endpoint (/api/chat)
             string baseUrl = config.ApiUrl.TrimEnd('/');
@@ -160,19 +251,34 @@ namespace CompanionAI_v3.MachineSpirit
 
             var op = request.SendWebRequest();
 
+            // ★ v3.71.0: Qwen3 <think> block filtering (defensive — even with think:false)
+            bool filterThink = DetectFamily(config.Model) == ModelFamily.Qwen3;
+            bool inThinkBlock = false;
+            string thinkBuffer = "";
+
             // Poll for streaming tokens each frame
             while (!op.isDone)
             {
                 string tokens = handler.FlushTokens();
                 if (tokens != null)
-                    onToken?.Invoke(tokens);
+                {
+                    if (filterThink)
+                        tokens = FilterThinkTokens(tokens, ref inThinkBlock, ref thinkBuffer);
+                    if (!string.IsNullOrEmpty(tokens))
+                        onToken?.Invoke(tokens);
+                }
                 yield return null;
             }
 
             // Flush any remaining tokens
             string remaining = handler.FlushTokens();
             if (remaining != null)
-                onToken?.Invoke(remaining);
+            {
+                if (filterThink)
+                    remaining = FilterThinkTokens(remaining, ref inThinkBlock, ref thinkBuffer);
+                if (!string.IsNullOrEmpty(remaining))
+                    onToken?.Invoke(remaining);
+            }
 
             _isRequesting = false;
 
@@ -187,6 +293,77 @@ namespace CompanionAI_v3.MachineSpirit
             }
 
             request.Dispose();
+        }
+
+        /// <summary>
+        /// ★ v3.71.0: Filter out Qwen3 &lt;think&gt;...&lt;/think&gt; blocks from streaming tokens.
+        /// Handles partial tags across chunk boundaries.
+        /// </summary>
+        private static string FilterThinkTokens(string text, ref bool inBlock, ref string buffer)
+        {
+            buffer += text;
+
+            // Inside a think block — look for closing tag
+            if (inBlock)
+            {
+                int closeIdx = buffer.IndexOf("</think>", StringComparison.Ordinal);
+                if (closeIdx >= 0)
+                {
+                    inBlock = false;
+                    buffer = buffer.Substring(closeIdx + 8); // after </think>
+                    return buffer.Length > 0 ? buffer : null;
+                }
+                // Still inside — might have partial </think> at end, keep buffering
+                if (buffer.Length > 200) buffer = buffer.Substring(buffer.Length - 20); // prevent unbounded growth
+                return null;
+            }
+
+            // Not in block — look for opening tag
+            int openIdx = buffer.IndexOf("<think>", StringComparison.Ordinal);
+            if (openIdx >= 0)
+            {
+                string before = buffer.Substring(0, openIdx);
+                string after = buffer.Substring(openIdx + 7);
+
+                // Check if closing tag is in same chunk
+                int closeInSame = after.IndexOf("</think>", StringComparison.Ordinal);
+                if (closeInSame >= 0)
+                {
+                    buffer = after.Substring(closeInSame + 8);
+                    string result = before + buffer;
+                    buffer = "";
+                    return string.IsNullOrEmpty(result) ? null : result;
+                }
+
+                // Opening tag found, no close yet
+                inBlock = true;
+                buffer = "";
+                return string.IsNullOrEmpty(before) ? null : before;
+            }
+
+            // No tags — check for partial "<think" at end
+            if (buffer.Length > 0 && buffer[buffer.Length - 1] == '<')
+            {
+                string safe = buffer.Substring(0, buffer.Length - 1);
+                buffer = "<";
+                return string.IsNullOrEmpty(safe) ? null : safe;
+            }
+
+            // Check for partial "<thin", "<thi", etc.
+            for (int i = System.Math.Min(6, buffer.Length - 1); i >= 1; i--)
+            {
+                if ("<think>".StartsWith(buffer.Substring(buffer.Length - i)))
+                {
+                    string safe = buffer.Substring(0, buffer.Length - i);
+                    buffer = buffer.Substring(buffer.Length - i);
+                    return string.IsNullOrEmpty(safe) ? null : safe;
+                }
+            }
+
+            // All clean
+            string output = buffer;
+            buffer = "";
+            return output;
         }
 
         // ════════════════════════════════════════════════════════════
@@ -298,14 +475,19 @@ namespace CompanionAI_v3.MachineSpirit
                     ["model"] = config.Model,
                     ["messages"] = JArray.FromObject(messages),
                     ["stream"] = false,
-                    ["keep_alive"] = -1, // ★ v3.70.0: Keep model in VRAM permanently
+                    ["keep_alive"] = -1,
                     ["options"] = new JObject
                     {
                         ["temperature"] = 0.3, // Low temperature for factual summary
+                        ["repeat_penalty"] = DetectFamily(config.Model) == ModelFamily.Mistral ? 1.05 : 1.0,
                         ["num_predict"] = 200,
                         ["num_ctx"] = 4096
                     }
                 };
+
+                // Qwen3: disable thinking mode
+                if (DetectFamily(config.Model) == ModelFamily.Qwen3)
+                    requestBody["think"] = false;
             }
             else
             {

@@ -1744,6 +1744,120 @@ namespace CompanionAI_v3.Settings
                 { Language.Chinese, "快速轻量（2GB）。仅英语。最适合低端GPU。" }
             },
 
+            // ── v3.70.0: New Ollama models ──
+            ["MSModel_qwen3_4b"] = new() {
+                { Language.English, "Strong reasoning and instruction following. Excellent multilingual support." },
+                { Language.Korean, "강력한 추론과 지시 추종. 뛰어난 다국어 지원." },
+                { Language.Russian, "Сильное рассуждение и следование инструкциям. Отличная мультиязычность." },
+                { Language.Japanese, "強力な推論と指示追従。優れた多言語サポート。" },
+                { Language.Chinese, "强大的推理和指令遵循。出色的多语言支持。" }
+            },
+            ["MSModel_mistral_nemo"] = new() {
+                { Language.English, "Efficient multilingual tokens — remembers longer conversations. 128K context." },
+                { Language.Korean, "효율적인 다국어 토큰 — 더 긴 대화를 기억. 128K 컨텍스트." },
+                { Language.Russian, "Эффективные мультиязычные токены — помнит длинные разговоры. 128К контекст." },
+                { Language.Japanese, "効率的な多言語トークン — より長い会話を記憶。128Kコンテキスト。" },
+                { Language.Chinese, "高效多语言标记 — 记住更长的对话。128K上下文。" }
+            },
+            ["MSModel_nemomix"] = new() {
+                { Language.English, "Creative storytelling. Unfiltered — no immersion-breaking moral disclaimers." },
+                { Language.Korean, "창의적 스토리텔링. Unfiltered — 몰입을 깨는 도덕적 설교 없음." },
+                { Language.Russian, "Творческое повествование. Без фильтров — без морализаторства." },
+                { Language.Japanese, "創造的なストーリーテリング。フィルターなし — 没入を妨げる道徳的説教なし。" },
+                { Language.Chinese, "创意叙事。无过滤 — 不会因道德说教而打破沉浸感。" }
+            },
+            ["MSModel_gemma3_12b_uf"] = new() {
+                { Language.English, "Gemma 3 12B with safety filters removed. Won't refuse grimdark content." },
+                { Language.Korean, "Gemma 3 12B 안전 필터 제거. 그림다크 콘텐츠를 거부하지 않음." },
+                { Language.Russian, "Gemma 3 12B без фильтров безопасности. Не отказывает в мрачном контенте." },
+                { Language.Japanese, "Gemma 3 12B 安全フィルター除去。グリムダークコンテンツを拒否しない。" },
+                { Language.Chinese, "Gemma 3 12B 去除安全过滤器。不拒绝黑暗内容。" }
+            },
+            ["MSModel_bigtiger"] = new() {
+                { Language.English, "Best for roleplay. Deep character acting and creative narrative. Community favorite." },
+                { Language.Korean, "롤플레이 최강. 깊은 캐릭터 연기와 창의적 서사. 커뮤니티 인기 모델." },
+                { Language.Russian, "Лучшая для ролевых игр. Глубокая игра персонажей. Фаворит сообщества." },
+                { Language.Japanese, "RP最強。深いキャラクター演技と創造的な物語。コミュニティ人気モデル。" },
+                { Language.Chinese, "角色扮演最强。深度角色演绎和创意叙事。社区最爱。" }
+            },
+            ["MSModel_gemma3_27b_uf"] = new() {
+                { Language.English, "Gemma 3 27B with safety filters removed. Maximum quality, unfiltered." },
+                { Language.Korean, "Gemma 3 27B 안전 필터 제거. 최고 품질, 필터 없음." },
+                { Language.Russian, "Gemma 3 27B без фильтров. Максимальное качество без цензуры." },
+                { Language.Japanese, "Gemma 3 27B フィルターなし。最高品質、無検閲。" },
+                { Language.Chinese, "Gemma 3 27B 去除过滤器。最高品质，无审查。" }
+            },
+            ["MSModel_qwen3_14b"] = new() {
+                { Language.English, "Strong reasoning and roleplay. Excellent multilingual. ~10GB VRAM." },
+                { Language.Korean, "강력한 추론과 롤플레이. 뛰어난 다국어 지원. ~10GB VRAM." },
+                { Language.Russian, "Сильное рассуждение и ролевая игра. Отличная мультиязычность. ~10ГБ VRAM." },
+                { Language.Japanese, "強力な推論とRP。優れた多言語サポート。~10GB VRAM。" },
+                { Language.Chinese, "强大的推理和角色扮演。出色的多语言支持。~10GB显存。" }
+            },
+            ["MSModel_qwen3_32b"] = new() {
+                { Language.English, "Strongest reasoning. Best multilingual support. Comparable to GPT-4 class." },
+                { Language.Korean, "최강 추론력. 최고의 다국어 지원. GPT-4급 성능." },
+                { Language.Russian, "Сильнейшее рассуждение. Лучшая мультиязычность. Уровень GPT-4." },
+                { Language.Japanese, "最強の推論力。最高の多言語サポート。GPT-4クラス。" },
+                { Language.Chinese, "最强推理。最佳多语言支持。GPT-4级别。" }
+            },
+            ["MSTierWarning"] = new() {
+                { Language.English, "Requires 24GB+ VRAM (RTX 3090/4090). May cause performance issues." },
+                { Language.Korean, "24GB+ VRAM 필요 (RTX 3090/4090). 성능 문제가 발생할 수 있음." },
+                { Language.Russian, "Требуется 24ГБ+ VRAM (RTX 3090/4090). Возможны проблемы с производительностью." },
+                { Language.Japanese, "24GB+のVRAM必要（RTX 3090/4090）。パフォーマンス問題の可能性あり。" },
+                { Language.Chinese, "需要24GB+显存（RTX 3090/4090）。可能导致性能问题。" }
+            },
+            ["MSUnfilteredNote"] = new() {
+                { Language.English, "Unfiltered models won't break immersion with moral disclaimers during grimdark content (Chaos, Inquisition, violent combat)." },
+                { Language.Korean, "Unfiltered 모델은 그림다크 콘텐츠(카오스, 이단심문, 전투) 묘사 시 도덕적 설교로 몰입을 깨지 않습니다." },
+                { Language.Russian, "Модели без фильтров не прерывают погружение моральными отступлениями при мрачном контенте (Хаос, Инквизиция, бой)." },
+                { Language.Japanese, "フィルターなしモデルはグリムダークコンテンツ（混沌、異端審問、戦闘）で道徳的免責事項により没入を妨げません。" },
+                { Language.Chinese, "无过滤模型不会在黑暗内容（混沌、审判、暴力战斗）中因道德免责声明而打破沉浸感。" }
+            },
+            ["MSAddModel"] = new() {
+                { Language.English, "Add New Model..." },
+                { Language.Korean, "새 모델 추가..." },
+                { Language.Russian, "Добавить модель..." },
+                { Language.Japanese, "新しいモデルを追加..." },
+                { Language.Chinese, "添加新模型..." }
+            },
+            ["MSCustomize"] = new() {
+                { Language.English, "Customize" },
+                { Language.Korean, "설정" },
+                { Language.Russian, "Настройки" },
+                { Language.Japanese, "カスタマイズ" },
+                { Language.Chinese, "自定义" }
+            },
+            ["MSInstallModel"] = new() {
+                { Language.English, "Install Selected Model" },
+                { Language.Korean, "선택한 모델 설치" },
+                { Language.Russian, "Установить модель" },
+                { Language.Japanese, "選択したモデルをインストール" },
+                { Language.Chinese, "安装选定模型" }
+            },
+            ["MSDeleteConfirm"] = new() {
+                { Language.English, "Delete this model?" },
+                { Language.Korean, "이 모델을 삭제하시겠습니까?" },
+                { Language.Russian, "Удалить эту модель?" },
+                { Language.Japanese, "このモデルを削除しますか？" },
+                { Language.Chinese, "删除此模型？" }
+            },
+            ["MSDeleteYes"] = new() {
+                { Language.English, "Yes, Delete" },
+                { Language.Korean, "예, 삭제" },
+                { Language.Russian, "Да, удалить" },
+                { Language.Japanese, "はい、削除" },
+                { Language.Chinese, "是，删除" }
+            },
+            ["MSDeleteNo"] = new() {
+                { Language.English, "Cancel" },
+                { Language.Korean, "취소" },
+                { Language.Russian, "Отмена" },
+                { Language.Japanese, "キャンセル" },
+                { Language.Chinese, "取消" }
+            },
+
             // ── Gemini models ──
             ["MSModel_gemini25flash"] = new() {
                 { Language.English, "Fast & smart. Best balance of speed and quality. Recommended." },
