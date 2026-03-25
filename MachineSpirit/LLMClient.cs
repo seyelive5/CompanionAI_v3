@@ -130,7 +130,7 @@ namespace CompanionAI_v3.MachineSpirit
         {
             if (string.IsNullOrEmpty(model)) return ModelFamily.Other;
             string m = model.ToLowerInvariant();
-            if (m.Contains("gemma") || m.Contains("big-tiger")) return ModelFamily.Gemma;
+            if (m.Contains("gemma") || m.Contains("big-tiger") || m.Contains("daichi") || m.Contains("pascal")) return ModelFamily.Gemma;
             if (m.Contains("qwen3") || m.Contains("qwq")) return ModelFamily.Qwen3;
             if (m.Contains("qwen")) return ModelFamily.Qwen2;
             if (m.Contains("mistral") || m.Contains("nemo") || m.Contains("nemomix") || m.Contains("mixtral")) return ModelFamily.Mistral;
@@ -172,7 +172,13 @@ namespace CompanionAI_v3.MachineSpirit
                         ["repeat_penalty"] = 1.1,   // NeMo has inherent repetition tendency
                         ["repeat_last_n"] = 128,
                         ["num_ctx"] = numCtx,
-                        ["num_predict"] = config.MaxTokens
+                        ["num_predict"] = config.MaxTokens,
+                        // ★ v3.74.0: Stop sequences to prevent RP-tuned models from narrating
+                        ["stop"] = new JArray(
+                            "\n**",            // Bold character name format
+                            "\nLord Captain:", // Writing as player
+                            "\n*"              // Asterisk action narration
+                        )
                     };
                 case ModelFamily.Qwen3:
                     return new JObject
@@ -196,7 +202,13 @@ namespace CompanionAI_v3.MachineSpirit
                         ["repeat_penalty"] = 1.05,
                         ["repeat_last_n"] = 128,
                         ["num_ctx"] = numCtx,
-                        ["num_predict"] = config.MaxTokens
+                        ["num_predict"] = config.MaxTokens,
+                        // ★ v3.74.0: Stop sequences to prevent RP-tuned models from narrating
+                        ["stop"] = new JArray(
+                            "\n**",            // Bold character name format
+                            "\nLord Captain:", // Writing as player
+                            "\n*"              // Asterisk action narration
+                        )
                     };
             }
         }
@@ -303,10 +315,10 @@ namespace CompanionAI_v3.MachineSpirit
         {
             buffer += text;
 
-            // Inside a think block — look for closing tag
+            // Inside a think block — look for closing tag (case-insensitive: <THINK>, <Think>, etc.)
             if (inBlock)
             {
-                int closeIdx = buffer.IndexOf("</think>", StringComparison.Ordinal);
+                int closeIdx = buffer.IndexOf("</think>", StringComparison.OrdinalIgnoreCase);
                 if (closeIdx >= 0)
                 {
                     inBlock = false;
@@ -318,15 +330,15 @@ namespace CompanionAI_v3.MachineSpirit
                 return null;
             }
 
-            // Not in block — look for opening tag
-            int openIdx = buffer.IndexOf("<think>", StringComparison.Ordinal);
+            // Not in block — look for opening tag (case-insensitive)
+            int openIdx = buffer.IndexOf("<think>", StringComparison.OrdinalIgnoreCase);
             if (openIdx >= 0)
             {
                 string before = buffer.Substring(0, openIdx);
                 string after = buffer.Substring(openIdx + 7);
 
-                // Check if closing tag is in same chunk
-                int closeInSame = after.IndexOf("</think>", StringComparison.Ordinal);
+                // Check if closing tag is in same chunk (case-insensitive)
+                int closeInSame = after.IndexOf("</think>", StringComparison.OrdinalIgnoreCase);
                 if (closeInSame >= 0)
                 {
                     buffer = after.Substring(closeInSame + 8);
@@ -341,7 +353,7 @@ namespace CompanionAI_v3.MachineSpirit
                 return string.IsNullOrEmpty(before) ? null : before;
             }
 
-            // No tags — check for partial "<think" at end
+            // No tags — check for partial "<think" at end (case-insensitive)
             if (buffer.Length > 0 && buffer[buffer.Length - 1] == '<')
             {
                 string safe = buffer.Substring(0, buffer.Length - 1);
@@ -349,10 +361,11 @@ namespace CompanionAI_v3.MachineSpirit
                 return string.IsNullOrEmpty(safe) ? null : safe;
             }
 
-            // Check for partial "<thin", "<thi", etc.
+            // Check for partial "<thin", "<thi", etc. (case-insensitive)
             for (int i = System.Math.Min(6, buffer.Length - 1); i >= 1; i--)
             {
-                if ("<think>".StartsWith(buffer.Substring(buffer.Length - i)))
+                string tail = buffer.Substring(buffer.Length - i).ToLowerInvariant();
+                if ("<think>".StartsWith(tail, StringComparison.Ordinal))
                 {
                     string safe = buffer.Substring(0, buffer.Length - i);
                     buffer = buffer.Substring(buffer.Length - i);
@@ -364,6 +377,37 @@ namespace CompanionAI_v3.MachineSpirit
             string output = buffer;
             buffer = "";
             return output;
+        }
+
+        /// <summary>
+        /// ★ v3.74.0: Strip narration patterns from RP-tuned model output.
+        /// Called on accumulated response text, not individual tokens.
+        /// </summary>
+        internal static string StripNarration(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+
+            // Remove *action descriptions* (asterisk-wrapped text)
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"\*[^*]+\*", "");
+
+            // Remove **Bold Name:** dialogue format
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"\*\*\w+:\*\*\s*", "");
+
+            // Remove lines starting with third-person narration
+            var lines = text.Split('\n');
+            var sb = new StringBuilder();
+            foreach (var line in lines)
+            {
+                string trimmed = line.TrimStart();
+                // Skip lines that start with third-person narration patterns
+                if (System.Text.RegularExpressions.Regex.IsMatch(trimmed,
+                    @"^(She |He |They |The \w+ |[A-Z]\w+ (said|walked|looked|raised|drew|turned|smiled|nodded|shook|whispered|muttered|sighed|laughed|frowned|grinned|glanced))"))
+                    continue;
+                if (sb.Length > 0) sb.Append('\n');
+                sb.Append(line);
+            }
+
+            return sb.ToString().Trim();
         }
 
         // ════════════════════════════════════════════════════════════

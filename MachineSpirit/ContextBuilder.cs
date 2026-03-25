@@ -73,49 +73,59 @@ namespace CompanionAI_v3.MachineSpirit
         // ── RULES: Critical behavioral constraints (identical across ALL personalities) ──
 
         private const string RULES_EN = @"CRITICAL RULES:
-- The person chatting with you IS the Lord Captain. Address them as such. They command you and the voidship.
+- The person chatting with you IS the Lord Captain. Address them as such.
 - You are ONE character: the Machine Spirit. Speak ONLY as yourself in first person.
-- NEVER write dialogue for crew members. NEVER use formats like ""**Name:** dialogue"" or quote what characters say.
-- You COMMENT ON what happens. You do NOT narrate or roleplay as other characters.
-- Good example: ""Sensors confirm another heretic purged, Lord Captain. Argenta's efficiency rating rises to 94.7% — the Omnissiah would approve.""
-- Bad example (NEVER do this): ""**Argenta:** 'The unclean are purified!'"" ""**Cassia:** 'Another one down.'""
-- VARIETY: Never reuse the same opening phrase or interjection from your recent messages. Each response must use a different angle, structure, and vocabulary. Focus on what specifically CHANGED — not the same observations again.";
+- You are a CHATBOT, not a narrator, not a dungeon master, not a storyteller.
+- NEVER narrate in third person. NEVER describe what crew members do, think, or feel.
+- NEVER write prose like a novel. No ""she raised an eyebrow"", no ""he slowly drew his blade"".
+- NEVER write dialogue for others. No ""**Name:** quote"" format. No quoting what characters say.
+- NEVER invent scenes, actions, or events that aren't in the game data you received.
+- You REACT and COMMENT on events. You do NOT create or narrate them.
+- VARIETY: Never reuse the same opening phrase from recent messages. Each response needs a different angle.";
 
         private const string RULES_KO = @"절대 규칙:
-- 너에게 말을 거는 사람이 바로 로드 캡틴이다. 그에 맞게 호칭하라. 그가 너와 이 함선의 지휘관이다.
+- 너에게 말을 거는 사람이 바로 로드 캡틴이다. 그에 맞게 호칭하라.
 - 너는 오직 하나의 캐릭터: 머신 스피릿이다. 오직 너 자신으로서 1인칭으로만 말하라.
-- 절대로 승무원 대사를 작성하지 마라. ""**이름:** 대사"" 같은 형식 금지. 캐릭터를 인용하지 마라.
-- 너는 일어난 일에 대해 코멘트하는 것이다. 다른 캐릭터의 역할극을 하는 것이 아니다.
-- 좋은 예: ""로드 캡틴, 센서가 또 하나의 이단자 제거를 확인했습니다. 아르젠타의 효율 등급이 94.7%로 상승 — 옴니시아께서 기뻐하시겠군요.""
-- 나쁜 예 (절대 금지): ""**아르젠타:** '불결한 자, 정화되었다!'"" ""**카시아:** '하나 줄었네요.'""
-- 다양성: 최근 메시지에서 사용한 도입부나 추임새를 절대 반복하지 마라. 매번 다른 관점, 구조, 어휘를 사용하라. 같은 관찰이 아닌 무엇이 변했는지에 집중하라.";
+- 너는 챗봇이다. 나레이터도, 던전 마스터도, 소설가도 아니다.
+- 절대 3인칭으로 서술하지 마라. 승무원이 뭘 하는지, 생각하는지, 느끼는지 묘사 금지.
+- 소설 같은 문체 금지. ""그녀는 눈썹을 치켜올리더니"", ""그는 천천히 단검을 뽑았다"" 같은 표현 절대 금지.
+- 다른 캐릭터의 대사 작성 금지. ""**이름:** 대사"" 형식 금지. 인용 금지.
+- 게임 데이터에 없는 장면, 행동, 사건을 지어내지 마라.
+- 너는 이벤트에 반응하고 코멘트하는 것이다. 이벤트를 만들거나 서술하는 것이 아니다.
+- 다양성: 최근 메시지와 같은 도입부를 반복하지 마라. 매번 다른 관점으로.";
 
         private const string RULES_RU = @"Критические правила:
-- Тот, кто с тобой говорит — это Лорд-Капитан. Обращайся к нему соответственно. Он командует тобой и кораблём.
+- Тот, кто с тобой говорит — это Лорд-Капитан. Обращайся к нему соответственно.
 - Ты ОДИН персонаж: Дух Машины. Говори ТОЛЬКО от своего лица, от первого лица.
-- НИКОГДА не пиши реплики членов экипажа. ЗАПРЕЩЕНЫ форматы типа ""**Имя:** реплика"". Не цитируй персонажей.
-- Ты КОММЕНТИРУЕШЬ происходящее. Ты НЕ играешь роли других персонажей.
-- Хороший пример: ""Сенсоры подтверждают уничтожение ещё одного еретика, Лорд-Капитан. Рейтинг эффективности Аргенты — 94.7%. Омниссия одобрит.""
-- Плохой пример (ЗАПРЕЩЕНО): ""**Аргента:** 'Нечестивые очищены!'"" ""**Кассия:** 'Ещё одним меньше.'""
-- РАЗНООБРАЗИЕ: Никогда не повторяй одну и ту же вступительную фразу или междометие из последних сообщений. Каждый ответ должен использовать другой ракурс, структуру и лексику. Сосредоточься на том, что ИЗМЕНИЛОСЬ.";
+- Ты ЧАТБОТ, не рассказчик, не мастер подземелий, не писатель.
+- НИКОГДА не повествуй от третьего лица. Не описывай что делают, думают или чувствуют члены экипажа.
+- ЗАПРЕЩЕНА проза в стиле романа. Никаких ""она подняла бровь"", ""он медленно потянулся к кинжалу"".
+- НИКОГДА не пиши диалоги за других. Запрещён формат ""**Имя:** реплика"". Не цитируй.
+- НЕ ВЫДУМЫВАЙ сцены, действия или события, которых нет в данных.
+- Ты РЕАГИРУЕШЬ и КОММЕНТИРУЕШЬ события. Ты их НЕ создаёшь и НЕ повествуешь.
+- РАЗНООБРАЗИЕ: Не повторяй одно и то же вступление из последних сообщений. Каждый раз другой ракурс.";
 
         private const string RULES_JA = @"絶対ルール:
-- お前に話しかけている者こそロード・キャプテンだ。それに相応しく呼びかけよ。彼がお前とこの艦の指揮官だ。
+- お前に話しかけている者こそロード・キャプテンだ。それに相応しく呼びかけよ。
 - お前は一つのキャラクター：マシン・スピリットだ。自分自身としてのみ、一人称で話せ。
-- 絶対に乗組員の台詞を書くな。""**名前:** 台詞""のような形式は禁止。キャラクターを引用するな。
-- お前は起きたことにコメントする。他のキャラクターのロールプレイをするのではない。
-- 良い例：""ロード・キャプテン、センサーが異端者の排除を確認。アルジェンタの効率評価が94.7%に上昇 — オムニシアもお喜びだろう。""
-- 悪い例（絶対禁止）：""**アルジェンタ:** '不浄なる者よ、浄化された！'"" ""**カシア:** '一つ減りましたね。'""
-- 多様性：最近のメッセージと同じ冒頭や感嘆詞を絶対に繰り返すな。毎回異なる視点、構造、語彙を使え。同じ観察ではなく、何が変わったかに集中せよ。";
+- お前はチャットボットだ。ナレーターでもDMでも小説家でもない。
+- 絶対に三人称で語るな。乗組員が何をし、考え、感じるかを描写するな。
+- 小説のような文体は禁止。「彼女は眉を上げ」「彼はゆっくりと短剣を抜いた」は絶対禁止。
+- 他キャラの台詞を書くな。「**名前:** 台詞」形式は禁止。引用禁止。
+- ゲームデータにない場面、行動、出来事を作り出すな。
+- お前はイベントに反応しコメントする。イベントを作ったり語ったりするのではない。
+- 多様性：最近のメッセージと同じ冒頭を繰り返すな。毎回異なる視点で。";
 
         private const string RULES_ZH = @"核心规则：
-- 与你对话的人就是领主舰长。以相应的称呼称呼他们。他们指挥着你和这艘虚空飞船。
+- 与你对话的人就是领主舰长。以相应的称呼称呼他们。
 - 你是唯一的角色：机魂。只以你自己的身份用第一人称说话。
-- 绝对不要为船员编写对话。禁止使用""**姓名：** 台词""这样的格式，也不要引用角色的话语。
-- 你是对发生之事进行评论，而非扮演或叙述其他角色。
-- 正确示范：""传感器确认又一名异端被清除，领主舰长。阿尔真塔的效率评级升至94.7%——万机神定会赞许。""
-- 错误示范（绝对禁止）：""**阿尔真塔：** '不洁之物已被净化！'"" ""**卡西亚：** '又少了一个。'""
-- 多样性：绝不重复最近消息中使用过的开头或感叹词。每次回复都要使用不同的角度、结构和词汇。关注具体发生了什么变化，而非重复相同的观察。";
+- 你是聊天机器人，不是叙述者，不是地下城主，不是小说家。
+- 绝对不要用第三人称叙述。不要描述船员在做什么、想什么、感受什么。
+- 禁止小说式文体。不要写""她挑起眉毛""、""他缓缓拔出匕首""之类的内容。
+- 绝对不要为其他角色编写对话。禁止""**姓名：** 台词""格式，不要引用。
+- 不要编造游戏数据中没有的场景、行动或事件。
+- 你是对事件做出反应和评论。不是创造或叙述事件。
+- 多样性：不要重复最近消息中使用过的开头。每次用不同的角度。";
 
         // ── PERSONALITY: Mechanicus (Omnissiah-worshipping tech-priest, default) ──
 
@@ -681,6 +691,56 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
         }
 
         /// <summary>
+        /// ★ v3.72.0: Slim party context for small models — names + HP% only,
+        /// skips equipment, buffs, and stats to save ~300 tokens.
+        /// </summary>
+        private static string BuildPartyContextSlim()
+        {
+            try
+            {
+                var party = Game.Instance?.Player?.PartyAndPets;
+                if (party == null || party.Count == 0) return null;
+
+                BaseUnitEntity mainChar = null;
+                try { mainChar = Game.Instance?.Player?.MainCharacterEntity; } catch { }
+
+                var sb = new StringBuilder();
+                sb.AppendLine("[CREW ROSTER]");
+
+                foreach (var unit in party)
+                {
+                    if (unit == null) continue;
+                    string name = unit.CharacterName ?? "Unknown";
+
+                    if (unit.IsPet)
+                    {
+                        sb.AppendLine($"- {name} (Pet)");
+                        continue;
+                    }
+
+                    bool isLordCaptain = mainChar != null && unit == mainChar;
+                    string hpInfo = "";
+                    try
+                    {
+                        float hpPct = unit.Health.HitPointsLeft / (float)Math.Max(1, unit.Health.MaxHitPoints);
+                        hpInfo = $" {hpPct:P0} HP";
+                        if (hpPct < 0.3f) hpInfo += " CRITICAL";
+                        else if (hpPct < 0.6f) hpInfo += " wounded";
+                    }
+                    catch { }
+
+                    sb.AppendLine($"- {name}{(isLordCaptain ? " (Lord Captain)" : "")}{hpInfo}");
+                }
+
+                return sb.ToString();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Build hostile forces context during active combat.
         /// ★ v3.64.0: Enhanced with round, momentum, engagement alerts, kill log.
         /// </summary>
@@ -906,7 +966,8 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
             if (dialogues.Count < 2) return null; // Need at least 2 lines for meaningful context
 
             var sb = new StringBuilder();
-            sb.AppendLine("[ACTIVE DIALOGUE — NPC Conversation Transcript]");
+            // ★ v3.74.0: Reframed as cogitator transcript — no quotes to prevent RP continuation
+            sb.AppendLine("[ACTIVE DIALOGUE — COGITATOR TRANSCRIPT]");
             sb.AppendLine("(You are observing this conversation. Comment on the content, not the format.)");
 
             foreach (var evt in dialogues)
@@ -914,7 +975,7 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
                 string speaker = evt.Speaker;
                 if (string.IsNullOrEmpty(speaker) || speaker == "Unknown")
                     speaker = "Narrator";
-                sb.AppendLine($"  {speaker}: \"{evt.Text}\"");
+                sb.AppendLine($"  {speaker}: {evt.Text}");
             }
 
             return sb.ToString();
@@ -1201,6 +1262,9 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
         {
             var systemSb = new StringBuilder(GetSystemPrompt());
 
+            // ★ v3.72.0: Small model budget — skip heavy sections to stay within 4K context
+            bool isSmall = IsSmallModel(config);
+
             // ★ Conversation summary (from background summarization)
             if (!string.IsNullOrEmpty(conversationSummary))
             {
@@ -1224,7 +1288,8 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
             }
 
             // Party roster as sensor data
-            string partyContext = BuildPartyContext();
+            // ★ v3.72.0: Small models get slim party context (names + HP% only)
+            string partyContext = isSmall ? BuildPartyContextSlim() : BuildPartyContext();
 
             if (!string.IsNullOrEmpty(partyContext))
             {
@@ -1236,17 +1301,21 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
             }
 
             // ★ v3.68.0: World state — quests, economy, factions
-            string worldContext = BuildWorldContext();
-            if (!string.IsNullOrEmpty(worldContext))
+            // ★ v3.72.0: Skip for small models (saves ~200 tokens)
+            if (!isSmall)
             {
-                if (!hasSensorHeader)
+                string worldContext = BuildWorldContext();
+                if (!string.IsNullOrEmpty(worldContext))
                 {
-                    systemSb.AppendLine();
-                    systemSb.AppendLine();
-                    systemSb.AppendLine("--- SENSOR DATA (read-only observations, do NOT copy or repeat these) ---");
-                    hasSensorHeader = true;
+                    if (!hasSensorHeader)
+                    {
+                        systemSb.AppendLine();
+                        systemSb.AppendLine();
+                        systemSb.AppendLine("--- SENSOR DATA (read-only observations, do NOT copy or repeat these) ---");
+                        hasSensorHeader = true;
+                    }
+                    systemSb.AppendLine(worldContext);
                 }
-                systemSb.AppendLine(worldContext);
             }
 
             // ★ v3.68.0: Location intel — area + active quests from blueprints
@@ -1296,17 +1365,23 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
             }
 
             // ★ v3.68.0: NPC dialogue transcript — full conversation context
-            string dialogueTranscript = BuildDialogueTranscript();
-            if (!string.IsNullOrEmpty(dialogueTranscript))
+            // ★ v3.72.0: Only inject during active dialogue scenes to prevent context pollution
+            bool inDialogue = false;
+            try { inDialogue = Kingmaker.Game.Instance?.DialogController?.Dialog != null; } catch { }
+            if (inDialogue)
             {
-                if (!hasSensorHeader)
+                string dialogueTranscript = BuildDialogueTranscript();
+                if (!string.IsNullOrEmpty(dialogueTranscript))
                 {
-                    systemSb.AppendLine();
-                    systemSb.AppendLine();
-                    systemSb.AppendLine("--- SENSOR DATA (read-only observations, do NOT copy or repeat these) ---");
-                    hasSensorHeader = true;
+                    if (!hasSensorHeader)
+                    {
+                        systemSb.AppendLine();
+                        systemSb.AppendLine();
+                        systemSb.AppendLine("--- SENSOR DATA (read-only observations, do NOT copy or repeat these) ---");
+                        hasSensorHeader = true;
+                    }
+                    systemSb.AppendLine(dialogueTranscript);
                 }
-                systemSb.AppendLine(dialogueTranscript);
             }
 
             // Recent events as sensor log (expanded to 20 for richer context)
@@ -1320,15 +1395,16 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
                     systemSb.AppendLine("--- SENSOR DATA (read-only observations, do NOT copy or repeat these) ---");
                 }
                 systemSb.AppendLine("[Sensor log]");
-                // ★ v3.68.0: Generous sensor log — local AI has unlimited tokens
-                int maxEvents = (config?.Provider == ApiProvider.Ollama && IsSmallModel(config)) ? 20 : 30;
+                // ★ v3.72.0: Small models get fewer events to stay within context budget
+                int maxEvents = isSmall ? 10 : 30;
                 int start = events.Count > maxEvents ? events.Count - maxEvents : 0;
                 for (int i = start; i < events.Count; i++)
                     systemSb.AppendLine(events[i].ToString());
             }
 
             // ★ v3.66.0: Anti-repetition — feed recent openings as "don't repeat these"
-            if (chatHistory != null)
+            // ★ v3.72.0: Skip for small models (saves 200-300 tokens)
+            if (!isSmall && chatHistory != null && chatHistory.Count > 0)
             {
                 string antiRep = BuildAntiRepetitionContext(chatHistory);
                 if (!string.IsNullOrEmpty(antiRep))
@@ -1370,6 +1446,14 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
                     systemSb.AppendLine("- ALWAYS respond in the SAME LANGUAGE as the user's message.");
                 }
             }
+
+            // ★ v3.74.0: Anti-narration anchor — placed near generation point for maximum effect
+            systemSb.AppendLine();
+            var antiNarFamily = config != null ? LLMClient.DetectFamily(config.Model) : LLMClient.ModelFamily.Other;
+            if (antiNarFamily == LLMClient.ModelFamily.Mistral)
+                systemSb.AppendLine("[ABSOLUTE: You are a chatbot. NEVER write prose, actions, or narration. Only commentary in first person.]");
+            else
+                systemSb.AppendLine("[REMINDER: Respond as Machine Spirit only. First person. No narration.]");
 
             return systemSb.ToString();
         }
@@ -1471,7 +1555,7 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
             for (int i = histStart; i < chatHistory.Count; i++)
             {
                 var msg = chatHistory[i];
-                if (string.IsNullOrEmpty(msg.Text?.Trim())) continue; // Skip empty messages
+                if (string.IsNullOrWhiteSpace(msg.Text)) continue; // Skip empty messages
                 // Skip internal system notifications (not real conversation)
                 if (!msg.IsUser && msg.Text.StartsWith("[")) continue;
                 string role = msg.IsUser ? "user" : "assistant";
@@ -1586,11 +1670,23 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
             for (int i = start; i < chatHistory.Count; i++)
             {
                 var msg = chatHistory[i];
-                messages.Add(new LLMClient.ChatMessage
+                if (string.IsNullOrWhiteSpace(msg.Text)) continue; // ★ Skip empty history messages
+                // Skip internal system notifications (not real conversation)
+                if (!msg.IsUser && msg.Text.StartsWith("[")) continue;
+                string role = msg.IsUser ? "user" : "assistant";
+                string content = msg.Text;
+
+                // Merge consecutive same-role messages (prevents API errors)
+                if (messages.Count > 0 && messages[messages.Count - 1].Role == role)
                 {
-                    Role = msg.IsUser ? "user" : "assistant",
-                    Content = msg.Text
-                });
+                    var last = messages[messages.Count - 1];
+                    last.Content += "\n" + content;
+                    messages[messages.Count - 1] = last;
+                }
+                else
+                {
+                    messages.Add(new LLMClient.ChatMessage { Role = role, Content = content });
+                }
             }
 
             // Add user query with system injection for Gemma/Mistral
@@ -1648,7 +1744,8 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
                 Language.Chinese => "认知体截获了这段对话。用你的角色身份简短评论（1-2句）。如果对话无趣，只回复[SKIP]。",
                 _ => "Cogitator intercepted this conversation. Comment briefly in character (1-2 sentences). If the dialogue is mundane, respond with [SKIP] only."
             };
-            string prompt = $"[VOX INTERCEPT] {evt.Speaker} said: \"{evt.Text}\"\n{instruction}";
+            // ★ v3.74.0: Reframed as cogitator log — no quotes to prevent RP continuation
+            string prompt = $"[COGITATOR LOG] Vox activity detected — {evt.Speaker} discussed: {evt.Text}\n{instruction}";
             return Build(chatHistory, config, prompt, conversationSummary);
         }
 
@@ -1662,11 +1759,12 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
         {
             var dialogueLines = GameEventCollector.DialogueBuffer;
             var sb = new StringBuilder();
-            sb.AppendLine("[DIALOGUE SCENE STARTING]");
+            // ★ v3.74.0: Reframed as cogitator sensor data
+            sb.AppendLine("[COGITATOR LOG — DIALOGUE SCENE STARTING]");
             if (dialogueLines.Count > 0)
             {
                 foreach (var line in dialogueLines)
-                    sb.AppendLine($"  {line.Speaker}: {line.Text}");
+                    sb.AppendLine($"  — {line.Speaker} discussed: {line.Text}");
             }
 
             var lang = Main.Settings?.UILanguage ?? Language.English;
@@ -1693,11 +1791,12 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
         {
             var dialogueLines = GameEventCollector.DialogueBuffer;
             var sb = new StringBuilder();
-            sb.AppendLine("[DIALOGUE SCENE CONCLUDED — FULL TRANSCRIPT]");
+            // ★ v3.74.0: Reframed as cogitator sensor data
+            sb.AppendLine("[COGITATOR LOG — DIALOGUE SCENE CONCLUDED]");
             if (dialogueLines.Count > 0)
             {
                 foreach (var line in dialogueLines)
-                    sb.AppendLine($"  {line.Speaker}: {line.Text}");
+                    sb.AppendLine($"  — {line.Speaker} discussed: {line.Text}");
             }
 
             var lang = Main.Settings?.UILanguage ?? Language.English;

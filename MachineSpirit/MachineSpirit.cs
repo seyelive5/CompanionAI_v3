@@ -25,6 +25,7 @@ namespace CompanionAI_v3.MachineSpirit
         private static float _lastDialogueCommentTime; // ★ v3.66.0
         private static float _lastAreaTransitionTime;
         private static bool _hasGreeted;
+        private static bool _isTemplateChecking; // ★ v3.72.0: Block LLM calls during template check
 
         // ★ v3.60.0: Idle commentary
         private static float _lastActivityTime;
@@ -89,18 +90,27 @@ namespace CompanionAI_v3.MachineSpirit
         /// </summary>
         private static IEnumerator CheckAndApplyTemplateFix()
         {
-            // Small delay to let Ollama server be ready
-            yield return new UnityEngine.WaitForSeconds(2f);
-
-            if (Config == null || Config.Provider != ApiProvider.Ollama) yield break;
-
-            yield return OllamaSetup.CheckAndFixTemplate(Config.Model);
-
-            if (!string.IsNullOrEmpty(OllamaSetup.TemplateFixedModel))
+            _isTemplateChecking = true;
+            try
             {
-                Main.LogDebug($"[MachineSpirit] Switching to template-fixed model: {OllamaSetup.TemplateFixedModel}");
-                Config.Model = OllamaSetup.TemplateFixedModel;
-                OllamaSetup.TemplateFixedModel = null;
+                // Small delay to let Ollama server be ready
+                yield return new UnityEngine.WaitForSeconds(2f);
+
+                if (Config == null || Config.Provider != ApiProvider.Ollama)
+                    yield break;
+
+                yield return OllamaSetup.CheckAndFixTemplate(Config.Model);
+
+                if (!string.IsNullOrEmpty(OllamaSetup.TemplateFixedModel))
+                {
+                    Main.LogDebug($"[MachineSpirit] Switching to template-fixed model: {OllamaSetup.TemplateFixedModel}");
+                    Config.Model = OllamaSetup.TemplateFixedModel;
+                    OllamaSetup.TemplateFixedModel = null;
+                }
+            }
+            finally
+            {
+                _isTemplateChecking = false;
             }
         }
 
@@ -169,6 +179,11 @@ namespace CompanionAI_v3.MachineSpirit
                     _chatHistory.AddRange(data.Messages);
                     _conversationSummary = data.Summary;
                     _summarizedUpToIndex = 0; // Will re-evaluate on next summarization pass
+
+                    // ★ v3.72.0: Clear stale event/dialogue buffers on history restore
+                    GameEventCollector.ClearDialogueBuffer();
+                    GameEventCollector.ClearEvents();
+
                     Main.LogDebug($"[MachineSpirit] Chat loaded: {_chatHistory.Count} messages");
                 }
             }
@@ -320,7 +335,11 @@ namespace CompanionAI_v3.MachineSpirit
                         if (responseIdx < _chatHistory.Count)
                         {
                             var msg = _chatHistory[responseIdx];
-                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                            // ★ v3.74.0: Strip narration patterns from RP models
+                            msg.Text = LLMClient.StripNarration(msg.Text);
+                            _chatHistory[responseIdx] = msg;
+
+                            if (string.IsNullOrWhiteSpace(msg.Text))
                                 _chatHistory.RemoveAt(responseIdx);
                         }
                         ChatWindow.SetThinking(false);
@@ -398,7 +417,11 @@ namespace CompanionAI_v3.MachineSpirit
                         if (responseIdx < _chatHistory.Count)
                         {
                             var msg = _chatHistory[responseIdx];
-                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                            // ★ v3.74.0: Strip narration patterns from RP models
+                            msg.Text = LLMClient.StripNarration(msg.Text);
+                            _chatHistory[responseIdx] = msg;
+
+                            if (string.IsNullOrWhiteSpace(msg.Text))
                                 _chatHistory.RemoveAt(responseIdx);
                         }
                         ChatWindow.SetThinking(false);
@@ -450,6 +473,7 @@ namespace CompanionAI_v3.MachineSpirit
         public static void OnDialogueEvent(GameEvent evt)
         {
             if (!IsActive) return;
+            if (_isTemplateChecking) return;
             if (LLMClient.IsRequesting) return;
             if (Config?.IdleMode == IdleFrequency.Off) return; // Respect idle setting
             if (Time.time - _lastDialogueCommentTime < DIALOGUE_COOLDOWN) return;
@@ -481,7 +505,11 @@ namespace CompanionAI_v3.MachineSpirit
                         if (responseIdx < _chatHistory.Count)
                         {
                             var msg = _chatHistory[responseIdx];
-                            if (string.IsNullOrEmpty(msg.Text?.Trim()) || msg.Text.Trim().Contains("[SKIP]"))
+                            // ★ v3.74.0: Strip narration patterns from RP models
+                            msg.Text = LLMClient.StripNarration(msg.Text);
+                            _chatHistory[responseIdx] = msg;
+
+                            if (string.IsNullOrWhiteSpace(msg.Text) || msg.Text.Trim().Contains("[SKIP]"))
                             {
                                 _chatHistory.RemoveAt(responseIdx);
                                 Main.LogDebug("[MachineSpirit] Dialogue: skipped (uninteresting)");
@@ -558,7 +586,11 @@ namespace CompanionAI_v3.MachineSpirit
                         if (responseIdx < _chatHistory.Count)
                         {
                             var msg = _chatHistory[responseIdx];
-                            if (string.IsNullOrEmpty(msg.Text?.Trim()) || msg.Text.Trim().Contains("[SKIP]"))
+                            // ★ v3.74.0: Strip narration patterns from RP models
+                            msg.Text = LLMClient.StripNarration(msg.Text);
+                            _chatHistory[responseIdx] = msg;
+
+                            if (string.IsNullOrWhiteSpace(msg.Text) || msg.Text.Trim().Contains("[SKIP]"))
                                 _chatHistory.RemoveAt(responseIdx);
                         }
                         ChatWindow.SetThinking(false);
@@ -619,7 +651,11 @@ namespace CompanionAI_v3.MachineSpirit
                         if (responseIdx < _chatHistory.Count)
                         {
                             var msg = _chatHistory[responseIdx];
-                            if (string.IsNullOrEmpty(msg.Text?.Trim()) || msg.Text.Trim().Contains("[SKIP]"))
+                            // ★ v3.74.0: Strip narration patterns from RP models
+                            msg.Text = LLMClient.StripNarration(msg.Text);
+                            _chatHistory[responseIdx] = msg;
+
+                            if (string.IsNullOrWhiteSpace(msg.Text) || msg.Text.Trim().Contains("[SKIP]"))
                                 _chatHistory.RemoveAt(responseIdx);
                         }
                         ChatWindow.SetThinking(false);
@@ -662,6 +698,7 @@ namespace CompanionAI_v3.MachineSpirit
         public static void OnAreaTransition(GameEvent evt)
         {
             if (!IsActive) return;
+            if (_isTemplateChecking) return;
             if (LLMClient.IsRequesting) return;
             if (Time.time - _lastAreaTransitionTime < AREA_TRANSITION_COOLDOWN) return;
 
@@ -696,7 +733,11 @@ namespace CompanionAI_v3.MachineSpirit
                         if (responseIdx < _chatHistory.Count)
                         {
                             var msg = _chatHistory[responseIdx];
-                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                            // ★ v3.74.0: Strip narration patterns from RP models
+                            msg.Text = LLMClient.StripNarration(msg.Text);
+                            _chatHistory[responseIdx] = msg;
+
+                            if (string.IsNullOrWhiteSpace(msg.Text))
                                 _chatHistory.RemoveAt(responseIdx);
                         }
                         ChatWindow.SetThinking(false);
@@ -811,6 +852,7 @@ namespace CompanionAI_v3.MachineSpirit
         public static void OnMergedEvents(List<GameEvent> events)
         {
             if (!IsActive) return;
+            if (_isTemplateChecking) return;
             if (LLMClient.IsRequesting) return;
 
             _lastActivityTime = Time.time;
@@ -848,7 +890,11 @@ namespace CompanionAI_v3.MachineSpirit
                         if (responseIdx < _chatHistory.Count)
                         {
                             var msg = _chatHistory[responseIdx];
-                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                            // ★ v3.74.0: Strip narration patterns from RP models
+                            msg.Text = LLMClient.StripNarration(msg.Text);
+                            _chatHistory[responseIdx] = msg;
+
+                            if (string.IsNullOrWhiteSpace(msg.Text))
                                 _chatHistory.RemoveAt(responseIdx);
                         }
                         ChatWindow.SetThinking(false);
@@ -907,7 +953,7 @@ namespace CompanionAI_v3.MachineSpirit
             if (!IsActive) return;
 
             // ★ v3.66.0: Session greeting — wait 3 seconds after init for provider readiness
-            if (!_hasGreeted && Time.time - _lastActivityTime > 3f)
+            if (!_hasGreeted && !_isTemplateChecking && Time.time - _lastActivityTime > 3f)
             {
                 _hasGreeted = true;
                 TriggerGreeting();
@@ -981,7 +1027,11 @@ namespace CompanionAI_v3.MachineSpirit
                         if (responseIdx < _chatHistory.Count)
                         {
                             var msg = _chatHistory[responseIdx];
-                            if (string.IsNullOrEmpty(msg.Text?.Trim()))
+                            // ★ v3.74.0: Strip narration patterns from RP models
+                            msg.Text = LLMClient.StripNarration(msg.Text);
+                            _chatHistory[responseIdx] = msg;
+
+                            if (string.IsNullOrWhiteSpace(msg.Text))
                                 _chatHistory.RemoveAt(responseIdx);
                         }
                         ChatWindow.SetThinking(false);
@@ -1136,7 +1186,11 @@ namespace CompanionAI_v3.MachineSpirit
                         if (responseIdx < _chatHistory.Count)
                         {
                             var msg = _chatHistory[responseIdx];
-                            if (string.IsNullOrEmpty(msg.Text?.Trim()) || msg.Text.Trim().Contains("[SKIP]"))
+                            // ★ v3.74.0: Strip narration patterns from RP models
+                            msg.Text = LLMClient.StripNarration(msg.Text);
+                            _chatHistory[responseIdx] = msg;
+
+                            if (string.IsNullOrWhiteSpace(msg.Text) || msg.Text.Trim().Contains("[SKIP]"))
                             {
                                 _chatHistory.RemoveAt(responseIdx);
                                 Main.LogDebug("[MachineSpirit] Idle: skipped (nothing interesting)");

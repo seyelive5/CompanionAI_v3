@@ -1759,12 +1759,19 @@ namespace CompanionAI_v3.Settings
                 { Language.Japanese, "効率的な多言語トークン — より長い会話を記憶。128Kコンテキスト。" },
                 { Language.Chinese, "高效多语言标记 — 记住更长的对话。128K上下文。" }
             },
+            ["MSModel_daichi"] = new() {
+                { Language.English, "Gemma 3 12B RP finetune. Great roleplay in English. Non-English may feel unnatural." },
+                { Language.Korean, "Gemma 3 12B RP 파인튜닝. 영어 롤플레이 우수. 영어 외 언어는 번역체가 될 수 있음." },
+                { Language.Russian, "Gemma 3 12B RP файнтюн. Отличный отыгрыш на английском. На других языках может звучать неестественно." },
+                { Language.Japanese, "Gemma 3 12B RPファインチューン。英語RP優秀。英語以外は翻訳調になる可能性あり。" },
+                { Language.Chinese, "Gemma 3 12B RP微调。英语RP优秀。非英语可能产生翻译腔。" }
+            },
             ["MSModel_nemomix"] = new() {
-                { Language.English, "Creative storytelling. Unfiltered — no immersion-breaking moral disclaimers." },
-                { Language.Korean, "창의적 스토리텔링. Unfiltered — 몰입을 깨는 도덕적 설교 없음." },
-                { Language.Russian, "Творческое повествование. Без фильтров — без морализаторства." },
-                { Language.Japanese, "創造的なストーリーテリング。フィルターなし — 没入を妨げる道徳的説教なし。" },
-                { Language.Chinese, "创意叙事。无过滤 — 不会因道德说教而打破沉浸感。" }
+                { Language.English, "Creative storytelling. Unfiltered. May narrate in novel style. English optimized." },
+                { Language.Korean, "창의적 스토리텔링. Unfiltered. 소설체 나레이션 경향. 영어 외 언어 지원 약함." },
+                { Language.Russian, "Творческое повествование. Без фильтров. Может повествовать в стиле романа. Оптимизирован для английского." },
+                { Language.Japanese, "創造的なストーリーテリング。フィルターなし。小説調ナレーション傾向。英語以外は不自然な場合あり。" },
+                { Language.Chinese, "创意叙事。无过滤。可能以小说体叙述。非英语支持较弱。" }
             },
             ["MSModel_gemma3_12b_uf"] = new() {
                 { Language.English, "Gemma 3 12B with safety filters removed. Won't refuse grimdark content." },
@@ -1774,11 +1781,11 @@ namespace CompanionAI_v3.Settings
                 { Language.Chinese, "Gemma 3 12B 去除安全过滤器。不拒绝黑暗内容。" }
             },
             ["MSModel_bigtiger"] = new() {
-                { Language.English, "Best for roleplay. Deep character acting and creative narrative. Community favorite." },
-                { Language.Korean, "롤플레이 최강. 깊은 캐릭터 연기와 창의적 서사. 커뮤니티 인기 모델." },
-                { Language.Russian, "Лучшая для ролевых игр. Глубокая игра персонажей. Фаворит сообщества." },
-                { Language.Japanese, "RP最強。深いキャラクター演技と創造的な物語。コミュニティ人気モデル。" },
-                { Language.Chinese, "角色扮演最强。深度角色演绎和创意叙事。社区最爱。" }
+                { Language.English, "Best for roleplay. Deep character acting. Community favorite. English optimized." },
+                { Language.Korean, "롤플레이 최강. 깊은 캐릭터 연기. 커뮤니티 인기. 영어 외 언어 지원 약함." },
+                { Language.Russian, "Лучшая для ролевых игр. Глубокая игра персонажей. Оптимизирован для английского." },
+                { Language.Japanese, "RP最強。深いキャラクター演技。コミュニティ人気。英語以外は不自然な場合あり。" },
+                { Language.Chinese, "角色扮演最强。深度角色演绎。社区最爱。非英语支持较弱。" }
             },
             ["MSModel_gemma3_27b_uf"] = new() {
                 { Language.English, "Gemma 3 27B with safety filters removed. Maximum quality, unfiltered." },

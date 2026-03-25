@@ -150,6 +150,10 @@ namespace CompanionAI_v3.MachineSpirit
 
         public static void Clear() => _events.Clear();
 
+        // ★ v3.72.0: Targeted clear methods for save/load context pollution prevention
+        public static void ClearDialogueBuffer() => _dialogueBuffer.Clear();
+        public static void ClearEvents() { _events.Clear(); _killCounts.Clear(); }
+
         // ── EventBus subscriber ──
         private static CombatEventSubscriber _subscriber;
 
@@ -356,6 +360,7 @@ namespace CompanionAI_v3.MachineSpirit
             }
 
             // ★ v3.68.0: Player dialogue choice
+            // ★ v3.72.0: Filter out "continue" / navigation answers (not real choices)
             public void HandleSelectAnswer(BlueprintAnswer answer)
             {
                 if (!MachineSpirit.IsActive) return;
@@ -363,6 +368,12 @@ namespace CompanionAI_v3.MachineSpirit
                 {
                     string text = answer?.DisplayText;
                     if (string.IsNullOrEmpty(text)) return;
+
+                    // ★ v3.72.0: Filter out navigation/continue buttons — not meaningful choices
+                    string trimmed = text.Trim();
+                    if (trimmed.Length < 3) return;  // Too short to be meaningful
+                    if (trimmed.StartsWith("[") && trimmed.EndsWith("]")) return;  // [Continue], [Leave], etc.
+
                     if (text.Length > 200) text = text.Substring(0, 200) + "...";
 
                     AddEvent(GameEventType.PlayerChoice, "Lord Captain", text);

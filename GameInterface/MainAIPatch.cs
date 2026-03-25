@@ -612,6 +612,11 @@ namespace CompanionAI_v3.GameInterface
             {
                 // 캐시 클리어 → 다음 Instance 접근 시 새 GameId로 자동 로드
                 Settings.PerSaveSettings.ClearCache();
+
+                // ★ v3.72.0: Clear stale event/dialogue buffers to prevent context pollution
+                MachineSpirit.GameEventCollector.ClearDialogueBuffer();
+                MachineSpirit.GameEventCollector.ClearEvents();
+
                 Main.Log("[SaveLoadPatch] Cache cleared after load - settings will reload on next access");
             }
             catch (Exception ex)

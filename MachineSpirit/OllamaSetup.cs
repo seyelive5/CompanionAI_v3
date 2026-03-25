@@ -445,6 +445,10 @@ namespace CompanionAI_v3.MachineSpirit
 
             switch (family)
             {
+                case LLMClient.ModelFamily.Gemma:
+                    // Gemma has built-in template in Ollama — do NOT override
+                    Main.LogDebug($"[MachineSpirit] Gemma model detected — skipping template fix (has built-in template)");
+                    yield break;
                 case LLMClient.ModelFamily.Mistral:
                     // Mistral Instruct v2/v3 format
                     template = "[INST] {{ if .System }}{{ .System }}\n{{ end }}{{ .Prompt }} [/INST]";

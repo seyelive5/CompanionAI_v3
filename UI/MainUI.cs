@@ -687,9 +687,10 @@ namespace CompanionAI_v3.UI
                 Label = "12B  (12GB GPU)", DescKey = "MSTier_12b", IsHighEnd = false,
                 Models = new[]
                 {
-                    new ModelPreset { Id = "michaelbui/nemomix-unleashed-12b:q4-k-m",     Label = "★ NemoMix Unleashed 12B", DescKey = "MSModel_nemomix" },
+                    new ModelPreset { Id = "gemma3:12b",                                Label = "★ Gemma 3 12B",           DescKey = "MSModel_gemma3_12b" },
+                    new ModelPreset { Id = "elated_hamilton_557/daichi-12b",               Label = "Daichi 12B",              DescKey = "MSModel_daichi" },
                     new ModelPreset { Id = "qwen3:14b",                                  Label = "Qwen 3 14B",              DescKey = "MSModel_qwen3_14b" },
-                    new ModelPreset { Id = "gemma3:12b",                                Label = "Gemma 3 12B",             DescKey = "MSModel_gemma3_12b" },
+                    new ModelPreset { Id = "michaelbui/nemomix-unleashed-12b:q4-k-m",     Label = "NemoMix Unleashed 12B",   DescKey = "MSModel_nemomix" },
                 }
             },
             new OllamaTier
