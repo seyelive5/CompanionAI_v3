@@ -46,6 +46,19 @@ namespace CompanionAI_v3.GameInterface
             float aoERadius = CombatAPI.GetAoERadius(ability);
             if (aoERadius <= 0) aoERadius = 3f;
 
+            // ★ Fix 3: Reject positions where caster is within own AoE blast radius (grenade self-damage prevention)
+            if (caster != null)
+            {
+                float casterDist = CombatAPI.GetDistanceInTiles(targetPosition, caster);
+                if (casterDist <= aoERadius)
+                {
+                    score.IsSafe = false;
+                    score.Score = float.MinValue;
+                    Main.LogDebug($"[AoESafety] Position rejected: caster within own AoE ({casterDist:F1} tiles, radius {aoERadius:F1})");
+                    return score;
+                }
+            }
+
             var aoeConfig = AIConfig.GetAoEConfig();
             float HIT_SCORE = SC.AoEEnemyHitScore;
 
@@ -111,8 +124,26 @@ namespace CompanionAI_v3.GameInterface
                     // 이전: 적으로 간주하여 AoE 보너스 → 분류 실패한 아군 피격 위험
                     Main.Log($"[AoESafetyChecker] ★ Classification FAILED: {unit?.CharacterName}: {ex.Message}");
                     score.AlliesHit++;
+                    // ★ Fix 4: Classification failure also counts toward MaxPlayerAlliesHit hard reject
+                    playerPartyAlliesHit++;
+                    if (playerPartyAlliesHit > aoeConfig.MaxPlayerAlliesHit)
+                    {
+                        score.IsSafe = false;
+                        score.Score = float.MinValue;
+                        Main.LogDebug($"[AOE] Classification-failed unit counted as ally, too many ({playerPartyAlliesHit} > {aoeConfig.MaxPlayerAlliesHit}) - rejected");
+                        return score;
+                    }
                     totalScore -= SC.AoEPlayerAllyPenaltyMult * HIT_SCORE;
                 }
+            }
+
+            // ★ Fix 4: Final hard reject if MaxPlayerAlliesHit exceeded (belt-and-suspenders check)
+            if (playerPartyAlliesHit > aoeConfig.MaxPlayerAlliesHit)
+            {
+                score.IsSafe = false;
+                score.Score = float.MinValue;
+                Main.LogDebug($"[AOE] Final check: too many player allies ({playerPartyAlliesHit} > {aoeConfig.MaxPlayerAlliesHit}) - rejected");
+                return score;
             }
 
             score.Score = totalScore;
@@ -849,12 +880,28 @@ namespace CompanionAI_v3.GameInterface
                     // ★ v3.30.0: 피아 구분 실패 시 아군으로 간주 (안전 우선)
                     Main.Log($"[AoESafetyChecker] ★ DirectionalAoE classification FAILED: {unit?.CharacterName}: {ex.Message}");
                     score.AlliesHit++;
+                    // ★ Fix 4: Classification failure also counts toward MaxPlayerAlliesHit hard reject
+                    playerPartyAlliesHit++;
+                    if (playerPartyAlliesHit > aoeConfig.MaxPlayerAlliesHit)
+                    {
+                        score.IsSafe = false;
+                        score.Score = float.MinValue;
+                        return score;
+                    }
                     totalScore -= SC.AoEPlayerAllyPenaltyMult * HIT_SCORE;
                 }
             }
 
             // 캐스터 자신 체크 (Cone의 경우 원점에서 시작하므로 자신은 안전)
             // Ray도 마찬가지로 캐스터 위치에서 시작
+
+            // ★ Fix 4: Final hard reject if MaxPlayerAlliesHit exceeded
+            if (playerPartyAlliesHit > aoeConfig.MaxPlayerAlliesHit)
+            {
+                score.IsSafe = false;
+                score.Score = float.MinValue;
+                return score;
+            }
 
             score.Score = totalScore;
             // ★ v3.5.76: minEnemiesRequired 활용
@@ -945,8 +992,24 @@ namespace CompanionAI_v3.GameInterface
                     // ★ v3.30.0: 피아 구분 실패 시 아군으로 간주 (안전 우선)
                     Main.Log($"[AoESafetyChecker] ★ DirectionalAoE(Pos) classification FAILED: {unit?.CharacterName}: {ex.Message}");
                     score.AlliesHit++;
+                    // ★ Fix 4: Classification failure also counts toward MaxPlayerAlliesHit hard reject
+                    playerPartyAlliesHit++;
+                    if (playerPartyAlliesHit > aoeConfig.MaxPlayerAlliesHit)
+                    {
+                        score.IsSafe = false;
+                        score.Score = float.MinValue;
+                        return score;
+                    }
                     totalScore -= SC.AoEPlayerAllyPenaltyMult * HIT_SCORE;
                 }
+            }
+
+            // ★ Fix 4: Final hard reject if MaxPlayerAlliesHit exceeded
+            if (playerPartyAlliesHit > aoeConfig.MaxPlayerAlliesHit)
+            {
+                score.IsSafe = false;
+                score.Score = float.MinValue;
+                return score;
             }
 
             score.Score = totalScore;
@@ -985,9 +1048,9 @@ namespace CompanionAI_v3.GameInterface
 
             try
             {
-                // 클러스터 탐색
+                // 클러스터 탐색 — minEnemiesRequired 전달하여 소규모 클러스터 필터링
                 var bestCluster = Analysis.ClusterDetector.FindBestClusterForAbility(
-                    ability, caster, enemies, allies);
+                    ability, caster, enemies, allies, minEnemiesRequired);
 
                 if (bestCluster != null && bestCluster.IsValid)
                 {

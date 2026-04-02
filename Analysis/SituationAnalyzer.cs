@@ -1244,6 +1244,9 @@ namespace CompanionAI_v3.Analysis
             // ★ v3.0.10: Commands.Empty 체크로 중복 이동 방지 (게임 API MP 값 사용)
             situation.AllowChaseMove = turnState.AllowChaseMove && !situation.HasHittableEnemies && situation.CurrentMP > 0;
 
+            // ★ v3.74.2: 이전 이동 출발 위치 (진동 방지)
+            situation.LastMoveOrigin = turnState.LastMoveOrigin;
+
             // ★ v3.0.73: 원거리 캐릭터 이동 제어 로직 수정
             // v3.0.65 버그: 버프만 사용해도 NeedsReposition=false → Hittable=0인데 이동 불가
             //

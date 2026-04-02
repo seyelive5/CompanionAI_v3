@@ -708,7 +708,8 @@ namespace CompanionAI_v3.Planning.Planners
                     effectiveMP,
                     situation.InfluenceMap,
                     role,
-                    situation.PredictiveThreatMap
+                    situation.PredictiveThreatMap,
+                    situation.LastMoveOrigin  // ★ v3.74.2: 진동 방지
                 );
 
                 // ★ v3.8.47: HittableEnemyCount가 0이면 유효한 공격 위치가 아님
@@ -805,7 +806,8 @@ namespace CompanionAI_v3.Planning.Planners
                     role,
                     situation.PredictiveThreatMap,
                     bestMeleeAoEForMove,
-                    situation.Enemies
+                    situation.Enemies,
+                    situation.LastMoveOrigin  // ★ v3.74.2: 진동 방지
                 );
 
                 // ★ v3.18.16: 근접 위치가 DamagingAoE 안이면 거부 (현재 안전할 때만)

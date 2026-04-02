@@ -155,11 +155,15 @@ namespace CompanionAI_v3.GameInterface
             /// <summary>★ v3.28.0: 플랭킹 보너스 (Back=최대, Side=중간, Front=0)</summary>
             public float FlankingScore { get; set; }
 
+            /// <summary>★ v3.74.2: 진동 방지 패널티 (이전 위치로 되돌아가면 감점)</summary>
+            public float OscillationPenalty { get; set; }
+
             public float TotalScore => CoverScore + DistanceScore - ThreatScore + AttackScore
                                        - InfluenceThreatScore + InfluenceControlBonus
                                        + SharedTargetBonus + TacticalAdjustment
                                        - PathRiskScore + HitChanceBonus + MeleeAoESplashBonus
-                                       - AllyClusterPenalty + FlankingScore;
+                                       - AllyClusterPenalty + FlankingScore
+                                       - OscillationPenalty;
 
             public bool CanStand { get; set; }
             public bool HasLosToEnemy { get; set; }
@@ -771,13 +775,14 @@ namespace CompanionAI_v3.GameInterface
         /// <summary>
         /// ★ v3.9.26: 폴백 거리 밴드 기반 보너스 (primaryAttack 없을 때)
         /// </summary>
+        /// ★ v3.74.2: optimalRange를 60%로 수정 + 최대사거리 근처 이차 감쇠
         private static float CalculateDistanceBandBonus(
             Vector3 position,
             List<BaseUnitEntity> enemies,
             float weaponRange)
         {
             float bestBonus = -10f;
-            float optimalRange = weaponRange / 2f;
+            float optimalRange = weaponRange * 0.6f;
 
             for (int i = 0; i < enemies.Count; i++)
             {
@@ -788,11 +793,19 @@ namespace CompanionAI_v3.GameInterface
 
                 float bonus;
                 if (distTiles <= optimalRange)
+                {
                     bonus = 15f;
+                }
                 else if (distTiles <= weaponRange)
-                    bonus = 5f;
+                {
+                    // ★ v3.74.2: 이차 감쇠 — 최대사거리 근처는 더 큰 페널티
+                    float excess = (distTiles - optimalRange) / Math.Max(weaponRange - optimalRange, 1f);
+                    bonus = 15f - (excess * excess) * 20f;  // 60%→15, 80%→11.75, 100%→-5
+                }
                 else
+                {
                     bonus = -10f;
+                }
 
                 if (bonus > bestBonus)
                     bestBonus = bonus;
@@ -950,17 +963,17 @@ namespace CompanionAI_v3.GameInterface
                     }
                     else if (nearestEnemyDist <= weaponRange)
                     {
-                        // ★ v3.9.48: 최적 사거리(60%) 선호 벨 커브
-                        // 기존: 멀수록 높은 점수 (20~30) → 유닛이 최대 사거리에 고착
-                        // 개선: 60% 사거리에서 최고점(25), 양 극단에서 감소
-                        // minSafe(0%)→17.8, 30%→21.4, 60%→25, 80%→22.6, 100%→20.2
+                        // ★ v3.9.48 → v3.74.2: 최적 사거리(60%) 선호 — 이차 감쇠 강화
+                        // v3.9.48: 선형 deviation*12 → 최대 사거리에서도 20.2점 (차이 4.8점만)
+                        // v3.74.2: 이차 감쇠 → 최대 사거리에서 15.4점 (차이 9.6점)
+                        // minSafe(0%)→15.4, 30%→21.8, 60%→25, 80%→23.4, 100%→15.4
                         float denominator = weaponRange - minSafeDistance;
                         float distRatio = denominator > 0.1f
                             ? (nearestEnemyDist - minSafeDistance) / denominator
                             : 0.5f;
                         float optimalRatio = 0.6f;
                         float deviation = Math.Abs(distRatio - optimalRatio);
-                        score.DistanceScore = 25f - deviation * 12f;
+                        score.DistanceScore = 25f - (deviation * deviation) * 60f;
                     }
                     else
                     {
@@ -1002,7 +1015,8 @@ namespace CompanionAI_v3.GameInterface
             float predictedMP = 0f,
             BattlefieldInfluenceMap influenceMap = null,
             AIRole role = AIRole.Auto,
-            Analysis.PredictiveThreatMap predictiveMap = null)
+            Analysis.PredictiveThreatMap predictiveMap = null,
+            Vector3? lastMoveOrigin = null)
         {
             // ★ v3.8.13: AI용 패스파인딩 사용 - 경로 위협 데이터(ProvokedAttacks, EnteredAoE) 포함
             var tiles = predictedMP > 0
@@ -1121,6 +1135,17 @@ namespace CompanionAI_v3.GameInterface
                     score.HittableEnemyCount = CombatAPI.CountHittableEnemiesFromPosition(
                         unit, score.Node, enemies, primaryAttack, allies);
                 }
+
+                // ★ v3.74.2: 진동 방지 — 이전 위치 근처로 되돌아가면 패널티
+                if (lastMoveOrigin.HasValue)
+                {
+                    float distToLastOrigin = CombatAPI.MetersToTiles(
+                        Vector3.Distance(score.Position, lastMoveOrigin.Value));
+                    if (distToLastOrigin < 2f)
+                    {
+                        score.OscillationPenalty = 15f;
+                    }
+                }
             }
 
             // ★ v3.8.48: O(n log n) 정렬 제거 → O(n) MaxByWhere 사용 (100+ 요소 최적화)
@@ -1193,7 +1218,8 @@ namespace CompanionAI_v3.GameInterface
             AIRole role = AIRole.Auto,
             Analysis.PredictiveThreatMap predictiveMap = null,
             AbilityData meleeAoEAbility = null,
-            List<BaseUnitEntity> enemies = null)
+            List<BaseUnitEntity> enemies = null,
+            Vector3? lastMoveOrigin = null)
         {
             if (unit == null || target == null) return null;
 
@@ -1301,6 +1327,17 @@ namespace CompanionAI_v3.GameInterface
                     if (splashCount >= 2)
                     {
                         posScore.MeleeAoESplashBonus = (splashCount - 1) * 12f;
+                    }
+                }
+
+                // ★ v3.74.2: 진동 방지 — 이전 위치 근처로 되돌아가면 패널티
+                if (lastMoveOrigin.HasValue)
+                {
+                    float distToLastOrigin = CombatAPI.MetersToTiles(
+                        Vector3.Distance(pos, lastMoveOrigin.Value));
+                    if (distToLastOrigin < 2f)
+                    {
+                        posScore.OscillationPenalty = 15f;
                     }
                 }
 

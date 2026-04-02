@@ -389,6 +389,29 @@ namespace CompanionAI_v3.Planning.Plans
             bool isRetreatMode = TeamBlackboard.Instance.CurrentTactic == TacticalSignal.Retreat;
             bool strategyRecommendsBuff = strategy?.ShouldBuffBeforeAttack == true;
 
+            // ★ v3.74.0: 적 1명 이하일 때 공격 AP 예약 — 버프에 전 AP 소모 방지
+            // Phase 4~4.95 버프/디버프가 누적으로 AP 소진 → Phase 5 공격 불가 방지
+            float lastEnemyAttackReserve = 0f;
+            if (situation.HasHittableEnemies && situation.HittableEnemies.Count <= 1)
+            {
+                float cheapestAttackAP = float.MaxValue;
+                var attacks = situation.AvailableAttacks;
+                if (attacks != null)
+                {
+                    for (int i = 0; i < attacks.Count; i++)
+                    {
+                        float apCost = CombatAPI.GetAbilityAPCost(attacks[i]);
+                        if (apCost < cheapestAttackAP) cheapestAttackAP = apCost;
+                    }
+                }
+                if (cheapestAttackAP < float.MaxValue)
+                {
+                    lastEnemyAttackReserve = cheapestAttackAP;
+                    remainingAP -= lastEnemyAttackReserve;
+                    Main.Log($"[DPS] Phase 4: Last enemy reserve — hiding {lastEnemyAttackReserve:F1} AP for guaranteed attack");
+                }
+            }
+
             if (!situation.HasPerformedFirstAction && !situation.HasBuffedThisTurn && !isRetreatMode)
             {
                 if (strategyRecommendsBuff)
@@ -635,6 +658,8 @@ namespace CompanionAI_v3.Planning.Plans
 
             // Phase 4.6: 마킹
             // ★ v3.9.50: Phase 5와 동일한 타겟 선택 로직 (BestTarget ≠ 실제 공격 대상 불일치 수정)
+            // ★ v3.74.0: markedTarget을 Phase 5까지 전달 — 마크한 적을 우선 공격
+            BaseUnitEntity markedTarget = null;
             if (situation.AvailableMarkers.Count > 0 && situation.HasHittableEnemies)
             {
                 // Phase 5와 동일: FindWeakestEnemy → SharedTarget 점수 비교
@@ -656,6 +681,8 @@ namespace CompanionAI_v3.Planning.Plans
                     if (markerAction != null)
                     {
                         actions.Add(markerAction);
+                        // ★ v3.74.0: 마크 대상 저장 — Phase 5에서 첫 공격 대상으로 강제
+                        markedTarget = markerTarget;
                     }
                 }
             }
@@ -696,6 +723,13 @@ namespace CompanionAI_v3.Planning.Plans
                     actions.Add(preAttackDebuff);
                     Main.Log($"[DPS] Phase 4.95: Strategy debuff-before-attack — {preAttackDebuff.Ability?.Name}");
                 }
+            }
+
+            // ★ v3.74.0: Phase 4에서 예약한 공격 AP 복원
+            if (lastEnemyAttackReserve > 0f)
+            {
+                remainingAP += lastEnemyAttackReserve;
+                Main.Log($"[DPS] Phase 5: Restored {lastEnemyAttackReserve:F1} AP reserved for attack (AP={remainingAP:F1})");
             }
 
             // Phase 5: 공격 - 약한 적 우선
@@ -744,6 +778,15 @@ namespace CompanionAI_v3.Planning.Plans
                     {
                         if (Main.IsDebugEnabled) Main.LogDebug($"[DPS] Phase 5: Keeping BestTarget {preferTarget?.CharacterName} (SharedTarget {sharedTarget.CharacterName} score={sharedScore:F0} < {bestScore * 0.9f:F0})");
                     }
+                }
+
+                // ★ v3.74.0: 이번 턴에 마크한 적이 있으면 첫 공격 대상으로 강제
+                if (markedTarget != null && markedTarget.IsConscious &&
+                    situation.HittableEnemies.Contains(markedTarget))
+                {
+                    preferTarget = markedTarget;
+                    markedTarget = null;  // 첫 공격에만 적용
+                    Main.Log($"[DPS] Phase 5: Forcing attack on marked target {preferTarget.CharacterName}");
                 }
 
                 PlannedAction attackAction = null;

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Kingmaker.Blueprints;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.Utility;
@@ -266,11 +267,30 @@ namespace CompanionAI_v3.Analysis
                 var singleCasterNode = position.GetNearestNodeXZ() as CustomGridNodeBase;
                 Func<BaseUnitEntity, bool> hasLosToEnemy = (BaseUnitEntity e) =>
                 {
-                    if (singleCasterNode == null) return true;  // 노드 실패 시 허용
+                    // ★ v3.74.0: null 노드 시 차단 (이전: 허용 → 벽 뒤 적에게 도발 시도)
+                    if (singleCasterNode == null) return false;
                     var eNode = e.Position.GetNearestNodeXZ() as CustomGridNodeBase;
-                    if (eNode == null) return true;
+                    if (eNode == null) return false;
                     var los = LosCalculations.GetWarhammerLos(singleCasterNode, tank.SizeRect, eNode, e.SizeRect);
                     return los.CoverType != LosCalculations.CoverType.Invisible;
+                };
+
+                // ★ v3.74.0: 방향성 패턴(Cone/Ray/Sector) 도발은 방향 유효성도 체크
+                var tauntPatternInfo = CombatAPI.GetPatternInfo(taunt);
+                Func<BaseUnitEntity, bool> isInDirectionalRange = (BaseUnitEntity e) =>
+                {
+                    if (tauntPatternInfo == null || !tauntPatternInfo.IsValid || !tauntPatternInfo.CanBeDirectional)
+                        return true;  // 비방향성 도발은 항상 통과
+
+                    float dirAoERadius = tauntPatternInfo.Radius;
+                    if (dirAoERadius <= 0) dirAoERadius = CombatAPI.GetAoERadius(taunt);
+                    if (dirAoERadius <= 0) return true;  // 반경 없으면 통과
+
+                    Vector3 direction = (e.Position - position).normalized;
+                    return CombatAPI.IsUnitInDirectionalAoERange(
+                        position, direction, e, dirAoERadius,
+                        tauntPatternInfo.Angle > 0 ? tauntPatternInfo.Angle : 90f,
+                        tauntPatternInfo.Type ?? Kingmaker.Blueprints.PatternType.Cone);
                 };
 
                 // ★ v3.5.98: 1순위: 아군 타겟팅 중인 적 (타일 단위 + LOS 체크)
@@ -278,6 +298,7 @@ namespace CompanionAI_v3.Analysis
                 target = enemiesTargetingAllies
                     .Where(e => e != null && e.IsConscious && !CombatAPI.IsTargetUnconditionallyImmune(e))
                     .Where(e => CombatAPI.MetersToTiles(Vector3.Distance(position, e.Position)) <= tauntRange)
+                    .Where(isInDirectionalRange)
                     .Where(hasLosToEnemy)
                     .OrderBy(e => Vector3.Distance(position, e.Position))
                     .FirstOrDefault();
@@ -289,6 +310,7 @@ namespace CompanionAI_v3.Analysis
                     target = enemies
                         .Where(e => e != null && e.IsConscious && !CombatAPI.IsTargetUnconditionallyImmune(e))
                         .Where(e => CombatAPI.MetersToTiles(Vector3.Distance(position, e.Position)) <= tauntRange)
+                        .Where(isInDirectionalRange)
                         .Where(hasLosToEnemy)
                         .OrderBy(e => Vector3.Distance(position, e.Position))
                         .FirstOrDefault();

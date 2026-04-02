@@ -343,6 +343,9 @@ namespace CompanionAI_v3.Analysis
         /// <summary>★ v3.0.7: 추격 이동 허용 (이동했지만 공격 못함, 적이 아직 멀리 있음)</summary>
         public bool AllowChaseMove { get; set; }
 
+        /// <summary>★ v3.74.2: 이전 이동 출발 위치 (진동 방지 — 되돌아가는 이동 패널티)</summary>
+        public Vector3? LastMoveOrigin { get; set; }
+
         #endregion
 
         #region Computed Properties
@@ -498,6 +501,7 @@ namespace CompanionAI_v3.Analysis
             MoveCount = 0;
             AllowPostAttackMove = false;
             AllowChaseMove = false;
+            LastMoveOrigin = null;
 
             // Ability Profile
             HasGapCloser = false;

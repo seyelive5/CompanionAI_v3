@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Kingmaker.EntitySystem.Entities;
+using UnityEngine;
 using CompanionAI_v3.Analysis;
 
 namespace CompanionAI_v3.Core
@@ -101,6 +102,9 @@ namespace CompanionAI_v3.Core
 
         /// <summary>★ v3.28.0: 마지막 공격 카테고리 (Arch-Militant Versatility 스택 축적용)</summary>
         public Data.AttackCategory LastAttackCategory { get; set; } = Data.AttackCategory.Normal;
+
+        /// <summary>★ v3.74.2: 이동 전 위치 (진동 방지 — 되돌아가는 이동 패널티)</summary>
+        public Vector3? LastMoveOrigin { get; set; }
 
         /// <summary>★ v3.9.92: 비동기 무기 전환 대기 — 목표 세트 인덱스 (-1 = 대기 없음)
         /// GameCommandQueue.SwitchHandEquipment는 비동기 처리 → 매 프레임 CurrentHandEquipmentSetIndex 확인
@@ -236,6 +240,9 @@ namespace CompanionAI_v3.Core
                     case ActionType.Move:
                         HasMovedThisTurn = true;
                         MoveCount++;  // ★ v3.0.3: 이동 횟수 추적
+                        // ★ v3.74.2: 이동 전 위치 기록 (진동 방지)
+                        if (Unit != null)
+                            LastMoveOrigin = Unit.Position;
                         break;
                     case ActionType.Attack:
                         HasAttackedThisTurn = true;

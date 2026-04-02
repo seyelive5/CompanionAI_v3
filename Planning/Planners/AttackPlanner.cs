@@ -152,6 +152,42 @@ namespace CompanionAI_v3.Planning.Planners
                 .Where(a => !IsAbilityExcluded(a, excludeAbilityGuids))
                 .ToList();
 
+            // ★ v3.74.2: 장착 무기 공격 우선 — 액세서리 슬롯(Stinger Ring 등) 공격 후순위
+            // ability.Weapon이 PrimaryHand/SecondaryHand가 아니면 액세서리 아이템 공격
+            // 무기 공격이 있으면 액세서리 공격 제외, 없으면 폴백으로 허용
+            if (filteredAttacks.Count > 1)
+            {
+                var unit = situation.Unit;
+                var primaryWeapon = unit?.Body?.PrimaryHand?.MaybeWeapon;
+                var secondaryWeapon = unit?.Body?.SecondaryHand?.MaybeWeapon;
+
+                var weaponAttacks = new List<AbilityData>();
+                for (int i = 0; i < filteredAttacks.Count; i++)
+                {
+                    var atk = filteredAttacks[i];
+                    var atkWeapon = atk.Weapon;
+                    if (atkWeapon == null)
+                    {
+                        weaponAttacks.Add(atk);  // 비무기 능력 (사이킥 등)은 유지
+                    }
+                    else if (atkWeapon == primaryWeapon || atkWeapon == secondaryWeapon)
+                    {
+                        weaponAttacks.Add(atk);  // 장착 무기 공격
+                    }
+                    // else: 액세서리 슬롯 무기 공격 — 제외
+                }
+
+                if (weaponAttacks.Count > 0)
+                {
+                    if (weaponAttacks.Count < filteredAttacks.Count)
+                    {
+                        Main.Log($"[AttackPlanner] ★ Filtered {filteredAttacks.Count - weaponAttacks.Count} accessory-slot attacks (Stinger Ring etc.)");
+                    }
+                    filteredAttacks = weaponAttacks;
+                }
+                // weaponAttacks가 비어있으면 액세서리 공격이라도 사용 (폴백)
+            }
+
             // ★ v3.5.11: 필터링 결과 로깅
             if (filteredAttacks.Count == 0 && situation.AvailableAttacks.Count > 0)
             {
@@ -225,6 +261,48 @@ namespace CompanionAI_v3.Planning.Planners
                         {
                             if (Main.IsDebugEnabled) Main.LogDebug($"[AttackPlanner] DangerousAoE pattern range failed: {attack.Name} -> {target.CharacterName} " +
                                 $"(dist={distanceToTarget:F1} > patternRadius={patternRadius:F0} tiles)");
+                            continue;
+                        }
+                    }
+
+                    // ★ v3.74.0: DangerousAoE 전용 아군 안전 체크 (방향성 패턴 포함)
+                    // IsAttackSafeForTarget은 CanUseAbilityOn 이후에만 실행되므로,
+                    // CanUseAbilityOn이 통과하지만 방향성 AoE 안전 체크를 놓치는 경우를 방지
+                    var aoeConfig = AIConfig.GetAoEConfig();
+                    float dangerAoERadius = CombatAPI.GetAoERadius(attack);
+                    if (dangerAoERadius <= 0 && patternInfo != null && patternInfo.IsValid)
+                        dangerAoERadius = patternInfo.Radius;
+
+                    if (dangerAoERadius > 0 && aoeConfig != null)
+                    {
+                        UnityEngine.Vector3 direction = (target.Position - situation.Unit.Position).normalized;
+                        int alliesInAoE = 0;
+                        for (int a = 0; a < situation.Allies.Count; a++)
+                        {
+                            var ally = situation.Allies[a];
+                            if (ally == null || ally == situation.Unit || !ally.IsConscious) continue;
+                            if (!ally.IsInPlayerParty) continue;
+
+                            bool inRange;
+                            if (patternInfo != null && patternInfo.IsValid && patternInfo.CanBeDirectional)
+                            {
+                                inRange = CombatAPI.IsUnitInDirectionalAoERange(
+                                    situation.Unit.Position, direction, ally, dangerAoERadius,
+                                    patternInfo.Angle > 0 ? patternInfo.Angle : 90f,
+                                    patternInfo.Type ?? Kingmaker.Blueprints.PatternType.Cone);
+                            }
+                            else
+                            {
+                                inRange = CombatAPI.IsUnitInAoERange(attack, target.Position, ally, dangerAoERadius);
+                            }
+
+                            if (inRange)
+                                alliesInAoE++;
+                        }
+
+                        if (alliesInAoE > aoeConfig.MaxPlayerAlliesHit)
+                        {
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[AttackPlanner] DangerousAoE {attack.Name} rejected: {alliesInAoE} allies in AoE (max {aoeConfig.MaxPlayerAlliesHit})");
                             continue;
                         }
                     }

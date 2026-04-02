@@ -77,10 +77,10 @@ namespace CompanionAI_v3.Analysis
 
         /// <summary>
         /// ★ v3.5.76: 클러스터 최소 크기 (설정에서 읽음)
-        /// 기본값 2, 설정으로 1까지 완화 가능
+        /// ★ Fix: 최소 2 보장 — 1-enemy 클러스터는 AoE 낭비
         /// </summary>
         public static int MIN_CLUSTER_SIZE =>
-            AIConfig.GetAoEConfig()?.MinClusterSize ?? DEFAULT_MIN_CLUSTER_SIZE;
+            Math.Max(2, AIConfig.GetAoEConfig()?.MinClusterSize ?? DEFAULT_MIN_CLUSTER_SIZE);
 
         /// <summary>
         /// ★ v3.5.20: 설정에서 최대 클러스터 수 읽기 (기본값 5)
@@ -210,17 +210,20 @@ namespace CompanionAI_v3.Analysis
         /// <summary>
         /// 특정 AOE 능력에 최적인 클러스터 탐색
         /// ★ v3.9.04: LINQ 제거, inline 필터링 + best 추적
+        /// ★ Fix: minEnemiesForAoE 파라미터 추가 — 최소 적 수 미달 클러스터 필터링
         /// </summary>
         /// <param name="ability">AOE 능력</param>
         /// <param name="caster">시전자</param>
         /// <param name="enemies">적 목록</param>
         /// <param name="allies">아군 목록</param>
+        /// <param name="minEnemiesForAoE">AoE 사용 최소 적 수 (기본 2)</param>
         /// <returns>최적 클러스터 (없으면 null)</returns>
         public static EnemyCluster FindBestClusterForAbility(
             AbilityData ability,
             BaseUnitEntity caster,
             List<BaseUnitEntity> enemies,
-            List<BaseUnitEntity> allies)
+            List<BaseUnitEntity> allies,
+            int minEnemiesForAoE = 2)
         {
             if (ability == null || caster == null || enemies == null)
                 return null;
@@ -243,6 +246,10 @@ namespace CompanionAI_v3.Analysis
                 for (int i = 0; i < clusters.Count; i++)
                 {
                     var c = clusters[i];
+
+                    // ★ Fix: 최소 적 수 미달 클러스터 스킵 — 1-enemy 클러스터에 AoE 낭비 방지
+                    if (c.Count < minEnemiesForAoE)
+                        continue;
 
                     // ★ v3.5.98: 시전자 사거리 내 클러스터만 (타일 단위)
                     if (CombatAPI.MetersToTiles(Vector3.Distance(caster.Position, c.Center)) > abilityRange)
@@ -347,6 +354,13 @@ namespace CompanionAI_v3.Analysis
                             bestPosition = testPos;
                         }
                     }
+                }
+
+                // ★ Fix: bestHits가 0이면 빈 위치에 투척 방지
+                if (bestHits <= 0)
+                {
+                    Main.LogDebug($"[ClusterDetector] No valid AoE position found (0 hits). Skipping.");
+                    return null;
                 }
 
                 Main.LogDebug($"[ClusterDetector] Optimal position: {bestHits} hits at ({bestPosition.x:F1}, {bestPosition.z:F1})");
