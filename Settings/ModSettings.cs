@@ -438,6 +438,22 @@ namespace CompanionAI_v3.Settings
                 { Language.Chinese, "在单回合内使用两套武器组。\n切换武器(0 AP)以使用备用武器组的攻击。\n⚠️ 此功能正在开发中，可能无法按预期工作。" }
             },
 
+            // ★ Phase 3: LLM-as-Judge
+            ["EnableLLMJudge"] = new() {
+                { Language.English, "LLM Judge" },
+                { Language.Korean, "LLM 판정관" },
+                { Language.Russian, "LLM Судья" },
+                { Language.Japanese, "LLMジャッジ" },
+                { Language.Chinese, "LLM裁判" }
+            },
+            ["EnableLLMJudgeDesc"] = new() {
+                { Language.English, "Use LLM to select the best plan from multiple candidates.\nRequires Ollama running locally. Adds ~1s per turn." },
+                { Language.Korean, "LLM을 사용하여 여러 후보 플랜 중 최선을 선택합니다.\nOllama 로컬 실행 필요. 턴당 ~1초 추가." },
+                { Language.Russian, "Использовать LLM для выбора лучшего плана из нескольких кандидатов.\nТребуется локально запущенный Ollama. Добавляет ~1с за ход." },
+                { Language.Japanese, "LLMを使用して複数の候補プランから最適なプランを選択します。\nOllamaのローカル実行が必要。ターンあたり約1秒追加。" },
+                { Language.Chinese, "使用LLM从多个候选方案中选择最佳方案。\n需要本地运行Ollama。每回合增加约1秒。" }
+            },
+
             // ★ v3.5.13: Advanced Settings UI
             ["AdvancedSettings"] = new() {
                 { Language.English, "Advanced Settings" },
@@ -1631,6 +1647,97 @@ namespace CompanionAI_v3.Settings
                 { Language.Russian, "Дух Машины" }, { Language.Japanese, "マシンスピリット" },
                 { Language.Chinese, "机魂" }
             },
+            ["TabLLMCombatAI"] = new() {
+                { Language.English, "LLM Combat AI" }, { Language.Korean, "LLM 전투 AI" },
+                { Language.Russian, "LLM Боевой ИИ" }, { Language.Japanese, "LLM戦闘AI" },
+                { Language.Chinese, "LLM战斗AI" }
+            },
+
+            // ── LLM Combat AI settings ───────────────────────────
+            ["LLMCombatAITitle"] = new() {
+                { Language.English, "LLM Combat AI" },
+                { Language.Korean, "LLM 전투 AI" }
+            },
+            ["LLMCombatAIDesc"] = new() {
+                { Language.English, "Use a local LLM to evaluate and select the best combat plan from multiple candidates.\nRequires Ollama running locally. The LLM acts as a tactical judge, picking optimal actions each turn." },
+                { Language.Korean, "로컬 LLM을 사용하여 여러 후보 전투 플랜 중 최적의 플랜을 선택합니다.\nOllama 로컬 실행 필요. LLM이 매 턴 최적 행동을 판정합니다." }
+            },
+            ["LLMCombatAIEnable"] = new() {
+                { Language.English, "Enable LLM Combat AI" },
+                { Language.Korean, "LLM 전투 AI 활성화" }
+            },
+            ["LLMCombatAIOllamaHint"] = new() {
+                { Language.English, "Ollama not detected. Install from ollama.com/download and start the server." },
+                { Language.Korean, "Ollama가 감지되지 않았습니다. ollama.com/download 에서 설치 후 서버를 시작하세요." }
+            },
+            ["LLMCombatAIModel"] = new() {
+                { Language.English, "Model Selection" },
+                { Language.Korean, "모델 선택" }
+            },
+            ["LLMCombatAICurrent"] = new() {
+                { Language.English, "Current Model" },
+                { Language.Korean, "현재 모델" }
+            },
+            ["LLMCombatAIRecommended"] = new() {
+                { Language.English, "Recommended: Gemma 4 E4B (best for combat AI)" },
+                { Language.Korean, "추천: Gemma 4 E4B (전투 AI에 최적)" }
+            },
+            ["LLMCombatAIRecommendedDesc"] = new() {
+                { Language.English, "Gemma 4 E4B is optimized for fast tactical decisions (~0.3s response). 9.6GB VRAM." },
+                { Language.Korean, "Gemma 4 E4B는 빠른 전술 판정에 최적화되어 있습니다 (~0.3초 응답). 9.6GB VRAM." }
+            },
+            ["LLMCombatAIAvailable"] = new() {
+                { Language.English, "Available Models" },
+                { Language.Korean, "사용 가능한 모델" }
+            },
+            ["LLMCombatAINoModels"] = new() {
+                { Language.English, "No Ollama models installed. Install one below or via the Machine Spirit tab." },
+                { Language.Korean, "설치된 Ollama 모델이 없습니다. 아래에서 설치하거나 Machine Spirit 탭에서 설치하세요." }
+            },
+            ["LLMCombatAIRecTag"] = new() {
+                { Language.English, "Recommended" },
+                { Language.Korean, "추천" }
+            },
+            ["LLMCombatAIInstall"] = new() {
+                { Language.English, "Install Recommended Model:" },
+                { Language.Korean, "추천 모델 설치:" }
+            },
+            ["LLMCombatAIRefresh"] = new() {
+                { Language.English, "Refresh Models" },
+                { Language.Korean, "모델 새로고침" }
+            },
+            ["LLMCombatAIApplyTo"] = new() {
+                { Language.English, "Apply To" },
+                { Language.Korean, "적용 대상" }
+            },
+            ["LLMCombatAIAll"] = new() {
+                { Language.English, "All Characters" },
+                { Language.Korean, "모든 캐릭터" }
+            },
+            ["LLMCombatAIDisplay"] = new() {
+                { Language.English, "Display Options" },
+                { Language.Korean, "표시 옵션" }
+            },
+            ["LLMCombatAIOverlay"] = new() {
+                { Language.English, "Show LLM Overlay" },
+                { Language.Korean, "LLM 오버레이 표시" }
+            },
+            ["LLMCombatAIOverlayDesc"] = new() {
+                { Language.English, "Show LLM decisions on screen during combat." },
+                { Language.Korean, "전투 중 화면에 LLM 판정 결과를 표시합니다." }
+            },
+            ["LLMCombatAIStats"] = new() {
+                { Language.English, "Statistics" },
+                { Language.Korean, "통계" }
+            },
+            ["LLMCombatAILastTime"] = new() {
+                { Language.English, "Last Judge Response Time" },
+                { Language.Korean, "마지막 판정 응답 시간" }
+            },
+            ["LLMCombatAINoStats"] = new() {
+                { Language.English, "No LLM Judge data yet. Stats will appear after combat with LLM enabled." },
+                { Language.Korean, "아직 LLM 판정 데이터가 없습니다. LLM 활성화 후 전투를 하면 통계가 표시됩니다." }
+            },
 
             // ── Machine Spirit settings ───────────────────────────
             ["MSProvider"] = new() {
@@ -1708,12 +1815,19 @@ namespace CompanionAI_v3.Settings
             },
 
             // ── Ollama models (Gemma 3 recommended per latest research) ──
+            ["MSModel_gemma4_e4b"] = new() {
+                { Language.English, "★ RECOMMENDED — Google Gemma 4 E4B. Latest generation, native structured output, thinking mode. ~5GB VRAM. 128K context." },
+                { Language.Korean, "★ 추천 — Google Gemma 4 E4B. 최신 세대, 네이티브 구조화 출력, 씽킹 모드. ~5GB VRAM. 128K 컨텍스트." },
+                { Language.Russian, "★ РЕКОМЕНДУЕТСЯ — Google Gemma 4 E4B. Новое поколение, структурированный вывод, режим мышления. ~5ГБ VRAM." },
+                { Language.Japanese, "★ 推奨 — Google Gemma 4 E4B。最新世代、ネイティブ構造化出力、思考モード。~5GB VRAM。128Kコンテキスト。" },
+                { Language.Chinese, "★ 推荐 — Google Gemma 4 E4B。最新一代，原生结构化输出，思维模式。~5GB显存。128K上下文。" }
+            },
             ["MSModel_gemma3_4b"] = new() {
-                { Language.English, "★ RECOMMENDED — Google Gemma 3 4B QAT. Best quality/performance ratio. ~3GB VRAM. Multilingual, 128K context." },
-                { Language.Korean, "★ 추천 — Google Gemma 3 4B QAT. 최고의 성능/품질 비율. ~3GB VRAM. 다국어, 128K 컨텍스트." },
-                { Language.Russian, "★ РЕКОМЕНДУЕТСЯ — Google Gemma 3 4B QAT. Лучшее соотношение качества. ~3ГБ VRAM. Мультиязычная, 128К." },
-                { Language.Japanese, "★ 推奨 — Google Gemma 3 4B QAT。最高の性能/品質比。~3GB VRAM。多言語、128Kコンテキスト。" },
-                { Language.Chinese, "★ 推荐 — Google Gemma 3 4B QAT。最佳性价比。~3GB显存。多语言，128K上下文。" }
+                { Language.English, "Google Gemma 3 4B QAT. Previous gen, good quality/performance ratio. ~3GB VRAM. Multilingual, 128K context." },
+                { Language.Korean, "Google Gemma 3 4B QAT. 이전 세대, 좋은 성능/품질 비율. ~3GB VRAM. 다국어, 128K 컨텍스트." },
+                { Language.Russian, "Google Gemma 3 4B QAT. Предыдущее поколение, хорошее соотношение качества. ~3ГБ VRAM. Мультиязычная, 128К." },
+                { Language.Japanese, "Google Gemma 3 4B QAT。前世代、良好な性能/品質比。~3GB VRAM。多言語、128Kコンテキスト。" },
+                { Language.Chinese, "Google Gemma 3 4B QAT。上一代，良好的性价比。~3GB显存。多语言，128K上下文。" }
             },
             ["MSModel_gemma3_12b"] = new() {
                 { Language.English, "Gemma 3 12B — Deep reasoning, excellent roleplay. ~8GB VRAM. For mid-range GPUs (RTX 3060+)." },
@@ -1722,12 +1836,19 @@ namespace CompanionAI_v3.Settings
                 { Language.Japanese, "Gemma 3 12B — 深い推論、優れたRP。~8GB VRAM。中級GPU（RTX 3060+）。" },
                 { Language.Chinese, "Gemma 3 12B — 深度推理，出色角色扮演。~8GB显存。适合中端GPU（RTX 3060+）。" }
             },
+            ["MSModel_gemma4_27b"] = new() {
+                { Language.English, "★ Gemma 4 27B — Latest gen, maximum quality. ~18GB VRAM. For high-end GPUs (RTX 3090/4090)." },
+                { Language.Korean, "★ Gemma 4 27B — 최신 세대, 최고 품질. ~18GB VRAM. 고급 GPU 전용 (RTX 3090/4090)." },
+                { Language.Russian, "★ Gemma 4 27B — Новое поколение, максимальное качество. ~18ГБ VRAM. Для мощных GPU." },
+                { Language.Japanese, "★ Gemma 4 27B — 最新世代、最高品質。~18GB VRAM。ハイエンドGPU専用。" },
+                { Language.Chinese, "★ Gemma 4 27B — 最新一代，最高品质。~18GB显存。仅限高端GPU。" }
+            },
             ["MSModel_gemma3_27b"] = new() {
-                { Language.English, "Gemma 3 27B — Maximum quality. ~18GB VRAM. For high-end GPUs only (RTX 3090/4090)." },
-                { Language.Korean, "Gemma 3 27B — 최고 품질. ~18GB VRAM. 고급 GPU 전용 (RTX 3090/4090)." },
-                { Language.Russian, "Gemma 3 27B — Максимальное качество. ~18ГБ VRAM. Только для мощных GPU (RTX 3090/4090)." },
-                { Language.Japanese, "Gemma 3 27B — 最高品質。~18GB VRAM。ハイエンドGPU専用（RTX 3090/4090）。" },
-                { Language.Chinese, "Gemma 3 27B — 最高品质。~18GB显存。仅限高端GPU（RTX 3090/4090）。" }
+                { Language.English, "Gemma 3 27B — Previous gen, high quality. ~18GB VRAM. For high-end GPUs only (RTX 3090/4090)." },
+                { Language.Korean, "Gemma 3 27B — 이전 세대, 고품질. ~18GB VRAM. 고급 GPU 전용 (RTX 3090/4090)." },
+                { Language.Russian, "Gemma 3 27B — Предыдущее поколение, высокое качество. ~18ГБ VRAM. Для мощных GPU." },
+                { Language.Japanese, "Gemma 3 27B — 前世代、高品質。~18GB VRAM。ハイエンドGPU専用。" },
+                { Language.Chinese, "Gemma 3 27B — 上一代，高品质。~18GB显存。仅限高端GPU。" }
             },
             ["MSModel_qwen25"] = new() {
                 { Language.English, "Multilingual (Korean, Japanese, Chinese, English). 4.7GB. Good alternative." },
@@ -2175,6 +2296,9 @@ namespace CompanionAI_v3.Settings
 
         // ★ v3.9.72: 무기 세트 로테이션 (한 턴에 양쪽 세트 공격)
         public bool EnableWeaponSetRotation { get; set; } = false;
+
+        // ★ Phase 3: LLM-as-Judge — LLM으로 최적 플랜 선택
+        public bool EnableLLMJudge { get; set; } = false;
     }
 
     /// <summary>
@@ -2343,6 +2467,15 @@ namespace CompanionAI_v3.Settings
         /// <summary>★ v3.46.0: 전략 지시 UI 크기 배율 (0.8 ~ 2.0, 기본 1.0)</summary>
         public float DecisionOverlayScale { get; set; } = 1.0f;
 
+        /// <summary>★ LLM Combat AI: 전역 마스터 토글 (이것과 캐릭터별 EnableLLMJudge 모두 활성화 필요)</summary>
+        public bool EnableLLMCombatAI { get; set; } = false;
+
+        /// <summary>★ LLM Combat AI: 오버레이 표시 여부</summary>
+        public bool ShowLLMOverlay { get; set; } = true;
+
+        /// <summary>★ Phase 3: LLM Judge 전용 모델 (빈 값이면 gemma4:e4b 사용)</summary>
+        public string LLMJudgeModel { get; set; } = "";
+
         /// <summary>★ v3.20.0: 보관할 최대 전투 리포트 수 (초과 시 오래된 것부터 삭제)</summary>
         public int MaxCombatReports { get; set; } = 10;
 
@@ -2420,7 +2553,8 @@ namespace CompanionAI_v3.Settings
                     UseKillSimulator = DefaultSettings.UseKillSimulator,
                     UseAoEOptimization = DefaultSettings.UseAoEOptimization,
                     UsePredictiveMovement = DefaultSettings.UsePredictiveMovement,
-                    EnableWeaponSetRotation = DefaultSettings.EnableWeaponSetRotation
+                    EnableWeaponSetRotation = DefaultSettings.EnableWeaponSetRotation,
+                    EnableLLMJudge = DefaultSettings.EnableLLMJudge
                 };
                 perSave.CharacterSettings[characterId] = settings;
                 // ★ v3.6.23: 자동 저장 제거 - 매 턴 NPC 분석 시 파일 크기가 계속 증가하는 문제 해결

@@ -653,5 +653,108 @@ namespace CompanionAI_v3.Planning
             }
         }
 
+        // ══════════════════════════════════════════════════════════════
+        // ★ Phase 3: LLM-as-Judge용 상위 N개 전략 반환
+        // ══════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// ★ Phase 3: 상위 N개 전략 반환 (LLM-as-Judge용).
+        /// EvaluateInternal()로 후보를 생성한 뒤, 가중 점수 내림차순으로 정렬하여
+        /// 최대 count개의 TurnStrategy를 반환한다.
+        /// 기존 Evaluate()/EvaluateInternal() 로직은 변경하지 않음.
+        /// </summary>
+        /// <param name="situation">전투 상황</param>
+        /// <param name="role">AI 역할</param>
+        /// <param name="count">반환할 최대 전략 수 (기본 3)</param>
+        /// <returns>가중 점수 내림차순으로 정렬된 전략 리스트 (후보 없으면 빈 리스트)</returns>
+        public static List<TurnStrategy> EvaluateTopN(Situation situation, Settings.AIRole role, int count = 3)
+        {
+            var results = new List<TurnStrategy>(count);
+
+            try
+            {
+                // EvaluateInternal()은 _candidates를 채운 뒤 최적 1개를 반환하지만,
+                // 여기서는 반환값을 무시하고 _candidates 전체를 활용한다.
+                EvaluateInternal(situation, role);
+
+                if (_candidates.Count == 0)
+                    return results;
+
+                bool isPrimaryDPS = role == Settings.AIRole.DPS || role == Settings.AIRole.Auto;
+
+                // 가중 점수 기준 내림차순 정렬을 위해 임시 인덱스-점수 배열 생성
+                // _candidates는 struct List이므로 직접 Sort 가능하지만,
+                // 원본 순서를 보존하고 가중치 적용을 위해 인덱스+점수 배열 사용
+                int candidateCount = _candidates.Count;
+                int resultCount = candidateCount < count ? candidateCount : count;
+
+                // 단순 선택 정렬 (N이 3 이하이므로 O(N*M)이 효율적)
+                var used = new bool[candidateCount];
+                for (int picked = 0; picked < resultCount; picked++)
+                {
+                    int bestIdx = -1;
+                    float bestScore = float.MinValue;
+
+                    for (int i = 0; i < candidateCount; i++)
+                    {
+                        if (used[i]) continue;
+                        float score = GetWeightedScore(_candidates[i], isPrimaryDPS);
+                        if (score > bestScore)
+                        {
+                            bestScore = score;
+                            bestIdx = i;
+                        }
+                    }
+
+                    if (bestIdx < 0) break;
+                    used[bestIdx] = true;
+                    results.Add(BuildStrategyFromCandidate(_candidates[bestIdx]));
+                }
+
+                if (Main.IsDebugEnabled)
+                {
+                    Main.LogDebug($"[Strategy] EvaluateTopN: Returning {results.Count}/{candidateCount} strategies for {situation.Unit?.CharacterName}");
+                    for (int i = 0; i < results.Count; i++)
+                        Main.LogDebug($"[Strategy]   TopN #{i}: {results[i].Sequence} — {results[i].Reason}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.Log($"[Strategy] Error in EvaluateTopN: {ex.Message}");
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// CandidateScore → TurnStrategy 변환 헬퍼.
+        /// EvaluateInternal() 라인 478-499의 빌드 로직을 재사용 가능하게 추출.
+        /// </summary>
+        private static TurnStrategy BuildStrategyFromCandidate(CandidateScore candidate)
+        {
+            bool plansPostAction = candidate.Type == SequenceType.RnGChain ||
+                                   candidate.Type == SequenceType.BuffedRnGChain ||
+                                   candidate.Type == SequenceType.AoERnGChain ||
+                                   candidate.Type == SequenceType.BuffedRnGAoE;
+
+            return new TurnStrategy
+            {
+                // 기존 필드
+                Sequence = candidate.Type,
+                ShouldBuffBeforeAttack = candidate.Buff != null,
+                RecommendedBuff = candidate.Buff,
+                ReservedAPForPostAction = candidate.RnGCost,
+                PlansPostAction = plansPostAction,
+                ExpectedTotalDamage = candidate.TotalDamage,
+                Reason = candidate.Description,
+                // ★ v3.11.0 확장 필드
+                ShouldPrioritizeAoE = candidate.UsesAoE,
+                RecommendedAoE = candidate.RecommendedAoE,
+                PrioritizesKillSequence = candidate.UsesKillSeq,
+                ShouldDebuffBeforeAttack = candidate.Debuff != null,
+                ExpectedKills = candidate.ExpectedKills
+            };
+        }
+
     }
 }

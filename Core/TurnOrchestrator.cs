@@ -14,6 +14,7 @@ using CompanionAI_v3.GameInterface;
 using CompanionAI_v3.Data;  // ★ v3.11.2: AbilityDatabase.IsTaunt
 using CompanionAI_v3.Diagnostics;  // ★ v3.20.0: CombatReportCollector
 using CompanionAI_v3.Settings;     // ★ v3.21.0: AIRole, RangePreference
+using CompanionAI_v3.Planning.LLM;  // ★ Phase 3: LLM-as-Judge
 
 namespace CompanionAI_v3.Core
 {
@@ -70,6 +71,16 @@ namespace CompanionAI_v3.Core
         /// ★ v3.9.02: 게임 기본 AI 타임아웃 백업 (턴 종료 시 복원)
         /// </summary>
         private static float _originalAiTimeout = -1f;
+
+        // ★ Phase 3: LLM-as-Judge 상태
+        private static List<CandidatePlan> _pendingCandidates;
+        private static int _judgeResult = -1;
+        private static bool _judgeStarted;
+
+        // ★ Phase 4: LLM Strategic Advisor 상태
+        private static bool _advisorStarted;
+        private static bool _advisorDone;
+        private static StrategicIntent _pendingIntent;
 
         #endregion
 
@@ -220,6 +231,12 @@ namespace CompanionAI_v3.Core
             turnState.CurrentComputePhase = ComputePhase.Ready;
             turnState.PendingSituation = null;
 
+            // ★ Phase 3: LLM-as-Judge — 활성화된 유닛은 후보 플랜 생성 + LLM 판정
+            if (IsLLMJudgeEnabled(unit))
+            {
+                return HandleLLMJudge(unit, unitId, unitName, turnState, situation);
+            }
+
             // Plan 생성/업데이트
             _profilerStopwatch.Restart();
 
@@ -302,6 +319,313 @@ namespace CompanionAI_v3.Core
         {
             var errorType = ExecutionErrorTypeExtensions.ParseFromReason(reason);
             return errorType.IsRecoverable();
+        }
+
+        #endregion
+
+        #region LLM-as-Judge (Phase 3)
+
+        /// <summary>
+        /// ★ Phase 3: LLM Judge 활성화 여부 확인 (전역 + 캐릭터별 설정 모두 체크)
+        /// </summary>
+        private bool IsLLMJudgeEnabled(BaseUnitEntity unit)
+        {
+            if (unit == null) return false;
+            // 전역 마스터 토글 확인
+            if (!(Main.Settings?.EnableLLMCombatAI ?? false)) return false;
+            // 캐릭터별 토글 확인
+            var settings = Main.Settings?.GetOrCreateSettings(unit.UniqueId, unit.CharacterName);
+            return settings?.EnableLLMJudge ?? false;
+        }
+
+        /// <summary>
+        /// ★ Phase 3: 유닛의 유효 역할 결정 (TurnPlanner의 패턴과 동일)
+        /// Auto 모드면 RoleDetector로 감지, 아니면 설정된 역할 반환
+        /// </summary>
+        private AIRole GetEffectiveRole(BaseUnitEntity unit, Situation situation)
+        {
+            var configuredRole = situation.CharacterSettings?.Role ?? AIRole.Auto;
+            if (configuredRole == AIRole.Auto)
+                return Analysis.RoleDetector.DetectOptimalRole(unit);
+            return configuredRole;
+        }
+
+        /// <summary>
+        /// ★ Phase 3: LLM-as-Judge 흐름 처리.
+        /// Phase 1: 후보 플랜 생성 + Judge 코루틴 시작 → Waiting
+        /// Phase 2: Judge 응답 대기 → Waiting
+        /// Phase 3: 응답 수신 → 플랜 선택 + 실행
+        /// 실패 시 일반 플래너로 폴백.
+        /// </summary>
+        private ExecutionResult HandleLLMJudge(
+            BaseUnitEntity unit, string unitId, string unitName,
+            TurnState turnState, Situation situation)
+        {
+            // 이미 플랜이 있고 아직 완료되지 않았으면 — 기존 플랜 실행 (replan 경로)
+            if (turnState.Plan != null && !turnState.Plan.IsComplete)
+            {
+                // NeedsReplan 체크
+                if (turnState.Plan.NeedsReplan(situation))
+                {
+                    CaptureStrategicContextOnReplan(turnState);
+                    Main.Log($"[LLM Judge] {unitName}: Replanning due to situation change");
+                    turnState.Plan = _planner.CreatePlan(situation, turnState);
+                    Data.CompanionDialogue.AnnouncePlan(unit, turnState.Plan);
+                    TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
+                    CombatReportCollector.Instance.RecordPlan(turnState.Plan);
+                }
+                return ExecuteNextAction(unit, unitName, turnState, situation);
+            }
+
+            // ★ Phase 4: LLM Strategic Advisor — 후보 생성 전 전략 의도 획득
+            // Advisor가 완료되기 전까지는 Phase 1(후보 생성)으로 넘어가지 않음
+            if (!_advisorDone && !_judgeStarted && !LLMJudge.IsJudging)
+            {
+                if (!_advisorStarted && !LLMAdvisor.IsAdvising)
+                {
+                    // Advisor 코루틴 시작
+                    _advisorStarted = true;
+                    _pendingIntent = null;
+                    var advRole = GetEffectiveRole(unit, situation);
+                    MachineSpirit.CoroutineRunner.Start(LLMAdvisor.Advise(
+                        situation, advRole.ToString(),
+                        intent =>
+                        {
+                            _pendingIntent = intent;
+                            _advisorDone = true;
+                        }));
+
+                    Main.Log($"[LLM Advisor] {unitName}: Started strategic analysis");
+
+                    UI.TacticalOverlayUI.ShowAlways(unitName,
+                        new[] { "Strategic analysis..." },
+                        UnityEngine.Color.white, 10f);
+
+                    return ExecutionResult.Waiting("LLM Advisor analyzing");
+                }
+
+                if (LLMAdvisor.IsAdvising)
+                {
+                    return ExecutionResult.Waiting("LLM Advisor processing");
+                }
+
+                // Advisor 코루틴이 콜백 없이 종료된 경우 (안전장치)
+                _advisorDone = true;
+                if (_pendingIntent == null)
+                    _pendingIntent = StrategicIntent.Balanced;
+            }
+
+            // ★ Phase 4: Advisor 결과를 TurnState 컨텍스트에 적용 (1회만)
+            if (_advisorDone && _pendingIntent != null && !_judgeStarted
+                && !turnState.HasContext(StrategyWeightModifier.KEY_PRIMARY_GOAL))
+            {
+                StrategyWeightModifier.ApplyIntent(_pendingIntent, turnState, situation);
+                Main.Log($"[LLM Advisor] {unitName}: Applied {_pendingIntent} ({LLMAdvisor.LastAdvisorTimeMs}ms)");
+
+                // ★ Advisor 결과 오버레이 표시
+                if (_pendingIntent.PrimaryGoal != IntentType.Balanced)
+                {
+                    string intentOverlay = _pendingIntent.PrimaryGoal.ToString();
+                    if (_pendingIntent.FocusTargetIndex >= 0
+                        && situation.Enemies != null
+                        && _pendingIntent.FocusTargetIndex < situation.Enemies.Count)
+                    {
+                        var focusEnemy = situation.Enemies[_pendingIntent.FocusTargetIndex];
+                        intentOverlay += ": " + (focusEnemy?.CharacterName ?? "target");
+                    }
+                    UI.TacticalOverlayUI.ShowAlways(unitName,
+                        new[] { intentOverlay },
+                        UnityEngine.Color.cyan, 3f);
+                }
+            }
+
+            // Phase 1: 후보 플랜 생성 + Judge 시작
+            if (!_judgeStarted && !LLMJudge.IsJudging)
+            {
+                // AP 정체 감지 (일반 경로와 동일)
+                float currentGameAP = CombatAPI.GetCurrentAP(unit);
+                if (turnState.APAtLastPlanStart >= 0)
+                {
+                    bool apUnchanged = Math.Abs(currentGameAP - turnState.APAtLastPlanStart) < 0.01f;
+                    bool noAttack = !turnState.HasAttackedThisTurn;
+                    if (apUnchanged && noAttack)
+                    {
+                        turnState.StagnantPlanCount++;
+                        if (turnState.StagnantPlanCount >= 3)
+                        {
+                            Main.LogWarning($"[LLM Judge] {unitName}: ★ Ending turn — {turnState.StagnantPlanCount} stagnant plans");
+                            return ExecutionResult.EndTurn("Stagnant AP - no progress");
+                        }
+                    }
+                    else
+                    {
+                        turnState.StagnantPlanCount = 0;
+                    }
+                }
+                turnState.APAtLastPlanStart = currentGameAP;
+
+                // ★ Phase 4: TargetScorer에 TurnState 설정 (LLM 가중치 적용)
+                TargetScorer.SetActiveTurnState(turnState);
+
+                // 후보 플랜 생성 (동기)
+                var role = GetEffectiveRole(unit, situation);
+                _pendingCandidates = CandidatePlanGenerator.Generate(
+                    situation, turnState, _planner, role);
+
+                // ★ Phase 4: 스코어링 완료 — TurnState 해제
+                TargetScorer.ClearActiveTurnState();
+
+                if (_pendingCandidates == null || _pendingCandidates.Count <= 1)
+                {
+                    // 후보 1개 이하 — Judge 불필요, 있으면 바로 사용, 없으면 일반 경로
+                    if (_pendingCandidates != null && _pendingCandidates.Count == 1)
+                    {
+                        turnState.Plan = _pendingCandidates[0].Plan;
+                        string singleStratLabel = _pendingCandidates[0].Strategy != null
+                            ? _pendingCandidates[0].Strategy.Sequence.ToString()
+                            : _pendingCandidates[0].Plan?.Priority.ToString() ?? "Unknown";
+                        Main.Log($"[LLM Judge] {unitName}: Single candidate — using directly ({singleStratLabel})");
+                        TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
+                        CombatReportCollector.Instance.RecordPlan(turnState.Plan);
+                        Data.CompanionDialogue.AnnouncePlan(unit, turnState.Plan);
+                        _pendingCandidates = null;
+                        return ExecuteNextAction(unit, unitName, turnState, situation);
+                    }
+
+                    // 0개 — 일반 플래너 폴백
+                    Main.Log($"[LLM Judge] {unitName}: No candidates — falling back to normal planner");
+                    _pendingCandidates = null;
+                    return FallbackToNormalPlan(unit, unitId, unitName, turnState, situation);
+                }
+
+                // Judge 코루틴 시작
+                _judgeResult = -1;
+                _judgeStarted = true;
+                MachineSpirit.CoroutineRunner.Start(LLMJudge.Judge(
+                    _pendingCandidates, situation,
+                    role.ToString(),
+                    result => _judgeResult = result));
+
+                Main.Log($"[LLM Judge] {unitName}: Started judging {_pendingCandidates.Count} candidates");
+
+                // 오버레이: Advisor 결과 + Judge 진행 표시
+                string overlayText = _pendingIntent != null && _pendingIntent.PrimaryGoal != IntentType.Balanced
+                    ? $"Strategy: {_pendingIntent.PrimaryGoal} | Evaluating plans..."
+                    : "Tactical evaluation...";
+                UI.TacticalOverlayUI.ShowAlways(unitName,
+                    new[] { overlayText },
+                    UnityEngine.Color.white, 10f);
+
+                return ExecutionResult.Waiting("LLM Judge deciding");
+            }
+
+            // Phase 2: Judge 응답 대기
+            if (LLMJudge.IsJudging)
+            {
+                return ExecutionResult.Waiting("LLM Judge processing");
+            }
+
+            // Phase 3: Judge 응답 수신 — 플랜 선택
+            _judgeStarted = false;
+            int selected = _judgeResult >= 0 ? _judgeResult : 0;
+
+            if (_pendingCandidates != null && selected < _pendingCandidates.Count)
+            {
+                var chosen = _pendingCandidates[selected];
+                turnState.Plan = chosen.Plan;
+
+                // ★ Phase 4: Advisor 결과도 함께 로깅
+                string advisorTag = _pendingIntent != null && _pendingIntent.PrimaryGoal != IntentType.Balanced
+                    ? $", Advisor: {_pendingIntent.PrimaryGoal}"
+                    : "";
+                string strategyLabel = chosen.Strategy != null
+                    ? chosen.Strategy.Sequence.ToString()
+                    : chosen.Plan?.Priority.ToString() ?? "Unknown";
+                Main.Log($"[LLM Judge] {unitName}: Selected Plan {(char)('A' + selected)} " +
+                    $"({strategyLabel}, {LLMJudge.LastJudgeTimeMs}ms{advisorTag})");
+                Main.Log($"[LLM Judge] {unitName}: {chosen.Summary}");
+
+                // 결과 오버레이 표시
+                string overlayLine = _pendingIntent != null && _pendingIntent.PrimaryGoal != IntentType.Balanced
+                    ? $"[{_pendingIntent.PrimaryGoal}] Plan {(char)('A' + selected)}: {chosen.Summary}"
+                    : $"Plan {(char)('A' + selected)}: {chosen.Summary}";
+                UI.TacticalOverlayUI.ShowAlways(unitName,
+                    new[] { overlayLine },
+                    UnityEngine.Color.white, 5f);
+
+                _pendingCandidates = null;
+
+                // 플랜 등록
+                TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
+                CombatReportCollector.Instance.RecordPlan(turnState.Plan);
+                Data.CompanionDialogue.AnnouncePlan(unit, turnState.Plan);
+
+                // Tactical Narrator
+                var narratorStrategy = chosen.Strategy;
+                Diagnostics.TacticalNarrator.Narrate(unit, turnState.Plan, situation, narratorStrategy);
+
+                // Machine Spirit feed
+                if (CompanionAI_v3.MachineSpirit.MachineSpirit.IsActive)
+                {
+                    string summary = $"Plan (LLM Judge): {turnState.Plan.Priority}, Actions: {turnState.Plan.RemainingActionCount}";
+                    CompanionAI_v3.MachineSpirit.GameEventCollector.AddTurnPlanSummary(unitName, summary);
+                }
+
+                return ExecuteNextAction(unit, unitName, turnState, situation);
+            }
+
+            // Judge 결과 유효하지 않음 — 일반 플래너 폴백
+            Main.LogWarning($"[LLM Judge] {unitName}: Invalid judge result ({_judgeResult}) — falling back to normal planner");
+            _pendingCandidates = null;
+            return FallbackToNormalPlan(unit, unitId, unitName, turnState, situation);
+        }
+
+        /// <summary>
+        /// ★ Phase 3: LLM Judge 실패 시 일반 TurnPlanner 경로로 폴백
+        /// </summary>
+        private ExecutionResult FallbackToNormalPlan(
+            BaseUnitEntity unit, string unitId, string unitName,
+            TurnState turnState, Situation situation)
+        {
+            _profilerStopwatch.Restart();
+
+            turnState.Plan = _planner.CreatePlan(situation, turnState);
+            Data.CompanionDialogue.AnnouncePlan(unit, turnState.Plan);
+            TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
+            CombatReportCollector.Instance.RecordPlan(turnState.Plan);
+
+            var narratorStrategy = turnState.GetContext<TurnStrategy>(
+                StrategicContextKeys.TurnStrategyKey, default(TurnStrategy));
+            Diagnostics.TacticalNarrator.Narrate(unit, turnState.Plan, situation, narratorStrategy);
+
+            if (CompanionAI_v3.MachineSpirit.MachineSpirit.IsActive)
+            {
+                string summary = $"Plan: {turnState.Plan.Priority}, Actions: {turnState.Plan.RemainingActionCount}";
+                CompanionAI_v3.MachineSpirit.GameEventCollector.AddTurnPlanSummary(unitName, summary);
+            }
+
+            _profilerStopwatch.Stop();
+            _totalPlanMs += _profilerStopwatch.ElapsedMilliseconds;
+
+            return ExecuteNextAction(unit, unitName, turnState, situation);
+        }
+
+        /// <summary>
+        /// ★ Phase 3+4: LLM Judge/Advisor 상태 초기화
+        /// </summary>
+        private static void ResetLLMJudgeState()
+        {
+            _judgeStarted = false;
+            _judgeResult = -1;
+            _pendingCandidates = null;
+            LLMJudge.Reset();
+
+            // ★ Phase 4: Advisor 상태 초기화
+            _advisorStarted = false;
+            _advisorDone = false;
+            _pendingIntent = null;
+            LLMAdvisor.Reset();
+            TargetScorer.ClearActiveTurnState();
         }
 
         #endregion
@@ -812,6 +1136,9 @@ namespace CompanionAI_v3.Core
             AbilityUsageTracker.ClearForUnit(unitId);
             Data.CompanionDialogue.ClearForUnit(unitId);  // ★ v3.9.32: AI Speech 대사 기록 초기화
 
+            // ★ Phase 3: LLM Judge 상태 초기화
+            ResetLLMJudgeState();
+
             // ★ v3.5.00: 킬 스냅샷 초기화
             _executor.ClearSnapshots();
 
@@ -916,6 +1243,9 @@ namespace CompanionAI_v3.Core
 
             // ★ v3.9.32: AI Speech 상태 정리
             Data.CompanionDialogue.ClearAll();
+
+            // ★ Phase 3: LLM Judge 상태 정리
+            ResetLLMJudgeState();
 
             // ★ v3.8.55: Raven support 사거리 캐시 정리
             GameInterface.FamiliarAPI.ClearRangeCache();

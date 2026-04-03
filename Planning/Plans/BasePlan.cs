@@ -513,6 +513,76 @@ namespace CompanionAI_v3.Planning.Plans
             return null; // 계속 진행
         }
 
+        #region ★ Phase 0.2: Common Early Phase Methods (PlanContext 기반, Template Method 준비)
+
+        /// <summary>
+        /// ★ Phase 0.2: PlanContext 기반 공통 초기 Phase 실행 (Phase 0 ~ 1.8).
+        /// DPS/Tank/Support/Overseer 4개 Plan에서 동일한 초기 Phase들을 통합.
+        ///
+        /// Phase 0:    Ultimate (잠재력 초월) — early return 가능
+        /// Phase 0.5:  AoE 대피 — early return 가능
+        /// Phase 1:    긴급 자기 힐 — early return 가능
+        /// Phase 1.5:  재장전
+        /// Phase 1.55: 무기 전환 (virtual — DPS는 override로 bonusWeaponSwitch 처리)
+        /// Phase 1.8:  Approach Stance
+        /// </summary>
+        /// <returns>early return이 필요하면 TurnPlan, 아니면 null (계속 진행)</returns>
+        protected TurnPlan ExecuteCommonEarlyPhases(PlanContext ctx)
+        {
+            // Phase 0 ~ 1.5: 기존 메서드에 위임
+            var earlyReturn = ExecuteCommonEarlyPhases(ctx.Actions, ctx.Situation, ref ctx.RemainingAP);
+            if (earlyReturn != null) return earlyReturn;
+
+            // Phase 1.55: 무기 전환 (virtual — DPS는 override)
+            var switchReturn = ExecuteWeaponSwitchPhase(ctx);
+            if (switchReturn != null) return switchReturn;
+
+            // Phase 1.8: Approach Stance
+            ExecuteApproachStancePhase(ctx);
+
+            return null; // 계속 진행
+        }
+
+        /// <summary>
+        /// ★ Phase 0.2: Phase 1.55 — 무기 전환.
+        /// Tank/Support/Overseer 공통: 현재 무기 무용/비효율 시 즉시 전환.
+        /// DPS는 이 메서드를 override하여 bonusWeaponSwitch 억제 + Phase 1.56 처리.
+        /// </summary>
+        /// <returns>무기 전환으로 early return 필요 시 TurnPlan, 아니면 null</returns>
+        protected virtual TurnPlan ExecuteWeaponSwitchPhase(PlanContext ctx)
+        {
+            var situation = ctx.Situation;
+            if (situation.WeaponRotationAvailable
+                && (!situation.HasHittableEnemies || ShouldSwitchForEffectiveness(situation))
+                && ShouldSwitchFirst(situation))
+            {
+                var switchActions = PlanWeaponSetRotationAttack(situation, ref ctx.RemainingAP);
+                if (switchActions.Count > 0)
+                {
+                    ctx.Actions.AddRange(switchActions);
+                    Main.Log($"[{ctx.RoleName}] Phase 1.55: Switch-First — switching weapon for better effectiveness");
+                    return new TurnPlan(ctx.Actions, TurnPriority.DirectAttack,
+                        $"{ctx.RoleName} weapon switch-first");
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// ★ Phase 0.2: Phase 1.8 — Cautious/Confident Approach 스탠스 선택.
+        /// DPS/Overseer는 preferOffensive=true, Tank/Support는 false.
+        /// </summary>
+        protected void ExecuteApproachStancePhase(PlanContext ctx)
+        {
+            bool preferOffensive = ctx.Role == AIRole.DPS || ctx.Role == AIRole.Overseer;
+            var approachStance = PlanApproachStance(ctx.Situation, preferOffensive: preferOffensive);
+            if (approachStance != null)
+                ctx.Actions.Add(approachStance);
+        }
+
+        #endregion
+
         /// <summary>
         /// ★ v3.12.0: 공통 Familiar 능력 Phase (Phase 1.75)
         /// DPS/Tank/Support에서 동일한 사역마 능력 시퀀스 실행

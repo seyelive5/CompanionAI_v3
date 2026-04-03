@@ -67,6 +67,9 @@ namespace CompanionAI_v3.UI
         /// <param name="lines">2~3줄 대사</param>
         /// <param name="nameColor">캐릭터 이름 색상</param>
         /// <param name="duration">표시 시간 (초)</param>
+        // ★ Phase 3: EnableDecisionOverlay 설정 무시 플래그
+        private static bool _bypassOverlayCheck;
+
         public static void Show(string unitName, string[] lines, Color nameColor, float duration = 5f)
         {
             if (lines == null || lines.Length == 0) return;
@@ -77,6 +80,14 @@ namespace CompanionAI_v3.UI
             _duration = duration;
             _showStartTime = Time.unscaledTime;
             _isVisible = true;
+            _bypassOverlayCheck = false;
+        }
+
+        /// <summary>★ Phase 3: EnableDecisionOverlay 설정과 무관하게 표시 (LLM Judge용).</summary>
+        public static void ShowAlways(string unitName, string[] lines, Color nameColor, float duration = 5f)
+        {
+            Show(unitName, lines, nameColor, duration);
+            _bypassOverlayCheck = true;
         }
 
         /// <summary>즉시 숨기기 (턴 종료 시)</summary>
@@ -95,7 +106,7 @@ namespace CompanionAI_v3.UI
             if (!_isVisible) return;
             if (_lines == null || _lines.Length == 0) return;
             if (!Main.Enabled) return;
-            if (ModSettings.Instance?.EnableDecisionOverlay != true) return;
+            if (!_bypassOverlayCheck && ModSettings.Instance?.EnableDecisionOverlay != true) return;
 
             // 타이머 체크
             float elapsed = Time.unscaledTime - _showStartTime;

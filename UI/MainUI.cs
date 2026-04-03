@@ -11,12 +11,12 @@ using MSp = CompanionAI_v3.MachineSpirit;
 namespace CompanionAI_v3.UI
 {
     /// <summary>
-    /// v3.0: 메인 UI — Imperial Dark tab system (6 tabs)
+    /// v3.0: 메인 UI — Imperial Dark tab system (8 tabs)
     /// </summary>
     public static class MainUI
     {
         // ── Tab system ───────────────────────────────────────────
-        private enum UITab { Party, Gameplay, Combat, Performance, Language, Debug, MachineSpirit }
+        private enum UITab { Party, Gameplay, Combat, Performance, Language, Debug, MachineSpirit, LLMCombatAI }
         private static UITab _activeTab = UITab.Party;
 
         private static readonly (UITab tab, string locKey)[] TabDefs = new[]
@@ -28,6 +28,7 @@ namespace CompanionAI_v3.UI
             (UITab.Language,    "TabLanguage"),
             (UITab.Debug,       "TabDebug"),
             (UITab.MachineSpirit, "TabMachineSpirit"),
+            (UITab.LLMCombatAI,  "TabLLMCombatAI"),
         };
 
         // ── State ────────────────────────────────────────────────
@@ -120,6 +121,7 @@ namespace CompanionAI_v3.UI
                 case UITab.Language:    DrawLanguageTab(); break;
                 case UITab.Debug:       DrawDebugTab(); break;
                 case UITab.MachineSpirit: DrawMachineSpiritTab(); break;
+                case UITab.LLMCombatAI:  DrawLLMCombatAITab(); break;
             }
             GUILayout.EndVertical();
         }
@@ -395,6 +397,347 @@ namespace CompanionAI_v3.UI
                     Main.Settings.DecisionOverlayScale, 0.8f, 2.0f, GUILayout.Width(UIStyles.Sd(134)));
                 GUILayout.EndHorizontal();
             }
+        }
+
+        // ═════════════════════════════════════════════════════════
+        // LLM Combat AI Tab
+        // ═════════════════════════════════════════════════════════
+
+        private static bool _llmCombatScannedOnce;
+        private static bool _llmCombatInstallingModel;
+        private static string _llmCombatInstallStatus = "";
+        private static string _llmCombatPendingModelSelect;
+
+        private const string RECOMMENDED_JUDGE_MODEL = "gemma4:e4b";
+
+        private static void DrawLLMCombatAITab()
+        {
+            UIStyles.SectionTitle(L("LLMCombatAITitle"));
+            GUILayout.Label($"<color={UIStyles.TextMid}>{L("LLMCombatAIDesc")}</color>", UIStyles.Description);
+            GUILayout.Space(5);
+
+            // ══════════════════════════════════════════════════════
+            // Section 1: Global Enable + Ollama Status
+            // ══════════════════════════════════════════════════════
+
+            Main.Settings.EnableLLMCombatAI = DrawCheckbox(Main.Settings.EnableLLMCombatAI, L("LLMCombatAIEnable"));
+            GUILayout.Space(3);
+
+            // Ollama status check
+            var ollamaState = MSp.OllamaSetup.State;
+            bool ollamaReady = ollamaState == MSp.OllamaSetup.SetupState.Ready;
+
+            // Auto-scan installed models on first draw
+            if (!_llmCombatScannedOnce && !MSp.OllamaSetup.IsFetchingModels)
+            {
+                _llmCombatScannedOnce = true;
+                MSp.CoroutineRunner.Start(MSp.OllamaSetup.FetchInstalledModels());
+            }
+
+            // Check Ollama reachability from installed model list (if count > 0, server responded)
+            bool ollamaConnected = MSp.OllamaSetup.InstalledModels.Count > 0 || ollamaReady;
+            string statusIcon = ollamaConnected ? $"<color={UIStyles.Green}>\u2713 Running</color>" : $"<color={UIStyles.Danger}>\u2717 Not Found</color>";
+            GUILayout.Label($"<color={UIStyles.TextLight}>Ollama Status: </color>{statusIcon}", UIStyles.BoldLabel);
+
+            if (!ollamaConnected)
+            {
+                GUILayout.Label($"<color={UIStyles.TextMid}>{L("LLMCombatAIOllamaHint")}</color>", UIStyles.Description);
+            }
+
+            if (!Main.Settings.EnableLLMCombatAI) return; // early out
+
+            UIStyles.DrawDivider();
+            GUILayout.Space(5);
+
+            // ══════════════════════════════════════════════════════
+            // Section 2: Model Selection
+            // ══════════════════════════════════════════════════════
+
+            GUILayout.Label($"<color={UIStyles.Gold}>{L("LLMCombatAIModel")}</color>", UIStyles.SubHeader);
+            GUILayout.Space(3);
+
+            // Auto-select after install completes
+            if (_llmCombatPendingModelSelect != null && !_llmCombatInstallingModel)
+            {
+                Main.Settings.LLMJudgeModel = _llmCombatPendingModelSelect;
+                _llmCombatPendingModelSelect = null;
+            }
+
+            // Current model display
+            string currentModel = Main.Settings.LLMJudgeModel;
+            if (string.IsNullOrEmpty(currentModel)) currentModel = RECOMMENDED_JUDGE_MODEL;
+            bool isCurrentInstalled = false;
+            var installed = MSp.OllamaSetup.InstalledModels;
+            for (int i = 0; i < installed.Count; i++)
+            {
+                if (installed[i].Name == currentModel) { isCurrentInstalled = true; break; }
+            }
+            string installedMark = isCurrentInstalled ? $"<color={UIStyles.Green}>\u2713 Installed</color>" : $"<color={UIStyles.Danger}>\u2717 Not Installed</color>";
+            GUILayout.Label($"<color={UIStyles.TextLight}>{L("LLMCombatAICurrent")}: </color><color={UIStyles.Gold}>{currentModel}</color>  {installedMark}", UIStyles.BoldLabel);
+            GUILayout.Space(3);
+
+            // Recommended model callout
+            GUILayout.Label($"<color={UIStyles.Gold}>\u2605 {L("LLMCombatAIRecommended")}</color>", UIStyles.Description);
+            GUILayout.Label($"<color={UIStyles.TextMid}>{L("LLMCombatAIRecommendedDesc")}</color>", UIStyles.Description);
+            GUILayout.Space(5);
+
+            // Available models list
+            GUILayout.Label($"<color={UIStyles.TextLight}>{L("LLMCombatAIAvailable")}</color>", UIStyles.BoldLabel);
+            GUILayout.Space(3);
+
+            if (MSp.OllamaSetup.IsFetchingModels)
+            {
+                GUILayout.Label($"<color={UIStyles.TextMid}>Scanning installed models...</color>", UIStyles.Description);
+            }
+            else if (installed.Count == 0)
+            {
+                GUILayout.Label($"<color={UIStyles.TextDim}>{L("LLMCombatAINoModels")}</color>", UIStyles.Description);
+            }
+            else
+            {
+                // Build set of local names
+                var localFixedNames = new System.Collections.Generic.HashSet<string>();
+                for (int i = 0; i < installed.Count; i++)
+                {
+                    string n = installed[i].Name;
+                    if (!n.Contains("/")) localFixedNames.Add(n);
+                }
+
+                for (int i = 0; i < installed.Count; i++)
+                {
+                    var m = installed[i];
+
+                    // Hide community original if template-fixed local version exists
+                    if (m.Name.Contains("/"))
+                    {
+                        string afterSlash = m.Name.Substring(m.Name.IndexOf('/') + 1);
+                        if (afterSlash.Contains(":")) afterSlash = afterSlash.Substring(0, afterSlash.IndexOf(':'));
+                        if (localFixedNames.Contains(afterSlash)) continue;
+                    }
+
+                    bool isActive = m.Name == Main.Settings.LLMJudgeModel || (string.IsNullOrEmpty(Main.Settings.LLMJudgeModel) && m.Name == RECOMMENDED_JUDGE_MODEL);
+                    string sizeStr = m.SizeGB >= 1f ? $"{m.SizeGB:F1}GB" : $"{(int)(m.SizeGB * 1024)}MB";
+                    bool isRecommended = m.Name == RECOMMENDED_JUDGE_MODEL;
+                    string recTag = isRecommended ? $" \u2605 {L("LLMCombatAIRecTag")}" : "";
+
+                    string selectLabel = isActive
+                        ? $"<color={UIStyles.Gold}>\u25c9 {m.Name}  ({sizeStr}){recTag}</color>"
+                        : $"<color={UIStyles.TextLight}>\u25cb {m.Name}  ({sizeStr}){recTag}</color>";
+
+                    if (GUILayout.Button(selectLabel, UIStyles.Button, GUILayout.ExpandWidth(true), GUILayout.Height(BUTTON_HEIGHT)))
+                    {
+                        Main.Settings.LLMJudgeModel = m.Name;
+                    }
+                }
+            }
+
+            // Install recommended model button (if not installed)
+            bool recommendedInstalled = false;
+            for (int i = 0; i < installed.Count; i++)
+            {
+                if (installed[i].Name == RECOMMENDED_JUDGE_MODEL) { recommendedInstalled = true; break; }
+            }
+
+            if (!recommendedInstalled && ollamaConnected)
+            {
+                GUILayout.Space(5);
+                GUI.enabled = !_llmCombatInstallingModel;
+                if (GUILayout.Button($"<color={UIStyles.Gold}>\u2605 {L("LLMCombatAIInstall")} {RECOMMENDED_JUDGE_MODEL}</color>",
+                    UIStyles.Button, GUILayout.Height(BUTTON_HEIGHT)))
+                {
+                    _llmCombatInstallingModel = true;
+                    _llmCombatPendingModelSelect = RECOMMENDED_JUDGE_MODEL;
+                    MSp.CoroutineRunner.Start(LLMCombatInstallModel(RECOMMENDED_JUDGE_MODEL));
+                }
+                GUI.enabled = true;
+            }
+
+            // Install progress
+            if (_llmCombatInstallingModel && !string.IsNullOrEmpty(_llmCombatInstallStatus))
+            {
+                GUILayout.Label($"<color={UIStyles.Gold}>{_llmCombatInstallStatus}</color>", UIStyles.Label);
+            }
+
+            // Refresh button
+            GUILayout.Space(3);
+            if (GUILayout.Button($"<color={UIStyles.TextLight}>\u21bb {L("LLMCombatAIRefresh")}</color>",
+                UIStyles.Button, GUILayout.Width(UIStyles.Sd(160)), GUILayout.Height(BUTTON_HEIGHT)))
+            {
+                MSp.CoroutineRunner.Start(MSp.OllamaSetup.FetchInstalledModels());
+            }
+
+            UIStyles.DrawDivider();
+            GUILayout.Space(5);
+
+            // ══════════════════════════════════════════════════════
+            // Section 3: Character Selection
+            // ══════════════════════════════════════════════════════
+
+            GUILayout.Label($"<color={UIStyles.Gold}>{L("LLMCombatAIApplyTo")}</color>", UIStyles.SubHeader);
+            GUILayout.Space(3);
+
+            var characters = GetPartyMembers();
+            if (characters.Count == 0)
+            {
+                GUILayout.Label($"<color={UIStyles.TextMid}><i>{L("NoCharacters")}</i></color>", UIStyles.Description);
+            }
+            else
+            {
+                // "All Characters" master toggle
+                bool allEnabled = true;
+                for (int i = 0; i < characters.Count; i++)
+                {
+                    var cs = Main.Settings.GetOrCreateSettings(characters[i].Id, characters[i].Name);
+                    if (!cs.EnableLLMJudge) { allEnabled = false; break; }
+                }
+
+                bool newAll = DrawCheckbox(allEnabled, L("LLMCombatAIAll"));
+                if (newAll != allEnabled)
+                {
+                    for (int i = 0; i < characters.Count; i++)
+                    {
+                        var cs = Main.Settings.GetOrCreateSettings(characters[i].Id, characters[i].Name);
+                        cs.EnableLLMJudge = newAll;
+                    }
+                    Main.Settings.SaveCharacterSettings();
+                }
+
+                // Individual character toggles
+                for (int i = 0; i < characters.Count; i++)
+                {
+                    var ch = characters[i];
+                    var cs = Main.Settings.GetOrCreateSettings(ch.Id, ch.Name);
+                    string roleColor = GetRoleColor(cs.Role);
+                    string roleName = Localization.GetRoleName(cs.Role);
+
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Space(UIStyles.Sd(20)); // indent
+
+                    bool newVal = DrawCheckbox(cs.EnableLLMJudge, $"{ch.Name}  <color={roleColor}>({roleName})</color>");
+                    if (newVal != cs.EnableLLMJudge)
+                    {
+                        cs.EnableLLMJudge = newVal;
+                        Main.Settings.SaveCharacterSettings();
+                    }
+
+                    GUILayout.EndHorizontal();
+                }
+            }
+
+            UIStyles.DrawDivider();
+            GUILayout.Space(5);
+
+            // ══════════════════════════════════════════════════════
+            // Section 4: Display Options
+            // ══════════════════════════════════════════════════════
+
+            GUILayout.Label($"<color={UIStyles.Gold}>{L("LLMCombatAIDisplay")}</color>", UIStyles.SubHeader);
+            GUILayout.Space(3);
+
+            Main.Settings.ShowLLMOverlay = DrawCheckbox(Main.Settings.ShowLLMOverlay, L("LLMCombatAIOverlay"));
+            GUILayout.Label($"<color={UIStyles.TextMid}>{L("LLMCombatAIOverlayDesc")}</color>", UIStyles.Description);
+
+            UIStyles.DrawDivider();
+            GUILayout.Space(5);
+
+            // ══════════════════════════════════════════════════════
+            // Section 5: Statistics
+            // ══════════════════════════════════════════════════════
+
+            GUILayout.Label($"<color={UIStyles.Gold}>{L("LLMCombatAIStats")}</color>", UIStyles.SubHeader);
+            GUILayout.Space(3);
+
+            long lastTime = Planning.LLM.LLMJudge.LastJudgeTimeMs;
+            if (lastTime > 0)
+            {
+                GUILayout.Label($"<color={UIStyles.TextLight}>{L("LLMCombatAILastTime")}: <color={UIStyles.Gold}>{lastTime}ms</color></color>", UIStyles.Label);
+            }
+            else
+            {
+                GUILayout.Label($"<color={UIStyles.TextDim}>{L("LLMCombatAINoStats")}</color>", UIStyles.Description);
+            }
+        }
+
+        /// <summary>Install an Ollama model for LLM Combat AI (reuses same pattern as Machine Spirit)</summary>
+        private static System.Collections.IEnumerator LLMCombatInstallModel(string modelId)
+        {
+            _llmCombatInstallStatus = $"Starting download: {modelId}...";
+
+            string ollamaPath = "ollama";
+            string localAppData = System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData);
+            string localOllama = System.IO.Path.Combine(localAppData, "Programs", "Ollama", "ollama.exe");
+            if (System.IO.File.Exists(localOllama)) ollamaPath = localOllama;
+
+            System.Diagnostics.Process proc = null;
+            bool startFailed = false;
+            try
+            {
+                proc = new System.Diagnostics.Process();
+                proc.StartInfo.FileName = ollamaPath;
+                proc.StartInfo.Arguments = $"pull {modelId}";
+                proc.StartInfo.UseShellExecute = false;
+                proc.StartInfo.RedirectStandardOutput = true;
+                proc.StartInfo.RedirectStandardError = true;
+                proc.StartInfo.CreateNoWindow = true;
+                proc.Start();
+
+                proc.BeginErrorReadLine();
+                proc.ErrorDataReceived += (sender, e) =>
+                {
+                    if (string.IsNullOrEmpty(e.Data)) return;
+                    string line = e.Data;
+                    var match = System.Text.RegularExpressions.Regex.Match(line, @"(\d+)%");
+                    if (match.Success)
+                        _llmCombatInstallStatus = $"Downloading {modelId}... {match.Groups[1].Value}%";
+                    else if (line.Contains("success"))
+                        _llmCombatInstallStatus = $"\u2713 {modelId} installed!";
+                };
+
+                proc.BeginOutputReadLine();
+                proc.OutputDataReceived += (sender, e) =>
+                {
+                    if (string.IsNullOrEmpty(e.Data)) return;
+                    var match = System.Text.RegularExpressions.Regex.Match(e.Data, @"(\d+)%");
+                    if (match.Success)
+                        _llmCombatInstallStatus = $"Downloading {modelId}... {match.Groups[1].Value}%";
+                    else if (e.Data.Contains("success"))
+                        _llmCombatInstallStatus = $"\u2713 {modelId} installed!";
+                };
+            }
+            catch
+            {
+                startFailed = true;
+                _llmCombatInstallStatus = "Failed to start Ollama. Is it installed?";
+            }
+
+            if (!startFailed && proc != null)
+            {
+                float deadline = Time.realtimeSinceStartup + 1800f;
+                while (!proc.HasExited && Time.realtimeSinceStartup < deadline)
+                    yield return new WaitForSeconds(0.5f);
+
+                if (proc.HasExited && proc.ExitCode == 0)
+                {
+                    _llmCombatInstallStatus = $"\u2713 {modelId} installed!";
+                    yield return new WaitForSeconds(2f);
+                    MSp.CoroutineRunner.Start(MSp.OllamaSetup.FetchInstalledModels());
+                }
+                else
+                {
+                    _llmCombatInstallStatus = "Install failed. Check Ollama is running.";
+                    yield return new WaitForSeconds(5f);
+                }
+
+                proc.Dispose();
+            }
+            else
+            {
+                yield return new WaitForSeconds(5f);
+            }
+
+            _llmCombatInstallingModel = false;
+            _llmCombatInstallStatus = "";
+            _llmCombatPendingModelSelect = null;
         }
 
         // ═════════════════════════════════════════════════════════
@@ -679,7 +1022,8 @@ namespace CompanionAI_v3.UI
                 Label = "4B  (6GB GPU)", DescKey = "MSTier_4b", IsHighEnd = false,
                 Models = new[]
                 {
-                    new ModelPreset { Id = "gemma3:4b-it-qat", Label = "★ Gemma 3 4B QAT", DescKey = "MSModel_gemma3_4b" },
+                    new ModelPreset { Id = "gemma4:e4b", Label = "★ Gemma 4 E4B (Recommended)", DescKey = "MSModel_gemma4_e4b" },
+                    new ModelPreset { Id = "gemma3:4b-it-qat", Label = "Gemma 3 4B QAT", DescKey = "MSModel_gemma3_4b" },
                 }
             },
             new OllamaTier
@@ -698,7 +1042,8 @@ namespace CompanionAI_v3.UI
                 Label = "27B+  (24GB GPU)", DescKey = "MSTier_27b", IsHighEnd = true,
                 Models = new[]
                 {
-                    new ModelPreset { Id = "gemma3:27b",                                             Label = "★ Gemma 3 27B",           DescKey = "MSModel_gemma3_27b" },
+                    new ModelPreset { Id = "gemma4:27b", Label = "★ Gemma 4 27B", DescKey = "MSModel_gemma4_27b" },
+                    new ModelPreset { Id = "gemma3:27b",                                             Label = "Gemma 3 27B",             DescKey = "MSModel_gemma3_27b" },
                     new ModelPreset { Id = "jean-luc/big-tiger-gemma:27b-v1c-Q3_K_M",                Label = "Big Tiger Gemma 27B",     DescKey = "MSModel_bigtiger" },
                     new ModelPreset { Id = "qwen3:32b",                                              Label = "Qwen 3 32B",              DescKey = "MSModel_qwen3_32b" },
                 }

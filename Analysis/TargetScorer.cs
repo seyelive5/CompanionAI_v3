@@ -7,6 +7,7 @@ using Kingmaker.View.Covers;  // ★ v3.8.31: LosCalculations.CoverType
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Data;
 using CompanionAI_v3.GameInterface;
+using CompanionAI_v3.Planning.LLM;
 using CompanionAI_v3.Settings;
 using Kingmaker.Blueprints.Classes.Experience;  // ★ v3.8.49: UnitDifficultyType
 using UnityEngine;  // ★ v3.24.0: Mathf (EV 스코어링)
@@ -113,6 +114,30 @@ namespace CompanionAI_v3.Analysis
 
         // ── EvaluateThreat Fallback ──
         private const float THREAT_FALLBACK = 0.5f;
+
+        #endregion
+
+        #region LLM Advisor Context (★ Phase 4)
+
+        /// <summary>
+        /// ★ Phase 4: 현재 스코어링 중인 유닛의 TurnState.
+        /// ScoreEnemy()가 LLM Advisor 가중치를 읽기 위해 사용.
+        /// Plan 생성 전 SetActiveTurnState()로 설정, 완료 후 ClearActiveTurnState()로 해제.
+        /// 동기 호출 경로에서만 사용 (동시성 문제 없음).
+        /// </summary>
+        private static TurnState _activeTurnState;
+
+        /// <summary>★ Phase 4: 스코어링 시작 전 TurnState 설정</summary>
+        public static void SetActiveTurnState(TurnState turnState)
+        {
+            _activeTurnState = turnState;
+        }
+
+        /// <summary>★ Phase 4: 스코어링 완료 후 TurnState 해제</summary>
+        public static void ClearActiveTurnState()
+        {
+            _activeTurnState = null;
+        }
 
         #endregion
 
@@ -457,6 +482,32 @@ namespace CompanionAI_v3.Analysis
                     score += turnUrgency * weights.TurnUrgency;
                     if (Main.IsDebugEnabled)
                         Main.LogDebug($"[TargetScorer] {target.CharacterName}: {turnUrgency * weights.TurnUrgency:+0;-0} turn urgency");
+                }
+
+                // ★ Phase 4: LLM Strategic Advisor — 집중 공격 보너스
+                if (_activeTurnState != null)
+                {
+                    string focusId = _activeTurnState.GetContext<string>(StrategyWeightModifier.KEY_FOCUS_TARGET, null);
+                    if (focusId != null && target.UniqueId == focusId)
+                    {
+                        float focusBonus = _activeTurnState.GetContext<float>(StrategyWeightModifier.KEY_FOCUS_BONUS, 0f);
+                        if (focusBonus > 0f)
+                        {
+                            score += focusBonus;
+                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: +{focusBonus:F0} LLM focus target");
+                        }
+                    }
+
+                    // ★ Phase 4: AoE 선호도 — AoE 클러스터 보너스 증폭
+                    float aoePref = _activeTurnState.GetContext<float>(StrategyWeightModifier.KEY_AOE_PREF, 0.5f);
+                    if (aoePref > 0.6f && aoeClusterBonus > 0f)
+                    {
+                        // AoE 선호도가 높으면 기존 AoE 클러스터 보너스를 증폭 (최대 2x)
+                        float aoeAmplify = aoeClusterBonus * (aoePref - 0.5f) * 2f;
+                        score += aoeAmplify;
+                        if (Main.IsDebugEnabled)
+                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: +{aoeAmplify:F0} LLM AoE preference amplify");
+                    }
                 }
             }
             catch (Exception ex)
