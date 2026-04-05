@@ -1670,6 +1670,30 @@ namespace CompanionAI_v3.Settings
                 { Language.English, "Ollama not detected. Install from ollama.com/download and start the server." },
                 { Language.Korean, "Ollama가 감지되지 않았습니다. ollama.com/download 에서 설치 후 서버를 시작하세요." }
             },
+            ["LLMCombatAIExperimental"] = new() {
+                { Language.English, "EXPERIMENTAL FEATURE" },
+                { Language.Korean, "실험적 기능" }
+            },
+            ["LLMCombatAIExperimentalDesc"] = new() {
+                { Language.English, "This feature uses a local AI model (Ollama) to enhance combat decisions. It requires additional GPU memory and may increase turn processing time." },
+                { Language.Korean, "이 기능은 로컬 AI 모델(Ollama)을 사용하여 전투 결정을 강화합니다. 추가 GPU 메모리가 필요하며 턴 처리 시간이 증가할 수 있습니다." }
+            },
+            ["LLMDevTools"] = new() {
+                { Language.English, "LLM Developer Tools" },
+                { Language.Korean, "LLM 개발자 도구" }
+            },
+            ["LLMDevToolsWarning"] = new() {
+                { Language.English, "For mod developers only. Do not enable unless instructed." },
+                { Language.Korean, "모드 개발자 전용. 지시받지 않은 경우 활성화하지 마세요." }
+            },
+            ["EnableTrainingDataCollection"] = new() {
+                { Language.English, "Training Data Collection (Developer Only)" },
+                { Language.Korean, "학습 데이터 수집 (개발자 전용)" }
+            },
+            ["TrainingDataCollectionDesc"] = new() {
+                { Language.English, "Records combat decisions as JSONL for AI fine-tuning.\nPath: [mod]/training_data/" },
+                { Language.Korean, "AI 파인튜닝을 위해 전투 결정을 JSONL로 기록합니다.\n경로: [mod]/training_data/" }
+            },
             ["LLMCombatAIModel"] = new() {
                 { Language.English, "Model Selection" },
                 { Language.Korean, "모델 선택" }
@@ -2469,6 +2493,9 @@ namespace CompanionAI_v3.Settings
 
         /// <summary>★ LLM Combat AI: 전역 마스터 토글 (이것과 캐릭터별 EnableLLMJudge 모두 활성화 필요)</summary>
         public bool EnableLLMCombatAI { get; set; } = false;
+
+        /// <summary>★ v3.84.0: Training data 수집 활성화 (Developer Only — Debug 탭에서 토글)</summary>
+        public bool EnableTrainingDataCollection { get; set; } = false;
 
         /// <summary>★ LLM Combat AI: 오버레이 표시 여부</summary>
         public bool ShowLLMOverlay { get; set; } = true;

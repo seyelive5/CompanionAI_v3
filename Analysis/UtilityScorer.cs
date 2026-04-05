@@ -11,6 +11,7 @@ using Kingmaker.UnitLogic.Mechanics.Actions;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Data;
 using CompanionAI_v3.GameInterface;
+using CompanionAI_v3.Planning.LLM;
 using CompanionAI_v3.Settings;
 using UnityEngine;
 
@@ -326,6 +327,16 @@ namespace CompanionAI_v3.Analysis
                 case CombatPhase.Desperate:
                     if (!IsDefensiveBuff(buff)) score *= SC.DesperateNonDefMult;
                     break;
+            }
+
+            // ★ LLM-as-Scorer: 버프 우선순위 배율 적용
+            if (TargetScorer.GetActiveScorerWeights() is ScorerWeights buffWeights
+                && Math.Abs(buffWeights.BuffPriority - 1f) > 0.01f)
+            {
+                float prevScore = score;
+                score *= buffWeights.BuffPriority;
+                if (Main.IsDebugEnabled)
+                    Main.LogDebug($"[UtilityScorer] {buff.Name}: {prevScore:F0} -> {score:F0} LLM buff priority (x{buffWeights.BuffPriority:F1})");
             }
 
             return score;
@@ -909,6 +920,17 @@ namespace CompanionAI_v3.Analysis
                 }
             }
 
+            // ★ LLM-as-Scorer: AoE 공격 가중치 적용
+            if (TargetScorer.GetActiveScorerWeights() is ScorerWeights atkWeights
+                && atkWeights.AoEWeight > 1.01f
+                && CombatHelpers.IsAoEAbility(attack))
+            {
+                float aoeBoost = score * (atkWeights.AoEWeight - 1f);
+                score += aoeBoost;
+                if (Main.IsDebugEnabled)
+                    Main.LogDebug($"[UtilityScorer] {attack.Name}: +{aoeBoost:F0} LLM AoE weight (x{atkWeights.AoEWeight:F1})");
+            }
+
             return score;
         }
 
@@ -1082,6 +1104,16 @@ namespace CompanionAI_v3.Analysis
             float expectedHeal = EstimateHealAmount(heal, target);
             float efficiency = Math.Min(expectedHeal / Math.Max(missingHP, 1f), 1f);
             score += efficiency * HEAL_EFFICIENCY_MULTIPLIER;
+
+            // ★ LLM-as-Scorer: 힐 우선순위 오프셋 적용
+            if (TargetScorer.GetActiveScorerWeights() is ScorerWeights healWeights
+                && Math.Abs(healWeights.HealPriority) > 0.01f)
+            {
+                float healOffset = score * healWeights.HealPriority;
+                score += healOffset;
+                if (Main.IsDebugEnabled)
+                    Main.LogDebug($"[UtilityScorer] {heal.Name}: {healOffset:+0;-0} LLM heal priority ({healWeights.HealPriority:+0.0;-0.0})");
+            }
 
             return score;
         }

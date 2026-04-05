@@ -47,5 +47,29 @@ namespace CompanionAI_v3.Core
         /// <summary>★ v3.19.2: string - 현재 턴의 전술적 의도 ("Kill", "AoE", "Support", "Retreat")
         /// Replan 시 의도 연속성 보존 — 의도가 유효하면 전략 힌트로 활용</summary>
         public const string TacticalObjective = "TacticalObjective";
+
+        // ── ★ v3.78.0: LLM Archetype 전략 컨텍스트 ──
+
+        /// <summary>★ v3.78.0: bool - Support 아키타입 모드 (아군 힐/버프 우선, 공격 AP 절약)</summary>
+        public const string LLM_SupportMode = "LLM_SupportMode";
+
+        /// <summary>★ v3.78.0: bool - Defensive 아키타입 모드 (후퇴/방어 우선)</summary>
+        public const string LLM_DefensiveMode = "LLM_DefensiveMode";
+
+        // ── ★ LLM-as-Scorer 가중치 ──
+
+        /// <summary>★ LLM-as-Scorer: ScorerWeights 객체 (TargetScorer/UtilityScorer에서 읽음)</summary>
+        public const string LLM_ScorerWeights = "LLM_ScorerWeights";
+
+        // ── ★ v3.82.0: Training Data 수집 ──
+
+        /// <summary>★ v3.82.0: string - CompactBattlefieldEncoder 출력 (TrainingDataCollector용)</summary>
+        public const string TrainingCompactState = "TrainingCompactState";
+
+        /// <summary>★ v3.82.0: string - 역할 이름 (TrainingDataCollector용)</summary>
+        public const string TrainingRole = "TrainingRole";
+
+        /// <summary>★ v3.82.0: string - PlanSummarizer 출력 (TrainingDataCollector용)</summary>
+        public const string TrainingPlanSummary = "TrainingPlanSummary";
     }
 }

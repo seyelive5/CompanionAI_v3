@@ -66,7 +66,14 @@ namespace CompanionAI_v3.GameInterface
             }
 
             // 우리가 제어하는 유닛인지 확인
-            if (!TurnOrchestrator.Instance.ShouldControl(unit)) return;
+            if (!TurnOrchestrator.Instance.ShouldControl(unit))
+            {
+                // ★ v3.82.0: 적/비제어 유닛 턴 → LLM pre-compute 시도
+                // 다음 아군 턴을 위해 LLM 스코어링을 미리 계산
+                try { Planning.LLM.LLMPreCompute.TryStartPreCompute(); }
+                catch (System.Exception ex) { Main.LogDebug($"[TurnEventHandler] PreCompute failed: {ex.Message}"); }
+                return;
+            }
 
             Main.LogDebug($"[TurnEventHandler] Turn started for {unit.CharacterName}");
 
@@ -112,6 +119,9 @@ namespace CompanionAI_v3.GameInterface
             // ★ v3.48.0: Tactical Narrator 오버레이 숨김
             Diagnostics.TacticalNarrator.OnTurnEnd();
 
+            // ★ v3.76.0: LLM Combat Panel 숨김
+            UI.LLMCombatPanel.Hide();
+
             // ★ v3.5.26: 턴 시작 시간 정리
             CustomBehaviourTreePatch.ClearTurnStart(unit.UniqueId);
         }
@@ -151,6 +161,9 @@ namespace CompanionAI_v3.GameInterface
                 // ★ v3.48.0: Tactical Narrator 전투 종료 정리
                 Diagnostics.TacticalNarrator.OnCombatEnd();
 
+                // ★ v3.76.0: LLM Combat Panel 정리
+                UI.LLMCombatPanel.Reset();
+
                 // ★ v3.1.19: 패턴 캐시 클리어
                 CombatAPI.ClearPatternCache();
 
@@ -163,6 +176,10 @@ namespace CompanionAI_v3.GameInterface
             else
             {
                 Main.Log("[TurnEventHandler] Combat started");
+
+                // ★ v3.82.0: LLM Scorer Cache + Pre-compute 초기화
+                Planning.LLM.LLMScorerCache.Clear();
+                Planning.LLM.LLMPreCompute.Clear();
 
                 // ★ v3.2.10: TeamBlackboard 초기화
                 TeamBlackboard.Instance.InitializeCombat();

@@ -12,6 +12,7 @@ namespace CompanionAI_v3.UI
         private void OnGUI()
         {
             TacticalOverlayUI.OnGUI();
+            LLMCombatPanel.DrawGUI();
         }
     }
 

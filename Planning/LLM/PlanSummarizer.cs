@@ -24,12 +24,17 @@ namespace CompanionAI_v3.Planning.LLM
         /// <param name="plan">요약할 턴 계획</param>
         /// <param name="strategy">계획의 근거 전략 (null 허용)</param>
         /// <param name="situation">현재 상황 (킬 판정용)</param>
+        /// <param name="archetypeTag">★ v3.78.0: 아키타입 태그 (null이면 생략)</param>
         /// <returns>자연어 요약 문자열</returns>
-        public static string Summarize(TurnPlan plan, TurnStrategy strategy, Situation situation)
+        public static string Summarize(TurnPlan plan, TurnStrategy strategy, Situation situation, string archetypeTag = null)
         {
             if (plan == null) return "(no plan)";
 
             _sb.Clear();
+
+            // ★ v3.78.0: 아키타입 태그 접두어 "[Aggressive] Plan [...]"
+            if (!string.IsNullOrEmpty(archetypeTag))
+                _sb.Append('[').Append(archetypeTag).Append("] ");
 
             // 헤더: "Plan [SequenceType] Focus TargetName:"
             string seqName = strategy != null ? strategy.Sequence.ToString() : plan.Priority.ToString();

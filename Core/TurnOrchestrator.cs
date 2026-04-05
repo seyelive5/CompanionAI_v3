@@ -77,10 +77,12 @@ namespace CompanionAI_v3.Core
         private static int _judgeResult = -1;
         private static bool _judgeStarted;
 
-        // ★ Phase 4: LLM Strategic Advisor 상태
-        private static bool _advisorStarted;
-        private static bool _advisorDone;
-        private static StrategicIntent _pendingIntent;
+        // ★ LLM-as-Scorer 상태 (Phase 4 Advisor 대체)
+        private static bool _scorerStarted;
+        private static ScorerWeights _pendingWeights;
+
+        // ★ v3.82.0: Scorer 캐시 해시 (LLM 응답 후 캐시 저장용)
+        private static long _lastScorerCacheHash;
 
         #endregion
 
@@ -351,10 +353,10 @@ namespace CompanionAI_v3.Core
         }
 
         /// <summary>
-        /// ★ Phase 3: LLM-as-Judge 흐름 처리.
-        /// Phase 1: 후보 플랜 생성 + Judge 코루틴 시작 → Waiting
-        /// Phase 2: Judge 응답 대기 → Waiting
-        /// Phase 3: 응답 수신 → 플랜 선택 + 실행
+        /// ★ LLM-as-Scorer + Judge 흐름 처리.
+        /// Phase 1: LLMScorer 코루틴 시작 → Waiting
+        /// Phase 2: Scorer 응답 대기 → Waiting
+        /// Phase 3: ScorerWeights로 후보 생성 → Judge → 실행
         /// 실패 시 일반 플래너로 폴백.
         /// </summary>
         private ExecutionResult HandleLLMJudge(
@@ -377,69 +379,75 @@ namespace CompanionAI_v3.Core
                 return ExecuteNextAction(unit, unitName, turnState, situation);
             }
 
-            // ★ Phase 4: LLM Strategic Advisor — 후보 생성 전 전략 의도 획득
-            // Advisor가 완료되기 전까지는 Phase 1(후보 생성)으로 넘어가지 않음
-            if (!_advisorDone && !_judgeStarted && !LLMJudge.IsJudging)
+            // ══════════════════════════════════════════════════
+            // Phase 1: LLM Scorer 시작 — 전투 상태 → 가중치 JSON
+            // ★ v3.82.0: 캐시 → Pre-compute → LLM 호출 순서
+            // ══════════════════════════════════════════════════
+            if (!_scorerStarted && !_judgeStarted && !LLMJudge.IsJudging && !LLMScorer.IsScoring)
             {
-                if (!_advisorStarted && !LLMAdvisor.IsAdvising)
+                var scorerRole = GetEffectiveRole(unit, situation);
+                int enemyCount = situation.Enemies?.Count ?? 0;
+
+                // ★ v3.82.0: Pre-computed 결과 확인 (적 턴 동안 미리 계산)
+                if (LLMPreCompute.TryGetPreComputed(unit.UniqueId, out var preWeights))
                 {
-                    // Advisor 코루틴 시작
-                    _advisorStarted = true;
-                    _pendingIntent = null;
-                    var advRole = GetEffectiveRole(unit, situation);
-                    MachineSpirit.CoroutineRunner.Start(LLMAdvisor.Advise(
-                        situation, advRole.ToString(),
-                        intent =>
-                        {
-                            _pendingIntent = intent;
-                            _advisorDone = true;
-                        }));
-
-                    Main.Log($"[LLM Advisor] {unitName}: Started strategic analysis");
-
-                    UI.TacticalOverlayUI.ShowAlways(unitName,
-                        new[] { "Strategic analysis..." },
-                        UnityEngine.Color.white, 10f);
-
-                    return ExecutionResult.Waiting("LLM Advisor analyzing");
+                    _scorerStarted = true;
+                    _pendingWeights = preWeights;
+                    Main.Log($"[LLM Scorer] {unitName}: Pre-computed hit ({preWeights})");
+                    // Phase 2 스킵 → Phase 3으로 바로 진행 (다음 프레임)
                 }
-
-                if (LLMAdvisor.IsAdvising)
+                // ★ v3.82.0: Semantic cache 확인
+                else
                 {
-                    return ExecutionResult.Waiting("LLM Advisor processing");
-                }
-
-                // Advisor 코루틴이 콜백 없이 종료된 경우 (안전장치)
-                _advisorDone = true;
-                if (_pendingIntent == null)
-                    _pendingIntent = StrategicIntent.Balanced;
-            }
-
-            // ★ Phase 4: Advisor 결과를 TurnState 컨텍스트에 적용 (1회만)
-            if (_advisorDone && _pendingIntent != null && !_judgeStarted
-                && !turnState.HasContext(StrategyWeightModifier.KEY_PRIMARY_GOAL))
-            {
-                StrategyWeightModifier.ApplyIntent(_pendingIntent, turnState, situation);
-                Main.Log($"[LLM Advisor] {unitName}: Applied {_pendingIntent} ({LLMAdvisor.LastAdvisorTimeMs}ms)");
-
-                // ★ Advisor 결과 오버레이 표시
-                if (_pendingIntent.PrimaryGoal != IntentType.Balanced)
-                {
-                    string intentOverlay = _pendingIntent.PrimaryGoal.ToString();
-                    if (_pendingIntent.FocusTargetIndex >= 0
-                        && situation.Enemies != null
-                        && _pendingIntent.FocusTargetIndex < situation.Enemies.Count)
+                    var cacheHash = LLMScorerCache.ComputeHash(situation, scorerRole);
+                    if (LLMScorerCache.TryGet(cacheHash, out var cachedWeights))
                     {
-                        var focusEnemy = situation.Enemies[_pendingIntent.FocusTargetIndex];
-                        intentOverlay += ": " + (focusEnemy?.CharacterName ?? "target");
+                        _scorerStarted = true;
+                        _pendingWeights = cachedWeights;
+                        Main.Log($"[LLM Scorer] {unitName}: Cache hit (hash={cacheHash}, {cachedWeights})");
                     }
-                    UI.TacticalOverlayUI.ShowAlways(unitName,
-                        new[] { intentOverlay },
-                        UnityEngine.Color.cyan, 3f);
+                    else
+                    {
+                        // Cache miss → 일반 LLM 호출
+                        _scorerStarted = true;
+                        _pendingWeights = null;
+                        _lastScorerCacheHash = cacheHash; // ★ 응답 후 캐시 저장용
+
+                        MachineSpirit.CoroutineRunner.Start(LLMScorer.Score(
+                            situation, scorerRole.ToString(), enemyCount,
+                            weights =>
+                            {
+                                _pendingWeights = weights;
+                                // ★ v3.82.0: 결과를 캐시에 저장
+                                if (weights != null)
+                                    LLMScorerCache.Store(_lastScorerCacheHash, weights);
+                            }));
+
+                        Main.Log($"[LLM Scorer] {unitName}: Started scoring (enemies={enemyCount})");
+                        UI.LLMCombatPanel.ShowAnalyzing(unitName, scorerRole.ToString());
+
+                        return ExecutionResult.Waiting("LLM Scorer analyzing");
+                    }
                 }
             }
 
-            // Phase 1: 후보 플랜 생성 + Judge 시작
+            // ══════════════════════════════════════════════════
+            // Phase 2: Scorer 응답 대기
+            // ══════════════════════════════════════════════════
+            if (LLMScorer.IsScoring)
+            {
+                return ExecutionResult.Waiting("LLM Scorer processing");
+            }
+
+            // Scorer 완료 — 결과 소비 (콜백 누락 안전장치)
+            if (_pendingWeights == null && _scorerStarted && !LLMScorer.IsScoring)
+            {
+                _pendingWeights = LLMScorer.ConsumeResult();
+            }
+
+            // ══════════════════════════════════════════════════
+            // Phase 3: 후보 생성 + Judge + 실행
+            // ══════════════════════════════════════════════════
             if (!_judgeStarted && !LLMJudge.IsJudging)
             {
                 // AP 정체 감지 (일반 경로와 동일)
@@ -453,7 +461,7 @@ namespace CompanionAI_v3.Core
                         turnState.StagnantPlanCount++;
                         if (turnState.StagnantPlanCount >= 3)
                         {
-                            Main.LogWarning($"[LLM Judge] {unitName}: ★ Ending turn — {turnState.StagnantPlanCount} stagnant plans");
+                            Main.LogWarning($"[LLM Judge] {unitName}: Ending turn — {turnState.StagnantPlanCount} stagnant plans");
                             return ExecutionResult.EndTurn("Stagnant AP - no progress");
                         }
                     }
@@ -464,30 +472,41 @@ namespace CompanionAI_v3.Core
                 }
                 turnState.APAtLastPlanStart = currentGameAP;
 
-                // ★ Phase 4: TargetScorer에 TurnState 설정 (LLM 가중치 적용)
-                TargetScorer.SetActiveTurnState(turnState);
-
-                // 후보 플랜 생성 (동기)
+                // 후보 플랜 생성 (동기) — ScorerWeights 전달
                 var role = GetEffectiveRole(unit, situation);
-                _pendingCandidates = CandidatePlanGenerator.Generate(
-                    situation, turnState, _planner, role);
+                var weights = _pendingWeights ?? new ScorerWeights();
+                Main.Log($"[LLM Scorer] {unitName}: Weights={weights} ({LLMScorer.LastScorerTimeMs}ms)");
 
-                // ★ Phase 4: 스코어링 완료 — TurnState 해제
-                TargetScorer.ClearActiveTurnState();
+                _pendingCandidates = CandidatePlanGenerator.Generate(
+                    situation, turnState, _planner, role, weights);
 
                 if (_pendingCandidates == null || _pendingCandidates.Count <= 1)
                 {
-                    // 후보 1개 이하 — Judge 불필요, 있으면 바로 사용, 없으면 일반 경로
+                    // 후보 1개 이하 — Judge 불필요
                     if (_pendingCandidates != null && _pendingCandidates.Count == 1)
                     {
-                        turnState.Plan = _pendingCandidates[0].Plan;
-                        string singleStratLabel = _pendingCandidates[0].Strategy != null
-                            ? _pendingCandidates[0].Strategy.Sequence.ToString()
-                            : _pendingCandidates[0].Plan?.Priority.ToString() ?? "Unknown";
+                        var single = _pendingCandidates[0];
+                        turnState.Plan = single.Plan;
+                        string singleStratLabel = single.Strategy != null
+                            ? single.Strategy.Sequence.ToString()
+                            : single.Plan?.Priority.ToString() ?? "Unknown";
                         Main.Log($"[LLM Judge] {unitName}: Single candidate — using directly ({singleStratLabel})");
+
+                        // 패널에 결과 표시
+                        string weightsTag = weights.IsDefault ? "Baseline" : "LLM Weights";
+                        UI.LLMCombatPanel.ShowResult(unitName, role.ToString(),
+                            weightsTag, "Plan A",
+                            single.Summary ?? singleStratLabel,
+                            (float)LLMScorer.LastScorerTimeMs / 1000f);
+
                         TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
                         CombatReportCollector.Instance.RecordPlan(turnState.Plan);
                         Data.CompanionDialogue.AnnouncePlan(unit, turnState.Plan);
+
+                        // ★ v3.82.0: Training data context 저장 (v3.84.0: opt-in via Debug tab)
+                        if (Main.Settings.EnableTrainingDataCollection)
+                            StoreTrainingContext(turnState, unit, situation, role.ToString(), weights, single.Summary ?? singleStratLabel);
+
                         _pendingCandidates = null;
                         return ExecuteNextAction(unit, unitName, turnState, situation);
                     }
@@ -507,25 +526,18 @@ namespace CompanionAI_v3.Core
                     result => _judgeResult = result));
 
                 Main.Log($"[LLM Judge] {unitName}: Started judging {_pendingCandidates.Count} candidates");
-
-                // 오버레이: Advisor 결과 + Judge 진행 표시
-                string overlayText = _pendingIntent != null && _pendingIntent.PrimaryGoal != IntentType.Balanced
-                    ? $"Strategy: {_pendingIntent.PrimaryGoal} | Evaluating plans..."
-                    : "Tactical evaluation...";
-                UI.TacticalOverlayUI.ShowAlways(unitName,
-                    new[] { overlayText },
-                    UnityEngine.Color.white, 10f);
+                UI.LLMCombatPanel.ShowEvaluating(unitName, _pendingCandidates.Count);
 
                 return ExecutionResult.Waiting("LLM Judge deciding");
             }
 
-            // Phase 2: Judge 응답 대기
+            // Phase 4: Judge 응답 대기
             if (LLMJudge.IsJudging)
             {
                 return ExecutionResult.Waiting("LLM Judge processing");
             }
 
-            // Phase 3: Judge 응답 수신 — 플랜 선택
+            // Phase 5: Judge 응답 수신 — 플랜 선택
             _judgeStarted = false;
             int selected = _judgeResult >= 0 ? _judgeResult : 0;
 
@@ -534,24 +546,22 @@ namespace CompanionAI_v3.Core
                 var chosen = _pendingCandidates[selected];
                 turnState.Plan = chosen.Plan;
 
-                // ★ Phase 4: Advisor 결과도 함께 로깅
-                string advisorTag = _pendingIntent != null && _pendingIntent.PrimaryGoal != IntentType.Balanced
-                    ? $", Advisor: {_pendingIntent.PrimaryGoal}"
-                    : "";
                 string strategyLabel = chosen.Strategy != null
                     ? chosen.Strategy.Sequence.ToString()
                     : chosen.Plan?.Priority.ToString() ?? "Unknown";
                 Main.Log($"[LLM Judge] {unitName}: Selected Plan {(char)('A' + selected)} " +
-                    $"({strategyLabel}, {LLMJudge.LastJudgeTimeMs}ms{advisorTag})");
+                    $"({strategyLabel}, scorer={LLMScorer.LastScorerTimeMs}ms, judge={LLMJudge.LastJudgeTimeMs}ms)");
                 Main.Log($"[LLM Judge] {unitName}: {chosen.Summary}");
 
-                // 결과 오버레이 표시
-                string overlayLine = _pendingIntent != null && _pendingIntent.PrimaryGoal != IntentType.Balanced
-                    ? $"[{_pendingIntent.PrimaryGoal}] Plan {(char)('A' + selected)}: {chosen.Summary}"
-                    : $"Plan {(char)('A' + selected)}: {chosen.Summary}";
-                UI.TacticalOverlayUI.ShowAlways(unitName,
-                    new[] { overlayLine },
-                    UnityEngine.Color.white, 5f);
+                // LLMCombatPanel: 결과 표시
+                {
+                    var panelRole = GetEffectiveRole(unit, situation);
+                    string archetypeTag = chosen.ArchetypeTag ?? strategyLabel;
+                    string planLabel = $"Plan {(char)('A' + selected)}";
+                    float totalTimeSec = (LLMScorer.LastScorerTimeMs + LLMJudge.LastJudgeTimeMs) / 1000f;
+                    UI.LLMCombatPanel.ShowResult(unitName, panelRole.ToString(),
+                        archetypeTag, planLabel, chosen.Summary, totalTimeSec);
+                }
 
                 _pendingCandidates = null;
 
@@ -567,8 +577,15 @@ namespace CompanionAI_v3.Core
                 // Machine Spirit feed
                 if (CompanionAI_v3.MachineSpirit.MachineSpirit.IsActive)
                 {
-                    string summary = $"Plan (LLM Judge): {turnState.Plan.Priority}, Actions: {turnState.Plan.RemainingActionCount}";
+                    string summary = $"Plan (LLM Scorer+Judge): {turnState.Plan.Priority}, Actions: {turnState.Plan.RemainingActionCount}";
                     CompanionAI_v3.MachineSpirit.GameEventCollector.AddTurnPlanSummary(unitName, summary);
+                }
+
+                // ★ v3.82.0: Training data context 저장 (v3.84.0: opt-in via Debug tab)
+                if (Main.Settings.EnableTrainingDataCollection)
+                {
+                    var trainRole = GetEffectiveRole(unit, situation);
+                    StoreTrainingContext(turnState, unit, situation, trainRole.ToString(), _pendingWeights, chosen.Summary);
                 }
 
                 return ExecuteNextAction(unit, unitName, turnState, situation);
@@ -611,7 +628,7 @@ namespace CompanionAI_v3.Core
         }
 
         /// <summary>
-        /// ★ Phase 3+4: LLM Judge/Advisor 상태 초기화
+        /// ★ LLM Scorer + Judge 상태 초기화
         /// </summary>
         private static void ResetLLMJudgeState()
         {
@@ -620,12 +637,38 @@ namespace CompanionAI_v3.Core
             _pendingCandidates = null;
             LLMJudge.Reset();
 
-            // ★ Phase 4: Advisor 상태 초기화
-            _advisorStarted = false;
-            _advisorDone = false;
-            _pendingIntent = null;
-            LLMAdvisor.Reset();
+            // ★ LLM Scorer 상태 초기화
+            _scorerStarted = false;
+            _pendingWeights = null;
+            _lastScorerCacheHash = 0;
+            LLMScorer.Reset();
             TargetScorer.ClearActiveTurnState();
+        }
+
+        /// <summary>
+        /// ★ v3.82.0: Training data context를 TurnState에 저장.
+        /// OnTurnEnd에서 TrainingDataCollector.RecordTurn() 호출 시 사용.
+        /// </summary>
+        private static void StoreTrainingContext(
+            TurnState turnState, Kingmaker.EntitySystem.Entities.BaseUnitEntity unit,
+            Situation situation, string roleName, ScorerWeights weights, string planSummary)
+        {
+            if (turnState == null) return;
+
+            try
+            {
+                string compactState = CompactBattlefieldEncoder.Encode(unit, situation, roleName);
+                turnState.SetContext(StrategicContextKeys.TrainingCompactState, compactState);
+                turnState.SetContext(StrategicContextKeys.TrainingRole, roleName);
+                turnState.SetContext(StrategicContextKeys.TrainingPlanSummary, planSummary ?? "");
+                // ScorerWeights를 전용 훈련 키로도 저장 (replan에서 LLM_ScorerWeights가 덮어써질 수 있으므로)
+                if (weights != null)
+                    turnState.SetContext("TrainingWeights", weights);
+            }
+            catch (System.Exception ex)
+            {
+                Main.LogDebug($"[TrainingData] StoreTrainingContext failed: {ex.Message}");
+            }
         }
 
         #endregion
@@ -1210,6 +1253,21 @@ namespace CompanionAI_v3.Core
                 CombatReportCollector.Instance.OnTurnEnd(
                     CombatAPI.GetCurrentAP(unit), CombatAPI.GetCurrentMP(unit));
 
+                // ★ v3.82.0: Training data 수집 (LLM-influenced 턴만, v3.84.0: opt-in via Debug tab)
+                if (Main.Settings.EnableTrainingDataCollection)
+                {
+                    var trainingCompact = state.GetContext<string>(StrategicContextKeys.TrainingCompactState);
+                    if (trainingCompact != null)
+                    {
+                        var trainingRole = state.GetContext<string>(StrategicContextKeys.TrainingRole, "Unknown");
+                        var trainingWeights = state.GetContext<ScorerWeights>("TrainingWeights");
+                        var trainingSummary = state.GetContext<string>(StrategicContextKeys.TrainingPlanSummary, "");
+                        TrainingDataCollector.RecordTurn(
+                            unit.CharacterName, trainingRole, trainingCompact,
+                            trainingWeights, trainingSummary, state);
+                    }
+                }
+
                 _turnStates.Remove(unitId);
             }
 
@@ -1246,6 +1304,13 @@ namespace CompanionAI_v3.Core
 
             // ★ Phase 3: LLM Judge 상태 정리
             ResetLLMJudgeState();
+
+            // ★ v3.82.0: LLM Scorer 캐시 + Pre-compute 정리
+            LLMScorerCache.Clear();
+            LLMPreCompute.Clear();
+
+            // ★ v3.82.0: Training data 플러시
+            TrainingDataCollector.FlushToFile();
 
             // ★ v3.8.55: Raven support 사거리 캐시 정리
             GameInterface.FamiliarAPI.ClearRangeCache();

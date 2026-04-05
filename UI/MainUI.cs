@@ -5,6 +5,7 @@ using Kingmaker;
 using Kingmaker.EntitySystem.Entities;
 using UnityEngine;
 using CompanionAI_v3.Data;
+using CompanionAI_v3.Diagnostics;
 using CompanionAI_v3.Settings;
 using MSp = CompanionAI_v3.MachineSpirit;
 
@@ -397,6 +398,17 @@ namespace CompanionAI_v3.UI
                     Main.Settings.DecisionOverlayScale, 0.8f, 2.0f, GUILayout.Width(UIStyles.Sd(134)));
                 GUILayout.EndHorizontal();
             }
+
+            // ★ v3.84.0: LLM Developer Tools section
+            GUILayout.Space(15);
+            GUILayout.Label($"<color={UIStyles.RoleGold}>\u2500\u2500 {L("LLMDevTools")} \u2500\u2500</color>", UIStyles.BoldLabel);
+            GUILayout.Label($"<color={UIStyles.Danger}>{L("LLMDevToolsWarning")}</color>", UIStyles.Description);
+            GUILayout.Space(5);
+
+            Main.Settings.EnableTrainingDataCollection = DrawCheckbox(
+                Main.Settings.EnableTrainingDataCollection, L("EnableTrainingDataCollection"));
+            GUILayout.Label($"<color={UIStyles.TextMid}>{L("TrainingDataCollectionDesc")}\n" +
+                $"Buffered entries: {TrainingDataCollector.BufferCount}</color>", UIStyles.Description);
         }
 
         // ═════════════════════════════════════════════════════════
@@ -412,6 +424,11 @@ namespace CompanionAI_v3.UI
 
         private static void DrawLLMCombatAITab()
         {
+            // ★ v3.84.0: Experimental warning
+            GUILayout.Label($"<color=#FF9900><b>\u26A0 {L("LLMCombatAIExperimental")}</b></color>", UIStyles.BoldLabel);
+            GUILayout.Label($"<color=#AAAAAA>{L("LLMCombatAIExperimentalDesc")}</color>", UIStyles.Description);
+            GUILayout.Space(10);
+
             UIStyles.SectionTitle(L("LLMCombatAITitle"));
             GUILayout.Label($"<color={UIStyles.TextMid}>{L("LLMCombatAIDesc")}</color>", UIStyles.Description);
             GUILayout.Space(5);

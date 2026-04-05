@@ -139,6 +139,15 @@ namespace CompanionAI_v3.Analysis
             _activeTurnState = null;
         }
 
+        /// <summary>
+        /// ★ LLM-as-Scorer: 현재 활성 TurnState에서 ScorerWeights 조회.
+        /// UtilityScorer 등 외부에서 LLM 가중치를 읽기 위한 헬퍼.
+        /// </summary>
+        public static ScorerWeights GetActiveScorerWeights()
+        {
+            return _activeTurnState?.GetContext<ScorerWeights>(StrategicContextKeys.LLM_ScorerWeights, null);
+        }
+
         #endregion
 
         #region Role-based Weight Presets
@@ -484,29 +493,59 @@ namespace CompanionAI_v3.Analysis
                         Main.LogDebug($"[TargetScorer] {target.CharacterName}: {turnUrgency * weights.TurnUrgency:+0;-0} turn urgency");
                 }
 
-                // ★ Phase 4: LLM Strategic Advisor — 집중 공격 보너스
+                // ★ LLM-as-Scorer: ScorerWeights 기반 가중치 적용
                 if (_activeTurnState != null)
                 {
-                    string focusId = _activeTurnState.GetContext<string>(StrategyWeightModifier.KEY_FOCUS_TARGET, null);
-                    if (focusId != null && target.UniqueId == focusId)
+                    var scorerWeights = _activeTurnState.GetContext<ScorerWeights>(StrategicContextKeys.LLM_ScorerWeights, null);
+                    if (scorerWeights != null)
                     {
-                        float focusBonus = _activeTurnState.GetContext<float>(StrategyWeightModifier.KEY_FOCUS_BONUS, 0f);
-                        if (focusBonus > 0f)
+                        // 집중 공격 대상 배율 (PriorityTarget 인덱스 → UniqueId 매칭)
+                        if (scorerWeights.PriorityTarget >= 0)
                         {
-                            score += focusBonus;
-                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: +{focusBonus:F0} LLM focus target");
+                            var enemies = situation.Enemies;
+                            if (enemies != null && scorerWeights.PriorityTarget < enemies.Count)
+                            {
+                                var priorityEnemy = enemies[scorerWeights.PriorityTarget];
+                                if (priorityEnemy != null && priorityEnemy.UniqueId == target.UniqueId)
+                                {
+                                    score *= scorerWeights.FocusFire;
+                                    if (Main.IsDebugEnabled)
+                                        Main.LogDebug($"[TargetScorer] {target.CharacterName}: x{scorerWeights.FocusFire:F1} LLM focus fire");
+                                }
+                            }
+                        }
+
+                        // AoE 가중치 — AoE 클러스터 보너스 증폭
+                        if (scorerWeights.AoEWeight > 1.01f && aoeClusterBonus > 0f)
+                        {
+                            float aoeAmplify = aoeClusterBonus * (scorerWeights.AoEWeight - 1f);
+                            score += aoeAmplify;
+                            if (Main.IsDebugEnabled)
+                                Main.LogDebug($"[TargetScorer] {target.CharacterName}: +{aoeAmplify:F0} LLM AoE weight amplify");
                         }
                     }
-
-                    // ★ Phase 4: AoE 선호도 — AoE 클러스터 보너스 증폭
-                    float aoePref = _activeTurnState.GetContext<float>(StrategyWeightModifier.KEY_AOE_PREF, 0.5f);
-                    if (aoePref > 0.6f && aoeClusterBonus > 0f)
+                    else
                     {
-                        // AoE 선호도가 높으면 기존 AoE 클러스터 보너스를 증폭 (최대 2x)
-                        float aoeAmplify = aoeClusterBonus * (aoePref - 0.5f) * 2f;
-                        score += aoeAmplify;
-                        if (Main.IsDebugEnabled)
-                            Main.LogDebug($"[TargetScorer] {target.CharacterName}: +{aoeAmplify:F0} LLM AoE preference amplify");
+                        // ★ Phase 4 레거시 폴백: StrategyWeightModifier 키가 있으면 사용
+                        string focusId = _activeTurnState.GetContext<string>(StrategyWeightModifier.KEY_FOCUS_TARGET, null);
+                        if (focusId != null && target.UniqueId == focusId)
+                        {
+                            float focusBonus = _activeTurnState.GetContext<float>(StrategyWeightModifier.KEY_FOCUS_BONUS, 0f);
+                            if (focusBonus > 0f)
+                            {
+                                score += focusBonus;
+                                Main.LogDebug($"[TargetScorer] {target.CharacterName}: +{focusBonus:F0} LLM focus target (legacy)");
+                            }
+                        }
+
+                        float aoePref = _activeTurnState.GetContext<float>(StrategyWeightModifier.KEY_AOE_PREF, 0.5f);
+                        if (aoePref > 0.6f && aoeClusterBonus > 0f)
+                        {
+                            float aoeAmplify = aoeClusterBonus * (aoePref - 0.5f) * 2f;
+                            score += aoeAmplify;
+                            if (Main.IsDebugEnabled)
+                                Main.LogDebug($"[TargetScorer] {target.CharacterName}: +{aoeAmplify:F0} LLM AoE preference amplify (legacy)");
+                        }
                     }
                 }
             }

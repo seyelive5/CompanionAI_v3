@@ -104,7 +104,7 @@ namespace CompanionAI_v3.Planning.LLM
                 string systemMsg, userMsg;
                 try
                 {
-                    systemMsg = BuildSystemMessage(roleName);
+                    systemMsg = BuildSystemMessage(roleName, candidates.Count);
                     userMsg = BuildUserMessage(candidates, situation);
                 }
                 catch (Exception msgEx)
@@ -226,20 +226,43 @@ namespace CompanionAI_v3.Planning.LLM
         // 메시지 빌드
         // ═══════════════════════════════════════════════════════════
 
-        /// <summary>시스템 메시지 — 역할별 캐싱</summary>
-        private static string BuildSystemMessage(string roleName)
+        /// <summary>시스템 메시지 — 역할+후보수별 캐싱</summary>
+        private static int _cachedCandidateCount;
+
+        private static string BuildSystemMessage(string roleName, int candidateCount)
         {
-            // 역할이 같으면 캐시 재사용
-            if (_cachedSystemMsg != null && _cachedSystemRole == roleName)
+            // 역할 + 후보 수가 같으면 캐시 재사용
+            if (_cachedSystemMsg != null && _cachedSystemRole == roleName && _cachedCandidateCount == candidateCount)
                 return _cachedSystemMsg;
+
+            // ★ v3.78.0: 후보 수에 맞는 동적 선택지 문자열 생성
+            int count = System.Math.Min(candidateCount, ChoiceLabels.Length);
+            string choiceStr;
+            if (count <= 1)
+                choiceStr = "A";
+            else if (count == 2)
+                choiceStr = "A or B";
+            else
+            {
+                var sb = new StringBuilder(count * 3);
+                for (int i = 0; i < count - 1; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append(ChoiceLabels[i]);
+                }
+                sb.Append(", or ").Append(ChoiceLabels[count - 1]);
+                choiceStr = sb.ToString();
+            }
 
             _sbSystem.Clear();
             _sbSystem.Append("You are a tactical combat advisor for a ").Append(roleName).Append(" unit.\n");
             _sbSystem.Append("Given the battlefield and candidate action plans, choose the single best plan.\n");
+            _sbSystem.Append("Each plan represents a distinct tactical approach (archetype). ");
             _sbSystem.Append("Evaluate: threat elimination, ally survival, damage efficiency, positioning.\n");
-            _sbSystem.Append("Respond with ONLY the letter of your choice (A, B, or C). Nothing else.");
+            _sbSystem.Append("Respond with ONLY the letter of your choice (").Append(choiceStr).Append("). Nothing else.");
 
             _cachedSystemRole = roleName;
+            _cachedCandidateCount = candidateCount;
             _cachedSystemMsg = _sbSystem.ToString();
             return _cachedSystemMsg;
         }
