@@ -56,6 +56,9 @@ namespace CompanionAI_v3
             // ★ v3.48.0: TacticalOverlay IMGUI 렌더러 초기화 (구 DirectiveOverlay 대체)
             DirectiveOverlayUI.Initialize();
 
+            // ★ Tactical Memory 초기화 (전투 간 전술 기억)
+            Planning.LLM.TacticalMemory.Initialize(modEntry.Path);
+
             // ★ v3.52.0: Machine Spirit 초기화
             MSController.Initialize();
 

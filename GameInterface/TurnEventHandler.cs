@@ -68,8 +68,8 @@ namespace CompanionAI_v3.GameInterface
             // 우리가 제어하는 유닛인지 확인
             if (!TurnOrchestrator.Instance.ShouldControl(unit))
             {
-                // ★ v3.82.0: 적/비제어 유닛 턴 → LLM pre-compute 시도
-                // 다음 아군 턴을 위해 LLM 스코어링을 미리 계산
+                // ★ v3.82.0: 적/비제어 유닛 턴 → LLM Scorer pre-compute 시도
+                // 다음 아군 턴을 위해 LLM 스코어링(가중치)을 미리 계산
                 try { Planning.LLM.LLMPreCompute.TryStartPreCompute(); }
                 catch (System.Exception ex) { Main.LogDebug($"[TurnEventHandler] PreCompute failed: {ex.Message}"); }
                 return;

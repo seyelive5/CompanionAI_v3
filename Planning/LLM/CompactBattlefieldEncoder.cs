@@ -57,6 +57,8 @@ namespace CompanionAI_v3.Planning.LLM
             AppendKeyFactorsLine(situation);
             AppendSkillsLine(situation);
             AppendKnowledgeContext(unit, situation);
+            AppendCommanderLine();
+            AppendMemoryLine();
 
             return _sb.ToString();
         }
@@ -537,6 +539,53 @@ namespace CompanionAI_v3.Planning.LLM
                     return i;
             }
             return -1;
+        }
+
+        // ════════════════════════════════════════════════════════════
+        // CMD: Commander 지시 (팀 전략)
+        // CMD:focus=0,form=aggressive,syn=tank_first
+        // ════════════════════════════════════════════════════════════
+
+        private static void AppendCommanderLine()
+        {
+            var cmd = Core.TeamBlackboard.Instance?.CommanderDirective;
+            if (cmd == null || cmd.IsDefault) return;
+
+            _sb.Append("CMD:");
+            bool needComma = false;
+
+            if (cmd.FocusTarget >= 0)
+            {
+                _sb.Append("focus=").Append(cmd.FocusTarget);
+                needComma = true;
+            }
+
+            if (!string.IsNullOrEmpty(cmd.Formation) && cmd.Formation != "balanced")
+            {
+                if (needComma) _sb.Append(',');
+                _sb.Append("form=").Append(cmd.Formation);
+                needComma = true;
+            }
+
+            if (!string.IsNullOrEmpty(cmd.Synergy))
+            {
+                if (needComma) _sb.Append(',');
+                _sb.Append("syn=").Append(cmd.Synergy);
+            }
+
+            _sb.Append('\n');
+        }
+
+        // ════════════════════════════════════════════════════════════
+        // PAST: 전투 간 전술 기억
+        // PAST: vs 2xCultist,1xPsyker, focus_fire=2.0 effective (3 rounds)
+        // ════════════════════════════════════════════════════════════
+
+        private static void AppendMemoryLine()
+        {
+            var memory = Core.TeamBlackboard.Instance?.TacticalMemoryContext;
+            if (string.IsNullOrEmpty(memory)) return;
+            _sb.Append(memory).Append('\n');
         }
     }
 }

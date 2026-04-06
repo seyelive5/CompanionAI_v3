@@ -1,5 +1,7 @@
 // Planning/LLM/LLMPreCompute.cs
 // ★ v3.82.0: Predictive pre-computation — 적 턴 동안 다음 아군의 LLM 스코어링을 미리 계산.
+// ★ Scorer weights만 사전 계산 (상황 독립적, 히트율 높음).
+//    풀 파이프라인(Plan 사전 생성)은 턴제 게임 특성상 비효율적이므로 제거됨.
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -23,6 +25,7 @@ namespace CompanionAI_v3.Planning.LLM
     /// 제한:
     /// - 한 번에 하나의 코루틴만 (네트워크 부하 방지)
     /// - 적 턴 동안 전장이 변해도 대략적 가중치는 유효 (가중치는 전략 방향만 조정)
+    /// - 풀 파이프라인(Plan 생성)은 턴제 특성상 15% 미만 히트율 → Scorer-only로 한정
     /// </summary>
     public static class LLMPreCompute
     {

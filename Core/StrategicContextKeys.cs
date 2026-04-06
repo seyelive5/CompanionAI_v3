@@ -61,6 +61,11 @@ namespace CompanionAI_v3.Core
         /// <summary>★ LLM-as-Scorer: ScorerWeights 객체 (TargetScorer/UtilityScorer에서 읽음)</summary>
         public const string LLM_ScorerWeights = "LLM_ScorerWeights";
 
+        // ── ★ Team Commander 지시 ──
+
+        /// <summary>★ CommanderDirective 객체 (팀 전체 전략 지시)</summary>
+        public const string CommanderDirective = "CommanderDirective";
+
         // ── ★ v3.82.0: Training Data 수집 ──
 
         /// <summary>★ v3.82.0: string - CompactBattlefieldEncoder 출력 (TrainingDataCollector용)</summary>

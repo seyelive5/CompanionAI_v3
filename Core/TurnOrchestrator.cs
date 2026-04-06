@@ -77,12 +77,22 @@ namespace CompanionAI_v3.Core
         private static int _judgeResult = -1;
         private static bool _judgeStarted;
 
+        // ★ Fuzzy Confidence Blending 상태
+        private static LLMJudge.JudgeConfidence _judgeConfidence;
+
         // ★ LLM-as-Scorer 상태 (Phase 4 Advisor 대체)
         private static bool _scorerStarted;
         private static ScorerWeights _pendingWeights;
 
         // ★ v3.82.0: Scorer 캐시 해시 (LLM 응답 후 캐시 저장용)
         private static long _lastScorerCacheHash;
+
+        // ★ Team Commander 상태
+        private static bool _commanderStarted;
+        private static CommanderDirective _commanderResult;
+
+        // ★ Cross-Combat Tactical Memory: 전투 중 사용된 가중치 추적
+        private static ScorerWeights _combatDominantWeights;
 
         #endregion
 
@@ -380,6 +390,70 @@ namespace CompanionAI_v3.Core
             }
 
             // ══════════════════════════════════════════════════
+            // Phase 0: Team Commander (라운드당 1회)
+            // ══════════════════════════════════════════════════
+            if (!_commanderStarted && !_scorerStarted && !_judgeStarted
+                && !LLMCommander.IsCommanding
+                && (Main.Settings?.EnableLLMCombatAI ?? false)
+                && (Main.Settings?.EnableLLMCommander ?? true))
+            {
+                int currentRound = Kingmaker.Game.Instance?.TurnController?.CombatRound ?? 1;
+                if (TeamBlackboard.Instance.NeedsCommanderUpdate(currentRound))
+                {
+                    // 아군 Situations 수집
+                    var allySituations = new System.Collections.Generic.List<Situation>(6);
+                    allySituations.Add(situation); // 현재 유닛
+                    var party = Kingmaker.Game.Instance?.Player?.PartyAndPets;
+                    if (party != null)
+                    {
+                        foreach (var ally in party)
+                        {
+                            if (ally == null || ally == unit) continue;
+                            if (!ally.IsInCombat || ally.LifeState?.IsConscious != true) continue;
+                            // TeamBlackboard에 이미 등록된 Situation이 있으면 사용
+                            var registeredSit = TeamBlackboard.Instance.GetUnitSituation(ally.UniqueId);
+                            if (registeredSit != null)
+                                allySituations.Add(registeredSit);
+                        }
+                    }
+
+                    int enemyCount = situation.Enemies?.Count ?? 0;
+                    if (enemyCount > 0 && allySituations.Count > 0)
+                    {
+                        _commanderStarted = true;
+                        _commanderResult = null;
+                        MachineSpirit.CoroutineRunner.Start(LLMCommander.Command(
+                            allySituations, TeamBlackboard.Instance, enemyCount,
+                            result => _commanderResult = result));
+
+                        Main.Log($"[LLM Commander] {unitName}: Started team commander (round={currentRound}, allies={allySituations.Count})");
+                        return ExecutionResult.Waiting("LLM Commander analyzing");
+                    }
+                    else
+                    {
+                        // 적 없음 — Commander 스킵
+                        TeamBlackboard.Instance.SetCommanderDirective(new CommanderDirective(), currentRound);
+                    }
+                }
+            }
+
+            // Commander 응답 대기
+            if (_commanderStarted && LLMCommander.IsCommanding)
+            {
+                return ExecutionResult.Waiting("LLM Commander processing");
+            }
+
+            // Commander 완료 → 결과 저장
+            if (_commanderStarted && !LLMCommander.IsCommanding)
+            {
+                _commanderStarted = false;
+                int currentRound = Kingmaker.Game.Instance?.TurnController?.CombatRound ?? 1;
+                var directive = _commanderResult ?? new CommanderDirective();
+                TeamBlackboard.Instance.SetCommanderDirective(directive, currentRound);
+                Main.Log($"[LLM Commander] {unitName}: {directive} ({LLMCommander.LastCommanderTimeMs}ms)");
+            }
+
+            // ══════════════════════════════════════════════════
             // Phase 1: LLM Scorer 시작 — 전투 상태 → 가중치 JSON
             // ★ v3.82.0: 캐시 → Pre-compute → LLM 호출 순서
             // ══════════════════════════════════════════════════
@@ -517,15 +591,20 @@ namespace CompanionAI_v3.Core
                     return FallbackToNormalPlan(unit, unitId, unitName, turnState, situation);
                 }
 
-                // Judge 코루틴 시작
+                // Judge 코루틴 시작 (Confidence 버전)
                 _judgeResult = -1;
+                _judgeConfidence = default;
                 _judgeStarted = true;
-                MachineSpirit.CoroutineRunner.Start(LLMJudge.Judge(
+                MachineSpirit.CoroutineRunner.Start(LLMJudge.JudgeWithConfidence(
                     _pendingCandidates, situation,
                     role.ToString(),
-                    result => _judgeResult = result));
+                    conf =>
+                    {
+                        _judgeConfidence = conf;
+                        _judgeResult = conf.PreferredIndex;
+                    }));
 
-                Main.Log($"[LLM Judge] {unitName}: Started judging {_pendingCandidates.Count} candidates");
+                Main.Log($"[LLM Judge] {unitName}: Started judging {_pendingCandidates.Count} candidates (confidence mode)");
                 UI.LLMCombatPanel.ShowEvaluating(unitName, _pendingCandidates.Count);
 
                 return ExecutionResult.Waiting("LLM Judge deciding");
@@ -537,30 +616,85 @@ namespace CompanionAI_v3.Core
                 return ExecutionResult.Waiting("LLM Judge processing");
             }
 
-            // Phase 5: Judge 응답 수신 — 플랜 선택
+            // Phase 5: Judge 응답 수신 — 신뢰도 블렌딩 또는 단일 선택
             _judgeStarted = false;
             int selected = _judgeResult >= 0 ? _judgeResult : 0;
 
             if (_pendingCandidates != null && selected < _pendingCandidates.Count)
             {
-                var chosen = _pendingCandidates[selected];
-                turnState.Plan = chosen.Plan;
+                // ★ Fuzzy Confidence Blending:
+                // 신뢰도가 95% 미만이고 후보가 2개이며 LLM weights가 있으면 블렌딩
+                bool shouldBlend = _judgeConfidence.IsValid
+                    && _judgeConfidence.Ratios != null
+                    && _judgeConfidence.Ratios.Length >= 2
+                    && _pendingCandidates.Count >= 2
+                    && _judgeConfidence.Ratios[_judgeConfidence.PreferredIndex] < 0.95f
+                    && _pendingWeights != null && !_pendingWeights.IsDefault;
 
-                string strategyLabel = chosen.Strategy != null
-                    ? chosen.Strategy.Sequence.ToString()
-                    : chosen.Plan?.Priority.ToString() ?? "Unknown";
-                Main.Log($"[LLM Judge] {unitName}: Selected Plan {(char)('A' + selected)} " +
+                TurnPlan finalPlan;
+                TurnStrategy finalStrategy;
+                string finalSummary;
+                string blendLabel;
+
+                if (shouldBlend)
+                {
+                    float ratioA = _judgeConfidence.Ratios.Length > 0 ? _judgeConfidence.Ratios[0] : 0.5f;
+                    float ratioB = _judgeConfidence.Ratios.Length > 1 ? _judgeConfidence.Ratios[1] : 0.5f;
+
+                    // Plan A = LLM weights, Plan B = baseline (default weights)
+                    var blendedWeights = ScorerWeights.Blend(_pendingWeights, new ScorerWeights(), ratioA, ratioB);
+
+                    Main.Log($"[LLM Judge] {unitName}: Blending weights A:{ratioA:F2} B:{ratioB:F2} → {blendedWeights}");
+
+                    // 블렌딩된 가중치로 최종 플랜 생성
+                    var blendedCandidates = CandidatePlanGenerator.Generate(
+                        situation, turnState, _planner,
+                        GetEffectiveRole(unit, situation), blendedWeights, 1);
+
+                    if (blendedCandidates != null && blendedCandidates.Count > 0)
+                    {
+                        var blended = blendedCandidates[0];
+                        finalPlan = blended.Plan;
+                        finalStrategy = blended.Strategy;
+                        finalSummary = blended.Summary;
+                        blendLabel = $"Blended A:{ratioA:F2},B:{ratioB:F2}";
+                    }
+                    else
+                    {
+                        // 블렌딩 플랜 생성 실패 → 원래 선택으로 폴백
+                        var chosen = _pendingCandidates[selected];
+                        finalPlan = chosen.Plan;
+                        finalStrategy = chosen.Strategy;
+                        finalSummary = chosen.Summary;
+                        blendLabel = $"Plan {(char)('A' + selected)} (blend failed)";
+                    }
+                }
+                else
+                {
+                    // 블렌딩 불필요 — 단일 선택 (기존 동작)
+                    var chosen = _pendingCandidates[selected];
+                    finalPlan = chosen.Plan;
+                    finalStrategy = chosen.Strategy;
+                    finalSummary = chosen.Summary;
+                    blendLabel = $"Plan {(char)('A' + selected)}";
+                }
+
+                turnState.Plan = finalPlan;
+
+                string strategyLabel = finalStrategy != null
+                    ? finalStrategy.Sequence.ToString()
+                    : finalPlan?.Priority.ToString() ?? "Unknown";
+                Main.Log($"[LLM Judge] {unitName}: {blendLabel} " +
                     $"({strategyLabel}, scorer={LLMScorer.LastScorerTimeMs}ms, judge={LLMJudge.LastJudgeTimeMs}ms)");
-                Main.Log($"[LLM Judge] {unitName}: {chosen.Summary}");
+                Main.Log($"[LLM Judge] {unitName}: {finalSummary}");
 
                 // LLMCombatPanel: 결과 표시
                 {
                     var panelRole = GetEffectiveRole(unit, situation);
-                    string archetypeTag = chosen.ArchetypeTag ?? strategyLabel;
-                    string planLabel = $"Plan {(char)('A' + selected)}";
+                    string archetypeTag = shouldBlend ? "Blended" : (_pendingCandidates[selected].ArchetypeTag ?? strategyLabel);
                     float totalTimeSec = (LLMScorer.LastScorerTimeMs + LLMJudge.LastJudgeTimeMs) / 1000f;
                     UI.LLMCombatPanel.ShowResult(unitName, panelRole.ToString(),
-                        archetypeTag, planLabel, chosen.Summary, totalTimeSec);
+                        archetypeTag, blendLabel, finalSummary, totalTimeSec);
                 }
 
                 _pendingCandidates = null;
@@ -571,8 +705,7 @@ namespace CompanionAI_v3.Core
                 Data.CompanionDialogue.AnnouncePlan(unit, turnState.Plan);
 
                 // Tactical Narrator
-                var narratorStrategy = chosen.Strategy;
-                Diagnostics.TacticalNarrator.Narrate(unit, turnState.Plan, situation, narratorStrategy);
+                Diagnostics.TacticalNarrator.Narrate(unit, turnState.Plan, situation, finalStrategy);
 
                 // Machine Spirit feed
                 if (CompanionAI_v3.MachineSpirit.MachineSpirit.IsActive)
@@ -585,8 +718,12 @@ namespace CompanionAI_v3.Core
                 if (Main.Settings.EnableTrainingDataCollection)
                 {
                     var trainRole = GetEffectiveRole(unit, situation);
-                    StoreTrainingContext(turnState, unit, situation, trainRole.ToString(), _pendingWeights, chosen.Summary);
+                    StoreTrainingContext(turnState, unit, situation, trainRole.ToString(), _pendingWeights, finalSummary);
                 }
+
+                // ★ Tactical Memory: 전투 중 사용 가중치 추적 (마지막 LLM weights 유지)
+                if (_pendingWeights != null && !_pendingWeights.IsDefault)
+                    _combatDominantWeights = _pendingWeights;
 
                 return ExecuteNextAction(unit, unitName, turnState, situation);
             }
@@ -634,6 +771,7 @@ namespace CompanionAI_v3.Core
         {
             _judgeStarted = false;
             _judgeResult = -1;
+            _judgeConfidence = default;
             _pendingCandidates = null;
             LLMJudge.Reset();
 
@@ -643,6 +781,11 @@ namespace CompanionAI_v3.Core
             _lastScorerCacheHash = 0;
             LLMScorer.Reset();
             TargetScorer.ClearActiveTurnState();
+
+            // ★ Commander 상태 초기화
+            _commanderStarted = false;
+            _commanderResult = null;
+            LLMCommander.Reset();
         }
 
         /// <summary>
@@ -786,7 +929,32 @@ namespace CompanionAI_v3.Core
 
                     // ★ v3.20.0: [CombatReport] 전투 최초 시작 감지
                     if (_lastProcessedRound == -1)
+                    {
                         CombatReportCollector.Instance.OnCombatStart();
+
+                        // ★ Tactical Memory: 전투 시작 시 유사 적 구성 기억 회상
+                        if (Main.Settings?.EnableTacticalMemory ?? true)
+                        {
+                            try
+                            {
+                                var enemies = GetCombatEnemiesForMemory();
+                                if (enemies != null && enemies.Count > 0)
+                                {
+                                    var memories = TacticalMemory.Recall(enemies, 2);
+                                    if (memories.Count > 0)
+                                    {
+                                        string memoryContext = TacticalMemory.FormatForPrompt(memories);
+                                        TeamBlackboard.Instance.TacticalMemoryContext = memoryContext;
+                                        Main.Log($"[TacticalMemory] Recalled {memories.Count} memories for this combat");
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Main.LogDebug($"[TacticalMemory] Recall failed: {ex.Message}");
+                            }
+                        }
+                    }
 
                     TeamBlackboard.Instance.OnRoundStart(currentRound);
                     _lastProcessedRound = currentRound;
@@ -1285,6 +1453,39 @@ namespace CompanionAI_v3.Core
         {
             Main.Log("[Orchestrator] Combat ended - clearing all turn states");
 
+            // ★ Tactical Memory: 전투 결과 기록 — Clear() 이전에 수행해야 데이터가 살아있음
+            try
+            {
+                if ((Main.Settings?.EnableTacticalMemory ?? true)
+                    && _combatDominantWeights != null && !_combatDominantWeights.IsDefault)
+                {
+                    var enemies = GetCombatEnemiesForMemory();
+                    if (enemies != null && enemies.Count > 0)
+                    {
+                        float finalTeamHP = TeamBlackboard.Instance.AverageAllyHP;
+                        int rounds = _lastProcessedRound > 0 ? _lastProcessedRound : 1;
+
+                        // 승패 판별: 아군 생존자 수 + 적 생존자 수 기반
+                        bool isVictory = true;
+                        int livingEnemies = 0;
+                        for (int i = 0; i < enemies.Count; i++)
+                        {
+                            if (enemies[i] != null && !enemies[i].LifeState.IsDead)
+                                livingEnemies++;
+                        }
+                        if (livingEnemies > 0 && finalTeamHP < 10f)
+                            isVictory = false; // 적이 살아있고 팀 HP 극히 낮으면 패배/후퇴
+
+                        TacticalMemory.RecordCombatEnd(enemies, _combatDominantWeights, isVictory, rounds, finalTeamHP);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[TacticalMemory] Record failed: {ex.Message}");
+            }
+            _combatDominantWeights = null;
+
             // ★ v3.20.0: [CombatReport] 전투 종료 → 리포트 내보내기
             CombatReportCollector.Instance.OnCombatEnd("Victory");
             _turnStates.Clear();
@@ -1329,6 +1530,23 @@ namespace CompanionAI_v3.Core
         }
 
         #endregion
+
+        /// <summary>★ Tactical Memory용: 전투 중 적 리스트 수집 (TeamBlackboard Situations에서)</summary>
+        private static System.Collections.Generic.List<BaseUnitEntity> GetCombatEnemiesForMemory()
+        {
+            // 등록된 Situation 중 하나에서 적 리스트를 가져옴
+            var party = Game.Instance?.Player?.PartyAndPets;
+            if (party == null) return null;
+
+            foreach (var unit in party)
+            {
+                if (unit == null) continue;
+                var sit = TeamBlackboard.Instance.GetUnitSituation(unit.UniqueId);
+                if (sit?.Enemies != null && sit.Enemies.Count > 0)
+                    return sit.Enemies;
+            }
+            return null;
+        }
 
         #region Utility
 

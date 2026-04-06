@@ -205,6 +205,33 @@ namespace CompanionAI_v3.Planning.LLM
 
         #endregion
 
+        /// <summary>
+        /// ★ 두 ScorerWeights를 비율로 블렌딩.
+        /// 연속값(AoE, FocusFire, Heal, Buff): 가중 평균 + 클램핑.
+        /// 이산값(PriorityTarget, DefensiveStance): 우세 비율(>= 0.5) 따름.
+        /// </summary>
+        public static ScorerWeights Blend(ScorerWeights a, ScorerWeights b, float ratioA, float ratioB)
+        {
+            if (a == null) a = new ScorerWeights();
+            if (b == null) b = new ScorerWeights();
+
+            // 비율 정규화 안전장치
+            float sum = ratioA + ratioB;
+            if (sum < 0.01f) { ratioA = 0.5f; ratioB = 0.5f; sum = 1f; }
+            ratioA /= sum;
+            ratioB /= sum;
+
+            return new ScorerWeights
+            {
+                AoEWeight = ClampF(a.AoEWeight * ratioA + b.AoEWeight * ratioB, 0.1f, 5.0f),
+                FocusFire = ClampF(a.FocusFire * ratioA + b.FocusFire * ratioB, 0.1f, 5.0f),
+                PriorityTarget = ratioA >= 0.5f ? a.PriorityTarget : b.PriorityTarget,
+                HealPriority = ClampF(a.HealPriority * ratioA + b.HealPriority * ratioB, -1.0f, 2.0f),
+                BuffPriority = ClampF(a.BuffPriority * ratioA + b.BuffPriority * ratioB, 0.1f, 3.0f),
+                DefensiveStance = ratioA >= 0.5f ? a.DefensiveStance : b.DefensiveStance
+            };
+        }
+
         public override string ToString()
         {
             if (IsDefault) return "ScorerWeights(default)";

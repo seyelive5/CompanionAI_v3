@@ -2497,6 +2497,12 @@ namespace CompanionAI_v3.Settings
         /// <summary>★ v3.84.0: Training data 수집 활성화 (Developer Only — Debug 탭에서 토글)</summary>
         public bool EnableTrainingDataCollection { get; set; } = false;
 
+        /// <summary>★ Team Commander: 라운드 시작 시 팀 전략 LLM 호출 (EnableLLMCombatAI 하위)</summary>
+        public bool EnableLLMCommander { get; set; } = true;
+
+        /// <summary>★ Tactical Memory: 전투 간 전술 기억 (적 구성별 가중치 성과 기록/회상)</summary>
+        public bool EnableTacticalMemory { get; set; } = true;
+
         /// <summary>★ LLM Combat AI: 오버레이 표시 여부</summary>
         public bool ShowLLMOverlay { get; set; } = true;
 

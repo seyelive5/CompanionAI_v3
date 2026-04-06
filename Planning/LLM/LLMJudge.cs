@@ -3,6 +3,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -21,6 +22,20 @@ namespace CompanionAI_v3.Planning.LLM
     /// </summary>
     public static class LLMJudge
     {
+        /// <summary>
+        /// ★ LLM Judge 신뢰도 결과. JudgeWithConfidence에서 반환.
+        /// 예: "A:0.7,B:0.3" → Ratios=[0.7, 0.3], PreferredIndex=0, IsValid=true
+        /// </summary>
+        public struct JudgeConfidence
+        {
+            /// <summary>각 후보의 신뢰도 비율 (합계 ≈ 1.0)</summary>
+            public float[] Ratios;
+            /// <summary>최대 비율 후보 인덱스 (argmax)</summary>
+            public int PreferredIndex;
+            /// <summary>파싱 성공 여부 (false면 PreferredIndex로 이진 선택 폴백)</summary>
+            public bool IsValid;
+        }
+
         private static bool _isJudging;
 
         /// <summary>Judge 요청 진행 중 여부</summary>
@@ -223,6 +238,165 @@ namespace CompanionAI_v3.Planning.LLM
         }
 
         // ═══════════════════════════════════════════════════════════
+        // ★ Confidence-based Judge (Fuzzy Blending)
+        // ═══════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// ★ LLM Judge 코루틴 (신뢰도 분포 버전) — "A:0.7,B:0.3" 형태 응답.
+        /// 파싱 실패 시 기존 이진 선택으로 폴백.
+        /// </summary>
+        public static IEnumerator JudgeWithConfidence(
+            List<CandidatePlan> candidates,
+            Situation situation,
+            string roleName,
+            Action<JudgeConfidence> onResult)
+        {
+            if (_isJudging)
+            {
+                Main.Log("[LLMJudge] Already judging — fallback confidence");
+                onResult?.Invoke(new JudgeConfidence { PreferredIndex = 0, IsValid = false });
+                yield break;
+            }
+
+            if (candidates == null || candidates.Count == 0)
+            {
+                onResult?.Invoke(new JudgeConfidence { PreferredIndex = 0, IsValid = false });
+                yield break;
+            }
+
+            if (candidates.Count == 1)
+            {
+                onResult?.Invoke(new JudgeConfidence
+                {
+                    Ratios = new[] { 1f },
+                    PreferredIndex = 0,
+                    IsValid = true
+                });
+                yield break;
+            }
+
+            _isJudging = true;
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+            try
+            {
+                string systemMsg, userMsg;
+                try
+                {
+                    systemMsg = BuildSystemMessageConfidence(roleName, candidates.Count);
+                    userMsg = BuildUserMessage(candidates, situation);
+                }
+                catch (Exception msgEx)
+                {
+                    Main.LogWarning($"[LLMJudge] Confidence message build failed: {msgEx.Message}");
+                    _isJudging = false;
+                    onResult?.Invoke(new JudgeConfidence { PreferredIndex = 0, IsValid = false });
+                    yield break;
+                }
+
+                string model = ResolveModel();
+                int candidateCount = System.Math.Min(candidates.Count, ChoiceLabels.Length);
+
+                var requestBody = new JObject
+                {
+                    ["model"] = model,
+                    ["messages"] = new JArray
+                    {
+                        new JObject { ["role"] = "system", ["content"] = systemMsg },
+                        new JObject { ["role"] = "user", ["content"] = userMsg }
+                    },
+                    ["stream"] = false,
+                    ["keep_alive"] = -1,
+                    ["options"] = new JObject
+                    {
+                        ["temperature"] = 0,
+                        ["num_predict"] = 50
+                    },
+                    ["think"] = false
+                };
+
+                string baseUrl = GetOllamaBaseUrl();
+                string url = baseUrl + "/api/chat";
+
+                Main.LogDebug($"[LLMJudge] Confidence → {url}, model={model}, candidates={candidateCount}");
+
+                string responseText = null;
+                string errorText = null;
+
+                var request = new UnityWebRequest(url, "POST");
+                request.uploadHandler = new UploadHandlerRaw(
+                    Encoding.UTF8.GetBytes(requestBody.ToString(Formatting.None)));
+                request.downloadHandler = new DownloadHandlerBuffer();
+                request.SetRequestHeader("Content-Type", "application/json");
+                request.timeout = JUDGE_TIMEOUT_SECONDS;
+
+                var op = request.SendWebRequest();
+
+                float deadline = Time.realtimeSinceStartup + JUDGE_TIMEOUT_SECONDS + 1f;
+                while (!op.isDone)
+                {
+                    if (Time.realtimeSinceStartup > deadline)
+                    {
+                        errorText = "Judge confidence timeout exceeded";
+                        request.Abort();
+                        break;
+                    }
+                    yield return null;
+                }
+
+                if (errorText == null)
+                {
+                    if (request.result == UnityWebRequest.Result.Success)
+                        responseText = request.downloadHandler.text;
+                    else
+                        errorText = $"HTTP {request.responseCode}: {request.error}";
+                }
+
+                request.Dispose();
+
+                JudgeConfidence confidence;
+
+                if (responseText != null)
+                {
+                    Main.LogDebug($"[LLMJudge] Confidence raw ({responseText.Length} chars): {Truncate(responseText, 300)}");
+                    confidence = ParseConfidenceResponse(responseText, candidateCount);
+                    stopwatch.Stop();
+                    LastJudgeTimeMs = stopwatch.ElapsedMilliseconds;
+
+                    if (confidence.IsValid)
+                    {
+                        var ratioStr = new StringBuilder(32);
+                        for (int i = 0; i < confidence.Ratios.Length; i++)
+                        {
+                            if (i > 0) ratioStr.Append(',');
+                            ratioStr.Append(ChoiceLabels[i]).Append(':').Append(confidence.Ratios[i].ToString("F2"));
+                        }
+                        Main.Log($"[LLMJudge] Confidence: [{ratioStr}] preferred={ChoiceLabels[confidence.PreferredIndex]} ({LastJudgeTimeMs}ms)");
+                    }
+                    else
+                    {
+                        Main.Log($"[LLMJudge] Confidence parse failed, preferred={ChoiceLabels[confidence.PreferredIndex]} ({LastJudgeTimeMs}ms)");
+                    }
+                }
+                else
+                {
+                    stopwatch.Stop();
+                    LastJudgeTimeMs = stopwatch.ElapsedMilliseconds;
+                    confidence = new JudgeConfidence { PreferredIndex = 0, IsValid = false };
+                    Main.Log($"[LLMJudge] Confidence failed: {errorText} ({LastJudgeTimeMs}ms)");
+                }
+
+                _isJudging = false;
+                onResult?.Invoke(confidence);
+            }
+            finally
+            {
+                _isJudging = false;
+                if (stopwatch.IsRunning) stopwatch.Stop();
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
         // 메시지 빌드
         // ═══════════════════════════════════════════════════════════
 
@@ -334,12 +508,16 @@ namespace CompanionAI_v3.Planning.LLM
                 // JSON 파싱 실패 또는 plain text 응답: "A", "B", "C" 직접 추출
                 if (string.IsNullOrEmpty(choice))
                 {
-                    // content에서 A/B/C 문자 찾기
+                    // content에서 독립 A/B/C 문자 찾기 (단어 내부 매치 방지)
                     for (int i = 0; i < content.Length; i++)
                     {
                         char c = char.ToUpperInvariant(content[i]);
                         if (c >= 'A' && c < 'A' + candidateCount)
                         {
+                            bool prevIsLetter = i > 0 && char.IsLetter(content[i - 1]);
+                            bool nextIsLetter = i + 1 < content.Length && char.IsLetter(content[i + 1]);
+                            if (prevIsLetter || nextIsLetter) continue;
+
                             choice = c.ToString();
                             break;
                         }
@@ -367,6 +545,176 @@ namespace CompanionAI_v3.Planning.LLM
             {
                 Main.LogDebug($"[LLMJudge] Parse error: {ex.Message}, raw={Truncate(rawResponse, 200)}");
                 return 0;
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // Confidence 메시지 빌드 + 파싱
+        // ═══════════════════════════════════════════════════════════
+
+        /// <summary>Confidence 시스템 메시지 캐시</summary>
+        private static string _cachedConfidenceRole;
+        private static int _cachedConfidenceCount;
+        private static string _cachedConfidenceMsg;
+
+        /// <summary>신뢰도 분포 출력용 시스템 메시지. "A:0.7,B:0.3" 형식 요청.</summary>
+        private static string BuildSystemMessageConfidence(string roleName, int candidateCount)
+        {
+            if (_cachedConfidenceMsg != null && _cachedConfidenceRole == roleName && _cachedConfidenceCount == candidateCount)
+                return _cachedConfidenceMsg;
+
+            int count = System.Math.Min(candidateCount, ChoiceLabels.Length);
+
+            // 예시 생성: "A:0.7,B:0.3" 또는 "A:0.5,B:0.3,C:0.2"
+            var exSb = new StringBuilder(count * 5);
+            for (int i = 0; i < count; i++)
+            {
+                if (i > 0) exSb.Append(',');
+                exSb.Append(ChoiceLabels[i]).Append(':');
+                if (i == 0) exSb.Append("0.7");
+                else if (i == 1) exSb.Append("0.3");
+                else exSb.Append("0.0");
+            }
+            string example = exSb.ToString();
+
+            _sbSystem.Clear();
+            _sbSystem.Append("You are a tactical combat advisor for a ").Append(roleName).Append(" unit.\n");
+            _sbSystem.Append("Given the battlefield and candidate action plans, rate each plan's confidence.\n");
+            _sbSystem.Append("Evaluate: threat elimination, ally survival, damage efficiency, positioning.\n");
+            _sbSystem.Append("Respond with ONLY a confidence distribution like: ").Append(example).Append('\n');
+            _sbSystem.Append("Values must sum to 1.0. Nothing else.");
+
+            _cachedConfidenceRole = roleName;
+            _cachedConfidenceCount = candidateCount;
+            _cachedConfidenceMsg = _sbSystem.ToString();
+            return _cachedConfidenceMsg;
+        }
+
+        /// <summary>
+        /// 신뢰도 분포 응답 파싱.
+        /// 지원 형식:
+        /// 1. "A:0.7,B:0.3"
+        /// 2. "A:0.7 B:0.3" (공백 구분)
+        /// 3. "A: 0.7, B: 0.3" (공백 포함)
+        /// 4. 단일 문자 "A" → [1.0, 0.0] (이진 폴백)
+        /// </summary>
+        private static JudgeConfidence ParseConfidenceResponse(string rawResponse, int candidateCount)
+        {
+            var fallback = new JudgeConfidence { PreferredIndex = 0, IsValid = false };
+
+            try
+            {
+                // Ollama 래퍼에서 content 추출
+                var outerJson = JObject.Parse(rawResponse);
+                string content = outerJson["message"]?["content"]?.ToString();
+
+                if (string.IsNullOrEmpty(content))
+                    return fallback;
+
+                content = content.Trim();
+
+                // "A:0.7,B:0.3" 또는 "A: 0.7, B: 0.3" 패턴 파싱
+                float[] ratios = new float[candidateCount];
+                bool anyFound = false;
+
+                for (int i = 0; i < candidateCount && i < ChoiceLabels.Length; i++)
+                {
+                    char label = ChoiceLabels[i];
+                    // 패턴: "A:0.7" or "A: 0.7" — 대소문자 무관
+                    int pos = -1;
+                    for (int j = 0; j < content.Length; j++)
+                    {
+                        if (char.ToUpperInvariant(content[j]) == label)
+                        {
+                            // 다음에 ':' 또는 '=' 있는지 확인
+                            int k = j + 1;
+                            while (k < content.Length && content[k] == ' ') k++;
+                            if (k < content.Length && (content[k] == ':' || content[k] == '='))
+                            {
+                                pos = k + 1;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (pos >= 0)
+                    {
+                        // 숫자 추출
+                        while (pos < content.Length && content[pos] == ' ') pos++;
+                        int numStart = pos;
+                        while (pos < content.Length && (char.IsDigit(content[pos]) || content[pos] == '.'))
+                            pos++;
+
+                        if (pos > numStart)
+                        {
+                            string numStr = content.Substring(numStart, pos - numStart);
+                            if (float.TryParse(numStr, NumberStyles.Float, CultureInfo.InvariantCulture, out float val))
+                            {
+                                ratios[i] = val < 0f ? 0f : (val > 1f ? 1f : val);
+                                anyFound = true;
+                            }
+                        }
+                    }
+                }
+
+                // "A:0.7,B:0.3" 형태 파싱 성공
+                if (anyFound)
+                {
+                    // 합계 정규화
+                    float sum = 0f;
+                    for (int i = 0; i < ratios.Length; i++) sum += ratios[i];
+
+                    if (sum > 0.01f)
+                    {
+                        for (int i = 0; i < ratios.Length; i++) ratios[i] /= sum;
+                    }
+                    else
+                    {
+                        // 모두 0 → 균등 분배
+                        float equal = 1f / candidateCount;
+                        for (int i = 0; i < ratios.Length; i++) ratios[i] = equal;
+                    }
+
+                    // argmax
+                    int best = 0;
+                    for (int i = 1; i < ratios.Length; i++)
+                    {
+                        if (ratios[i] > ratios[best]) best = i;
+                    }
+
+                    return new JudgeConfidence { Ratios = ratios, PreferredIndex = best, IsValid = true };
+                }
+
+                // 폴백: 단일 문자 ("A", "B") → 이진 변환
+                // 단어 내부의 문자 매치 방지 (예: "Analyzing"의 'A')
+                for (int i = 0; i < content.Length; i++)
+                {
+                    char c = char.ToUpperInvariant(content[i]);
+                    if (c >= 'A' && c < 'A' + candidateCount)
+                    {
+                        // 독립 문자인지 확인: 앞뒤가 알파벳이면 단어 내부 → 스킵
+                        bool prevIsLetter = i > 0 && char.IsLetter(content[i - 1]);
+                        bool nextIsLetter = i + 1 < content.Length && char.IsLetter(content[i + 1]);
+                        if (prevIsLetter || nextIsLetter) continue;
+
+                        int idx = c - 'A';
+                        ratios = new float[candidateCount];
+                        ratios[idx] = 1f;
+                        return new JudgeConfidence
+                        {
+                            Ratios = ratios,
+                            PreferredIndex = idx,
+                            IsValid = true  // 단일 선택도 유효한 결과
+                        };
+                    }
+                }
+
+                return fallback;
+            }
+            catch (Exception ex)
+            {
+                Main.LogDebug($"[LLMJudge] Confidence parse error: {ex.Message}");
+                return fallback;
             }
         }
 

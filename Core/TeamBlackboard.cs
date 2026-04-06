@@ -163,6 +163,28 @@ namespace CompanionAI_v3.Core
         /// <summary>전투 활성화 여부</summary>
         public bool IsCombatActive { get; private set; }
 
+        /// <summary>★ Commander LLM 지시 (라운드당 1회)</summary>
+        public Planning.LLM.CommanderDirective CommanderDirective { get; set; }
+
+        /// <summary>★ Commander가 마지막으로 실행된 라운드</summary>
+        private int _lastCommanderRound = -1;
+
+        /// <summary>★ 전투 간 전술 기억 프롬프트 (PAST: 라인)</summary>
+        public string TacticalMemoryContext { get; set; }
+
+        /// <summary>★ Commander 업데이트 필요 여부</summary>
+        public bool NeedsCommanderUpdate(int currentRound)
+        {
+            return _lastCommanderRound < currentRound;
+        }
+
+        /// <summary>★ Commander 지시 저장</summary>
+        public void SetCommanderDirective(Planning.LLM.CommanderDirective directive, int round)
+        {
+            CommanderDirective = directive;
+            _lastCommanderRound = round;
+        }
+
         #endregion
 
         #region Combat Lifecycle
@@ -214,6 +236,11 @@ namespace CompanionAI_v3.Core
 
             // ★ v3.22.6: 마스티프 Apprehend 상태 초기화
             _mastiffApprehendTargets.Clear();
+
+            // ★ Commander + Tactical Memory 초기화
+            CommanderDirective = null;
+            _lastCommanderRound = -1;
+            TacticalMemoryContext = null;
 
             Main.LogDebug("[TeamBlackboard] Cleared");
         }
