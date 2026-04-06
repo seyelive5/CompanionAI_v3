@@ -163,26 +163,76 @@ namespace CompanionAI_v3.Core
         /// <summary>전투 활성화 여부</summary>
         public bool IsCombatActive { get; private set; }
 
-        /// <summary>★ Commander LLM 지시 (라운드당 1회)</summary>
+        /// <summary>★ Commander LLM 지시</summary>
         public Planning.LLM.CommanderDirective CommanderDirective { get; set; }
 
         /// <summary>★ Commander가 마지막으로 실행된 라운드</summary>
         private int _lastCommanderRound = -1;
 
+        /// <summary>★ Commander 호출 시점의 전장 스냅샷 (변화 감지용)</summary>
+        private int _cmdSnapshotEnemyCount;
+        private int _cmdSnapshotFocusTargetAlive; // 1=alive, 0=dead/none
+        private bool _cmdSnapshotAllyCritical;
+
         /// <summary>★ 전투 간 전술 기억 프롬프트 (PAST: 라인)</summary>
         public string TacticalMemoryContext { get; set; }
 
-        /// <summary>★ Commander 업데이트 필요 여부</summary>
-        public bool NeedsCommanderUpdate(int currentRound)
+        /// <summary>★ Commander 업데이트 필요 여부 — 라운드 변경 또는 주요 전장 변화만 감지</summary>
+        public bool NeedsCommanderUpdate(int currentRound, Analysis.Situation situation)
         {
-            return _lastCommanderRound < currentRound;
+            // 라운드가 바뀌면 무조건 재호출
+            if (_lastCommanderRound < currentRound) return true;
+
+            // Commander가 아직 호출된 적 없으면
+            if (CommanderDirective == null) return true;
+
+            if (situation == null) return false;
+
+            // focus_target이 사망 — 핵심 전략이 무효화됨
+            if (CommanderDirective.FocusTarget >= 0 && _cmdSnapshotFocusTargetAlive == 1)
+            {
+                if (situation.Enemies != null
+                    && CommanderDirective.FocusTarget < situation.Enemies.Count)
+                {
+                    var focusEnemy = situation.Enemies[CommanderDirective.FocusTarget];
+                    if (focusEnemy == null || focusEnemy.LifeState.IsDead)
+                        return true;
+                }
+            }
+
+            // 아군 critical HP 발생 (이전에는 없었는데 새로 발생) — 긴급 전략 전환
+            if (!_cmdSnapshotAllyCritical && CriticalHPAlliesCount > 0) return true;
+
+            return false;
         }
 
-        /// <summary>★ Commander 지시 저장</summary>
-        public void SetCommanderDirective(Planning.LLM.CommanderDirective directive, int round)
+        /// <summary>★ Commander 지시 저장 + 스냅샷 갱신</summary>
+        public void SetCommanderDirective(Planning.LLM.CommanderDirective directive, int round, Analysis.Situation situation)
         {
             CommanderDirective = directive;
             _lastCommanderRound = round;
+
+            // 스냅샷 저장
+            _cmdSnapshotAllyCritical = CriticalHPAlliesCount > 0;
+            _cmdSnapshotEnemyCount = 0;
+            _cmdSnapshotFocusTargetAlive = 0;
+
+            if (situation?.Enemies != null)
+            {
+                for (int i = 0; i < situation.Enemies.Count; i++)
+                {
+                    if (situation.Enemies[i] != null && !situation.Enemies[i].LifeState.IsDead)
+                        _cmdSnapshotEnemyCount++;
+                }
+
+                if (directive != null && directive.FocusTarget >= 0
+                    && directive.FocusTarget < situation.Enemies.Count)
+                {
+                    var ft = situation.Enemies[directive.FocusTarget];
+                    if (ft != null && !ft.LifeState.IsDead)
+                        _cmdSnapshotFocusTargetAlive = 1;
+                }
+            }
         }
 
         #endregion
@@ -240,6 +290,9 @@ namespace CompanionAI_v3.Core
             // ★ Commander + Tactical Memory 초기화
             CommanderDirective = null;
             _lastCommanderRound = -1;
+            _cmdSnapshotEnemyCount = 0;
+            _cmdSnapshotFocusTargetAlive = 0;
+            _cmdSnapshotAllyCritical = false;
             TacticalMemoryContext = null;
 
             Main.LogDebug("[TeamBlackboard] Cleared");

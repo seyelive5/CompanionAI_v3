@@ -398,7 +398,7 @@ namespace CompanionAI_v3.Core
                 && (Main.Settings?.EnableLLMCommander ?? true))
             {
                 int currentRound = Kingmaker.Game.Instance?.TurnController?.CombatRound ?? 1;
-                if (TeamBlackboard.Instance.NeedsCommanderUpdate(currentRound))
+                if (TeamBlackboard.Instance.NeedsCommanderUpdate(currentRound, situation))
                 {
                     // 아군 Situations 수집
                     var allySituations = new System.Collections.Generic.List<Situation>(6);
@@ -432,7 +432,7 @@ namespace CompanionAI_v3.Core
                     else
                     {
                         // 적 없음 — Commander 스킵
-                        TeamBlackboard.Instance.SetCommanderDirective(new CommanderDirective(), currentRound);
+                        TeamBlackboard.Instance.SetCommanderDirective(new CommanderDirective(), currentRound, situation);
                     }
                 }
             }
@@ -449,7 +449,7 @@ namespace CompanionAI_v3.Core
                 _commanderStarted = false;
                 int currentRound = Kingmaker.Game.Instance?.TurnController?.CombatRound ?? 1;
                 var directive = _commanderResult ?? new CommanderDirective();
-                TeamBlackboard.Instance.SetCommanderDirective(directive, currentRound);
+                TeamBlackboard.Instance.SetCommanderDirective(directive, currentRound, situation);
                 Main.Log($"[LLM Commander] {unitName}: {directive} ({LLMCommander.LastCommanderTimeMs}ms)");
             }
 
@@ -567,7 +567,7 @@ namespace CompanionAI_v3.Core
                         Main.Log($"[LLM Judge] {unitName}: Single candidate — using directly ({singleStratLabel})");
 
                         // 패널에 결과 표시
-                        string weightsTag = weights.IsDefault ? "Baseline" : "LLM Weights";
+                        string weightsTag = weights.IsDefault ? "Script" : "AI";
                         UI.LLMCombatPanel.ShowResult(unitName, role.ToString(),
                             weightsTag, "Plan A",
                             single.Summary ?? singleStratLabel,
@@ -691,10 +691,11 @@ namespace CompanionAI_v3.Core
                 // LLMCombatPanel: 결과 표시
                 {
                     var panelRole = GetEffectiveRole(unit, situation);
-                    string archetypeTag = shouldBlend ? "Blended" : (_pendingCandidates[selected].ArchetypeTag ?? strategyLabel);
+                    string archetypeTag = shouldBlend ? "AI Blended" : "AI";
                     float totalTimeSec = (LLMScorer.LastScorerTimeMs + LLMJudge.LastJudgeTimeMs) / 1000f;
                     UI.LLMCombatPanel.ShowResult(unitName, panelRole.ToString(),
-                        archetypeTag, blendLabel, finalSummary, totalTimeSec);
+                        archetypeTag, blendLabel, finalSummary, totalTimeSec,
+                        _judgeConfidence.Narration);
                 }
 
                 _pendingCandidates = null;

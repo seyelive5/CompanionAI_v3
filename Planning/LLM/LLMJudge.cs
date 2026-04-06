@@ -34,6 +34,8 @@ namespace CompanionAI_v3.Planning.LLM
             public int PreferredIndex;
             /// <summary>파싱 성공 여부 (false면 PreferredIndex로 이진 선택 폴백)</summary>
             public bool IsValid;
+            /// <summary>전술 내레이션 (1문장, 이 유닛이 왜 이 행동을 하는지)</summary>
+            public string Narration;
         }
 
         private static bool _isJudging;
@@ -310,7 +312,7 @@ namespace CompanionAI_v3.Planning.LLM
                     ["options"] = new JObject
                     {
                         ["temperature"] = 0,
-                        ["num_predict"] = 50
+                        ["num_predict"] = 100  // confidence + narration (~50 토큰 추가)
                     },
                     ["think"] = false
                 };
@@ -372,6 +374,8 @@ namespace CompanionAI_v3.Planning.LLM
                             ratioStr.Append(ChoiceLabels[i]).Append(':').Append(confidence.Ratios[i].ToString("F2"));
                         }
                         Main.Log($"[LLMJudge] Confidence: [{ratioStr}] preferred={ChoiceLabels[confidence.PreferredIndex]} ({LastJudgeTimeMs}ms)");
+                        if (!string.IsNullOrEmpty(confidence.Narration))
+                            Main.Log($"[LLMJudge] Narration: {confidence.Narration}");
                     }
                     else
                     {
@@ -581,8 +585,10 @@ namespace CompanionAI_v3.Planning.LLM
             _sbSystem.Append("You are a tactical combat advisor for a ").Append(roleName).Append(" unit.\n");
             _sbSystem.Append("Given the battlefield and candidate action plans, rate each plan's confidence.\n");
             _sbSystem.Append("Evaluate: threat elimination, ally survival, damage efficiency, positioning.\n");
-            _sbSystem.Append("Respond with ONLY a confidence distribution like: ").Append(example).Append('\n');
-            _sbSystem.Append("Values must sum to 1.0. Nothing else.");
+            _sbSystem.Append("Line 1: confidence distribution like: ").Append(example).Append(" (must sum to 1.0)\n");
+            _sbSystem.Append("Line 2: brief tactical narration (1 sentence, what this unit will do and why)\n");
+            _sbSystem.Append("Example:\n").Append(example).Append('\n');
+            _sbSystem.Append("Buff and strike the weakened Psyker to eliminate the biggest threat.");
 
             _cachedConfidenceRole = roleName;
             _cachedConfidenceCount = candidateCount;
@@ -613,7 +619,22 @@ namespace CompanionAI_v3.Planning.LLM
 
                 content = content.Trim();
 
-                // "A:0.7,B:0.3" 또는 "A: 0.7, B: 0.3" 패턴 파싱
+                // 줄 분리: 1줄째 = confidence, 나머지 = narration
+                string confidenceLine = content;
+                string narrationText = null;
+                int newlineIdx = content.IndexOf('\n');
+                if (newlineIdx >= 0)
+                {
+                    confidenceLine = content.Substring(0, newlineIdx).Trim();
+                    narrationText = content.Substring(newlineIdx + 1).Trim();
+                    // 빈 narration 필터
+                    if (string.IsNullOrEmpty(narrationText)) narrationText = null;
+                    // 과도하게 긴 narration 방지
+                    if (narrationText != null && narrationText.Length > 200)
+                        narrationText = narrationText.Substring(0, 200);
+                }
+
+                // "A:0.7,B:0.3" 또는 "A: 0.7, B: 0.3" 패턴 파싱 (confidenceLine에서)
                 float[] ratios = new float[candidateCount];
                 bool anyFound = false;
 
@@ -622,14 +643,13 @@ namespace CompanionAI_v3.Planning.LLM
                     char label = ChoiceLabels[i];
                     // 패턴: "A:0.7" or "A: 0.7" — 대소문자 무관
                     int pos = -1;
-                    for (int j = 0; j < content.Length; j++)
+                    for (int j = 0; j < confidenceLine.Length; j++)
                     {
-                        if (char.ToUpperInvariant(content[j]) == label)
+                        if (char.ToUpperInvariant(confidenceLine[j]) == label)
                         {
-                            // 다음에 ':' 또는 '=' 있는지 확인
                             int k = j + 1;
-                            while (k < content.Length && content[k] == ' ') k++;
-                            if (k < content.Length && (content[k] == ':' || content[k] == '='))
+                            while (k < confidenceLine.Length && confidenceLine[k] == ' ') k++;
+                            if (k < confidenceLine.Length && (confidenceLine[k] == ':' || confidenceLine[k] == '='))
                             {
                                 pos = k + 1;
                                 break;
@@ -639,15 +659,14 @@ namespace CompanionAI_v3.Planning.LLM
 
                     if (pos >= 0)
                     {
-                        // 숫자 추출
-                        while (pos < content.Length && content[pos] == ' ') pos++;
+                        while (pos < confidenceLine.Length && confidenceLine[pos] == ' ') pos++;
                         int numStart = pos;
-                        while (pos < content.Length && (char.IsDigit(content[pos]) || content[pos] == '.'))
+                        while (pos < confidenceLine.Length && (char.IsDigit(confidenceLine[pos]) || confidenceLine[pos] == '.'))
                             pos++;
 
                         if (pos > numStart)
                         {
-                            string numStr = content.Substring(numStart, pos - numStart);
+                            string numStr = confidenceLine.Substring(numStart, pos - numStart);
                             if (float.TryParse(numStr, NumberStyles.Float, CultureInfo.InvariantCulture, out float val))
                             {
                                 ratios[i] = val < 0f ? 0f : (val > 1f ? 1f : val);
@@ -682,7 +701,7 @@ namespace CompanionAI_v3.Planning.LLM
                         if (ratios[i] > ratios[best]) best = i;
                     }
 
-                    return new JudgeConfidence { Ratios = ratios, PreferredIndex = best, IsValid = true };
+                    return new JudgeConfidence { Ratios = ratios, PreferredIndex = best, IsValid = true, Narration = narrationText };
                 }
 
                 // 폴백: 단일 문자 ("A", "B") → 이진 변환
@@ -704,7 +723,8 @@ namespace CompanionAI_v3.Planning.LLM
                         {
                             Ratios = ratios,
                             PreferredIndex = idx,
-                            IsValid = true  // 단일 선택도 유효한 결과
+                            IsValid = true,
+                            Narration = narrationText
                         };
                     }
                 }

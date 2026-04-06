@@ -16,9 +16,9 @@ namespace CompanionAI_v3.UI
         private static string _unitName;
         private static string _roleName;
         private static string _phase;          // "Analyzing", "Evaluating", "Complete"
-        private static string _strategyType;   // "Aggressive", "Support Allies", etc.
-        private static string _planLabel;      // "Plan A", "Plan B"
-        private static string[] _planActions;  // individual action lines split by →
+        private static string _strategyType;   // "AI", "AI Blended", "Script"
+        private static string _cmdNarration;   // Commander 내레이션 (팀 전략)
+        private static string _judgeNarration; // Judge 내레이션 (유닛 행동)
         private static float _responseTime;
         private static float _showTime;        // Time.unscaledTime when shown
         private static bool _visible;
@@ -53,8 +53,8 @@ namespace CompanionAI_v3.UI
             _roleName = roleName ?? "?";
             _phase = "Analyzing";
             _strategyType = null;
-            _planLabel = null;
-            _planActions = null;
+            _cmdNarration = null;
+            _judgeNarration = null;
             _responseTime = 0f;
             _candidateCount = 0;
             _showTime = Time.unscaledTime;
@@ -67,8 +67,8 @@ namespace CompanionAI_v3.UI
             _unitName = unitName ?? _unitName ?? "Unit";
             _phase = "Evaluating";
             _candidateCount = candidateCount;
-            _planLabel = null;
-            _planActions = null;
+            _cmdNarration = null;
+            _judgeNarration = null;
             _showTime = Time.unscaledTime;
             _visible = true;
         }
@@ -80,24 +80,27 @@ namespace CompanionAI_v3.UI
         /// <param name="roleName">역할 이름 (Tank, DPS 등)</param>
         /// <param name="strategyType">아키타입 태그 (Aggressive, Support Allies 등)</param>
         /// <param name="planLabel">선택된 플랜 라벨 (예: "Plan B")</param>
-        /// <param name="planSummary">PlanSummarizer 출력 (→ 로 연결된 액션)</param>
+        /// <param name="planSummary">PlanSummarizer 출력 (미사용 — 로그에만 기록)</param>
         /// <param name="responseTime">총 응답 시간 (초)</param>
         public static void ShowResult(string unitName, string roleName,
-            string strategyType, string planLabel, string planSummary, float responseTime)
+            string strategyType, string planLabel, string planSummary, float responseTime,
+            string judgeNarration = null)
         {
             _unitName = unitName ?? "Unit";
             _roleName = roleName ?? "?";
             _phase = "Complete";
             _strategyType = strategyType ?? "Balanced";
-            _planLabel = planLabel ?? "Plan A";
             _responseTime = responseTime;
             _showTime = Time.unscaledTime;
             _visible = true;
 
-            // Split plan summary into individual action lines
-            // Input format: "[Aggressive] Plan [BuffedAttack] Focus Worker: Buff self with X → Attack Y with Z"
-            // We want just the action part after the colon
-            _planActions = SplitPlanActions(planSummary);
+            // Commander narration (팀 전략)
+            var cmd = CompanionAI_v3.Core.TeamBlackboard.Instance?.CommanderDirective;
+            _cmdNarration = (cmd != null && !string.IsNullOrEmpty(cmd.Narration))
+                ? cmd.Narration : null;
+
+            // Judge narration (유닛 행동)
+            _judgeNarration = !string.IsNullOrEmpty(judgeNarration) ? judgeNarration : null;
         }
 
         /// <summary>패널 숨기기 (턴 종료 시 등).</summary>
@@ -113,7 +116,8 @@ namespace CompanionAI_v3.UI
             _unitName = null;
             _roleName = null;
             _phase = null;
-            _planActions = null;
+            _cmdNarration = null;
+            _judgeNarration = null;
         }
 
         // ═══════════════════════════════════════════════════════════
@@ -163,9 +167,10 @@ namespace CompanionAI_v3.UI
             else if (_phase == "Complete")
             {
                 contentLines += 1; // strategy line
-                contentLines += 1; // plan label line
-                if (_planActions != null)
-                    contentLines += _planActions.Length;
+                if (!string.IsNullOrEmpty(_cmdNarration))
+                    contentLines += 2; // commander narration (wraps ~2 lines)
+                if (!string.IsNullOrEmpty(_judgeNarration))
+                    contentLines += 2; // judge narration (wraps ~2 lines)
                 contentLines += 1; // spacing
                 contentLines += 1; // response time
             }
@@ -228,29 +233,27 @@ namespace CompanionAI_v3.UI
             }
             else if (_phase == "Complete")
             {
-                // Strategy type with color
+                // Source indicator (AI / AI Blended / Script)
                 Color stratColor = GetStrategyColor(_strategyType, alpha);
                 _headerStyle.normal.textColor = stratColor;
-                GUILayout.Label($"Strategy: {EscapeRichText(_strategyType)}", _headerStyle);
+                GUILayout.Label("\u25B6 " + EscapeRichText(_strategyType), _headerStyle); // ▶ prefix
 
-                GUILayout.Space(2f * scale);
-
-                // Plan label
-                Color labelColor = new Color(1f, 1f, 1f, alpha);
-                _bodyStyle.normal.textColor = labelColor;
-                GUILayout.Label($"{EscapeRichText(_planLabel)}:", _bodyStyle);
-
-                // Plan actions
-                if (_planActions != null)
+                // Commander narration (팀 전략)
+                if (!string.IsNullOrEmpty(_cmdNarration))
                 {
-                    Color actionColor = new Color(0.8f, 0.8f, 0.8f, alpha); // #CCC
-                    _bodyStyle.normal.textColor = actionColor;
-                    for (int i = 0; i < _planActions.Length; i++)
-                    {
-                        string prefix = i < _planActions.Length - 1 ? "  \u2192 " : "  \u2192 "; // → arrow
-                        if (i == 0) prefix = "  "; // first line no arrow
-                        GUILayout.Label(prefix + EscapeRichText(_planActions[i]), _bodyStyle);
-                    }
+                    GUILayout.Space(spacing);
+                    Color cmdColor = new Color(1f, 0.85f, 0.5f, alpha); // warm gold
+                    _bodyStyle.normal.textColor = cmdColor;
+                    GUILayout.Label("\u2694 " + EscapeRichText(_cmdNarration), _bodyStyle); // ⚔ prefix
+                }
+
+                // Judge narration (유닛 행동)
+                if (!string.IsNullOrEmpty(_judgeNarration))
+                {
+                    GUILayout.Space(spacing);
+                    Color judgeColor = new Color(0.75f, 0.9f, 1f, alpha); // light blue
+                    _bodyStyle.normal.textColor = judgeColor;
+                    GUILayout.Label("\u2192 " + EscapeRichText(_judgeNarration), _bodyStyle); // → prefix
                 }
 
                 GUILayout.Space(spacing);
@@ -258,7 +261,7 @@ namespace CompanionAI_v3.UI
                 // Response time
                 Color dimColor = new Color(0.4f, 0.4f, 0.4f, alpha);
                 _dimStyle.normal.textColor = dimColor;
-                GUILayout.Label($"Response: {_responseTime:F1}s", _dimStyle);
+                GUILayout.Label($"{_responseTime:F1}s", _dimStyle);
             }
 
             GUILayout.EndArea();
@@ -275,34 +278,6 @@ namespace CompanionAI_v3.UI
             int dotCount = (int)(Time.unscaledTime * 2f) % 3 + 1;
             string dots = new string('.', dotCount);
             GUILayout.Label(text + dots, _bodyStyle);
-        }
-
-        /// <summary>
-        /// PlanSummarizer 출력에서 액션 부분만 추출하여 분리.
-        /// 입력: "[Aggressive] Plan [BuffedAttack] Focus Worker: Buff self → Attack X → Move"
-        /// 출력: ["Buff self", "Attack X", "Move"]
-        /// </summary>
-        private static string[] SplitPlanActions(string planSummary)
-        {
-            if (string.IsNullOrEmpty(planSummary))
-                return null;
-
-            // Find the colon after "Plan [xxx]:" to extract action part
-            string actionPart = planSummary;
-            int colonIdx = planSummary.IndexOf(": ");
-            if (colonIdx >= 0 && colonIdx + 2 < planSummary.Length)
-            {
-                actionPart = planSummary.Substring(colonIdx + 2);
-            }
-
-            // Split by " → "
-            string[] parts = actionPart.Split(new[] { " \u2192 " }, System.StringSplitOptions.RemoveEmptyEntries);
-
-            // Trim each part
-            for (int i = 0; i < parts.Length; i++)
-                parts[i] = parts[i].Trim();
-
-            return parts.Length > 0 ? parts : null;
         }
 
         /// <summary>Strategy type → color mapping.</summary>

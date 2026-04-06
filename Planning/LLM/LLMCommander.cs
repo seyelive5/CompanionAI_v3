@@ -31,6 +31,9 @@ namespace CompanionAI_v3.Planning.LLM
         /// <summary>협동 힌트 (예: "tank_first", "focus_fire", "protect_healer")</summary>
         public string Synergy = "";
 
+        /// <summary>전술 내레이션 — 유저에게 보여줄 자연어 설명 (1-2문장)</summary>
+        public string Narration = "";
+
         /// <summary>기본값인지 확인 (LLM 미호출/실패 시)</summary>
         public bool IsDefault => FocusTarget == -1
             && (Formation == "balanced" || string.IsNullOrEmpty(Formation))
@@ -84,6 +87,15 @@ namespace CompanionAI_v3.Planning.LLM
                     if (syn.Length <= 40) // 과도한 텍스트 방지
                         d.Synergy = syn;
                 }
+
+                // narration
+                var narToken = json["narration"];
+                if (narToken != null)
+                {
+                    string nar = narToken.ToString().Trim();
+                    if (nar.Length <= 200) // 과도한 텍스트 방지
+                        d.Narration = nar;
+                }
             }
             catch (Exception ex)
             {
@@ -96,7 +108,10 @@ namespace CompanionAI_v3.Planning.LLM
         public override string ToString()
         {
             if (IsDefault) return "CommanderDirective(default)";
-            return $"CommanderDirective(focus={FocusTarget}, form={Formation}, syn={Synergy})";
+            string s = $"CommanderDirective(focus={FocusTarget}, form={Formation}, syn={Synergy})";
+            if (!string.IsNullOrEmpty(Narration))
+                s += $" \"{Narration}\"";
+            return s;
         }
     }
 
@@ -192,7 +207,7 @@ namespace CompanionAI_v3.Planning.LLM
                     ["options"] = new JObject
                     {
                         ["temperature"] = 0,
-                        ["num_predict"] = 80
+                        ["num_predict"] = 150  // narration 포함 (~30 토큰 추가)
                     },
                     ["think"] = false
                 };
@@ -279,8 +294,8 @@ namespace CompanionAI_v3.Planning.LLM
             _sbSystem.Clear();
             _sbSystem.Append("You are a team tactical commander for a squad in turn-based combat.\n");
             _sbSystem.Append("Given the full battlefield summary, output a team directive as JSON.\n");
-            _sbSystem.Append("Keys: focus_target(int,-1=individual choice), formation(aggressive/balanced/defensive), synergy(short coordination hint).\n");
-            _sbSystem.Append("Example: {\"focus_target\":0,\"formation\":\"aggressive\",\"synergy\":\"tank_first\"}\n");
+            _sbSystem.Append("Keys: focus_target(int,-1=individual choice), formation(aggressive/balanced/defensive), synergy(short hint), narration(1-2 sentence tactical briefing for the player).\n");
+            _sbSystem.Append("Example: {\"focus_target\":0,\"formation\":\"aggressive\",\"synergy\":\"tank_first\",\"narration\":\"Focus fire on the Psyker. Tank holds the line while DPS eliminates the priority target.\"}\n");
             _sbSystem.Append("Output ONLY the JSON. Nothing else.");
 
             _cachedSystemMsg = _sbSystem.ToString();
