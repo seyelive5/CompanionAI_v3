@@ -151,8 +151,11 @@ namespace CompanionAI_v3.Planning.LLM
         }
 
         // ════════════════════════════════════════════════════════════
-        // E: 적 (인덱스 부여)
-        // E:0:Psyker,HP40,d5,HI|1:Cult,HP100,d8|2:Cult,HP100,d8,CL|3:Heavy,HP90,d15
+        // E: 적 (인덱스 부여 + 이니셔티브 + 무기 유형)
+        // E:0:Psyker,HP40,d5,HI,T1,melee|1:Cult,HP100,d8,T2,melee|2:Cult,HP100,d8,CL,T+R,melee|3:Heavy,HP90,d15,T3,ranged
+        //   T1/T2/...  = 자신 다음 차례 전 행동 순서 (1=가장 먼저)
+        //   T+R        = 다음 라운드 이후 (멀어서 무시 가능)
+        //   melee/ranged = 무기 유형 (둘 다 false면 라벨 생략)
         // ════════════════════════════════════════════════════════════
 
         private static void AppendEnemiesLine(BaseUnitEntity unit, Situation situation)
@@ -190,6 +193,9 @@ namespace CompanionAI_v3.Planning.LLM
                 if (nearCount >= 2) _clusteredFlags[i] = true;
             }
 
+            // ★ 이니셔티브 매핑 — 한 번만 빌드 (적별 lookup용)
+            var initMap = InitiativeTracker.GetEnemiesBeforeNextTurn(unit);
+
             _sb.Append("E:");
             int displayed = 0;
 
@@ -220,6 +226,19 @@ namespace CompanionAI_v3.Planning.LLM
 
                 // 처치 가능 (HP < 20%)
                 if (eHP < 20f) _sb.Append(",FIN");
+
+                // ★ 이니셔티브 라벨
+                if (initMap.TryGetValue(e, out int tNum))
+                    _sb.Append(",T").Append(tNum);
+                else
+                    _sb.Append(",T+R");
+
+                // ★ 무기 유형
+                if (CombatAPI.HasMeleeWeapon(e))
+                    _sb.Append(",melee");
+                else if (CombatAPI.HasRangedWeapon(e))
+                    _sb.Append(",ranged");
+                // 둘 다 false면 라벨 생략 (안전 폴백)
 
                 displayed++;
             }
