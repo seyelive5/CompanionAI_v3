@@ -566,12 +566,16 @@ namespace CompanionAI_v3.Core
                             : single.Plan?.Priority.ToString() ?? "Unknown";
                         Main.Log($"[LLM Judge] {unitName}: Single candidate — using directly ({singleStratLabel})");
 
-                        // 패널에 결과 표시
+                        // 패널에 결과 표시 — single candidate라 Judge 호출 없음.
+                        // narration: 템플릿으로 단순 설명 (사용자가 AI 동작 확인 가능하도록)
                         string weightsTag = weights.IsDefault ? "Script" : "AI";
+                        string singleNarration = $"Only one viable strategy — direct execution of {singleStratLabel}.";
+                        Main.Log($"[LLM Judge] {unitName}: Narration (template): {singleNarration}");
                         UI.LLMCombatPanel.ShowResult(unitName, role.ToString(),
                             weightsTag, "Plan A",
                             single.Summary ?? singleStratLabel,
-                            (float)LLMScorer.LastScorerTimeMs / 1000f);
+                            (float)LLMScorer.LastScorerTimeMs / 1000f,
+                            singleNarration);
 
                         TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
                         CombatReportCollector.Instance.RecordPlan(turnState.Plan);
