@@ -1,5 +1,5 @@
 // Planning/LLM/CompactBattlefieldEncoder.cs
-// ★ LLM-as-Scorer: 전투 상태를 ~100 토큰으로 압축 인코딩.
+// ★ LLM-as-Scorer: 전투 상태를 ~150-180 토큰으로 압축 인코딩.
 // LLMScorer의 user message로 사용. 최소 토큰으로 최대 전술 정보 전달.
 using System.Collections.Generic;
 using System.Text;
@@ -14,7 +14,7 @@ using CompanionAI_v3.MachineSpirit.Knowledge;
 namespace CompanionAI_v3.Planning.LLM
 {
     /// <summary>
-    /// ★ 전투 상태를 ~100 토큰으로 압축 인코딩.
+    /// ★ 전투 상태를 ~150-180 토큰으로 압축 인코딩.
     ///
     /// 출력 형식:
     /// U:Argenta,DPS,HP85,AP4,MP10,Wpn:Bolter/12
@@ -42,7 +42,7 @@ namespace CompanionAI_v3.Planning.LLM
         private const int MAX_ENEMIES = 8;
 
         /// <summary>
-        /// 전투 상태를 ~100 토큰 compact 형식으로 인코딩.
+        /// 전투 상태를 ~150-180 토큰 compact 형식으로 인코딩.
         /// </summary>
         /// <param name="unit">현재 유닛</param>
         /// <param name="situation">전투 상황 스냅샷</param>
@@ -321,8 +321,13 @@ namespace CompanionAI_v3.Planning.LLM
         }
 
         // ════════════════════════════════════════════════════════════
-        // SK: 유닛 스킬/어빌리티 목록
-        // SK:Atk:단발 사격,점사 사격|Buff:속사,무모한 돌진|Heal:치유|AoE:화염 폭풍|Dbf:약점 노출
+        // SK: 유닛 스킬/어빌리티 목록 (효과 라벨 포함)
+        // SK:
+        // Atk:
+        // - 단발 사격 [single shot]
+        // - 점사 사격 [burst, +offense]
+        // Buff:
+        // - 황제의 말씀 [pre-attack buff — use before shooting]
         // ════════════════════════════════════════════════════════════
 
         private static void AppendSkillsLine(Situation situation)
@@ -344,8 +349,7 @@ namespace CompanionAI_v3.Planning.LLM
         ///   - 점사 사격 [burst, +offense]
         /// </summary>
         private static void AppendSkillCategory(
-            System.Collections.Generic.List<Kingmaker.UnitLogic.Abilities.AbilityData> abilities,
-            string label, int maxItems)
+            List<AbilityData> abilities, string label, int maxItems)
         {
             if (abilities == null || abilities.Count == 0) return;
 
