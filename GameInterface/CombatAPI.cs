@@ -2346,8 +2346,11 @@ namespace CompanionAI_v3.GameInterface
                     // 2. WarhammerDamageModifier (WarhammerDamageModifierTarget 포함)
                     //    - UnmodifiablePercentDamageModifier = 0 → PctMul_Extra=0 = 데미지 완전 무효화
                     //    - PercentDamageModifier ≤ -100 → PctAdd -100% = 데미지 0
+                    //    ★ v3.94.0: Restrictions 체크 — 조건부 면역은 판정에서 제외
                     foreach (var component in fact.SelectComponents<WarhammerDamageModifier>())
                     {
+                        // 조건부 (특정 무기/공격자 타입에만 적용) → 무조건 면역 아님
+                        if (!IsUnconditionalModifier(component)) continue;
                         try
                         {
                             var unmodPct = component.UnmodifiablePercentDamageModifier;
@@ -2378,8 +2381,10 @@ namespace CompanionAI_v3.GameInterface
                     }
 
                     // 3. WarhammerModifyIncomingAttackDamage — PctDmgMod ≤ -100
+                    //    ★ v3.94.0: Restrictions 체크
                     foreach (var component in fact.SelectComponents<WarhammerModifyIncomingAttackDamage>())
                     {
+                        if (!IsUnconditionalModifier(component)) continue;
                         try
                         {
                             var pctMod = component.PercentDamageModifier;
@@ -2398,8 +2403,10 @@ namespace CompanionAI_v3.GameInterface
                     }
 
                     // 4. WarhammerIncomingDamageNullifier — DamageChance = 0% (완전 면역)
+                    //    ★ v3.94.0: Restrictions 체크
                     foreach (var component in fact.SelectComponents<WarhammerIncomingDamageNullifier>())
                     {
+                        if (!IsUnconditionalModifier(component)) continue;
                         try
                         {
                             var field = typeof(WarhammerIncomingDamageNullifier).GetField("m_NullifyChances",
@@ -2454,8 +2461,10 @@ namespace CompanionAI_v3.GameInterface
                     if (fact == null) continue;
 
                     // 2. WarhammerDamageModifier — 무조건적 데미지 무효화
+                    //    ★ v3.94.0: Restrictions 체크 — 조건부 면역은 판정에서 제외
                     foreach (var component in fact.SelectComponents<WarhammerDamageModifier>())
                     {
+                        if (!IsUnconditionalModifier(component)) continue;
                         try
                         {
                             var unmodPct = component.UnmodifiablePercentDamageModifier;
@@ -2486,8 +2495,10 @@ namespace CompanionAI_v3.GameInterface
                     }
 
                     // 3. WarhammerModifyIncomingAttackDamage — PctDmgMod ≤ -100
+                    //    ★ v3.94.0: Restrictions 체크
                     foreach (var component in fact.SelectComponents<WarhammerModifyIncomingAttackDamage>())
                     {
+                        if (!IsUnconditionalModifier(component)) continue;
                         try
                         {
                             var pctMod = component.PercentDamageModifier;
@@ -2506,8 +2517,10 @@ namespace CompanionAI_v3.GameInterface
                     }
 
                     // 4. WarhammerIncomingDamageNullifier — DamageChance = 0%
+                    //    ★ v3.94.0: Restrictions 체크
                     foreach (var component in fact.SelectComponents<WarhammerIncomingDamageNullifier>())
                     {
+                        if (!IsUnconditionalModifier(component)) continue;
                         try
                         {
                             var field = typeof(WarhammerIncomingDamageNullifier).GetField("m_NullifyChances",
@@ -2558,6 +2571,53 @@ namespace CompanionAI_v3.GameInterface
             }
             catch { }
             return int.MaxValue;
+        }
+
+        /// <summary>
+        /// ★ v3.94.0: WarhammerDamageModifier 계열 컴포넌트가 무조건 적용되는지 확인.
+        /// 게임 소스(WarhammerDamageModifier.cs:38)는 TryApply 진입 시 Restrictions.IsPassed를 체크.
+        /// Restrictions.Property가 null이거나 Empty면 무조건 적용 → 진짜 면역 판정 가능.
+        /// Property가 있으면 조건부 (예: "워프 생물"은 특정 무기 타입에만 감소 적용) → 면역 판정 금지.
+        ///
+        /// 세 컴포넌트 모두 "Restrictions" 필드 이름 공유:
+        /// - WarhammerDamageModifier: public
+        /// - WarhammerModifyIncomingAttackDamage: protected
+        /// - WarhammerIncomingDamageNullifier: private
+        /// Reflection으로 통일 접근 (base type까지 탐색).
+        /// </summary>
+        private static bool IsUnconditionalModifier(object component)
+        {
+            if (component == null) return false;
+            try
+            {
+                // Restrictions 필드 탐색 (base type까지)
+                System.Reflection.FieldInfo field = null;
+                var current = component.GetType();
+                while (field == null && current != null && current != typeof(object))
+                {
+                    field = current.GetField("Restrictions",
+                        System.Reflection.BindingFlags.Public
+                        | System.Reflection.BindingFlags.NonPublic
+                        | System.Reflection.BindingFlags.Instance
+                        | System.Reflection.BindingFlags.DeclaredOnly);
+                    current = current.BaseType;
+                }
+
+                if (field == null) return true; // Restrictions 필드 없음 → 무조건 적용
+
+                var restrictions = field.GetValue(component)
+                    as Kingmaker.Designers.Mechanics.Facts.Restrictions.RestrictionCalculator;
+                if (restrictions == null) return true;
+
+                var prop = restrictions.Property;
+                // Property == null 또는 Property.Empty 이면 무조건 PASS (게임 로직과 동일)
+                return prop == null || prop.Empty;
+            }
+            catch
+            {
+                // 탐색 실패 시 보수적으로 false 반환 (면역 판정 안 함 — 공격 가능으로 둠)
+                return false;
+            }
         }
 
         /// <summary>
