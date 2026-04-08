@@ -84,7 +84,26 @@ namespace CompanionAI_v3.Planning.LLM
 
         private static void BuildFromDatabase()
         {
-            // Task 5에서 구현
+            int extracted = 0;
+            int skipped = 0;
+
+            foreach (var info in AbilityDatabase.GetAllInfos())
+            {
+                if (info == null || string.IsNullOrEmpty(info.Guid)) { skipped++; continue; }
+
+                string label = AbilityEffectExtractor.ExtractFromInfo(info);
+                if (!string.IsNullOrEmpty(label))
+                {
+                    _labels[info.Guid] = label;
+                    extracted++;
+                }
+                else
+                {
+                    skipped++;
+                }
+            }
+
+            Main.LogDebug($"[AbilityEffectCache] BuildFromDatabase: extracted={extracted}, skipped={skipped}");
         }
 
         private static bool TryLoadFromDisk()
