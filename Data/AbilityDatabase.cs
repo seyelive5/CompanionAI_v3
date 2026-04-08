@@ -949,6 +949,15 @@ namespace CompanionAI_v3.Data
         }
 
         /// <summary>
+        /// 등록된 모든 AbilityInfo 항목 enumeration.
+        /// AbilityEffectCache 빌드용.
+        /// </summary>
+        public static System.Collections.Generic.IEnumerable<AbilityInfo> GetAllInfos()
+        {
+            return Database.Values;
+        }
+
+        /// <summary>
         /// 능력의 타이밍 조회 (미등록 시 자동 감지)
         /// </summary>
         public static AbilityTiming GetTiming(AbilityData ability)
