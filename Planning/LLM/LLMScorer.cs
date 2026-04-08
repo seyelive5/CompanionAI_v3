@@ -130,7 +130,7 @@ namespace CompanionAI_v3.Planning.LLM
                     ["options"] = new JObject
                     {
                         ["temperature"] = 0,
-                        ["num_predict"] = 50  // 응답 ~20 토큰 (JSON 가중치)
+                        ["num_predict"] = 120  // JSON 가중치 + reasoning 1문장 (~50 토큰)
                     },
                     ["think"] = false
                 };
@@ -194,6 +194,8 @@ namespace CompanionAI_v3.Planning.LLM
                     LastScorerTimeMs = stopwatch.ElapsedMilliseconds;
 
                     Main.Log($"[LLMScorer] Result: {weights} in {LastScorerTimeMs}ms");
+                    if (!string.IsNullOrEmpty(weights.Reasoning))
+                        Main.Log($"[LLMScorer] Reasoning: {weights.Reasoning}");
                 }
                 else
                 {
@@ -236,9 +238,10 @@ namespace CompanionAI_v3.Planning.LLM
             _sbSystem.Clear();
             _sbSystem.Append("Tactical scoring advisor for ").Append(roleName).Append(" unit in turn-based combat.\n");
             _sbSystem.Append("Output JSON weights to adjust scoring. Only include changed values.\n");
-            _sbSystem.Append("Keys: aoe_weight(float), focus_fire(float), priority_target(int), heal_priority(float), buff_priority(float), defensive_stance(bool).\n");
+            _sbSystem.Append("Keys: aoe_weight(float), focus_fire(float), priority_target(int), heal_priority(float), buff_priority(float), defensive_stance(bool), reasoning(string).\n");
             _sbSystem.Append("Defaults: all 1.0, target -1, heal 0, defensive false.\n");
-            _sbSystem.Append("Example: {\"aoe_weight\":2.0,\"priority_target\":0}");
+            _sbSystem.Append("ALWAYS include 'reasoning': 1 short sentence explaining why these weights (or why baseline is fine).\n");
+            _sbSystem.Append("Example: {\"aoe_weight\":2.0,\"priority_target\":0,\"reasoning\":\"Cluster of weak enemies — AoE will maximize damage\"}");
 
             _cachedSystemRole = roleName;
             _cachedSystemMsg = _sbSystem.ToString();

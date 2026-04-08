@@ -32,6 +32,10 @@ namespace CompanionAI_v3.Planning.LLM
         /// <summary>방어적 포지셔닝 활성화 여부</summary>
         public bool DefensiveStance = false;
 
+        /// <summary>★ LLM이 가중치 결정의 근거를 한 문장으로 설명 (1-2 문장).
+        /// default 값을 출력한 경우에도 "왜 baseline이 적절한지" 설명할 수 있음.</summary>
+        public string Reasoning = "";
+
         /// <summary>모든 값이 기본값인지 확인 (LLM 호출 실패/무의미한 경우)</summary>
         public bool IsDefault => AoEWeight == 1f && FocusFire == 1f
             && PriorityTarget == -1 && HealPriority == 0f
@@ -145,6 +149,15 @@ namespace CompanionAI_v3.Planning.LLM
             // defensive_stance (bool)
             w.DefensiveStance = ReadBool(json, "defensive_stance", false);
 
+            // ★ reasoning (string, optional, max 200 chars)
+            var reasoningToken = json["reasoning"];
+            if (reasoningToken != null)
+            {
+                string reasoning = reasoningToken.ToString().Trim();
+                if (reasoning.Length > 200) reasoning = reasoning.Substring(0, 200);
+                w.Reasoning = reasoning;
+            }
+
             return w;
         }
 
@@ -228,7 +241,8 @@ namespace CompanionAI_v3.Planning.LLM
                 PriorityTarget = ratioA >= 0.5f ? a.PriorityTarget : b.PriorityTarget,
                 HealPriority = ClampF(a.HealPriority * ratioA + b.HealPriority * ratioB, -1.0f, 2.0f),
                 BuffPriority = ClampF(a.BuffPriority * ratioA + b.BuffPriority * ratioB, 0.1f, 3.0f),
-                DefensiveStance = ratioA >= 0.5f ? a.DefensiveStance : b.DefensiveStance
+                DefensiveStance = ratioA >= 0.5f ? a.DefensiveStance : b.DefensiveStance,
+                Reasoning = ratioA >= 0.5f ? a.Reasoning : b.Reasoning
             };
         }
 
