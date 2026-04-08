@@ -50,7 +50,7 @@ namespace CompanionAI_v3.Planning.LLM
                 yield break;
             }
 
-            // 2. 캐시 빌드 (Task 5에서 구현)
+            // 2. AbilityDatabase에서 캐시 빌드
             Main.LogDebug("[AbilityEffectCache] No cache file — building from AbilityDatabase");
             BuildFromDatabase();
 
@@ -59,7 +59,6 @@ namespace CompanionAI_v3.Planning.LLM
 
             _initialized = true;
             Main.Log($"[AbilityEffectCache] Built {_labels.Count} labels");
-            yield return null;
         }
 
         /// <summary>
@@ -129,6 +128,8 @@ namespace CompanionAI_v3.Planning.LLM
                         _labels[kvp.Key] = kvp.Value;
                     return true;
                 }
+
+                Main.LogDebug("[AbilityEffectCache] Cache has null labels — rebuilding");
             }
             catch (Exception ex)
             {
