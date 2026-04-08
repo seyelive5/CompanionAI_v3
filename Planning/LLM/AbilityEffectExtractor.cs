@@ -3,6 +3,7 @@
 // LLM 프롬프트에 주입되어 스킬 부가효과(Run and Gun의 보너스 MP 등)를 인식시킴
 using System.Text;
 using CompanionAI_v3.Data;
+using Kingmaker.UnitLogic.Abilities.Blueprints;
 
 namespace CompanionAI_v3.Planning.LLM
 {
@@ -34,6 +35,85 @@ namespace CompanionAI_v3.Planning.LLM
             AppendFlagModifiers(sb, info.Flags, info.Timing);
 
             return Truncate(sb.ToString());
+        }
+
+        /// <summary>
+        /// BlueprintAbility (게임 데이터) → 효과 라벨.
+        /// AbilityDatabase에 없는 ability용 폴백.
+        /// 게임 API 속성 (range, AbilityTags 등)에서 직접 추출.
+        /// </summary>
+        public static string ExtractFromBlueprint(Kingmaker.UnitLogic.Abilities.Blueprints.BlueprintAbility ability)
+        {
+            if (ability == null) return "";
+
+            var sb = new StringBuilder(64);
+
+            try
+            {
+                // AbilityTag 기반 분류 (가장 신뢰할 수 있는 게임 API)
+                // 주: 이 게임 버전의 enum은 Kingmaker.UnitLogic.Abilities.Blueprints 네임스페이스에 위치
+                //     사용 가능 값: None, Heal, ThrowingGrenade, UsingCombatDrug, StarshipShotAbility, StarshipUltimateAbility, Trap
+                var tag = ability.AbilityTag;
+                if (tag != Kingmaker.UnitLogic.Abilities.Blueprints.AbilityTag.None)
+                {
+                    string tagLabel = TagToLabel(tag);
+                    if (!string.IsNullOrEmpty(tagLabel))
+                        sb.Append(tagLabel);
+                }
+
+                // Range 정보 (있으면)
+                if (ability.Range == Kingmaker.UnitLogic.Abilities.Blueprints.AbilityRange.Personal)
+                {
+                    if (sb.Length > 0) sb.Append(", ");
+                    sb.Append("self");
+                }
+                else if (ability.Range == Kingmaker.UnitLogic.Abilities.Blueprints.AbilityRange.Touch)
+                {
+                    if (sb.Length > 0) sb.Append(", ");
+                    sb.Append("melee range");
+                }
+
+                // Free action (BlueprintAbility.IsFreeAction)
+                // 주: 이 게임 버전에는 BlueprintAbility.ActionType 속성이 없음, IsFreeAction bool 사용
+                if (ability.IsFreeAction)
+                {
+                    if (sb.Length > 0) sb.Append(", ");
+                    sb.Append("free action");
+                }
+            }
+            catch
+            {
+                // Game API 호출 실패 시 빈 라벨 반환 (안전 폴백)
+                return "";
+            }
+
+            return Truncate(sb.ToString());
+        }
+
+        private static string TagToLabel(Kingmaker.UnitLogic.Abilities.Blueprints.AbilityTag tag)
+        {
+            switch (tag)
+            {
+                case Kingmaker.UnitLogic.Abilities.Blueprints.AbilityTag.Heal:
+                    return "heals ally";
+                // TODO: AbilityTag.Damage not in this game version
+                // case Kingmaker.UnitLogic.Abilities.Blueprints.AbilityTag.Damage:
+                //     return "deals damage";
+                // TODO: AbilityTag.Buff not in this game version
+                // case Kingmaker.UnitLogic.Abilities.Blueprints.AbilityTag.Buff:
+                //     return "buff effect";
+                // TODO: AbilityTag.Debuff not in this game version
+                // case Kingmaker.UnitLogic.Abilities.Blueprints.AbilityTag.Debuff:
+                //     return "debuff effect";
+                case Kingmaker.UnitLogic.Abilities.Blueprints.AbilityTag.ThrowingGrenade:
+                    return "grenade — thrown explosive";
+                case Kingmaker.UnitLogic.Abilities.Blueprints.AbilityTag.UsingCombatDrug:
+                    return "combat drug — temporary boost";
+                case Kingmaker.UnitLogic.Abilities.Blueprints.AbilityTag.Trap:
+                    return "trap — placed device";
+                default:
+                    return "";
+            }
         }
 
         // ═══════════════════════════════════════════════════════════
