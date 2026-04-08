@@ -4,7 +4,9 @@
 using System.Collections.Generic;
 using System.Text;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.UnitLogic.Abilities;
 using CompanionAI_v3.Analysis;
+using CompanionAI_v3.Data;
 using CompanionAI_v3.GameInterface;
 using CompanionAI_v3.Settings;
 using CompanionAI_v3.MachineSpirit.Knowledge;
@@ -325,70 +327,49 @@ namespace CompanionAI_v3.Planning.LLM
 
         private static void AppendSkillsLine(Situation situation)
         {
-            _sb.Append("SK:");
-            bool first = true;
+            _sb.Append("SK:\n");
 
-            // Attacks
-            if (situation.AvailableAttacks != null && situation.AvailableAttacks.Count > 0)
+            AppendSkillCategory(situation.AvailableAttacks, "Atk", 3);
+            AppendSkillCategory(situation.AvailableAoEAttacks, "AoE", 2);
+            AppendSkillCategory(situation.AvailableBuffs, "Buff", 3);
+            AppendSkillCategory(situation.AvailableHeals, "Heal", 2);
+            AppendSkillCategory(situation.AvailableDebuffs, "Dbf", 2);
+        }
+
+        /// <summary>
+        /// 카테고리별 스킬 출력. 각 스킬에 효과 라벨 부착.
+        /// 형식:
+        ///   Atk:
+        ///   - 단발 사격 [single shot]
+        ///   - 점사 사격 [burst, +offense]
+        /// </summary>
+        private static void AppendSkillCategory(
+            System.Collections.Generic.List<Kingmaker.UnitLogic.Abilities.AbilityData> abilities,
+            string label, int maxItems)
+        {
+            if (abilities == null || abilities.Count == 0) return;
+
+            _sb.Append(label).Append(":\n");
+
+            int count = System.Math.Min(abilities.Count, maxItems);
+            for (int i = 0; i < count; i++)
             {
-                if (!first) _sb.Append('|'); first = false;
-                _sb.Append("Atk:");
-                for (int i = 0; i < situation.AvailableAttacks.Count && i < 3; i++)
-                {
-                    if (i > 0) _sb.Append(',');
-                    _sb.Append(situation.AvailableAttacks[i]?.Name ?? "?");
-                }
-            }
+                var ab = abilities[i];
+                if (ab == null) continue;
 
-            // AoE
-            if (situation.AvailableAoEAttacks != null && situation.AvailableAoEAttacks.Count > 0)
-            {
-                if (!first) _sb.Append('|'); first = false;
-                _sb.Append("AoE:");
-                for (int i = 0; i < situation.AvailableAoEAttacks.Count && i < 2; i++)
-                {
-                    if (i > 0) _sb.Append(',');
-                    _sb.Append(situation.AvailableAoEAttacks[i]?.Name ?? "?");
-                }
-            }
+                _sb.Append("- ");
+                _sb.Append(ab.Name ?? "?");
 
-            // Buffs
-            if (situation.AvailableBuffs != null && situation.AvailableBuffs.Count > 0)
-            {
-                if (!first) _sb.Append('|'); first = false;
-                _sb.Append("Buff:");
-                for (int i = 0; i < situation.AvailableBuffs.Count && i < 3; i++)
+                // 효과 라벨 조회 — 캐시 히트 시 [...] 추가
+                string guid = AbilityDatabase.GetGuid(ab);
+                string effectLabel = AbilityEffectCache.GetLabel(guid);
+                if (!string.IsNullOrEmpty(effectLabel))
                 {
-                    if (i > 0) _sb.Append(',');
-                    _sb.Append(situation.AvailableBuffs[i]?.Name ?? "?");
+                    _sb.Append(" [").Append(effectLabel).Append(']');
                 }
-            }
 
-            // Heals
-            if (situation.AvailableHeals != null && situation.AvailableHeals.Count > 0)
-            {
-                if (!first) _sb.Append('|'); first = false;
-                _sb.Append("Heal:");
-                for (int i = 0; i < situation.AvailableHeals.Count && i < 2; i++)
-                {
-                    if (i > 0) _sb.Append(',');
-                    _sb.Append(situation.AvailableHeals[i]?.Name ?? "?");
-                }
+                _sb.Append('\n');
             }
-
-            // Debuffs
-            if (situation.AvailableDebuffs != null && situation.AvailableDebuffs.Count > 0)
-            {
-                if (!first) _sb.Append('|'); first = false;
-                _sb.Append("Dbf:");
-                for (int i = 0; i < situation.AvailableDebuffs.Count && i < 2; i++)
-                {
-                    if (i > 0) _sb.Append(',');
-                    _sb.Append(situation.AvailableDebuffs[i]?.Name ?? "?");
-                }
-            }
-
-            _sb.AppendLine();
         }
 
         // ════════════════════════════════════════════════════════════
