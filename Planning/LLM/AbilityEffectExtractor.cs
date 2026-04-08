@@ -30,8 +30,8 @@ namespace CompanionAI_v3.Planning.LLM
             if (!string.IsNullOrEmpty(timingLabel))
                 sb.Append(timingLabel);
 
-            // 2. Flags → modifier suffixes
-            AppendFlagModifiers(sb, info.Flags);
+            // 2. Flags → modifier suffixes (timing-aware to avoid redundancy)
+            AppendFlagModifiers(sb, info.Flags, info.Timing);
 
             return Truncate(sb.ToString());
         }
@@ -99,9 +99,15 @@ namespace CompanionAI_v3.Planning.LLM
         // Flag 변환 (suffix로 추가)
         // ═══════════════════════════════════════════════════════════
 
-        private static void AppendFlagModifiers(StringBuilder sb, AbilityFlags flags)
+        private static void AppendFlagModifiers(StringBuilder sb, AbilityFlags flags, AbilityTiming timing)
         {
             if (flags == AbilityFlags.None) return;
+
+            // Suppress redundant flags when the timing already conveys the same info
+            bool suppressAoE = (timing == AbilityTiming.DangerousAoE);
+            bool suppressDangerous = (timing == AbilityTiming.DangerousAoE);
+            bool suppressCC = (timing == AbilityTiming.CrowdControl);
+            bool suppressDOT = (timing == AbilityTiming.DOTIntensify);
 
             // 가장 중요한 플래그만 선택 (토큰 절약)
             if ((flags & AbilityFlags.IsRetreatCapable) != 0)
@@ -119,10 +125,10 @@ namespace CompanionAI_v3.Planning.LLM
             if ((flags & AbilityFlags.IsOffensiveBuff) != 0)
                 Append(sb, "+offense");
 
-            if ((flags & AbilityFlags.HasCC) != 0)
+            if (!suppressCC && (flags & AbilityFlags.HasCC) != 0)
                 Append(sb, "stuns/paralyzes");
 
-            if ((flags & AbilityFlags.HasDOT) != 0)
+            if (!suppressDOT && (flags & AbilityFlags.HasDOT) != 0)
                 Append(sb, "damage over time");
 
             if ((flags & AbilityFlags.IsBurst) != 0)
@@ -134,10 +140,10 @@ namespace CompanionAI_v3.Planning.LLM
             if ((flags & AbilityFlags.IsMelee) != 0)
                 Append(sb, "melee");
 
-            if ((flags & AbilityFlags.IsAoE) != 0)
+            if (!suppressAoE && (flags & AbilityFlags.IsAoE) != 0)
                 Append(sb, "AoE");
 
-            if ((flags & AbilityFlags.Dangerous) != 0)
+            if (!suppressDangerous && (flags & AbilityFlags.Dangerous) != 0)
                 Append(sb, "⚠ may hit allies");
 
             if ((flags & AbilityFlags.IsFreeAction) != 0)
