@@ -622,13 +622,22 @@ namespace CompanionAI_v3.Core
 
             if (_pendingCandidates != null && selected < _pendingCandidates.Count)
             {
-                // ★ Fuzzy Confidence Blending:
-                // 신뢰도가 95% 미만이고 후보가 2개이며 LLM weights가 있으면 블렌딩
+                // ★ Fuzzy Confidence Blending — sweet spot 0.70~0.95:
+                // - 0.95+: 거의 확정 → 우세 플랜 단독 사용 (블렌딩 의미 없음)
+                // - 0.70~0.95: 적정 블렌딩 — LLM 의도 살리되 기본값으로 살짝 보정
+                // - 0.70 미만: LLM이 확신 없음 → 우세 플랜 단독 사용
+                //   (이전: 0.60에서도 블렌딩 → 가중치 희석 → EndTurn 양산 문제)
+                float dominantRatio = (_judgeConfidence.IsValid && _judgeConfidence.Ratios != null
+                    && _judgeConfidence.Ratios.Length > _judgeConfidence.PreferredIndex)
+                    ? _judgeConfidence.Ratios[_judgeConfidence.PreferredIndex]
+                    : 1f;
+
                 bool shouldBlend = _judgeConfidence.IsValid
                     && _judgeConfidence.Ratios != null
                     && _judgeConfidence.Ratios.Length >= 2
                     && _pendingCandidates.Count >= 2
-                    && _judgeConfidence.Ratios[_judgeConfidence.PreferredIndex] < 0.95f
+                    && dominantRatio >= 0.70f
+                    && dominantRatio < 0.95f
                     && _pendingWeights != null && !_pendingWeights.IsDefault;
 
                 TurnPlan finalPlan;
