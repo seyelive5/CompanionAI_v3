@@ -59,6 +59,10 @@ namespace CompanionAI_v3
             // ★ Tactical Memory 초기화 (전투 간 전술 기억)
             Planning.LLM.TacticalMemory.Initialize(modEntry.Path);
 
+            // ★ Skill Effect Cache 초기화 (LLM 스킬 효과 인식)
+            MachineSpirit.CoroutineRunner.Start(
+                Planning.LLM.AbilityEffectCache.Initialize(modEntry.Path));
+
             // ★ v3.52.0: Machine Spirit 초기화
             MSController.Initialize();
 
