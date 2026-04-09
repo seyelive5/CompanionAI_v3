@@ -386,8 +386,15 @@ namespace CompanionAI_v3.MachineSpirit
             }
         }
 
+        // ★ v3.94.0: 전투 중 자동 대화 비활성화 — 전투 몰입 방해 피드백 반영
+        // 전투 이벤트(CombatStart/End, UnitDeath, 대미지)에 대한 LLM 반응을 중단.
+        // 이벤트 수집(GameEventCollector)은 그대로 유지하여 컨텍스트 빌드에는 활용 가능.
         public static void OnMajorEvent(GameEvent evt)
         {
+            // ★ v3.94.0: Combat dialogue disabled — events still collected for context
+            return;
+
+            /*
             if (!IsActive) return;
             if (LLMClient.IsRequesting) return;
             if (Time.time - _lastSpontaneousTime < SPONTANEOUS_COOLDOWN) return;
@@ -464,6 +471,7 @@ namespace CompanionAI_v3.MachineSpirit
                     }
                 ));
             }
+            */
         }
 
         // ════════════════════════════════════════════════════════════
@@ -561,8 +569,16 @@ namespace CompanionAI_v3.MachineSpirit
         // ★ v3.70.0: Smart Dialogue Timing — react at scene start/end
         // ════════════════════════════════════════════════════════════
 
+        // ★ v3.94.0: 대화씬 시작 반응 비활성화 — NPC 대화 반응 축소 (종료 시 1회만 반응)
         public static void OnDialogueStarted()
         {
+            // ★ v3.94.0: Dialogue start reaction disabled — only react at scene end
+            // 대화 버퍼는 계속 수집되므로 OnDialogueEnded에서 전체 맥락 파악 가능
+            _lastActivityTime = Time.time;
+            ResetIdleTimers();
+            return;
+
+            /*
             if (!IsActive) return;
             if (LLMClient.IsRequesting) return;
             if (Config?.IdleMode == IdleFrequency.Off) return;
@@ -624,6 +640,7 @@ namespace CompanionAI_v3.MachineSpirit
                     }
                 ));
             }
+            */
         }
 
         public static void OnDialogueEnded()
