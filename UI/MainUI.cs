@@ -420,6 +420,7 @@ namespace CompanionAI_v3.UI
         private static string _llmCombatInstallStatus = "";
         private static string _llmCombatPendingModelSelect;
         private static bool _llmCombatCatalogExpanded;  // 다운로드 카탈로그 펼침 상태
+        private static string _llmCombatDeleteConfirm;   // ★ v3.94.0: 삭제 확인 대기 중인 모델
 
         private const string RECOMMENDED_JUDGE_MODEL = "gemma4:e4b";
 
@@ -719,6 +720,7 @@ namespace CompanionAI_v3.UI
                 }
 
                 bool isRec = entry.Name == RECOMMENDED_JUDGE_MODEL;
+                bool isDeletePending = _llmCombatDeleteConfirm == entry.Name;
 
                 // Cell row (alternate row tinting via SectionBox or plain)
                 GUILayout.BeginHorizontal();
@@ -744,18 +746,47 @@ namespace CompanionAI_v3.UI
                 // Description cell — 흰색
                 GUILayout.Label($"<color=#FFFFFF>{entry.Desc}</color>", UIStyles.Label, GUILayout.ExpandWidth(true));
 
-                // Action cell
-                GUI.enabled = !_llmCombatInstallingModel && !alreadyInstalled;
-                string btnLabel = alreadyInstalled
-                    ? $"<color={UIStyles.TextDim}>Installed</color>"
-                    : $"<color={UIStyles.Gold}>\u2b07 Download</color>";
-                if (GUILayout.Button(btnLabel, UIStyles.Button, GUILayout.Width(UIStyles.Sd(110)), GUILayout.Height(BUTTON_HEIGHT)))
+                // Action cell — ★ v3.94.0: Download / Delete 분기
+                if (alreadyInstalled)
                 {
-                    _llmCombatInstallingModel = true;
-                    _llmCombatPendingModelSelect = entry.Name;
-                    MSp.CoroutineRunner.Start(LLMCombatInstallModel(entry.Name));
+                    if (isDeletePending)
+                    {
+                        // 삭제 확인 모드: Yes / No
+                        GUI.enabled = !MSp.OllamaSetup.IsDeletingModel && !_llmCombatInstallingModel;
+                        if (GUILayout.Button($"<color={UIStyles.Danger}>Yes</color>", UIStyles.Button, GUILayout.Width(UIStyles.Sd(52)), GUILayout.Height(BUTTON_HEIGHT)))
+                        {
+                            _llmCombatDeleteConfirm = null;
+                            MSp.CoroutineRunner.Start(MSp.OllamaSetup.DeleteModel(entry.Name));
+                        }
+                        if (GUILayout.Button("No", UIStyles.Button, GUILayout.Width(UIStyles.Sd(52)), GUILayout.Height(BUTTON_HEIGHT)))
+                        {
+                            _llmCombatDeleteConfirm = null;
+                        }
+                        GUI.enabled = true;
+                    }
+                    else
+                    {
+                        // 삭제 버튼
+                        GUI.enabled = !MSp.OllamaSetup.IsDeletingModel && !_llmCombatInstallingModel;
+                        if (GUILayout.Button($"<color={UIStyles.Danger}>\u2716 Delete</color>", UIStyles.Button, GUILayout.Width(UIStyles.Sd(110)), GUILayout.Height(BUTTON_HEIGHT)))
+                        {
+                            _llmCombatDeleteConfirm = entry.Name;
+                        }
+                        GUI.enabled = true;
+                    }
                 }
-                GUI.enabled = true;
+                else
+                {
+                    // 다운로드 버튼
+                    GUI.enabled = !_llmCombatInstallingModel;
+                    if (GUILayout.Button($"<color={UIStyles.Gold}>\u2b07 Download</color>", UIStyles.Button, GUILayout.Width(UIStyles.Sd(110)), GUILayout.Height(BUTTON_HEIGHT)))
+                    {
+                        _llmCombatInstallingModel = true;
+                        _llmCombatPendingModelSelect = entry.Name;
+                        MSp.CoroutineRunner.Start(LLMCombatInstallModel(entry.Name));
+                    }
+                    GUI.enabled = true;
+                }
 
                 GUILayout.EndHorizontal();
                 GUILayout.Space(1);
