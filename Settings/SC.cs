@@ -85,13 +85,6 @@ namespace CompanionAI_v3.Settings
         public const int   MaxAttacksPerPlan      = 10;   // 턴당 최대 공격 수 (실질적 무제한, AP로 자연 종료)
         public const int   MaxPositionalBuffs     = 3;    // 위치 버프 최대 수
 
-        // ─── PositionEvaluator 턴 순서 ──────────────────────────────────
-        // ★ v3.22.4: 곧 행동할 적 근처 위치 회피, 이미 행동한 적 근처 안전 보너스
-        // ★ v3.28.0: PositionEvaluator는 dead code (MovementAPI sync 대체). 아래 상수는 PositionEvaluator 내부에서만 참조.
-        public const float PositionTurnOrderThreatRadiusMult = 1.5f;  // minSafeDistance × 이 배수 내 적만 고려
-        public const float PositionTurnOrderUrgencyRate      = 5f;    // 턴 위치당 패널티 (0번=-15, 1번=-10, 2번=-5)
-        public const float PositionTurnOrderActedBonus       = 3f;    // 이미 행동한 적 근처 안전 보너스
-
         // ─── 마스티프 사역마 ─────────────────────────────────────────────
         // ★ v3.22.6: 마스티프 Apprehend/Protect 개선
         public const float MastiffApprehendMaxReachTiles = 15f;  // Apprehend 도달 가능 최대 거리 (타일)
@@ -105,7 +98,6 @@ namespace CompanionAI_v3.Settings
 
         // ★ v3.24.0: Overwatch 포지셔닝 반영
         public const float OverwatchMovePenalty       = 15f;  // TacticalOptionEvaluator 이동 Overwatch 페널티 (적 1명당)
-        public const float PositionOverwatchPenalty   = 12f;  // PositionEvaluator Overwatch 근접 페널티 (적 1명당)
         public const float OverwatchEstimatedRange    = 15f;  // Overwatch 추정 사거리 (타일)
 
         // ★ v3.24.0: 사거리 품질 포지셔닝

@@ -1367,7 +1367,7 @@ namespace CompanionAI_v3.GameInterface
         /// ★ v3.2.25: role 파라미터 추가 - Role별 전선 위치 점수
         /// ★ v3.4.00: predictiveMap 파라미터 추가 - 적 이동 예측 기반 위협 점수
         ///
-        /// PositionEvaluator의 단순 Vector3 계산 대신 PathfindingService 사용
+        /// PathfindingService 기반 (위협/경로 품질 반영)
         /// </summary>
         public static PositionScore FindRetreatPositionSync(
             BaseUnitEntity unit,
