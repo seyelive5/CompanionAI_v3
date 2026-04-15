@@ -1578,7 +1578,10 @@ namespace CompanionAI_v3.GameInterface
                             break;
                     }
                 }
-                catch { }
+                catch (System.Exception ex)
+                {
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] cover score silent: {ex.Message}");
+                }
 
                 // ★ v3.8.78: LOS 기반 hittable count (기존 CountHittableEnemiesFromPosition 호출 제거)
                 // 위 enemy 루프에서 GetWarhammerLos로 동시 계산 → CanTargetFromNode 호출 제거

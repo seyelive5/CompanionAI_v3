@@ -1682,7 +1682,8 @@ namespace CompanionAI_v3.Planning.Planners
                 {
                     var enemy = hittableEnemies[enemyIdx];
                     if (enemy == null) continue;
-                    try { if (enemy.LifeState?.IsDead == true) continue; } catch { }
+                    try { if (enemy.LifeState?.IsDead == true) continue; }
+                    catch (System.Exception ex) { if (Main.IsDebugEnabled) Main.LogDebug($"[AttackPlanner] LifeState check silent: {ex.Message}"); }
 
                     // ★ v3.9.10: 패턴 1회 계산으로 적+아군 동시 카운트
                     CombatAPI.CountUnitsInPattern(

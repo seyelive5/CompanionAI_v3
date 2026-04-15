@@ -54,7 +54,11 @@ namespace CompanionAI_v3.MachineSpirit
 
                 return sb.ToString();
             }
-            catch { return null; }
+            catch (System.Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[GameKnowledge] GetUnitInfo silent: {ex.Message}");
+                return null;
+            }
         }
 
         // -----------------------------------------------------------------

@@ -463,7 +463,10 @@ namespace CompanionAI_v3.GameInterface
                         return true;
                 }
             }
-            catch { }
+            catch (System.Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MainAIPatch] ranged weapon detect silent: {ex.Message}");
+            }
 
             return false;
         }
