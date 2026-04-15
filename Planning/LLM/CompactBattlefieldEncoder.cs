@@ -67,7 +67,7 @@ namespace CompanionAI_v3.Planning.LLM
 
         // ════════════════════════════════════════════════════════════
         // U: 현재 유닛
-        // U:Argenta,DPS,HP85,AP4,MP10,Wpn:Bolter/12
+        // U:Argenta,DPS,HP85,AP4,MP10,Wpn:Bolter/12,ThisTurn:Atk1,Buf0,Mov0
         // ════════════════════════════════════════════════════════════
 
         private static void AppendUnitLine(BaseUnitEntity unit, Situation situation, string roleName)
@@ -98,6 +98,11 @@ namespace CompanionAI_v3.Planning.LLM
             }
 
             if (situation.NeedsReload) _sb.Append(",RELOAD");
+
+            // ★ v3.97.0: 이번 턴 행동 플래그 — LLM이 "이미 사용함" 인지 가능
+            _sb.Append(",ThisTurn:Atk").Append(situation.HasAttackedThisTurn ? '1' : '0')
+               .Append(",Buf").Append(situation.HasBuffedThisTurn ? '1' : '0')
+               .Append(",Mov").Append(situation.HasMovedThisTurn ? '1' : '0');
 
             _sb.Append('\n');
         }
@@ -361,11 +366,12 @@ namespace CompanionAI_v3.Planning.LLM
         }
 
         /// <summary>
-        /// 카테고리별 스킬 출력. 각 스킬에 효과 라벨 부착.
+        /// 카테고리별 스킬 출력. 각 스킬에 AP/MP 비용 + 효과 라벨 부착.
+        /// ★ v3.97.0: AP/MP 비용 포함 (LLM이 조합 가능 여부 판단 가능하도록)
         /// 형식:
         ///   Atk:
-        ///   - 단발 사격 [single shot]
-        ///   - 점사 사격 [burst, +offense]
+        ///   - 단발 사격 [2AP, single shot]
+        ///   - 점사 사격 [4AP, burst, +offense]
         /// </summary>
         private static void AppendSkillCategory(
             List<AbilityData> abilities, string label, int maxItems)
@@ -383,12 +389,34 @@ namespace CompanionAI_v3.Planning.LLM
                 _sb.Append("- ");
                 _sb.Append(ab.Name ?? "?");
 
-                // 효과 라벨 조회 — 캐시 히트 시 [...] 추가
+                // ★ v3.97.0: AP/MP 비용 + 효과 라벨 합쳐서 [...] 표기
+                float apCost = CombatAPI.GetEffectiveAPCost(ab);
+                float mpCost = CombatAPI.GetAbilityMPCost(ab);
                 string guid = AbilityDatabase.GetGuid(ab);
                 string effectLabel = AbilityEffectCache.GetLabel(guid);
-                if (!string.IsNullOrEmpty(effectLabel))
+
+                bool hasAny = apCost > 0f || mpCost > 0f || !string.IsNullOrEmpty(effectLabel);
+                if (hasAny)
                 {
-                    _sb.Append(" [").Append(effectLabel).Append(']');
+                    _sb.Append(" [");
+                    bool first = true;
+                    if (apCost > 0f)
+                    {
+                        _sb.Append(apCost.ToString("0.#")).Append("AP");
+                        first = false;
+                    }
+                    if (mpCost > 0f)
+                    {
+                        if (!first) _sb.Append(", ");
+                        _sb.Append(mpCost.ToString("0.#")).Append("MP");
+                        first = false;
+                    }
+                    if (!string.IsNullOrEmpty(effectLabel))
+                    {
+                        if (!first) _sb.Append(", ");
+                        _sb.Append(effectLabel);
+                    }
+                    _sb.Append(']');
                 }
 
                 _sb.Append('\n');
