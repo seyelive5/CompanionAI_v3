@@ -2,6 +2,7 @@
 // ★ LLM-as-Scorer: LLM이 출력하는 유틸리티 가중치.
 // Parse()는 JSON과 plain text 모두 안전하게 처리.
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using Newtonsoft.Json.Linq;
 
@@ -124,14 +125,16 @@ namespace CompanionAI_v3.Planning.LLM
         {
             var w = new ScorerWeights();
 
-            // aoe_weight (float, 0.1~5.0)
+            // ★ v3.102.0: 이산 카테고리 우선 (문자열) + 숫자 폴백
+
+            // aoe_weight: "skip"|"normal"|"priority" or float 0.1~5.0
             w.AoEWeight = ClampF(
-                ReadFloat(json, "aoe_weight", 1.0f),
+                ReadFloatOrCategory(json, "aoe_weight", 1.0f, _aoeWeightMap),
                 0.1f, 5.0f);
 
-            // focus_fire (float, 0.1~5.0)
+            // focus_fire: "off"|"normal"|"heavy" or float 0.1~5.0
             w.FocusFire = ClampF(
-                ReadFloat(json, "focus_fire", 1.0f),
+                ReadFloatOrCategory(json, "focus_fire", 1.0f, _focusFireMap),
                 0.1f, 5.0f);
 
             // priority_target (int, -1 ~ enemyCount-1)
@@ -147,14 +150,14 @@ namespace CompanionAI_v3.Planning.LLM
             }
             w.PriorityTarget = (rawTarget < 0 || rawTarget >= enemyCount) ? -1 : rawTarget;
 
-            // heal_priority (float, -1.0~2.0)
+            // heal_priority: "suppress"|"normal"|"urgent" or float -1.0~2.0
             w.HealPriority = ClampF(
-                ReadFloat(json, "heal_priority", 0f),
+                ReadFloatOrCategory(json, "heal_priority", 0f, _healPriorityMap),
                 -1.0f, 2.0f);
 
-            // buff_priority (float, 0.1~3.0)
+            // buff_priority: "skip"|"normal"|"heavy" or float 0.1~3.0
             w.BuffPriority = ClampF(
-                ReadFloat(json, "buff_priority", 1.0f),
+                ReadFloatOrCategory(json, "buff_priority", 1.0f, _buffPriorityMap),
                 0.1f, 3.0f);
 
             // defensive_stance (bool)
@@ -173,6 +176,63 @@ namespace CompanionAI_v3.Planning.LLM
         }
 
         #region JSON Read Helpers
+
+        // ★ v3.102.0: 이산 카테고리 맵 — 소형 LLM이 숫자 캘리브레이션보다 카테고리 선택에 강함.
+        // 내부 저장값은 float 유지 (downstream 코드 무변경), 입력만 문자열 허용.
+        // 하위 호환: 숫자도 계속 허용 (ReadFloatOrCategory가 폴백).
+        private static readonly Dictionary<string, float> _aoeWeightMap = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "skip", 0.3f }, { "off", 0.3f }, { "low", 0.3f },
+            { "normal", 1.0f }, { "default", 1.0f }, { "baseline", 1.0f },
+            { "priority", 2.5f }, { "heavy", 2.5f }, { "high", 2.5f }
+        };
+
+        private static readonly Dictionary<string, float> _focusFireMap = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "off", 0.5f }, { "skip", 0.5f }, { "low", 0.5f },
+            { "normal", 1.0f }, { "default", 1.0f },
+            { "heavy", 2.5f }, { "high", 2.5f }, { "strong", 2.5f }
+        };
+
+        private static readonly Dictionary<string, float> _healPriorityMap = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "suppress", -0.5f }, { "skip", -0.5f }, { "off", -0.5f }, { "low", -0.5f },
+            { "normal", 0.0f }, { "default", 0.0f },
+            { "urgent", 1.5f }, { "high", 1.5f }, { "critical", 1.5f }
+        };
+
+        private static readonly Dictionary<string, float> _buffPriorityMap = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "skip", 0.3f }, { "off", 0.3f }, { "low", 0.3f },
+            { "normal", 1.0f }, { "default", 1.0f },
+            { "heavy", 2.0f }, { "high", 2.0f }, { "strong", 2.0f }
+        };
+
+        /// <summary>
+        /// ★ v3.102.0: 카테고리 문자열 우선 → 숫자 폴백. 소형 LLM 편의.
+        /// 예: "heavy" → 2.5, 1.5 → 1.5, "1.5" → 1.5, "unknown" → fallback
+        /// </summary>
+        private static float ReadFloatOrCategory(JObject json, string key, float fallback, Dictionary<string, float> categoryMap)
+        {
+            var token = json[key];
+            if (token == null) return fallback;
+
+            // 1. 문자열이면 카테고리 맵 조회
+            if (token.Type == JTokenType.String)
+            {
+                string s = token.ToString().Trim();
+                if (categoryMap != null && categoryMap.TryGetValue(s, out float cat))
+                    return cat;
+                // 2. 숫자 문자열 폴백 ("1.5", "2.0")
+                if (float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out float v))
+                    return v;
+                return fallback;
+            }
+
+            // 3. 숫자 토큰
+            try { return token.Value<float>(); }
+            catch { return fallback; }
+        }
 
         private static float ReadFloat(JObject json, string key, float fallback)
         {

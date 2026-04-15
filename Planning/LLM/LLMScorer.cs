@@ -239,13 +239,19 @@ namespace CompanionAI_v3.Planning.LLM
 
             _sbSystem.Clear();
             _sbSystem.Append("Tactical scoring advisor for ").Append(roleName).Append(" unit in turn-based combat.\n");
-            _sbSystem.Append("Output JSON weights to adjust scoring. Only include changed values.\n");
-            _sbSystem.Append("Keys: aoe_weight(float), focus_fire(float), priority_target(int), heal_priority(float), buff_priority(float), defensive_stance(bool), reasoning(string).\n");
-            _sbSystem.Append("Defaults: all 1.0, target -1, heal 0, defensive false.\n");
+            _sbSystem.Append("Output JSON weights. Only include changed values.\n");
+            // ★ v3.102.0: 이산 카테고리 스키마 (소형 LLM 친화적)
+            _sbSystem.Append("Categorical keys (use short labels):\n");
+            _sbSystem.Append("  aoe_weight: \"skip\"|\"normal\"|\"priority\"\n");
+            _sbSystem.Append("  focus_fire: \"off\"|\"normal\"|\"heavy\"\n");
+            _sbSystem.Append("  heal_priority: \"suppress\"|\"normal\"|\"urgent\"\n");
+            _sbSystem.Append("  buff_priority: \"skip\"|\"normal\"|\"heavy\"\n");
+            _sbSystem.Append("Discrete keys: priority_target(int, 0..N-1 from E line), defensive_stance(bool).\n");
+            _sbSystem.Append("Defaults: all \"normal\", target -1, defensive false.\n");
             // ★ v3.101.0: E 라인 정렬 정책 고지 (primacy bias 활용)
             _sbSystem.Append("Note: E: entries are pre-sorted by threat (index 0 = top threat). priority_target refers to these indices. Override only when another index has a clearly stronger tactical reason.\n");
             _sbSystem.Append("ALWAYS include 'reasoning': 1 short sentence explaining why these weights (or why baseline is fine).\n");
-            _sbSystem.Append("Example: {\"aoe_weight\":2.0,\"priority_target\":0,\"reasoning\":\"Cluster of weak enemies — AoE will maximize damage\"}");
+            _sbSystem.Append("Example: {\"aoe_weight\":\"priority\",\"focus_fire\":\"heavy\",\"priority_target\":0,\"reasoning\":\"Cluster of weak enemies — AoE will maximize damage\"}");
 
             _cachedSystemRole = roleName;
             _cachedSystemMsg = _sbSystem.ToString();
