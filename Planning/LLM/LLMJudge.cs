@@ -437,6 +437,9 @@ namespace CompanionAI_v3.Planning.LLM
             _sbSystem.Append("Given the battlefield and candidate action plans, choose the single best plan.\n");
             _sbSystem.Append("Each plan represents a distinct tactical approach (archetype). ");
             _sbSystem.Append("Evaluate: threat elimination, ally survival, damage efficiency, positioning.\n");
+            // ★ v3.100.0: Rule reminders — 무효 플랜 선택 편향 감소
+            _sbSystem.Append("Rules: Standard attacks and most abilities are once-per-turn. Actions cost AP/MP shown in [brackets]. ");
+            _sbSystem.Append("Prefer plans with valid, unique action sequences — reject plans that list the same attack twice unless marked bonus.\n");
             _sbSystem.Append("Respond with ONLY the letter of your choice (").Append(choiceStr).Append("). Nothing else.");
 
             _cachedSystemRole = roleName;

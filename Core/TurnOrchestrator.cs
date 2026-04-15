@@ -234,9 +234,18 @@ namespace CompanionAI_v3.Core
             var situation = turnState.PendingSituation;
             if (situation == null)
             {
-                Main.LogWarning($"[Orchestrator] {unitName}: PendingSituation is null in WaitingForPlan phase");
+                // ★ v3.100.0: 턴 종료 대신 re-analyze 시도. ConsecutiveFailures 카운터로 무한 루프 방지.
+                turnState.ConsecutiveFailures++;
+                if (turnState.ConsecutiveFailures >= GameConstants.MAX_CONSECUTIVE_FAILURES)
+                {
+                    Main.LogWarning($"[Orchestrator] {unitName}: PendingSituation lost {turnState.ConsecutiveFailures}x — ending turn");
+                    turnState.ConsecutiveFailures = 0;
+                    turnState.CurrentComputePhase = ComputePhase.Ready;
+                    return ExecutionResult.EndTurn("PendingSituation lost (failure cap)");
+                }
+                Main.LogWarning($"[Orchestrator] {unitName}: PendingSituation null — re-analyzing (attempt {turnState.ConsecutiveFailures}/{GameConstants.MAX_CONSECUTIVE_FAILURES})");
                 turnState.CurrentComputePhase = ComputePhase.Ready;
-                return ExecutionResult.EndTurn("PendingSituation lost");
+                return ExecutionResult.Waiting("Re-analyzing after lost situation");
             }
 
             // Phase 완료 — 상태 리셋
