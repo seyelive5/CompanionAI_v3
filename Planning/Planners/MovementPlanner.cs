@@ -13,6 +13,7 @@ using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
 using CompanionAI_v3.Data;
 using CompanionAI_v3.GameInterface;
+using CompanionAI_v3.Planning.LLM;
 using CompanionAI_v3.Settings;
 
 namespace CompanionAI_v3.Planning.Planners
@@ -37,13 +38,18 @@ namespace CompanionAI_v3.Planning.Planners
             // ★ v3.0.89: forceMove=true면 HasHittableEnemies 체크 스킵
             // 사용 사례: 원거리 fallback으로 Hittable=True인데 PreferMelee라서 공격 못함 → 이동 필요
             // ★ v3.1.29: 원거리 캐릭터가 위험 거리 내에 있으면 후퇴 이동 허용
+            // ★ v3.96.0: LLM PriorityTarget이 비-Hittable이면 우회 이동 허용
             if (!forceMove && situation.HasHittableEnemies)
             {
                 // 원거리가 위험하면 이동 허용 (공격 가능해도 후퇴 필요)
                 bool isRangedInDanger = situation.PrefersRanged && situation.IsInDanger;
-                if (!isRangedInDanger)
+                bool llmBypass = ShouldBypassHittableGate(situation);
+                if (!isRangedInDanger && !llmBypass)
                     return null;
-                if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] Ranged in danger - allowing movement despite hittable enemies");
+                if (llmBypass)
+                    Main.Log($"[{roleName}] LLM PriorityTarget is non-hittable — bypassing hittable gate for approach");
+                else if (Main.IsDebugEnabled)
+                    Main.LogDebug($"[{roleName}] Ranged in danger - allowing movement despite hittable enemies");
             }
             if (!situation.HasLivingEnemies) return null;
             if (situation.NearestEnemy == null) return null;
@@ -77,6 +83,27 @@ namespace CompanionAI_v3.Planning.Planners
             // ★ v3.1.01: bypassCanMoveCheck와 predictedMP 전달
             // ★ v3.5.18: tacticalTarget 전달
             return PlanMoveToEnemy(situation, roleName, bypassCanMoveCheck, predictedMP, tacticalTarget, attackContext);
+        }
+
+        /// <summary>
+        /// ★ v3.96.0: LLM PriorityTarget이 비-Hittable 적을 지정했을 때 우회 이동 허용 여부.
+        /// LLM이 명시적으로 벽 뒤/먼 적을 우선하라고 지시했는데
+        /// 가까운 약체 Hittable 적 때문에 접근이 막히는 경우를 해결.
+        /// </summary>
+        private static bool ShouldBypassHittableGate(Situation situation)
+        {
+            if (situation?.Enemies == null) return false;
+            var weights = TargetScorer.GetActiveScorerWeights();
+            if (weights == null) return false;
+            if (weights.PriorityTarget < 0 || weights.PriorityTarget >= situation.Enemies.Count) return false;
+
+            var priorityEnemy = situation.Enemies[weights.PriorityTarget];
+            if (priorityEnemy == null) return false;
+
+            // PriorityTarget이 이미 Hittable이면 게이트 통과할 필요 없음 (기존 공격 경로)
+            bool isPriorityHittable = situation.HittableEnemies != null
+                && situation.HittableEnemies.Contains(priorityEnemy);
+            return !isPriorityHittable;
         }
 
         /// <summary>
