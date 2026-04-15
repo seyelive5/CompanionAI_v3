@@ -454,6 +454,7 @@ namespace CompanionAI_v3.Analysis
             // Target Analysis
             HittableEnemies.Clear();
             MeleeHittableEnemies.Clear();
+            NormalHittableCount = 0; // ★ v3.95.0: 풀링 재사용 시 이전 턴 값 유출 방지
             BestTarget = null;
             CanKillBestTarget = false;
 
