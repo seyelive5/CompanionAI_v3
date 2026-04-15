@@ -3422,19 +3422,7 @@ namespace CompanionAI_v3.Planning.Plans
                     if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: No TargetRestrictions");
                 }
 
-                // MultiTarget 컴포넌트 정보
-                var components = aerialRush.Blueprint?.ComponentsArray;
-                if (components != null)
-                {
-                    foreach (var comp in components)
-                    {
-                        // ★ v3.8.61: string 매칭 → is 연산자
-                        if (comp is Kingmaker.UnitLogic.Abilities.Components.AbilityTargetsAround)
-                        {
-                            if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Aerial Rush: Has AbilityTargetsAround component");
-                        }
-                    }
-                }
+                // ★ v3.99.0: AbilityTargetsAround 디버그 블록 제거 — 순수 로그용이었고 해당 타입이 [Obsolete]
             }
             catch (Exception ex)
             {

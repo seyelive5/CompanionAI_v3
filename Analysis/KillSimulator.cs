@@ -370,9 +370,13 @@ namespace CompanionAI_v3.Analysis
                         if (component == null) continue;
 
                         // 데미지 수정/보너스 컴포넌트 (WarhammerDamageModifier 추상 베이스 → 3개 구현체 모두 매칭)
+                        // ★ v3.99.0: WarhammerModifyOutgoingAttackDamage는 [Obsolete]지만 독립 타입이라
+                        // WarhammerDamageModifier 체크로 커버 안 됨. 실제 블루프린트에서 여전히 사용되므로 유지.
+#pragma warning disable 0612
                         if (component is WarhammerDamageModifier ||
                             component is WarhammerDamageBonusAgainstSize ||
                             component is WarhammerModifyOutgoingAttackDamage)
+#pragma warning restore 0612
                         {
                             Main.LogDebug($"[KillSimulator] Found damage bonus component: {component.GetType().Name}");
                             return 1.3f;

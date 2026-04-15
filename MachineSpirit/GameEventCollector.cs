@@ -462,6 +462,8 @@ namespace CompanionAI_v3.MachineSpirit
             }
 
             // ★ v3.68.0: Level up detection (ILevelUpInitiateUIHandler — global subscriber)
+            // ★ v3.99.0: LevelUpState는 [Obsolete]지만 인터페이스 시그니처이므로 유지 필요. 경고 억제.
+#pragma warning disable 0612
             public void HandleLevelUpStart(BaseUnitEntity unit, Action onCommit = null, Action onStop = null, LevelUpState.CharBuildMode mode = LevelUpState.CharBuildMode.LevelUp)
             {
                 if (!MachineSpirit.IsActive) return;
@@ -474,6 +476,7 @@ namespace CompanionAI_v3.MachineSpirit
                 }
                 catch { }
             }
+#pragma warning restore 0612
 
             // ★ v3.70.0: Dialogue scene start/end — smart timing for LLM reactions
             public void HandleDialogStarted(BlueprintDialog dialog)
