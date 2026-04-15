@@ -964,9 +964,14 @@ namespace CompanionAI_v3.MachineSpirit
 
         /// <summary>
         /// ★ v3.60.0: Called every frame. Checks idle timers for autonomous commentary.
+        /// ★ v3.98.0: LLM 전투 AI 모델 warmup 체크 (IsActive와 무관하게 동작)
         /// </summary>
         public static void Update()
         {
+            // ★ v3.98.0: LLM 전투 AI 모델 사전 로딩 — IsActive 체크 앞에 위치
+            // MachineSpirit OFF 상태여도 LLM 전투 AI만 켜져 있으면 warmup 진행
+            CompanionAI_v3.Planning.LLM.LLMWarmup.TryTickWarmup();
+
             if (!IsActive) return;
 
             // ★ v3.66.0: Session greeting — wait 3 seconds after init for provider readiness
