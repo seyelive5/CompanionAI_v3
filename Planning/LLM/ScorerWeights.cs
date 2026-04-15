@@ -53,7 +53,9 @@ namespace CompanionAI_v3.Planning.LLM
         /// </summary>
         /// <param name="response">LLM 원본 응답 (Ollama content)</param>
         /// <param name="enemyCount">유효 적 수 (PriorityTarget 범위 검증용)</param>
-        public static ScorerWeights Parse(string response, int enemyCount)
+        /// <param name="displayToOriginalMap">★ v3.101.0: E 라인 display idx → situation.Enemies 원본 idx 매핑.
+        /// 제공 시 LLM의 priority_target(display idx)을 원본 idx로 역매핑. null이면 원래 semantics.</param>
+        public static ScorerWeights Parse(string response, int enemyCount, int[] displayToOriginalMap = null)
         {
             if (string.IsNullOrEmpty(response))
                 return new ScorerWeights();
@@ -63,11 +65,11 @@ namespace CompanionAI_v3.Planning.LLM
             // 1. JSON 형태 시도 (전체 문자열이 JSON인 경우)
             if (response.IndexOf('{') >= 0)
             {
-                var result = TryParseJson(response, enemyCount);
+                var result = TryParseJson(response, enemyCount, displayToOriginalMap);
                 if (result != null) return result;
 
                 // 2. 혼합 텍스트에서 JSON 추출
-                result = TryExtractAndParseJson(response, enemyCount);
+                result = TryExtractAndParseJson(response, enemyCount, displayToOriginalMap);
                 if (result != null) return result;
             }
 
@@ -79,12 +81,12 @@ namespace CompanionAI_v3.Planning.LLM
         /// 전체 문자열을 JSON으로 파싱 시도.
         /// {"aoe_weight":2.0, "focus_fire":1.5, "priority_target":0}
         /// </summary>
-        private static ScorerWeights TryParseJson(string text, int enemyCount)
+        private static ScorerWeights TryParseJson(string text, int enemyCount, int[] displayToOriginalMap)
         {
             try
             {
                 var json = JObject.Parse(text);
-                return FromJObject(json, enemyCount);
+                return FromJObject(json, enemyCount, displayToOriginalMap);
             }
             catch
             {
@@ -96,7 +98,7 @@ namespace CompanionAI_v3.Planning.LLM
         /// 혼합 텍스트에서 {...} 부분만 추출하여 JSON 파싱.
         /// LLM이 "Based on analysis: {"aoe_weight":2.0}" 형태로 응답할 수 있음.
         /// </summary>
-        private static ScorerWeights TryExtractAndParseJson(string text, int enemyCount)
+        private static ScorerWeights TryExtractAndParseJson(string text, int enemyCount, int[] displayToOriginalMap)
         {
             int start = text.IndexOf('{');
             int end = text.LastIndexOf('}');
@@ -106,7 +108,7 @@ namespace CompanionAI_v3.Planning.LLM
             try
             {
                 var json = JObject.Parse(jsonPart);
-                return FromJObject(json, enemyCount);
+                return FromJObject(json, enemyCount, displayToOriginalMap);
             }
             catch
             {
@@ -118,7 +120,7 @@ namespace CompanionAI_v3.Planning.LLM
         /// JObject에서 ScorerWeights 생성. 누락된 키는 기본값 유지.
         /// 모든 값은 안전 범위로 클램프.
         /// </summary>
-        private static ScorerWeights FromJObject(JObject json, int enemyCount)
+        private static ScorerWeights FromJObject(JObject json, int enemyCount, int[] displayToOriginalMap)
         {
             var w = new ScorerWeights();
 
@@ -133,7 +135,16 @@ namespace CompanionAI_v3.Planning.LLM
                 0.1f, 5.0f);
 
             // priority_target (int, -1 ~ enemyCount-1)
+            // ★ v3.101.0: displayToOriginalMap 제공 시 display idx → original idx 역매핑
             int rawTarget = ReadInt(json, "priority_target", -1);
+            if (displayToOriginalMap != null)
+            {
+                // LLM은 display idx를 반환함. 매핑 범위 초과 시 -1 (invalid).
+                if (rawTarget >= 0 && rawTarget < displayToOriginalMap.Length)
+                    rawTarget = displayToOriginalMap[rawTarget];
+                else if (rawTarget >= 0)
+                    rawTarget = -1;  // out of displayed range = invalid
+            }
             w.PriorityTarget = (rawTarget < 0 || rawTarget >= enemyCount) ? -1 : rawTarget;
 
             // heal_priority (float, -1.0~2.0)

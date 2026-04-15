@@ -98,10 +98,12 @@ namespace CompanionAI_v3.Planning.LLM
             {
                 // 1. 메시지 구성
                 string systemMsg, userMsg;
+                int[] displayMap = null;  // ★ v3.101.0: E 라인 display idx → 원본 idx 역매핑
                 try
                 {
                     systemMsg = BuildSystemMessage(roleName);
                     userMsg = CompactBattlefieldEncoder.Encode(situation.Unit, situation, roleName);
+                    displayMap = CompactBattlefieldEncoder.GetDisplayToOriginalMap();
                 }
                 catch (Exception msgEx)
                 {
@@ -188,7 +190,7 @@ namespace CompanionAI_v3.Planning.LLM
                 {
                     Main.LogDebug($"[LLMScorer] Raw response ({responseText.Length} chars): {Truncate(responseText, 300)}");
                     string content = ExtractContent(responseText);
-                    weights = ScorerWeights.Parse(content, enemyCount);
+                    weights = ScorerWeights.Parse(content, enemyCount, displayMap);  // ★ v3.101.0: display → original 역매핑
 
                     stopwatch.Stop();
                     LastScorerTimeMs = stopwatch.ElapsedMilliseconds;
@@ -240,6 +242,8 @@ namespace CompanionAI_v3.Planning.LLM
             _sbSystem.Append("Output JSON weights to adjust scoring. Only include changed values.\n");
             _sbSystem.Append("Keys: aoe_weight(float), focus_fire(float), priority_target(int), heal_priority(float), buff_priority(float), defensive_stance(bool), reasoning(string).\n");
             _sbSystem.Append("Defaults: all 1.0, target -1, heal 0, defensive false.\n");
+            // ★ v3.101.0: E 라인 정렬 정책 고지 (primacy bias 활용)
+            _sbSystem.Append("Note: E: entries are pre-sorted by threat (index 0 = top threat). priority_target refers to these indices. Override only when another index has a clearly stronger tactical reason.\n");
             _sbSystem.Append("ALWAYS include 'reasoning': 1 short sentence explaining why these weights (or why baseline is fine).\n");
             _sbSystem.Append("Example: {\"aoe_weight\":2.0,\"priority_target\":0,\"reasoning\":\"Cluster of weak enemies — AoE will maximize damage\"}");
 

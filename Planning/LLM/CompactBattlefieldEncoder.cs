@@ -35,6 +35,12 @@ namespace CompanionAI_v3.Planning.LLM
         // 클러스터 결과 임시 저장 (GC 방지 — HashSet 대신 bool 배열)
         private static readonly bool[] _clusteredFlags = new bool[16];
 
+        // ★ v3.101.0: Display → Original 매핑 (primacy bias 완화)
+        // E 라인을 위협도 내림차순으로 정렬 후, display 인덱스 → situation.Enemies 원본 인덱스 역매핑용.
+        // LLMScorer가 Encode() 직후 GetDisplayToOriginalMap()로 조회하여 priority_target 역매핑.
+        private static readonly int[] _displayToOriginalIdx = new int[16];
+        private static int _displayedCount = 0;
+
         /// <summary>최대 표시 아군 수</summary>
         private const int MAX_ALLIES = 5;
 
@@ -156,24 +162,29 @@ namespace CompanionAI_v3.Planning.LLM
         }
 
         // ════════════════════════════════════════════════════════════
-        // E: 적 (인덱스 부여 + 이니셔티브 + 무기 유형)
+        // E: 적 (★ v3.101.0: 위협도 내림차순 정렬, display 인덱스를 라벨로)
         // E:0:Psyker,HP40,d5,HI,T1,melee|1:Cult,HP100,d8,T2,melee|2:Cult,HP100,d8,CL,T+R,melee|3:Heavy,HP90,d15,T3,ranged
+        //   라벨 숫자 = display rank (0 = 최고 위협). priority_target은 이 숫자로 반환받음.
         //   T1/T2/...  = 자신 다음 차례 전 행동 순서 (1=가장 먼저)
         //   T+R        = 다음 라운드 이후 (멀어서 무시 가능)
         //   melee/ranged = 무기 유형 (둘 다 false면 라벨 생략)
+        //
+        // Primacy bias 활용: LLM은 첫 번째로 제시된 옵션을 선호함.
+        // 위협도 정렬로 "첫 번째 = 최고 위협"이 되어 편향이 유리한 방향으로 작동.
         // ════════════════════════════════════════════════════════════
 
         private static void AppendEnemiesLine(BaseUnitEntity unit, Situation situation)
         {
             var enemies = situation.Enemies;
+            _displayedCount = 0;  // ★ v3.101.0: 매번 리셋
+
             if (enemies == null || enemies.Count == 0)
             {
                 _sb.Append("E:none\n");
                 return;
             }
 
-            // 클러스터 감지: 3+ enemies within 3 tiles of each other
-            // 인라인 경량 버전 (ClusterDetector 공유 버퍼 충돌 방지)
+            // 1. Live 필터
             _tempEnemyList.Clear();
             for (int i = 0; i < enemies.Count; i++)
             {
@@ -181,8 +192,28 @@ namespace CompanionAI_v3.Planning.LLM
                     _tempEnemyList.Add(enemies[i]);
             }
 
-            // clustered 플래그 초기화
+            // 2. ★ v3.101.0: 위협도 내림차순 정렬 (primacy bias 완화)
+            _tempEnemyList.Sort((a, b) =>
+            {
+                float sA = ComputeThreatScore(a, situation, unit);
+                float sB = ComputeThreatScore(b, situation, unit);
+                int cmp = sB.CompareTo(sA);  // desc
+                if (cmp != 0) return cmp;
+                // 동점 — 원본 인덱스 오름차순으로 결정적 정렬
+                return FindEnemyIndex(a, enemies).CompareTo(FindEnemyIndex(b, enemies));
+            });
+
             int liveCount = _tempEnemyList.Count;
+
+            // 3. ★ v3.101.0: Display → Original 매핑 빌드 (MAX_ENEMIES까지만)
+            int mapLimit = liveCount < _displayToOriginalIdx.Length ? liveCount : _displayToOriginalIdx.Length;
+            if (mapLimit > MAX_ENEMIES) mapLimit = MAX_ENEMIES;
+            for (int d = 0; d < mapLimit; d++)
+            {
+                _displayToOriginalIdx[d] = FindEnemyIndex(_tempEnemyList[d], enemies);
+            }
+
+            // 4. 클러스터 감지 (정렬 후, display 인덱스 기준)
             for (int i = 0; i < _clusteredFlags.Length; i++)
                 _clusteredFlags[i] = false;
 
@@ -204,10 +235,10 @@ namespace CompanionAI_v3.Planning.LLM
             _sb.Append("E:");
             int displayed = 0;
 
-            for (int i = 0; i < enemies.Count && displayed < MAX_ENEMIES; i++)
+            // 5. ★ v3.101.0: 정렬된 순서로 emit, 라벨 = display 인덱스 (rank)
+            for (int d = 0; d < liveCount && displayed < MAX_ENEMIES; d++)
             {
-                var e = enemies[i];
-                if (e == null || !e.IsConscious) continue;
+                var e = _tempEnemyList[d];
 
                 if (displayed > 0) _sb.Append('|');
 
@@ -215,7 +246,7 @@ namespace CompanionAI_v3.Planning.LLM
                 float eHP = CombatAPI.GetHPPercent(e);
                 float eDist = CombatAPI.GetDistanceInTiles(unit, e);
 
-                _sb.Append(i).Append(':').Append(eName)
+                _sb.Append(d).Append(':').Append(eName)  // ★ display index as label
                    .Append(",HP").Append((int)eHP)
                    .Append(",d").Append((int)eDist);
 
@@ -224,9 +255,8 @@ namespace CompanionAI_v3.Planning.LLM
                     && e.UniqueId == situation.BestTarget.UniqueId;
                 if (isBestTarget) _sb.Append(",HI");
 
-                // 클러스터 — _tempEnemyList 인덱스로 매핑
-                int liveIdx = _tempEnemyList.IndexOf(e);
-                if (liveIdx >= 0 && liveIdx < _clusteredFlags.Length && _clusteredFlags[liveIdx])
+                // 클러스터 — d는 이미 display 인덱스
+                if (d < _clusteredFlags.Length && _clusteredFlags[d])
                     _sb.Append(",CL");
 
                 // 처치 가능 (HP < 20%)
@@ -248,8 +278,49 @@ namespace CompanionAI_v3.Planning.LLM
                 displayed++;
             }
 
+            _displayedCount = displayed;
+
             if (displayed == 0) _sb.Append("none");
             _sb.Append('\n');
+        }
+
+        /// <summary>
+        /// ★ v3.101.0: E 라인 정렬용 위협 점수. 내림차순 정렬 → 최고 위협이 display index 0.
+        /// BestTarget → finishable → HP 낮음 → 거리 가까움 순으로 가중.
+        /// </summary>
+        private static float ComputeThreatScore(BaseUnitEntity enemy, Situation situation, BaseUnitEntity unit)
+        {
+            if (enemy == null) return 0f;
+            float score = 0f;
+            float hp = CombatAPI.GetHPPercent(enemy);
+            float dist = CombatAPI.GetDistanceInTiles(unit, enemy);
+
+            // BestTarget 최우선 (시스템이 이미 선정한 최적 타겟)
+            if (situation.BestTarget != null && enemy.UniqueId == situation.BestTarget.UniqueId)
+                score += 1000f;
+
+            // 처치 가능 (HP < 20%) — 기회비용 큼
+            if (hp < 20f) score += 500f;
+            else score += (100f - hp);  // HP 낮을수록 가중
+
+            // 가까울수록 위협적 (20타일 이내만 가산)
+            if (dist < 20f) score += (20f - dist) * 2f;
+
+            return score;
+        }
+
+        /// <summary>
+        /// ★ v3.101.0: 최근 Encode() 호출의 display index → situation.Enemies 원본 인덱스 매핑 반환.
+        /// LLM이 반환한 priority_target(display idx)을 원본 idx로 역매핑하는 데 사용.
+        /// 반드시 Encode() 직후에 호출 (다음 Encode() 호출 시 덮어쓰임).
+        /// </summary>
+        public static int[] GetDisplayToOriginalMap()
+        {
+            int len = _displayedCount;
+            if (len <= 0) return new int[0];
+            int[] result = new int[len];
+            System.Array.Copy(_displayToOriginalIdx, result, len);
+            return result;
         }
 
         // ════════════════════════════════════════════════════════════
@@ -262,11 +333,10 @@ namespace CompanionAI_v3.Planning.LLM
             _sb.Append("K:");
             bool first = true;
 
-            // 처치 가능 타겟
+            // 처치 가능 타겟 (★ v3.101.0: display 인덱스 사용)
             if (situation.CanKillBestTarget && situation.BestTarget != null)
             {
-                // BestTarget의 인덱스 찾기
-                int idx = FindEnemyIndex(situation.BestTarget, situation.Enemies);
+                int idx = FindDisplayIndex(situation.BestTarget);
                 if (idx >= 0)
                 {
                     AppendKeyFactor(ref first);
@@ -274,7 +344,7 @@ namespace CompanionAI_v3.Planning.LLM
                 }
             }
 
-            // 클러스터된 적 목록
+            // 클러스터된 적 목록 (★ v3.101.0: display 인덱스 사용 — i가 이미 display idx)
             int liveCount = _tempEnemyList.Count;
             bool hasCluster = false;
             for (int i = 0; i < liveCount && i < _clusteredFlags.Length; i++)
@@ -286,15 +356,11 @@ namespace CompanionAI_v3.Planning.LLM
             {
                 AppendKeyFactor(ref first);
                 bool firstCluster = true;
-                for (int i = 0; i < liveCount && i < _clusteredFlags.Length; i++)
+                for (int i = 0; i < liveCount && i < _clusteredFlags.Length && i < MAX_ENEMIES; i++)
                 {
                     if (!_clusteredFlags[i]) continue;
-                    // _tempEnemyList[i] → enemies 원본 인덱스
-                    int origIdx = FindEnemyIndex(_tempEnemyList[i], situation.Enemies);
-                    if (origIdx < 0) continue;
-
                     if (!firstCluster) _sb.Append(',');
-                    _sb.Append(origIdx);
+                    _sb.Append(i);  // ★ display index
                     firstCluster = false;
                 }
                 _sb.Append(" clustered");
@@ -568,6 +634,18 @@ namespace CompanionAI_v3.Planning.LLM
             for (int i = 0; i < enemies.Count; i++)
             {
                 if (enemies[i] != null && enemies[i].UniqueId == target.UniqueId)
+                    return i;
+            }
+            return -1;
+        }
+
+        /// <summary>★ v3.101.0: _tempEnemyList(정렬 후) 내 display 인덱스 찾기. K 라인용.</summary>
+        private static int FindDisplayIndex(BaseUnitEntity target)
+        {
+            if (target == null) return -1;
+            for (int i = 0; i < _tempEnemyList.Count && i < MAX_ENEMIES; i++)
+            {
+                if (_tempEnemyList[i] != null && _tempEnemyList[i].UniqueId == target.UniqueId)
                     return i;
             }
             return -1;
