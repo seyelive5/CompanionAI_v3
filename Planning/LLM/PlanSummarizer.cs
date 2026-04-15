@@ -18,6 +18,10 @@ namespace CompanionAI_v3.Planning.LLM
         // 재사용 StringBuilder (GC 방지)
         private static readonly StringBuilder _sb = new StringBuilder(256);
 
+        // ★ v3.103.0: Once-per-turn 중복 능력 감지용 (GC 방지 static 재사용)
+        // KillSequence seed가 아닌 경우 같은 능력 이름 2회 이상 등장 시 [dup] 표시 → Judge에게 룰 위반 힌트
+        private static readonly HashSet<string> _tempUsedAbilities = new HashSet<string>(8);
+
         /// <summary>
         /// TurnPlan + TurnStrategy → 자연어 1줄 요약.
         /// </summary>
@@ -44,6 +48,17 @@ namespace CompanionAI_v3.Planning.LLM
                 _sb.Append(" Focus ").Append(focusName);
             _sb.Append(": ");
 
+            // ★ v3.103.0: Once-per-turn 룰 위반 감지 준비
+            // KillSequence는 kill bonus action으로 정당한 중복 허용 → dup 체크 스킵
+            // RnGChain 계열도 이동 후 추가 공격 룰이므로 스킵
+            bool allowDuplicates = strategy != null && (
+                strategy.PrioritizesKillSequence
+                || strategy.Sequence == SequenceType.RnGChain
+                || strategy.Sequence == SequenceType.BuffedRnGChain
+                || strategy.Sequence == SequenceType.AoERnGChain
+                || strategy.Sequence == SequenceType.BuffedRnGAoE);
+            _tempUsedAbilities.Clear();
+
             // 각 액션을 자연어로 변환
             IReadOnlyList<PlannedAction> actions = plan.AllActions;
             bool first = true;
@@ -59,6 +74,17 @@ namespace CompanionAI_v3.Planning.LLM
                 string phrase = DescribeAction(action, strategy, situation);
                 if (string.IsNullOrEmpty(phrase))
                     continue;
+
+                // ★ v3.103.0: 같은 능력 중복 사용 감지 — Judge에게 룰 위반 힌트
+                // 대부분의 능력은 once-per-turn. 같은 능력 2회 이상 등장 시 [dup] 표시
+                if (!allowDuplicates && action.Ability != null)
+                {
+                    string abilityName = action.Ability.Name;
+                    if (!string.IsNullOrEmpty(abilityName) && !_tempUsedAbilities.Add(abilityName))
+                    {
+                        phrase += " [dup:once-per-turn]";
+                    }
+                }
 
                 if (!first)
                     _sb.Append(" → ");
