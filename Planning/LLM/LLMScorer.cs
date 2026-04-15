@@ -1,6 +1,6 @@
 // Planning/LLM/LLMScorer.cs
 // ★ LLM-as-Scorer: Ollama에 전투 상태를 보내고 가중치 JSON을 받음.
-// LLMJudge/LLMAdvisor와 동일한 HTTP 패턴 (format 없음, think=false, temp=0).
+// LLMJudge와 동일한 HTTP 패턴 (format 없음, think=false, temp=0).
 using System;
 using System.Collections;
 using System.Text;
@@ -15,7 +15,7 @@ namespace CompanionAI_v3.Planning.LLM
     /// <summary>
     /// ★ LLM-as-Scorer: Ollama에 전투 상태(CompactBattlefieldEncoder)를 보내고
     /// 가중치 JSON(ScorerWeights)을 받아 UtilityScorer/TargetScorer에 적용.
-    /// 독립적 HTTP 요청 (LLMJudge/LLMAdvisor와 별도).
+    /// 독립적 HTTP 요청 (LLMJudge와 별도).
     /// </summary>
     public static class LLMScorer
     {
@@ -271,7 +271,7 @@ namespace CompanionAI_v3.Planning.LLM
         }
 
         // ═══════════════════════════════════════════════════════════
-        // 헬퍼 (LLMJudge/LLMAdvisor와 동일 패턴)
+        // 헬퍼 (LLMJudge와 동일 패턴)
         // ═══════════════════════════════════════════════════════════
 
         /// <summary>Scorer에 사용할 모델 결정. LLM Judge 전용 설정 -> MachineSpirit 폴백.</summary>

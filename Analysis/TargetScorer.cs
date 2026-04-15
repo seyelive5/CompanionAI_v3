@@ -524,29 +524,6 @@ namespace CompanionAI_v3.Analysis
                                 Main.LogDebug($"[TargetScorer] {target.CharacterName}: +{aoeAmplify:F0} LLM AoE weight amplify");
                         }
                     }
-                    else
-                    {
-                        // ★ Phase 4 레거시 폴백: StrategyWeightModifier 키가 있으면 사용
-                        string focusId = _activeTurnState.GetContext<string>(StrategyWeightModifier.KEY_FOCUS_TARGET, null);
-                        if (focusId != null && target.UniqueId == focusId)
-                        {
-                            float focusBonus = _activeTurnState.GetContext<float>(StrategyWeightModifier.KEY_FOCUS_BONUS, 0f);
-                            if (focusBonus > 0f)
-                            {
-                                score += focusBonus;
-                                Main.LogDebug($"[TargetScorer] {target.CharacterName}: +{focusBonus:F0} LLM focus target (legacy)");
-                            }
-                        }
-
-                        float aoePref = _activeTurnState.GetContext<float>(StrategyWeightModifier.KEY_AOE_PREF, 0.5f);
-                        if (aoePref > 0.6f && aoeClusterBonus > 0f)
-                        {
-                            float aoeAmplify = aoeClusterBonus * (aoePref - 0.5f) * 2f;
-                            score += aoeAmplify;
-                            if (Main.IsDebugEnabled)
-                                Main.LogDebug($"[TargetScorer] {target.CharacterName}: +{aoeAmplify:F0} LLM AoE preference amplify (legacy)");
-                        }
-                    }
                 }
             }
             catch (Exception ex)
