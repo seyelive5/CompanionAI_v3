@@ -55,6 +55,55 @@ namespace CompanionAI_v3.Planning.LLM
         // 선택지 라벨 (A, B, C, ...)
         private static readonly char[] ChoiceLabels = { 'A', 'B', 'C', 'D', 'E' };
 
+        // ★ v3.105.0: 후보 순서 랜덤화 (primacy bias 진단)
+        // shuffleMap[shuffledPos] = originalCandidateIndex — LLM이 보는 shuffled 순서 → 호출자의 원본 인덱스 역매핑
+        private static readonly int[] _shuffleMap = new int[5];  // ChoiceLabels.Length와 동일
+        private static readonly System.Random _shuffleRng = new System.Random();
+
+        /// <summary>
+        /// ★ v3.105.0: Fisher-Yates 셔플로 후보 순서 랜덤화.
+        /// LLM primacy bias(첫 후보 선호) 진단용 — 원 순서와 상관없이 A/B 위치를 무작위로 섞음.
+        /// _shuffleMap에 매핑 저장: shuffledList[i] = originalList[_shuffleMap[i]]
+        /// </summary>
+        /// <returns>shuffled 후보 리스트 (새 List, 원본 불변)</returns>
+        private static List<CandidatePlan> ShuffleCandidates(List<CandidatePlan> original)
+        {
+            int count = original.Count;
+            if (count > _shuffleMap.Length) count = _shuffleMap.Length;
+
+            for (int i = 0; i < count; i++) _shuffleMap[i] = i;
+
+            // 1개 이하면 셔플 무의미
+            if (count <= 1) return original;
+
+            // Fisher-Yates
+            for (int i = count - 1; i > 0; i--)
+            {
+                int j = _shuffleRng.Next(i + 1);
+                int tmp = _shuffleMap[i];
+                _shuffleMap[i] = _shuffleMap[j];
+                _shuffleMap[j] = tmp;
+            }
+
+            var shuffled = new List<CandidatePlan>(count);
+            for (int i = 0; i < count; i++)
+                shuffled.Add(original[_shuffleMap[i]]);
+
+            // 진단 로그 — 매핑 상태 기록 (post-hoc 분석용)
+            if (Main.IsDebugEnabled)
+            {
+                var sb = new StringBuilder(32);
+                for (int i = 0; i < count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append(ChoiceLabels[i]).Append("=orig").Append(_shuffleMap[i]);
+                }
+                Main.LogDebug($"[LLMJudge] Shuffle map: {sb}");
+            }
+
+            return shuffled;
+        }
+
         // ═══════════════════════════════════════════════════════════
         // 시스템 메시지 캐시 (역할별)
         // ═══════════════════════════════════════════════════════════
@@ -117,12 +166,15 @@ namespace CompanionAI_v3.Planning.LLM
 
             try
             {
+                // ★ v3.105.0: primacy bias 진단 — 후보 순서 랜덤화
+                var shuffledCandidates = ShuffleCandidates(candidates);
+
                 // 1. 메시지 구성
                 string systemMsg, userMsg;
                 try
                 {
                     systemMsg = BuildSystemMessage(roleName, candidates.Count);
-                    userMsg = BuildUserMessage(candidates, situation);
+                    userMsg = BuildUserMessage(shuffledCandidates, situation);
                 }
                 catch (Exception msgEx)
                 {
@@ -213,14 +265,16 @@ namespace CompanionAI_v3.Planning.LLM
                 if (responseText != null)
                 {
                     Main.LogDebug($"[LLMJudge] Raw response ({responseText.Length} chars): {Truncate(responseText, 300)}");
-                    selectedIndex = ParseResponse(responseText, candidateCount);
+                    int shuffledIndex = ParseResponse(responseText, candidateCount);
+                    // ★ v3.105.0: shuffled idx → 원본 idx 역매핑
+                    selectedIndex = (shuffledIndex >= 0 && shuffledIndex < candidateCount) ? _shuffleMap[shuffledIndex] : 0;
                     stopwatch.Stop();
                     LastJudgeTimeMs = stopwatch.ElapsedMilliseconds;
                     string strategyLabel = candidates[selectedIndex].Strategy != null
                         ? candidates[selectedIndex].Strategy.Sequence.ToString()
                         : candidates[selectedIndex].Plan?.Priority.ToString() ?? "Unknown";
                     Main.Log($"[LLMJudge] Selected: {ChoiceLabels[selectedIndex]} " +
-                        $"({strategyLabel}) in {LastJudgeTimeMs}ms");
+                        $"({strategyLabel}) [promptPos={ChoiceLabels[shuffledIndex]}] in {LastJudgeTimeMs}ms");
                 }
                 else
                 {
@@ -282,11 +336,14 @@ namespace CompanionAI_v3.Planning.LLM
 
             try
             {
+                // ★ v3.105.0: primacy bias 진단 — 후보 순서 랜덤화
+                var shuffledCandidates = ShuffleCandidates(candidates);
+
                 string systemMsg, userMsg;
                 try
                 {
                     systemMsg = BuildSystemMessageConfidence(roleName, candidates.Count);
-                    userMsg = BuildUserMessage(candidates, situation);
+                    userMsg = BuildUserMessage(shuffledCandidates, situation);
                 }
                 catch (Exception msgEx)
                 {
@@ -365,6 +422,25 @@ namespace CompanionAI_v3.Planning.LLM
                     stopwatch.Stop();
                     LastJudgeTimeMs = stopwatch.ElapsedMilliseconds;
 
+                    // ★ v3.105.0: Ratios + PreferredIndex를 원본 인덱스로 역매핑
+                    // (LLM이 prompt[A]로 본 것 = candidates[_shuffleMap[0]])
+                    // 진단용으로 LLM이 선호한 prompt position도 함께 로깅
+                    int preferredPromptPos = confidence.PreferredIndex;
+                    if (confidence.IsValid && confidence.Ratios != null)
+                    {
+                        int len = confidence.Ratios.Length;
+                        if (len > candidateCount) len = candidateCount;
+                        var remappedRatios = new float[len];
+                        for (int i = 0; i < len; i++)
+                        {
+                            int origIdx = _shuffleMap[i];
+                            if (origIdx >= 0 && origIdx < len) remappedRatios[origIdx] = confidence.Ratios[i];
+                        }
+                        confidence.Ratios = remappedRatios;
+                        if (preferredPromptPos >= 0 && preferredPromptPos < candidateCount)
+                            confidence.PreferredIndex = _shuffleMap[preferredPromptPos];
+                    }
+
                     if (confidence.IsValid)
                     {
                         var ratioStr = new StringBuilder(32);
@@ -373,7 +449,8 @@ namespace CompanionAI_v3.Planning.LLM
                             if (i > 0) ratioStr.Append(',');
                             ratioStr.Append(ChoiceLabels[i]).Append(':').Append(confidence.Ratios[i].ToString("F2"));
                         }
-                        Main.Log($"[LLMJudge] Confidence: [{ratioStr}] preferred={ChoiceLabels[confidence.PreferredIndex]} ({LastJudgeTimeMs}ms)");
+                        // ★ v3.105.0: promptPos로 LLM 관점의 primacy 선택 기록 (post-hoc 편향 분석용)
+                        Main.Log($"[LLMJudge] Confidence: [{ratioStr}] preferred={ChoiceLabels[confidence.PreferredIndex]} [promptPos={ChoiceLabels[preferredPromptPos]}] ({LastJudgeTimeMs}ms)");
                         if (!string.IsNullOrEmpty(confidence.Narration))
                             Main.Log($"[LLMJudge] Narration: {confidence.Narration}");
                     }
