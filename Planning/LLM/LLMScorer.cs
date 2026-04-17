@@ -102,8 +102,19 @@ namespace CompanionAI_v3.Planning.LLM
                 try
                 {
                     systemMsg = BuildSystemMessage(roleName);
-                    userMsg = CompactBattlefieldEncoder.Encode(situation.Unit, situation, roleName);
+                    string encoded = CompactBattlefieldEncoder.Encode(situation.Unit, situation, roleName);
                     displayMap = CompactBattlefieldEncoder.GetDisplayToOriginalMap();
+
+                    // ★ v3.110.0: Commander narration을 팀 레벨 맥락으로 프리펜드 (A안 — Pre-Scorer Brief)
+                    var directive = Core.TeamBlackboard.Instance?.CommanderDirective;
+                    if (directive != null && !string.IsNullOrEmpty(directive.Narration))
+                    {
+                        userMsg = "TEAM BRIEF: " + directive.Narration.Trim() + "\n\n" + encoded;
+                    }
+                    else
+                    {
+                        userMsg = encoded;
+                    }
                 }
                 catch (Exception msgEx)
                 {

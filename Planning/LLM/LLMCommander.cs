@@ -31,13 +31,19 @@ namespace CompanionAI_v3.Planning.LLM
         /// <summary>협동 힌트 (예: "tank_first", "focus_fire", "protect_healer")</summary>
         public string Synergy = "";
 
-        /// <summary>전술 내레이션 — 유저에게 보여줄 자연어 설명 (1-2문장)</summary>
+        /// <summary>전술 내레이션 — 유저에게 보여줄 자연어 설명 (1-2문장).
+        /// ★ v3.110.0: Scorer 프롬프트에도 프리펜드되어 팀 레벨 맥락 제공.</summary>
         public string Narration = "";
+
+        /// <summary>★ v3.110.0: 전투 유형 분류 (normal|cleanup|horde|elite|boss|ambush).
+        /// TurnStrategyPlanner가 시드 선호도 바이어스로 소비.</summary>
+        public string EncounterType = "normal";
 
         /// <summary>기본값인지 확인 (LLM 미호출/실패 시)</summary>
         public bool IsDefault => FocusTarget == -1
             && (Formation == "balanced" || string.IsNullOrEmpty(Formation))
-            && string.IsNullOrEmpty(Synergy);
+            && string.IsNullOrEmpty(Synergy)
+            && EncounterType == "normal";
 
         /// <summary>
         /// LLM 응답에서 CommanderDirective 파싱.
@@ -88,6 +94,16 @@ namespace CompanionAI_v3.Planning.LLM
                         d.Synergy = syn;
                 }
 
+                // ★ v3.110.0: encounter_type
+                var etToken = json["encounter_type"];
+                if (etToken != null)
+                {
+                    string et = etToken.ToString().Trim().ToLowerInvariant();
+                    if (et == "normal" || et == "cleanup" || et == "horde"
+                        || et == "elite" || et == "boss" || et == "ambush")
+                        d.EncounterType = et;
+                }
+
                 // narration
                 var narToken = json["narration"];
                 if (narToken != null)
@@ -108,7 +124,8 @@ namespace CompanionAI_v3.Planning.LLM
         public override string ToString()
         {
             if (IsDefault) return "CommanderDirective(default)";
-            string s = $"CommanderDirective(focus={FocusTarget}, form={Formation}, syn={Synergy})";
+            // ★ v3.110.0: EncounterType 로그 표시 추가
+            string s = $"CommanderDirective(enc={EncounterType}, focus={FocusTarget}, form={Formation}, syn={Synergy})";
             if (!string.IsNullOrEmpty(Narration))
                 s += $" \"{Narration}\"";
             return s;
@@ -294,8 +311,13 @@ namespace CompanionAI_v3.Planning.LLM
             _sbSystem.Clear();
             _sbSystem.Append("You are a team tactical commander for a squad in turn-based combat.\n");
             _sbSystem.Append("Given the full battlefield summary, output a team directive as JSON.\n");
-            _sbSystem.Append("Keys: focus_target(int,-1=individual choice), formation(aggressive/balanced/defensive), synergy(short hint), narration(1-2 sentence tactical briefing for the player).\n");
-            _sbSystem.Append("Example: {\"focus_target\":0,\"formation\":\"aggressive\",\"synergy\":\"tank_first\",\"narration\":\"Focus fire on the Psyker. Tank holds the line while DPS eliminates the priority target.\"}\n");
+            // ★ v3.110.0: encounter_type + narration 중심 재포지셔닝
+            _sbSystem.Append("Keys:\n");
+            _sbSystem.Append("  encounter_type: \"normal\"|\"cleanup\"|\"horde\"|\"elite\"|\"boss\"|\"ambush\"\n");
+            _sbSystem.Append("    cleanup=weak scattered, horde=many weaker, elite=few strong, boss=single big threat, ambush=disadvantaged\n");
+            _sbSystem.Append("  narration: 1-2 sentence tactical brief — shared with each unit's scorer to align team strategy\n");
+            _sbSystem.Append("  focus_target: int (-1=no override, enemy index if team should converge)\n");
+            _sbSystem.Append("Example: {\"encounter_type\":\"boss\",\"narration\":\"Boss shield active this turn — debuff first, save AoE for phase 2. Tank holds aggro.\",\"focus_target\":0}\n");
             _sbSystem.Append("Output ONLY the JSON. Nothing else.");
 
             _cachedSystemMsg = _sbSystem.ToString();

@@ -446,11 +446,14 @@ namespace CompanionAI_v3.Planning
 
             bool isPrimaryDPS = role == Settings.AIRole.DPS || role == Settings.AIRole.Auto;
 
+            // ★ v3.110.0: Commander EncounterType 바이어스 (B안 — Encounter Classifier)
+            string encounterType = Core.TeamBlackboard.Instance?.CommanderDirective?.EncounterType ?? "normal";
+
             CandidateScore best = _candidates[0];
-            float bestScore = GetWeightedScore(_candidates[0], isPrimaryDPS);
+            float bestScore = GetWeightedScore(_candidates[0], isPrimaryDPS) * GetEncounterBias(_candidates[0].Type, encounterType);
             for (int i = 1; i < _candidates.Count; i++)
             {
-                float score = GetWeightedScore(_candidates[i], isPrimaryDPS);
+                float score = GetWeightedScore(_candidates[i], isPrimaryDPS) * GetEncounterBias(_candidates[i].Type, encounterType);
                 if (score > bestScore)
                 {
                     best = _candidates[i];
@@ -650,6 +653,68 @@ namespace CompanionAI_v3.Planning
                     return c.Score * NON_DPS_COMPLEX_SEED_WEIGHT;
                 default:
                     return c.Score;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.110.0: Commander EncounterType에 따른 시드 선호도 바이어스 배율.
+        /// 1.0 = 중립, 1.15 = 15% 선호, 0.90 = 10% 억제.
+        /// </summary>
+        private static float GetEncounterBias(SequenceType seqType, string encounterType)
+        {
+            switch (encounterType)
+            {
+                case "cleanup":
+                case "horde":
+                    // 다수 잡몹 → AoE 시드 선호, 단일 킬 시퀀스 억제
+                    switch (seqType)
+                    {
+                        case SequenceType.AoEFocus:
+                        case SequenceType.BuffedAoE:
+                        case SequenceType.AoERnGChain:
+                        case SequenceType.BuffedRnGAoE: return 1.15f;
+                        case SequenceType.KillSequence: return 0.90f;
+                        default: return 1.0f;
+                    }
+
+                case "elite":
+                    // 소수 강적 → 버프+집중 공격 선호
+                    switch (seqType)
+                    {
+                        case SequenceType.BuffedAttack:
+                        case SequenceType.KillSequence:
+                        case SequenceType.DebuffedAttack: return 1.15f;
+                        case SequenceType.AoEFocus: return 0.95f;
+                        default: return 1.0f;
+                    }
+
+                case "boss":
+                    // 단일 거대 적 → 킬시퀀스, 디버프 전개, 버프+올인 선호
+                    switch (seqType)
+                    {
+                        case SequenceType.KillSequence:
+                        case SequenceType.DebuffedAttack:
+                        case SequenceType.BuffedRnGChain:
+                        case SequenceType.BuffedAttack: return 1.15f;
+                        case SequenceType.AoEFocus:
+                        case SequenceType.BuffedAoE:
+                        case SequenceType.AoERnGChain: return 0.90f;
+                        default: return 1.0f;
+                    }
+
+                case "ambush":
+                    // 불리한 상황 → 기동성(R&G) 선호
+                    switch (seqType)
+                    {
+                        case SequenceType.RnGChain:
+                        case SequenceType.BuffedRnGChain:
+                        case SequenceType.AoERnGChain: return 1.15f;
+                        default: return 1.0f;
+                    }
+
+                case "normal":
+                default:
+                    return 1.0f;  // 바이어스 없음
             }
         }
 
