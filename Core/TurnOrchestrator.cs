@@ -321,6 +321,10 @@ namespace CompanionAI_v3.Core
                 TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
                 // ★ v3.20.0: [CombatReport] Replan 시 최신 계획으로 업데이트
                 CombatReportCollector.Instance.RecordPlan(turnState.Plan);
+
+                // ★ v3.110.1: Replan 경로 Visual Overlay 갱신 누락 버그 수정 —
+                // UI가 초기 Plan의 stale 타겟을 계속 표시하던 문제 해결
+                UI.LLMVisualOverlay.SetContext(unit, turnState.Plan, situation, -1);
             }
 
             _profilerStopwatch.Stop();
@@ -397,6 +401,10 @@ namespace CompanionAI_v3.Core
                     Data.CompanionDialogue.AnnouncePlan(unit, turnState.Plan);
                     TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
                     CombatReportCollector.Instance.RecordPlan(turnState.Plan);
+
+                    // ★ v3.110.1: Replan 경로 Visual Overlay 갱신 누락 버그 수정 —
+                    // LLM Judge 경로에서도 replan 시 오버레이 stale 문제 발생. _pendingWeights는 이번 턴 Scorer 결과 그대로 유지.
+                    UI.LLMVisualOverlay.SetContext(unit, turnState.Plan, situation, _pendingWeights?.PriorityTarget ?? -1);
                 }
                 return ExecuteNextAction(unit, unitName, turnState, situation);
             }

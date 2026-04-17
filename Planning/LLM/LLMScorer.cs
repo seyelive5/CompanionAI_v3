@@ -206,7 +206,22 @@ namespace CompanionAI_v3.Planning.LLM
                     stopwatch.Stop();
                     LastScorerTimeMs = stopwatch.ElapsedMilliseconds;
 
-                    Main.Log($"[LLMScorer] Result: {weights} in {LastScorerTimeMs}ms");
+                    // ★ v3.110.2: priority_target 디버깅 — 실제 적 이름 로깅
+                    string targetInfo = "";
+                    if (weights.PriorityTarget >= 0 && situation.Enemies != null
+                        && weights.PriorityTarget < situation.Enemies.Count)
+                    {
+                        var targetEnemy = situation.Enemies[weights.PriorityTarget];
+                        if (targetEnemy != null)
+                        {
+                            float tHp = GameInterface.CombatAPI.GetHPPercent(targetEnemy);
+                            float tDist = situation.Unit != null
+                                ? GameInterface.CombatAPI.GetDistanceInTiles(situation.Unit, targetEnemy)
+                                : 0f;
+                            targetInfo = $" [target={targetEnemy.CharacterName ?? "?"} HP={tHp:F0}% d={tDist:F1}]";
+                        }
+                    }
+                    Main.Log($"[LLMScorer] Result: {weights}{targetInfo} in {LastScorerTimeMs}ms");
                     if (!string.IsNullOrEmpty(weights.Reasoning))
                         Main.Log($"[LLMScorer] Reasoning: {weights.Reasoning}");
                 }

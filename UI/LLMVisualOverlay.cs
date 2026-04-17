@@ -52,12 +52,13 @@ namespace CompanionAI_v3.UI
 
         /// <summary>
         /// 오버레이 컨텍스트 갱신. 플랜 확정 직후 호출.
-        /// 내부에서 위협 랭킹 계산 (BestTarget 우선, 그 다음 HP/거리 기반).
+        /// ★ v3.110.2: Plan의 실제 공격 대상을 랭킹 #1로 우선 사용 (LLM priority 인덱스가 아닌 실제 AI 행동 기준).
+        /// priorityOriginalIdx 파라미터는 하위 호환 유지, 그러나 Plan 첫 공격 대상이 최우선.
         /// </summary>
         /// <param name="actingUnit">현재 턴 유닛</param>
-        /// <param name="plan">확정된 TurnPlan</param>
+        /// <param name="plan">확정된 TurnPlan — 첫 Attack 액션의 타겟이 rank #1로 사용됨</param>
         /// <param name="situation">현재 Situation (위협 랭킹 계산용)</param>
-        /// <param name="priorityOriginalIdx">LLM 지정 타겟의 situation.Enemies 원본 인덱스 (-1=없음)</param>
+        /// <param name="priorityOriginalIdx">LLM 지정 타겟 힌트 (Plan에서 추론 불가 시 fallback)</param>
         public static void SetContext(
             BaseUnitEntity actingUnit,
             TurnPlan plan,
@@ -67,15 +68,16 @@ namespace CompanionAI_v3.UI
             _actingUnit = actingUnit;
             _currentPlan = plan;
             _priorityOriginalIdx = priorityOriginalIdx;
-            _rankedEnemies = ComputeRankedEnemies(actingUnit, situation, priorityOriginalIdx);
+            _rankedEnemies = ComputeRankedEnemies(actingUnit, situation, plan, priorityOriginalIdx);
         }
 
         /// <summary>
-        /// 위협도 내림차순 랭킹 (top 3) — Situation.BestTarget을 1위, Priority Target을 강조,
-        /// 나머지는 HP 낮고 가까운 순.
+        /// ★ v3.110.2: 위협도 내림차순 랭킹 (top 3).
+        /// 우선순위: Plan 첫 공격 대상 > LLM priority > Situation.BestTarget > 위협 점수 최고 적.
+        /// Plan 우선 — UI의 "TOP THREAT"이 AI의 **실제 공격 대상**과 일치하도록 함.
         /// </summary>
         private static List<BaseUnitEntity> ComputeRankedEnemies(
-            BaseUnitEntity unit, Situation situation, int priorityOriginalIdx)
+            BaseUnitEntity unit, Situation situation, TurnPlan plan, int priorityOriginalIdx)
         {
             var result = new List<BaseUnitEntity>(3);
             if (situation?.Enemies == null) return result;
@@ -88,16 +90,24 @@ namespace CompanionAI_v3.UI
             }
             if (remaining.Count == 0) return result;
 
-            // 1위 선정: Priority > BestTarget > threat 최고 적
-            BaseUnitEntity top = null;
-            if (priorityOriginalIdx >= 0 && priorityOriginalIdx < situation.Enemies.Count)
-                top = situation.Enemies[priorityOriginalIdx];
-            if (top == null || top.LifeState.IsDead) top = situation.BestTarget;
+            // ★ v3.110.2: 1위는 Plan의 실제 첫 공격 대상 (UI-실행 일치 보장)
+            BaseUnitEntity top = InferFirstAttackTarget(plan);
+
+            // 폴백 체인
             if (top == null || top.LifeState.IsDead)
             {
-                top = FindHighestThreat(remaining, unit, situation);
+                if (priorityOriginalIdx >= 0 && priorityOriginalIdx < situation.Enemies.Count)
+                    top = situation.Enemies[priorityOriginalIdx];
             }
-            if (top != null) { result.Add(top); remaining.Remove(top); }
+            if (top == null || top.LifeState.IsDead) top = situation.BestTarget;
+            if (top == null || top.LifeState.IsDead)
+                top = FindHighestThreat(remaining, unit, situation);
+
+            if (top != null && !top.LifeState.IsDead)
+            {
+                result.Add(top);
+                remaining.Remove(top);
+            }
 
             // 2-3위: 나머지 중 위협 높은 순
             while (result.Count < 3 && remaining.Count > 0)
@@ -109,6 +119,20 @@ namespace CompanionAI_v3.UI
             }
 
             return result;
+        }
+
+        /// <summary>★ v3.110.2: Plan의 첫 Attack 액션에서 실제 공격 대상 추출.</summary>
+        private static BaseUnitEntity InferFirstAttackTarget(TurnPlan plan)
+        {
+            if (plan?.AllActions == null) return null;
+            foreach (var action in plan.AllActions)
+            {
+                if (action == null) continue;
+                if (action.Type != ActionType.Attack && action.Type != ActionType.Special) continue;
+                var target = action.Target?.Entity as BaseUnitEntity;
+                if (target != null && !target.LifeState.IsDead) return target;
+            }
+            return null;
         }
 
         private static BaseUnitEntity FindHighestThreat(List<BaseUnitEntity> list, BaseUnitEntity unit, Situation situation)
