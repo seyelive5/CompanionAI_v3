@@ -175,7 +175,10 @@ namespace CompanionAI_v3.Planning.LLM
                     if (llmPlan != null)
                     {
                         var llmStrategy = llmState.GetContext<TurnStrategy>(StrategicContextKeys.TurnStrategyKey, null);
-                        float utilityScore = llmWeights.FocusFire * 100f + llmWeights.AoEWeight * 50f;
+                        // ★ v3.106.0: Plan B와 동일한 utility 공식으로 통일 (FocusFire/AoEWeight 직접 boost 제거).
+                        // 이전: FocusFire*100 + AoEWeight*50 = LLM 가중치 수치 자체가 Judge 점수로 변환되어 편향 유발.
+                        // 이제는 실제 플랜의 기대 결과(ExpectedKills/Damage)만으로 평가.
+                        float utilityScore = 100f;
                         if (llmStrategy != null)
                         {
                             if (llmStrategy.ExpectedKills > 0) utilityScore += llmStrategy.ExpectedKills * 40f;
@@ -193,7 +196,10 @@ namespace CompanionAI_v3.Planning.LLM
                             Plan = llmPlan,
                             Strategy = llmStrategy,
                             UtilityScore = utilityScore,
-                            Summary = PlanSummarizer.Summarize(llmPlan, llmStrategy, situation, "LLM Weights"),
+                            // ★ v3.106.0: ArchetypeTag를 Summary에서 제거 — Judge 편향 방지.
+                            // [LLM Weights] / [Baseline] 라벨이 Judge 프롬프트에 박혀 판단 힌트로 작동하던 문제.
+                            // ArchetypeTag 필드는 내부 로깅용으로 유지.
+                            Summary = PlanSummarizer.Summarize(llmPlan, llmStrategy, situation),
                             FocusTarget = llmFocusTarget,
                             ArchetypeTag = "LLM Weights"
                         });
@@ -234,7 +240,8 @@ namespace CompanionAI_v3.Planning.LLM
                         Plan = basePlan,
                         Strategy = baseStrategy,
                         UtilityScore = baseUtility,
-                        Summary = PlanSummarizer.Summarize(basePlan, baseStrategy, situation, "Baseline"),
+                        // ★ v3.106.0: ArchetypeTag를 Summary에서 제거 (Judge 편향 방지)
+                        Summary = PlanSummarizer.Summarize(basePlan, baseStrategy, situation),
                         FocusTarget = originalBestTarget,
                         ArchetypeTag = "Baseline"
                     });
