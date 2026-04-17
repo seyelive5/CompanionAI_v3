@@ -399,6 +399,10 @@ namespace CompanionAI_v3.UI
                 GUILayout.EndHorizontal();
             }
 
+            // ★ v3.109.0: LLM 시각 오버레이 (위협 랭킹 + 액션 프리뷰)
+            Main.Settings.EnableLLMVisualOverlay = DrawCheckbox(Main.Settings.EnableLLMVisualOverlay, L("EnableLLMVisualOverlay"));
+            GUILayout.Label($"<color={UIStyles.TextMid}>{L("EnableLLMVisualOverlayDesc")}</color>", UIStyles.Description);
+
             // ★ v3.84.0: LLM Developer Tools section
             GUILayout.Space(15);
             GUILayout.Label($"<color={UIStyles.RoleGold}>\u2500\u2500 {L("LLMDevTools")} \u2500\u2500</color>", UIStyles.BoldLabel);

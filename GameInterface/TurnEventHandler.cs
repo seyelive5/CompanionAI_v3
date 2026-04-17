@@ -122,6 +122,9 @@ namespace CompanionAI_v3.GameInterface
             // ★ v3.76.0: LLM Combat Panel 숨김
             UI.LLMCombatPanel.Hide();
 
+            // ★ v3.109.0: LLM 시각 오버레이 클리어
+            UI.LLMVisualOverlay.Clear();
+
             // ★ v3.5.26: 턴 시작 시간 정리
             CustomBehaviourTreePatch.ClearTurnStart(unit.UniqueId);
         }

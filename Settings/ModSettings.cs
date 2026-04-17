@@ -126,6 +126,20 @@ namespace CompanionAI_v3.Settings
                 { Language.Japanese, "ターン開始時に仲間の台詞を表示 — 各キャラが戦場状況と計画を自分の個性で語ります" },
                 { Language.Chinese, "回合开始时显示同伴对话——每个角色以自己的个性描述战场形势和作战计划" }
             },
+            ["EnableLLMVisualOverlay"] = new() {
+                { Language.English, "LLM Visual Overlay" },
+                { Language.Korean, "LLM 시각 오버레이" },
+                { Language.Russian, "Визуальное наложение LLM" },
+                { Language.Japanese, "LLM ビジュアルオーバーレイ" },
+                { Language.Chinese, "LLM 视觉叠加" }
+            },
+            ["EnableLLMVisualOverlayDesc"] = new() {
+                { Language.English, "Show threat ranking, priority target marker, and action preview icons on the battlefield — visualizes what the AI is thinking" },
+                { Language.Korean, "전장 위에 위협 랭킹, 우선 타겟 마커, 액션 프리뷰 아이콘 표시 — AI의 사고를 시각화" },
+                { Language.Russian, "Отображение рейтинга угроз, маркера приоритетной цели и предпросмотра действий на поле боя" },
+                { Language.Japanese, "戦場上に脅威ランキング、優先ターゲットマーカー、アクションプレビューを表示" },
+                { Language.Chinese, "在战场上显示威胁排名、优先目标标记和动作预览图标——可视化 AI 的思考" }
+            },
             ["OverlayScale"] = new() {
                 { Language.English, "Overlay Size" },
                 { Language.Korean, "오버레이 크기" },
@@ -2490,6 +2504,10 @@ namespace CompanionAI_v3.Settings
 
         /// <summary>★ v3.46.0: 전략 지시 UI 크기 배율 (0.8 ~ 2.0, 기본 1.0)</summary>
         public float DecisionOverlayScale { get; set; } = 1.0f;
+
+        /// <summary>★ v3.109.0: LLM 시각 오버레이 — 위협 랭킹 + Priority Target 마커 + 액션 프리뷰 (X-COM 스타일).
+        /// 전장 위에 AI의 결정을 직접 시각화. 게임 로직 무영향 (순수 렌더링).</summary>
+        public bool EnableLLMVisualOverlay { get; set; } = true;
 
         /// <summary>★ LLM Combat AI: 전역 마스터 토글 (이것과 캐릭터별 EnableLLMJudge 모두 활성화 필요)</summary>
         public bool EnableLLMCombatAI { get; set; } = false;

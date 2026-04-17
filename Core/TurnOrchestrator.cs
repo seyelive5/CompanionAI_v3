@@ -296,6 +296,9 @@ namespace CompanionAI_v3.Core
                 TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
                 // ★ v3.20.0: [CombatReport] 시점2 — 최초 계획 기록
                 CombatReportCollector.Instance.RecordPlan(turnState.Plan);
+
+                // ★ v3.109.0: 시각 오버레이 갱신 (non-LLM 경로) — priority=-1 이면 마커 없이 랭킹+액션만
+                UI.LLMVisualOverlay.SetContext(unit, turnState.Plan, situation, -1);
                 // ★ v3.48.0: Tactical Narrator — 초기 plan만 (replan 제외)
                 var narratorStrategy = turnState.GetContext<TurnStrategy>(
                     StrategicContextKeys.TurnStrategyKey, default(TurnStrategy));
@@ -593,6 +596,9 @@ namespace CompanionAI_v3.Core
                         CombatReportCollector.Instance.RecordPlan(turnState.Plan);
                         Data.CompanionDialogue.AnnouncePlan(unit, turnState.Plan);
 
+                        // ★ v3.109.0: 시각 오버레이 갱신 (단일 후보 경로)
+                        UI.LLMVisualOverlay.SetContext(unit, turnState.Plan, situation, weights?.PriorityTarget ?? -1);
+
                         // ★ v3.82.0: Training data context 저장 (v3.84.0: opt-in via Debug tab)
                         if (Main.Settings.EnableTrainingDataCollection)
                             StoreTrainingContext(turnState, unit, situation, role.ToString(), weights, single.Summary ?? singleStratLabel);
@@ -729,6 +735,9 @@ namespace CompanionAI_v3.Core
                 TeamBlackboard.Instance.RegisterUnitPlan(unitId, turnState.Plan);
                 CombatReportCollector.Instance.RecordPlan(turnState.Plan);
                 Data.CompanionDialogue.AnnouncePlan(unit, turnState.Plan);
+
+                // ★ v3.109.0: 시각 오버레이 갱신 (Judge 경로)
+                UI.LLMVisualOverlay.SetContext(unit, turnState.Plan, situation, _pendingWeights?.PriorityTarget ?? -1);
 
                 // Tactical Narrator
                 Diagnostics.TacticalNarrator.Narrate(unit, turnState.Plan, situation, finalStrategy);

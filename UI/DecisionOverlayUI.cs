@@ -13,6 +13,7 @@ namespace CompanionAI_v3.UI
         {
             TacticalOverlayUI.OnGUI();
             LLMCombatPanel.DrawGUI();
+            LLMVisualOverlay.OnGUI();  // ★ v3.109.0: 시각 오버레이 (위협 랭킹 + 액션 프리뷰)
         }
     }
 
