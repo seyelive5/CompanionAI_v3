@@ -270,12 +270,22 @@ namespace CompanionAI_v3.Planning.Planners
 
         /// <summary>
         /// 버프 계획 (AP 예약 고려)
+        /// ★ v3.104.0: plannedBuffGuids로 현재 플랜 내 중복 선택 방지 (once-per-turn 룰)
         /// </summary>
-        public static PlannedAction PlanBuffWithReservation(Situation situation, ref float remainingAP, float reservedAP, string roleName)
+        public static PlannedAction PlanBuffWithReservation(Situation situation, ref float remainingAP, float reservedAP, string roleName, HashSet<string> plannedBuffGuids = null)
         {
             if (situation.BestBuff == null) return null;
 
             var buff = situation.BestBuff;
+
+            // ★ v3.104.0: 이미 이 플랜에서 선택된 버프면 스킵
+            string buffGuid = GetBuffGuid(buff);
+            if (plannedBuffGuids != null && plannedBuffGuids.Contains(buffGuid))
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] Skip buff {buff.Name}: already planned this turn");
+                return null;
+            }
+
             float cost = CombatAPI.GetAbilityAPCost(buff);
 
             bool isEssential = IsEssentialBuff(buff, situation);
@@ -290,6 +300,7 @@ namespace CompanionAI_v3.Planning.Planners
             if (CombatAPI.CanUseAbilityOn(buff, target, out reason))
             {
                 remainingAP -= cost;
+                plannedBuffGuids?.Add(buffGuid);  // ★ v3.104.0: dedup 등록
                 Main.Log($"[{roleName}] Buff: {buff.Name} (cost={cost:F1})");
                 return PlannedAction.Buff(buff, situation.Unit, $"Proactive buff: {buff.Name}", cost);
             }
@@ -297,10 +308,16 @@ namespace CompanionAI_v3.Planning.Planners
             return null;
         }
 
+        /// <summary>★ v3.104.0: 버프 GUID 추출 헬퍼 (PlanPositionalBuff와 동일 패턴)</summary>
+        private static string GetBuffGuid(AbilityData buff)
+        {
+            return buff?.Blueprint?.AssetGuid?.ToString() ?? buff?.Name ?? "";
+        }
+
         /// <summary>
         /// 방어 자세 계획 (Tank 전용)
         /// </summary>
-        public static PlannedAction PlanDefensiveStanceWithReservation(Situation situation, ref float remainingAP, float reservedAP, string roleName)
+        public static PlannedAction PlanDefensiveStanceWithReservation(Situation situation, ref float remainingAP, float reservedAP, string roleName, HashSet<string> plannedBuffGuids = null)
         {
             var target = new TargetWrapper(situation.Unit);
 
@@ -313,6 +330,10 @@ namespace CompanionAI_v3.Planning.Planners
                 // ★ v3.5.75: 통합 API 사용
                 if (!AbilityDatabase.IsDefensiveStance(ability))
                     continue;
+
+                // ★ v3.104.0: 이미 이 플랜에서 선택된 버프면 스킵
+                string buffGuid = GetBuffGuid(ability);
+                if (plannedBuffGuids != null && plannedBuffGuids.Contains(buffGuid)) continue;
 
                 float cost = CombatAPI.GetAbilityAPCost(ability);
 
@@ -335,6 +356,7 @@ namespace CompanionAI_v3.Planning.Planners
                 if (CombatAPI.CanUseAbilityOn(ability, target, out reason))
                 {
                     remainingAP -= cost;
+                    plannedBuffGuids?.Add(buffGuid);  // ★ v3.104.0: dedup 등록
                     Main.Log($"[{roleName}] Defensive stance: {ability.Name}");
                     return PlannedAction.Buff(ability, situation.Unit, "Defensive stance priority", cost);
                 }
@@ -414,7 +436,7 @@ namespace CompanionAI_v3.Planning.Planners
         /// ★ v3.1.10: 사용 가능한 공격이 없으면 스킵
         /// ★ v3.34.0: 점수 기반 스마트 버프 선택 — 상황에 맞는 최적 버프 사용
         /// </summary>
-        public static PlannedAction PlanAttackBuffWithReservation(Situation situation, ref float remainingAP, float reservedAP, string roleName)
+        public static PlannedAction PlanAttackBuffWithReservation(Situation situation, ref float remainingAP, float reservedAP, string roleName, HashSet<string> plannedBuffGuids = null)
         {
             // ★ v3.1.10: 사용 가능한 공격이 없으면 공격 전 버프 사용 금지
             if (situation.AvailableAttacks == null || situation.AvailableAttacks.Count == 0)
@@ -439,6 +461,7 @@ namespace CompanionAI_v3.Planning.Planners
             // ★ v3.34.0: 점수 기반 최적 버프 선택
             AbilityData bestBuff = null;
             float bestScore = -1f;
+            string bestBuffGuid = null;
 
             foreach (var buff in situation.AvailableBuffs)
             {
@@ -449,6 +472,10 @@ namespace CompanionAI_v3.Planning.Planners
 
                 if (AbilityDatabase.IsRunAndGun(buff)) continue;
                 if (AbilityDatabase.IsPostFirstAction(buff)) continue;
+
+                // ★ v3.104.0: 이미 이 플랜에서 선택된 버프면 스킵
+                string buffGuid = GetBuffGuid(buff);
+                if (plannedBuffGuids != null && plannedBuffGuids.Contains(buffGuid)) continue;
 
                 float cost = CombatAPI.GetAbilityAPCost(buff);
 
@@ -469,6 +496,7 @@ namespace CompanionAI_v3.Planning.Planners
                 {
                     bestScore = score;
                     bestBuff = buff;
+                    bestBuffGuid = buffGuid;
                 }
             }
 
@@ -476,6 +504,7 @@ namespace CompanionAI_v3.Planning.Planners
             {
                 float cost = CombatAPI.GetAbilityAPCost(bestBuff);
                 remainingAP -= cost;
+                plannedBuffGuids?.Add(bestBuffGuid);  // ★ v3.104.0: dedup 등록
                 Main.Log($"[{roleName}] Attack buff: {bestBuff.Name} (score={bestScore:F0})");
                 return PlannedAction.Buff(bestBuff, situation.Unit, $"Attack buff (score={bestScore:F0})", cost);
             }
@@ -723,7 +752,7 @@ namespace CompanionAI_v3.Planning.Planners
         /// <summary>
         /// Heroic Act 계획 (DPS 전용)
         /// </summary>
-        public static PlannedAction PlanHeroicAct(Situation situation, ref float remainingAP, string roleName)
+        public static PlannedAction PlanHeroicAct(Situation situation, ref float remainingAP, string roleName, HashSet<string> plannedBuffGuids = null)
         {
             var heroicAbilities = situation.AvailableBuffs
                 .Where(a => AbilityDatabase.IsHeroicAct(a))
@@ -752,6 +781,10 @@ namespace CompanionAI_v3.Planning.Planners
 
             foreach (var heroic in heroicAbilities)
             {
+                // ★ v3.104.0: 이미 이 플랜에서 선택된 버프면 스킵
+                string heroicGuid = GetBuffGuid(heroic);
+                if (plannedBuffGuids != null && plannedBuffGuids.Contains(heroicGuid)) continue;
+
                 float cost = CombatAPI.GetAbilityAPCost(heroic);
                 if (cost > remainingAP) continue;
 
@@ -768,6 +801,7 @@ namespace CompanionAI_v3.Planning.Planners
                 {
                     AbilityUsageTracker.MarkUsed(unitId, heroic);
                     remainingAP -= cost;
+                    plannedBuffGuids?.Add(heroicGuid);  // ★ v3.104.0: dedup 등록
                     Main.Log($"[{roleName}] Heroic Act: {heroic.Name}");
                     return PlannedAction.Buff(heroic, situation.Unit, "Heroic Act - high momentum", cost);
                 }
@@ -895,7 +929,7 @@ namespace CompanionAI_v3.Planning.Planners
         /// <summary>
         /// 방어 버프 계획 (Post-attack용)
         /// </summary>
-        public static PlannedAction PlanDefensiveBuff(Situation situation, ref float remainingAP, string roleName)
+        public static PlannedAction PlanDefensiveBuff(Situation situation, ref float remainingAP, string roleName, HashSet<string> plannedBuffGuids = null)
         {
             var target = new TargetWrapper(situation.Unit);
 
@@ -907,6 +941,10 @@ namespace CompanionAI_v3.Planning.Planners
 
             foreach (var buff in defensiveBuffs)
             {
+                // ★ v3.104.0: 이미 이 플랜에서 선택된 버프면 스킵
+                string buffGuid = GetBuffGuid(buff);
+                if (plannedBuffGuids != null && plannedBuffGuids.Contains(buffGuid)) continue;
+
                 float cost = CombatAPI.GetAbilityAPCost(buff);
                 if (cost > remainingAP) continue;
 
@@ -914,6 +952,7 @@ namespace CompanionAI_v3.Planning.Planners
                 if (CombatAPI.CanUseAbilityOn(buff, target, out reason))
                 {
                     remainingAP -= cost;
+                    plannedBuffGuids?.Add(buffGuid);  // ★ v3.104.0: dedup 등록
                     return PlannedAction.Buff(buff, situation.Unit, "Defensive buff", cost);
                 }
             }

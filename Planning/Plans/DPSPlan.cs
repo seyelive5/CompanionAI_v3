@@ -23,6 +23,9 @@ namespace CompanionAI_v3.Planning.Plans
 
         public override TurnPlan CreatePlan(Situation situation, TurnState turnState)
         {
+            // ★ v3.104.0: CreatePlan 진입 시 버프 중복 추적 초기화
+            ResetPlannedBuffTracking();
+
             var actions = new List<PlannedAction>();
             // ★ v3.0.68: 게임 AP 직접 사용
             float remainingAP = situation.CurrentAP;
@@ -1300,6 +1303,10 @@ namespace CompanionAI_v3.Planning.Plans
 
             foreach (var heroic in heroicAbilities)
             {
+                // ★ v3.104.0: 이미 이 플랜에서 선택된 버프면 스킵 (BasePlan 통합 dedup)
+                string heroicGuid = heroic?.Blueprint?.AssetGuid?.ToString() ?? heroic?.Name ?? "";
+                if (_plannedBuffGuids.Contains(heroicGuid)) continue;
+
                 float cost = CombatAPI.GetAbilityAPCost(heroic);
                 if (cost > remainingAP) continue;
 
@@ -1316,6 +1323,7 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     AbilityUsageTracker.MarkUsed(unitId, heroic);
                     remainingAP -= cost;
+                    _plannedBuffGuids.Add(heroicGuid);  // ★ v3.104.0: dedup 등록
                     Main.Log($"[DPS] Heroic Act: {heroic.Name}");
                     return PlannedAction.Buff(heroic, situation.Unit, "Heroic Act - high momentum", cost);
                 }
@@ -1411,6 +1419,10 @@ namespace CompanionAI_v3.Planning.Plans
                 if (AbilityDatabase.IsRunAndGun(buff)) continue;
                 if (AbilityDatabase.IsPostFirstAction(buff)) continue;
 
+                // ★ v3.104.0: 이미 이 플랜에서 선택된 버프면 스킵 (BasePlan 통합 dedup)
+                string buffGuid = buff?.Blueprint?.AssetGuid?.ToString() ?? buff?.Name ?? "";
+                if (_plannedBuffGuids.Contains(buffGuid)) continue;
+
                 float cost = CombatAPI.GetAbilityAPCost(buff);
 
                 bool isEssential = IsEssentialBuff(buff, situation);
@@ -1423,6 +1435,7 @@ namespace CompanionAI_v3.Planning.Plans
                 if (CombatAPI.CanUseAbilityOn(buff, target, out reason))
                 {
                     remainingAP -= cost;
+                    _plannedBuffGuids.Add(buffGuid);  // ★ v3.104.0: dedup 등록
                     Main.Log($"[DPS] Attack buff: {buff.Name}");
                     return PlannedAction.Buff(buff, situation.Unit, "Attack buff before strike", cost);
                 }

@@ -39,6 +39,15 @@ namespace CompanionAI_v3.Planning.Plans
         /// <summary>★ v3.9.10: RecalculateHittable 새 목록용</summary>
         private static readonly List<BaseUnitEntity> _sharedNewHittable = new List<BaseUnitEntity>(16);
 
+        /// <summary>★ v3.104.0: 현재 CreatePlan 호출 동안 이미 선택된 버프 GUID 추적.
+        /// PlanAttackBuff/PlanBuff/PlanHeroicAct/PlanPositionalBuff가 공유.
+        /// Role Plan CreatePlan 진입 시 ResetPlannedBuffTracking() 호출 필수.
+        /// 같은 버프를 턴 내 여러 번 계획하는 문제(once-per-turn 룰 위반) 방지.</summary>
+        protected static readonly HashSet<string> _plannedBuffGuids = new HashSet<string>(8);
+
+        /// <summary>★ v3.104.0: CreatePlan 진입 시 버프 중복 추적 초기화.</summary>
+        protected static void ResetPlannedBuffTracking() => _plannedBuffGuids.Clear();
+
         #endregion
 
         #region Constants — ★ v3.22.0: SC.cs 참조
@@ -310,18 +319,15 @@ namespace CompanionAI_v3.Planning.Plans
                 if (AbilityDatabase.IsPostFirstAction(buff)) continue;
                 if (AllyStateCache.HasBuff(situation.Unit, buff)) continue;
 
-                // 이미 계획된 버프인지 확인 (Phase 4에서 이미 사용했을 수 있음)
-                bool alreadyPlanned = false;
-                for (int i = 0; i < actions.Count; i++)
-                {
-                    if (actions[i].Ability == buff) { alreadyPlanned = true; break; }
-                }
-                if (alreadyPlanned) continue;
+                // ★ v3.104.0: 통합 dedup (Phase 2/4/4.05/4.7 모든 버프 경로 공유)
+                string buffGuid = buff.Blueprint?.AssetGuid?.ToString() ?? buff.Name ?? "";
+                if (_plannedBuffGuids.Contains(buffGuid)) continue;
 
                 string reason;
                 if (!CombatAPI.CanUseAbilityOn(buff, selfTarget, out reason)) continue;
 
                 actions.Add(PlannedAction.Buff(buff, situation.Unit, $"Free attack buff: {buff.Name}", 0f));
+                _plannedBuffGuids.Add(buffGuid);  // ★ v3.104.0: dedup 등록
                 Main.Log($"[{RoleName}] Phase 4.05: Free buff {buff.Name}");
             }
         }
@@ -753,8 +759,9 @@ namespace CompanionAI_v3.Planning.Plans
             ref float remainingAP,
             HashSet<string> usedBuffGuids = null)
         {
+            // ★ v3.104.0: 명시적 HashSet 없으면 BasePlan 통합 field 사용 → Phase 2/4 버프와 dedup 공유
             if (usedBuffGuids == null)
-                usedBuffGuids = new HashSet<string>();
+                usedBuffGuids = _plannedBuffGuids;
 
             int positionalBuffCount = 0;
             while (positionalBuffCount < MAX_POSITIONAL_BUFFS && remainingAP >= 1f)
@@ -818,6 +825,14 @@ namespace CompanionAI_v3.Planning.Plans
                         continue;
                     }
 
+                    // ★ v3.104.0: 이미 이 플랜에서 선택된 버프면 스킵 (Tank 인내 4× 중복 방지)
+                    string buffGuid = buff.Blueprint?.AssetGuid?.ToString() ?? buff.Name ?? "";
+                    if (_plannedBuffGuids.Contains(buffGuid))
+                    {
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Fallback buffs: Skip {buff.Name} (already planned this turn)");
+                        continue;
+                    }
+
                     float cost = CombatAPI.GetAbilityAPCost(buff);
                     if (cost > remainingAP) continue;
 
@@ -843,6 +858,7 @@ namespace CompanionAI_v3.Planning.Plans
                             {
                                 remainingAP -= cost;
                                 actions.Add(PlannedAction.Buff(buff, ally, $"Fallback buff ally: {buff.Name}", cost));
+                                _plannedBuffGuids.Add(buffGuid);  // ★ v3.104.0: dedup 등록
                                 Main.Log($"[{RoleName}] Fallback buff (ally): {buff.Name} -> {ally.CharacterName}");
                                 usedOnAlly = true;
                                 break;
@@ -858,6 +874,7 @@ namespace CompanionAI_v3.Planning.Plans
                         {
                             remainingAP -= cost;
                             actions.Add(PlannedAction.Buff(buff, situation.Unit, "Fallback buff - no attack available", cost));
+                            _plannedBuffGuids.Add(buffGuid);  // ★ v3.104.0: dedup 등록
                             Main.Log($"[{RoleName}] Fallback buff: {buff.Name}");
                         }
                     }
@@ -1402,13 +1419,13 @@ namespace CompanionAI_v3.Planning.Plans
         #region Buff/Debuff - Delegates to BuffPlanner
 
         protected PlannedAction PlanBuffWithReservation(Situation situation, ref float remainingAP, float reservedAP)
-            => BuffPlanner.PlanBuffWithReservation(situation, ref remainingAP, reservedAP, RoleName);
+            => BuffPlanner.PlanBuffWithReservation(situation, ref remainingAP, reservedAP, RoleName, _plannedBuffGuids);
 
         protected PlannedAction PlanDefensiveStanceWithReservation(Situation situation, ref float remainingAP, float reservedAP)
-            => BuffPlanner.PlanDefensiveStanceWithReservation(situation, ref remainingAP, reservedAP, RoleName);
+            => BuffPlanner.PlanDefensiveStanceWithReservation(situation, ref remainingAP, reservedAP, RoleName, _plannedBuffGuids);
 
         protected PlannedAction PlanAttackBuffWithReservation(Situation situation, ref float remainingAP, float reservedAP)
-            => BuffPlanner.PlanAttackBuffWithReservation(situation, ref remainingAP, reservedAP, RoleName);
+            => BuffPlanner.PlanAttackBuffWithReservation(situation, ref remainingAP, reservedAP, RoleName, _plannedBuffGuids);
 
         /// <summary>
         /// ★ v3.10.0: 전략이 추천한 특정 버프를 사용하는 헬퍼
@@ -1417,6 +1434,14 @@ namespace CompanionAI_v3.Planning.Plans
         protected PlannedAction PlanSpecificBuff(Situation situation, AbilityData buff, ref float remainingAP, float reservedAP)
         {
             if (buff == null) return null;
+
+            // ★ v3.104.0: 이미 이 플랜에서 선택된 버프면 스킵 (strategy.RecommendedBuff 중복 방지)
+            string buffGuid = buff.Blueprint?.AssetGuid?.ToString() ?? buff.Name ?? "";
+            if (_plannedBuffGuids.Contains(buffGuid))
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] PlanSpecificBuff skip {buff.Name}: already planned this turn");
+                return null;
+            }
 
             float cost = CombatAPI.GetAbilityAPCost(buff);
             if (cost > remainingAP - reservedAP) return null;
@@ -1430,6 +1455,7 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             remainingAP -= cost;
+            _plannedBuffGuids.Add(buffGuid);  // ★ v3.104.0: dedup 등록
             return PlannedAction.Buff(buff, situation.Unit, "Strategy-recommended buff", cost);
         }
 
@@ -1441,7 +1467,7 @@ namespace CompanionAI_v3.Planning.Plans
             => BuffPlanner.PlanTaunt(situation, ref remainingAP, RoleName);
 
         protected PlannedAction PlanHeroicAct(Situation situation, ref float remainingAP)
-            => BuffPlanner.PlanHeroicAct(situation, ref remainingAP, RoleName);
+            => BuffPlanner.PlanHeroicAct(situation, ref remainingAP, RoleName, _plannedBuffGuids);
 
         // ★ v3.8.41: 통합 궁극기 계획 (모든 타겟 유형 처리)
         protected PlannedAction PlanUltimate(Situation situation, ref float remainingAP)
@@ -1454,10 +1480,10 @@ namespace CompanionAI_v3.Planning.Plans
             => BuffPlanner.PlanMarker(situation, target, ref remainingAP, RoleName);
 
         protected PlannedAction PlanDefensiveBuff(Situation situation, ref float remainingAP)
-            => BuffPlanner.PlanDefensiveBuff(situation, ref remainingAP, RoleName);
+            => BuffPlanner.PlanDefensiveBuff(situation, ref remainingAP, RoleName, _plannedBuffGuids);
 
         protected PlannedAction PlanPositionalBuff(Situation situation, ref float remainingAP, HashSet<string> usedBuffGuids = null)
-            => BuffPlanner.PlanPositionalBuff(situation, ref remainingAP, usedBuffGuids, RoleName);
+            => BuffPlanner.PlanPositionalBuff(situation, ref remainingAP, usedBuffGuids ?? _plannedBuffGuids, RoleName);
 
         protected PlannedAction PlanStratagem(Situation situation, ref float remainingAP)
             => BuffPlanner.PlanStratagem(situation, ref remainingAP, RoleName);

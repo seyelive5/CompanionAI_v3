@@ -31,6 +31,9 @@ namespace CompanionAI_v3.Planning.Plans
 
         public override TurnPlan CreatePlan(Situation situation, TurnState turnState)
         {
+            // ★ v3.104.0: CreatePlan 진입 시 버프 중복 추적 초기화
+            ResetPlannedBuffTracking();
+
             var actions = new List<PlannedAction>();
             float remainingAP = situation.CurrentAP;
             float remainingMP = situation.CurrentMP;

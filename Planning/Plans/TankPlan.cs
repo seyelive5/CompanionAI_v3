@@ -27,6 +27,9 @@ namespace CompanionAI_v3.Planning.Plans
 
         public override TurnPlan CreatePlan(Situation situation, TurnState turnState)
         {
+            // ★ v3.104.0: CreatePlan 진입 시 버프 중복 추적 초기화
+            ResetPlannedBuffTracking();
+
             var actions = new List<PlannedAction>();
             // ★ v3.0.68: 게임 AP 직접 사용
             float remainingAP = situation.CurrentAP;
@@ -815,6 +818,10 @@ namespace CompanionAI_v3.Planning.Plans
                 if (!AbilityDatabase.IsDefensiveStance(ability))
                     continue;
 
+                // ★ v3.104.0: 이미 이 플랜에서 선택된 버프면 스킵 (Tank Phase 2/8.9 인내 중복 방지)
+                string abilityGuid = ability?.Blueprint?.AssetGuid?.ToString() ?? ability?.Name ?? "";
+                if (_plannedBuffGuids.Contains(abilityGuid)) continue;
+
                 // ★ v3.8.86: ClearMP + 이동 필요 시 연기 (Phase 8.9에서 재시도)
                 if (movementStillNeeded && CombatAPI.AbilityClearsMPAfterUse(ability, situation.Unit))  // ★ v3.8.88
                 {
@@ -844,6 +851,7 @@ namespace CompanionAI_v3.Planning.Plans
                 if (CombatAPI.CanUseAbilityOn(ability, target, out reason))
                 {
                     remainingAP -= cost;
+                    _plannedBuffGuids.Add(abilityGuid);  // ★ v3.104.0: dedup 등록
                     Main.Log($"[Tank] Defensive stance: {ability.Name}");
                     return PlannedAction.Buff(ability, situation.Unit, "Defensive stance priority", cost);
                 }
