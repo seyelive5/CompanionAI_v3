@@ -1474,7 +1474,7 @@ namespace CompanionAI_v3.Planning.Plans
             => BuffPlanner.PlanUltimate(situation, ref remainingAP, RoleName);
 
         protected PlannedAction PlanDebuff(Situation situation, BaseUnitEntity target, ref float remainingAP)
-            => BuffPlanner.PlanDebuff(situation, target, ref remainingAP, RoleName);
+            => BuffPlanner.PlanDebuff(situation, target, ref remainingAP, RoleName, _plannedBuffGuids);
 
         protected PlannedAction PlanMarker(Situation situation, BaseUnitEntity target, ref float remainingAP)
             => BuffPlanner.PlanMarker(situation, target, ref remainingAP, RoleName);
@@ -2034,6 +2034,16 @@ namespace CompanionAI_v3.Planning.Plans
                 // 최근 사용된 능력 스킵
                 if (AbilityUsageTracker.WasUsedRecently(unitId, abilityId, 1000)) continue;
 
+                // ★ v3.110.7: 이 턴 이미 계획된 버프 스킵 — PlanFinalAPUtilization dedup 누락 버그 수정.
+                // 로그 분석: 인내/황제의 말씀/피 흘리기가 self-target으로 2회씩 중복 등장 →
+                // Phase 3/4에서 자기 버프가 _plannedBuffGuids에 등록됐는데, Phase 9가 이를 무시하고
+                // 동일 버프를 "Final AP buff" 사유로 재추가. 실행 시점엔 이미 cooldown이라 두 번째는 실패.
+                if (_plannedBuffGuids.Contains(abilityId))
+                {
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Phase 9: Skip {buff.Name} (already planned this turn)");
+                    continue;
+                }
+
                 // 선제 버프 제외 (공격 없으면 무의미)
                 var timing = AbilityDatabase.GetTiming(buff);
                 if (timing == AbilityTiming.PreAttackBuff ||
@@ -2051,6 +2061,7 @@ namespace CompanionAI_v3.Planning.Plans
                 if (CombatAPI.CanUseAbilityOn(buff, selfTarget, out reason))
                 {
                     remainingAP -= cost;
+                    _plannedBuffGuids.Add(abilityId);  // ★ v3.110.7: dedup 등록
                     Main.Log($"[{RoleName}] Phase 9: Final buff - {buff.Name}");
                     return PlannedAction.Buff(buff, situation.Unit, "Final AP buff", cost);
                 }
@@ -2071,6 +2082,15 @@ namespace CompanionAI_v3.Planning.Plans
 
                     if (AbilityUsageTracker.WasUsedRecently(unitId, abilityId, 1000)) continue;
 
+                    // ★ v3.110.7: 이 턴 이미 계획된 능력 스킵 — 공포 지대 같은 PointTarget 디버프가
+                    // 다른 phase에서 PlanDebuff로 이미 추가됐는데 Phase 9에서 또 추가하던 버그.
+                    // _plannedBuffGuids는 이제 "once-per-turn ability tracker"로 역할 확장 (buff + debuff + marker).
+                    if (_plannedBuffGuids.Contains(abilityId))
+                    {
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Phase 9: Skip debuff {debuff.Name} (already planned this turn)");
+                        continue;
+                    }
+
                     var target = new TargetWrapper(situation.NearestEnemy);
                     string reason;
                     if (CombatAPI.CanUseAbilityOn(debuff, target, out reason))
@@ -2083,6 +2103,7 @@ namespace CompanionAI_v3.Planning.Plans
                         }
 
                         remainingAP -= cost;
+                        _plannedBuffGuids.Add(abilityId);  // ★ v3.110.7: dedup 등록
                         Main.Log($"[{RoleName}] Phase 9: Final debuff - {debuff.Name} -> {situation.NearestEnemy.CharacterName}");
                         return PlannedAction.Attack(debuff, situation.NearestEnemy, "Final AP debuff", cost);
                     }
@@ -2116,6 +2137,13 @@ namespace CompanionAI_v3.Planning.Plans
                     // 능력 자체도 최근 사용 여부 확인
                     if (AbilityUsageTracker.WasUsedRecently(unitId, abilityId, 1000)) continue;
 
+                    // ★ v3.110.7: 이 턴 이미 계획된 능력 스킵
+                    if (_plannedBuffGuids.Contains(abilityId))
+                    {
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[{RoleName}] Phase 9: Skip marker {marker.Name} (already planned this turn)");
+                        continue;
+                    }
+
                     var target = new TargetWrapper(situation.NearestEnemy);
                     string reason;
                     if (CombatAPI.CanUseAbilityOn(marker, target, out reason))
@@ -2128,6 +2156,7 @@ namespace CompanionAI_v3.Planning.Plans
                         }
 
                         remainingAP -= cost;
+                        _plannedBuffGuids.Add(abilityId);  // ★ v3.110.7: dedup 등록
                         Main.Log($"[{RoleName}] Phase 9: Final marker - {marker.Name} -> {situation.NearestEnemy.CharacterName}");
                         return PlannedAction.Buff(marker, situation.NearestEnemy, "Final AP marker", cost);
                     }

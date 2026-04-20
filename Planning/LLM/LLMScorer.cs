@@ -152,7 +152,10 @@ namespace CompanionAI_v3.Planning.LLM
                 string baseUrl = GetOllamaBaseUrl();
                 string url = baseUrl + "/api/chat";
 
-                Main.LogDebug($"[LLMScorer] -> {url}, model={model}, enemies={enemyCount}");
+                // ★ v3.110.4: 토큰 회귀 감지용 — user msg 길이 + 대략 토큰 (chars/4).
+                // 컴포넌트 누적(TEAM BRIEF, CMD, PAST, KB, E line)으로 예산 초과 시 응답 지연 증가.
+                int userChars = userMsg?.Length ?? 0;
+                Main.LogDebug($"[LLMScorer] -> {url}, model={model}, enemies={enemyCount}, userMsg={userChars}ch (~{userChars / 4}tok)");
 
                 // 5. HTTP 요청
                 string responseText = null;

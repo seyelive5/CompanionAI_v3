@@ -77,12 +77,30 @@ namespace CompanionAI_v3.Planning.LLM
 
                 // ★ v3.103.0: 같은 능력 중복 사용 감지 — Judge에게 룰 위반 힌트
                 // 대부분의 능력은 once-per-turn. 같은 능력 2회 이상 등장 시 [dup] 표시
-                if (!allowDuplicates && action.Ability != null)
+                //
+                // ★ v3.110.5: Weapon attacks (ability.Weapon != null)은 제외.
+                //   단발 사격/돌격/점사 사격 등 기본 공격은 AP만 있으면 반복 가능 — once-per-turn 아님.
+                //
+                // ★ v3.110.6: dedup key = ability + target 조합으로 변경.
+                //   로그 분석 결과, "지휘의 목소리 ×5" 같은 패턴은 SupportPlan Phase 4의
+                //   아군 버프 루프(line 162-180)가 다른 5명 아군에게 같은 버프를 정상 적용한 경우였음.
+                //   ability 이름만으로 dedup 하면 합법 사용도 false positive로 태그.
+                //   (ability, target) 조합으로 같은 능력+같은 타겟만 진짜 룰 위반으로 판정.
+                bool isWeaponAttack = action.Ability?.Weapon != null;
+                if (!allowDuplicates && action.Ability != null && !isWeaponAttack)
                 {
                     string abilityName = action.Ability.Name;
-                    if (!string.IsNullOrEmpty(abilityName) && !_tempUsedAbilities.Add(abilityName))
+                    string dedupKey = BuildDedupKey(abilityName, action);
+                    if (!string.IsNullOrEmpty(abilityName) && !_tempUsedAbilities.Add(dedupKey))
                     {
                         phrase += " [dup:once-per-turn]";
+                        // ★ v3.110.4: dup은 상류 Planner 버그 — once-per-turn 능력이 Plan에 두 번 들어옴.
+                        // Judge에게 힌트 주는 건 하류 처리, 실제 원인은 BasePlan/AttackPlanner에서 막아야 함.
+                        // 추적 가능하도록 Warning. Seq/ability/caster/target 기록.
+                        string seqLabel = strategy != null ? strategy.Sequence.ToString() : "?";
+                        string casterName = situation?.Unit?.CharacterName ?? "?";
+                        string targetLabel = GetTargetName(action) ?? "?";
+                        Main.LogWarning($"[PlanSummarizer] dup once-per-turn: {casterName} seq={seqLabel} ability={abilityName} target={targetLabel} — upstream Planner leak");
                     }
                 }
 
@@ -115,7 +133,11 @@ namespace CompanionAI_v3.Planning.LLM
                     return DescribeAttack(action, abilityName, targetName, strategy, situation);
 
                 case ActionType.Buff:
-                    return $"Buff self with {abilityName}";
+                    // ★ v3.110.6: 실제 타겟 반영 — self/ally 구분.
+                    //   이전에는 모두 "Buff self"로 출력하여 아군 5명 버프 시에도 self로 보여 오해 유발.
+                    return action.Target?.Entity is BaseUnitEntity buffUnit && buffUnit != situation?.Unit
+                        ? $"Buff {buffUnit.CharacterName ?? "ally"} with {abilityName}"
+                        : $"Buff self with {abilityName}";
 
                 case ActionType.Heal:
                     return DescribeHeal(action, abilityName, targetName);
@@ -221,6 +243,25 @@ namespace CompanionAI_v3.Planning.LLM
 
             // Point 타겟
             return "area";
+        }
+
+        /// <summary>
+        /// ★ v3.110.6: dedup key — ability + target 조합.
+        /// 같은 능력+같은 타겟 = 진짜 중복 (once-per-turn 위반).
+        /// 같은 능력+다른 타겟 = 합법 (아군 여러 명 버프 등).
+        /// Point 타겟 좌표는 반올림하지 않고 그대로 구분 (소수점 자리는 사실상 unique key).
+        /// </summary>
+        private static string BuildDedupKey(string abilityName, PlannedAction action)
+        {
+            if (action?.Target == null) return abilityName + ":self";
+
+            var unit = action.Target.Entity as BaseUnitEntity;
+            if (unit != null)
+                return abilityName + ":" + (unit.UniqueId ?? unit.CharacterName ?? "unit");
+
+            // Point 타겟 — 좌표 기반 key
+            var p = action.Target.Point;
+            return abilityName + ":pt(" + p.x.ToString("F1") + "," + p.z.ToString("F1") + ")";
         }
     }
 }

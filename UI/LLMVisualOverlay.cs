@@ -299,7 +299,8 @@ namespace CompanionAI_v3.UI
                     DrawWorldLine(effectivePos, targetWorldPos, lineColor, action.Type == ActionType.Move ? 3f : 2f);
                 }
 
-                DrawSingleActionPreview(action, step);
+                // ★ v3.110.3: effectivePos 전달 — Move 뒤 Self-액션(Buff/Reload/Swap)이 이동 후 위치에 찍히도록
+                DrawSingleActionPreview(action, step, effectivePos, targetWorldPos);
 
                 // Move 이후 effective 위치 업데이트 → 후속 액션의 원점 이동
                 if (action.Type == ActionType.Move && action.MoveDestination.HasValue)
@@ -388,9 +389,12 @@ namespace CompanionAI_v3.UI
             GUI.matrix = prevMatrix;
         }
 
-        private static void DrawSingleActionPreview(PlannedAction action, int step)
+        /// <summary>
+        /// ★ v3.110.3: 아이콘 위치는 effectivePos/targetWorldPos로 결정 (연결선 계산과 동일 소스).
+        /// Self-액션(Buff/Reload/Swap)은 effectivePos, 외부타겟 액션은 targetWorldPos. 중복 switch 제거.
+        /// </summary>
+        private static void DrawSingleActionPreview(PlannedAction action, int step, Vector3 effectivePos, Vector3 targetWorldPos)
         {
-            // 타겟 위치 결정 + 컬러 + 한글 라벨 (ActionType별 분기)
             Vector3 worldPos;
             Color iconColor;
             string actionLabel;
@@ -398,50 +402,50 @@ namespace CompanionAI_v3.UI
             switch (action.Type)
             {
                 case ActionType.Move:
-                    worldPos = action.MoveDestination ?? (_actingUnit != null ? _actingUnit.Position : Vector3.zero);
+                    worldPos = targetWorldPos;  // MoveDestination (없으면 selfPos = effectivePos)
                     iconColor = new Color(0.4f, 0.8f, 1f, 0.85f);  // 밝은 파랑
                     actionLabel = "MOVE";
                     break;
 
                 case ActionType.Attack:
                 case ActionType.Special:
-                    worldPos = GetTargetPosition(action);
+                    worldPos = targetWorldPos;
                     iconColor = new Color(1f, 0.35f, 0.3f, 0.9f);   // 빨강
                     actionLabel = "ATTACK";
                     break;
 
                 case ActionType.Buff:
-                    worldPos = _actingUnit != null ? _actingUnit.Position : Vector3.zero;
+                    worldPos = effectivePos;  // ★ v3.110.3: Move 이후 위치 반영
                     iconColor = new Color(0.7f, 1f, 0.5f, 0.85f);   // 연두
                     actionLabel = "BUFF";
                     break;
 
                 case ActionType.Heal:
-                    worldPos = GetTargetPosition(action);
+                    worldPos = targetWorldPos;
                     iconColor = new Color(0.3f, 1f, 0.6f, 0.9f);    // 초록
                     actionLabel = "HEAL";
                     break;
 
                 case ActionType.Support:
-                    worldPos = GetTargetPosition(action);
+                    worldPos = targetWorldPos;
                     iconColor = new Color(0.3f, 1f, 0.6f, 0.9f);
                     actionLabel = "SUPPORT";
                     break;
 
                 case ActionType.Debuff:
-                    worldPos = GetTargetPosition(action);
+                    worldPos = targetWorldPos;
                     iconColor = new Color(0.9f, 0.5f, 1f, 0.9f);    // 자주
                     actionLabel = "DEBUFF";
                     break;
 
                 case ActionType.Reload:
-                    worldPos = _actingUnit != null ? _actingUnit.Position : Vector3.zero;
+                    worldPos = effectivePos;  // ★ v3.110.3: Move 이후 위치 반영
                     iconColor = new Color(0.8f, 0.8f, 0.8f, 0.8f);  // 회색
                     actionLabel = "RELOAD";
                     break;
 
                 case ActionType.WeaponSwitch:
-                    worldPos = _actingUnit != null ? _actingUnit.Position : Vector3.zero;
+                    worldPos = effectivePos;  // ★ v3.110.3: Move 이후 위치 반영
                     iconColor = new Color(0.8f, 0.8f, 0.8f, 0.8f);
                     actionLabel = "SWAP";
                     break;

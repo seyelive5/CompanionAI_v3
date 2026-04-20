@@ -66,13 +66,19 @@ namespace CompanionAI_v3.Planning.LLM
             {
                 var json = JObject.Parse(jsonPart);
 
-                // focus_target
+                // focus_target — ★ v3.110.3: TryParse 반환값으로 실패 판정 (이전 로직 가독성 개선)
                 var ftToken = json["focus_target"];
                 if (ftToken != null)
                 {
                     int ft;
-                    try { ft = ftToken.Value<int>(); }
-                    catch { int.TryParse(ftToken.ToString(), out ft); ft = ft == 0 && ftToken.ToString() != "0" ? -1 : ft; }
+                    try
+                    {
+                        ft = ftToken.Value<int>();
+                    }
+                    catch
+                    {
+                        if (!int.TryParse(ftToken.ToString(), out ft)) ft = -1;
+                    }
                     d.FocusTarget = (ft >= 0 && ft < enemyCount) ? ft : -1;
                 }
 
@@ -233,7 +239,9 @@ namespace CompanionAI_v3.Planning.LLM
                 string baseUrl = GetOllamaBaseUrl();
                 string url = baseUrl + "/api/chat";
 
-                Main.LogDebug($"[LLMCommander] → {url}, model={model}, allies={allySituations.Count}, enemies={enemyCount}");
+                // ★ v3.110.4: 토큰 회귀 감지용 — user msg 길이 + 대략 토큰 (chars/4)
+                int userChars = userMsg?.Length ?? 0;
+                Main.LogDebug($"[LLMCommander] → {url}, model={model}, allies={allySituations.Count}, enemies={enemyCount}, userMsg={userChars}ch (~{userChars / 4}tok)");
 
                 // 5. HTTP 요청
                 string responseText = null;

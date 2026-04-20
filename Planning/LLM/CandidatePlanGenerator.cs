@@ -4,7 +4,6 @@ using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
 using CompanionAI_v3.Settings;
 using CompanionAI_v3.GameInterface;
-using UnityEngine;
 
 namespace CompanionAI_v3.Planning.LLM
 {
@@ -121,7 +120,10 @@ namespace CompanionAI_v3.Planning.LLM
             }
 
             var originalBestTarget = situation.BestTarget;
-            var originalCanKill = situation.CanKillBestTarget;
+            // ★ v3.110.3: CanKillBestTarget 오버라이드 제거 — Plans/Planners는 이 플래그를 읽지 않음.
+            // 1타 킬 판단은 각 Plan/Planner가 CombatAPI.CanKillInOneHit 직접 호출.
+            // 이 플래그는 LLM 프롬프트 생성기(Encoder/Summarizer)와 디스플레이 전용이며,
+            // 그들은 CandidatePlanGenerator 실행 구간 *밖*에서 원본값만 읽음. 오버라이드는 no-op이었음.
 
             Main.Log($"[CandidatePlanGenerator] Generating candidates for {situation.Unit.CharacterName}" +
                 $" (BestTarget={originalBestTarget?.CharacterName ?? "none"}, " +
@@ -144,7 +146,6 @@ namespace CompanionAI_v3.Planning.LLM
                         if (priorityEnemy != null)
                         {
                             situation.BestTarget = priorityEnemy;
-                            situation.CanKillBestTarget = EstimateCanKill(situation, priorityEnemy);
                         }
                     }
 
@@ -170,7 +171,6 @@ namespace CompanionAI_v3.Planning.LLM
 
                     // BestTarget 복원
                     situation.BestTarget = originalBestTarget;
-                    situation.CanKillBestTarget = originalCanKill;
 
                     if (llmPlan != null)
                     {
@@ -205,7 +205,6 @@ namespace CompanionAI_v3.Planning.LLM
                         });
 
                         situation.BestTarget = originalBestTarget;
-                        situation.CanKillBestTarget = originalCanKill;
                     }
                 }
 
@@ -251,7 +250,6 @@ namespace CompanionAI_v3.Planning.LLM
             {
                 // ★ 반드시 원본 BestTarget 복원
                 situation.BestTarget = originalBestTarget;
-                situation.CanKillBestTarget = originalCanKill;
                 TargetScorer.ClearActiveTurnState();
             }
 
@@ -272,18 +270,6 @@ namespace CompanionAI_v3.Planning.LLM
             var freshState = new TurnState(situation.Unit, currentAP, currentMP);
             CopyTurnStateFlags(original, freshState);
             return freshState;
-        }
-
-        /// <summary>타겟 처치 가능 여부 간이 추정 (HP% 기반)</summary>
-        private static bool EstimateCanKill(Situation situation, BaseUnitEntity target)
-        {
-            if (target == null) return false;
-            try
-            {
-                float hpPct = CombatCache.GetHPPercent(target);
-                return hpPct < 30f;
-            }
-            catch { return false; }
         }
 
         /// <summary>원본 TurnState에서 보존해야 할 플래그를 새 TurnState로 복사</summary>

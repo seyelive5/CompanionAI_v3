@@ -813,7 +813,7 @@ namespace CompanionAI_v3.Planning.Planners
         /// <summary>
         /// 디버프 계획
         /// </summary>
-        public static PlannedAction PlanDebuff(Situation situation, BaseUnitEntity target, ref float remainingAP, string roleName)
+        public static PlannedAction PlanDebuff(Situation situation, BaseUnitEntity target, ref float remainingAP, string roleName, HashSet<string> plannedGuids = null)
         {
             var debuffs = situation.AvailableDebuffs;
             if (debuffs.Count == 0) return null;
@@ -824,6 +824,11 @@ namespace CompanionAI_v3.Planning.Planners
             {
                 float cost = CombatAPI.GetAbilityAPCost(debuff);
                 if (cost > remainingAP) continue;
+
+                // ★ v3.110.7: 이 턴 이미 계획된 능력 스킵 — PlanPostAttackActions 등 여러 phase가
+                // PlanDebuff를 호출하면서 같은 첫 번째 debuff를 반복 선택하던 버그.
+                string debuffGuid = debuff.Blueprint?.AssetGuid?.ToString() ?? debuff.Name ?? "";
+                if (plannedGuids != null && plannedGuids.Contains(debuffGuid)) continue;
 
                 if (AllyStateCache.HasBuff(target, debuff)) continue;
 
@@ -864,6 +869,7 @@ namespace CompanionAI_v3.Planning.Planners
                     }
 
                     remainingAP -= cost;
+                    plannedGuids?.Add(debuffGuid);  // ★ v3.110.7: dedup 등록
                     Main.Log($"[{roleName}] Debuff: {debuff.Name} -> {target.CharacterName}");
                     return PlannedAction.Debuff(debuff, target, $"Debuff {target.CharacterName}", cost);
                 }

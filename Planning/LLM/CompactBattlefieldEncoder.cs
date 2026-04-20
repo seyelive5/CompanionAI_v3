@@ -653,7 +653,7 @@ namespace CompanionAI_v3.Planning.LLM
 
         // ════════════════════════════════════════════════════════════
         // CMD: Commander 지시 (팀 전략)
-        // CMD:focus=0,form=aggressive,syn=tank_first
+        // CMD:enc=boss,focus=0,form=aggressive,syn=tank_first
         // ════════════════════════════════════════════════════════════
 
         private static void AppendCommanderLine()
@@ -664,8 +664,17 @@ namespace CompanionAI_v3.Planning.LLM
             _sb.Append("CMD:");
             bool needComma = false;
 
+            // ★ v3.110.4: EncounterType 토큰 — narration 파싱에 의존하지 않는 구조화 채널.
+            // "normal"은 default라 스킵 (토큰 절약).
+            if (!string.IsNullOrEmpty(cmd.EncounterType) && cmd.EncounterType != "normal")
+            {
+                _sb.Append("enc=").Append(cmd.EncounterType);
+                needComma = true;
+            }
+
             if (cmd.FocusTarget >= 0)
             {
+                if (needComma) _sb.Append(',');
                 _sb.Append("focus=").Append(cmd.FocusTarget);
                 needComma = true;
             }

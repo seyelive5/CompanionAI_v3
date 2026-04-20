@@ -48,6 +48,10 @@ namespace CompanionAI_v3.Planning.LLM
         {
             if (_isPreComputing) return;
 
+            // ★ v3.110.4: Defense-in-depth — LLMScorer._isScoring가 true인 동안 새 Score 호출 방지.
+            // 실전 로그에선 race 미발생이나, 재귀 TryStartPreCompute와 이벤트 재진입 등 이론적 경로 차단.
+            if (LLMScorer.IsScoring) return;
+
             // LLM 전역 설정 확인
             if (!(Main.Settings?.EnableLLMCombatAI ?? false)) return;
 

@@ -93,6 +93,8 @@ namespace CompanionAI_v3.Core
 
         // ★ Cross-Combat Tactical Memory: 전투 중 사용된 가중치 추적
         private static ScorerWeights _combatDominantWeights;
+        // ★ v3.110.4: best-turn 선정용 — 최고 turn score (ExpectedKills + Damage 기반)
+        private static float _combatBestTurnScore;
 
         #endregion
 
@@ -611,6 +613,9 @@ namespace CompanionAI_v3.Core
                         if (Main.Settings.EnableTrainingDataCollection)
                             StoreTrainingContext(turnState, unit, situation, role.ToString(), weights, single.Summary ?? singleStratLabel);
 
+                        // ★ v3.110.4: best-turn weights 선정 — 단일 후보 경로도 기록 (이전 누락).
+                        TryUpdateBestCombatWeights(weights, single.Strategy);
+
                         _pendingCandidates = null;
                         return ExecuteNextAction(unit, unitName, turnState, situation);
                     }
@@ -764,9 +769,9 @@ namespace CompanionAI_v3.Core
                     StoreTrainingContext(turnState, unit, situation, trainRole.ToString(), _pendingWeights, finalSummary);
                 }
 
-                // ★ Tactical Memory: 전투 중 사용 가중치 추적 (마지막 LLM weights 유지)
-                if (_pendingWeights != null && !_pendingWeights.IsDefault)
-                    _combatDominantWeights = _pendingWeights;
+                // ★ v3.110.4: Tactical Memory — best-turn weights 선정으로 변경.
+                // 이전에는 마지막 non-default weights를 유지했으나, 후반 cleanup 턴이 덮어써서 학습 신호 왜곡.
+                TryUpdateBestCombatWeights(_pendingWeights, finalStrategy);
 
                 return ExecuteNextAction(unit, unitName, turnState, situation);
             }
@@ -829,6 +834,32 @@ namespace CompanionAI_v3.Core
             _commanderStarted = false;
             _commanderResult = null;
             LLMCommander.Reset();
+        }
+
+        /// <summary>
+        /// ★ v3.110.4: 전투 턴별 best-turn score로 dominant weights 선정.
+        /// 이전 (~v3.110.3): 마지막 non-default turn weights → 후반 cleanup 턴 편향 문제.
+        /// 현재: ExpectedKills + ExpectedTotalDamage 기반 turn score, 최고 점수 턴의 weights를 dominant로.
+        /// 공식은 CandidatePlanGenerator의 utility 공식과 동일 (일관성).
+        /// TacticalMemory에 기록되는 "이 적 구성에 효과적이었던 weights" 학습 신호를 의미 있게 만듦.
+        /// </summary>
+        private static void TryUpdateBestCombatWeights(ScorerWeights weights, TurnStrategy strategy)
+        {
+            if (weights == null || weights.IsDefault) return;
+
+            float turnScore = 100f;
+            if (strategy != null)
+            {
+                if (strategy.ExpectedKills > 0) turnScore += strategy.ExpectedKills * 40f;
+                turnScore += strategy.ExpectedTotalDamage * 0.1f;
+            }
+
+            if (turnScore > _combatBestTurnScore)
+            {
+                _combatBestTurnScore = turnScore;
+                _combatDominantWeights = weights;
+                Main.LogDebug($"[TacticalMemory] Best-turn weights updated: score={turnScore:F0} {weights}");
+            }
         }
 
         /// <summary>
@@ -1528,6 +1559,7 @@ namespace CompanionAI_v3.Core
                 Main.LogDebug($"[TacticalMemory] Record failed: {ex.Message}");
             }
             _combatDominantWeights = null;
+            _combatBestTurnScore = 0f;
 
             // ★ v3.20.0: [CombatReport] 전투 종료 → 리포트 내보내기
             CombatReportCollector.Instance.OnCombatEnd("Victory");
