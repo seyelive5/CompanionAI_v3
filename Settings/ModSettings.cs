@@ -490,20 +490,7 @@ namespace CompanionAI_v3.Settings
                 { Language.Japanese, "デフォルトにリセット" },
                 { Language.Chinese, "重置为默认" }
             },
-            ["MinSafeDistance"] = new() {
-                { Language.English, "Min Safe Distance" },
-                { Language.Korean, "최소 안전 거리" },
-                { Language.Russian, "Мин. безопасная дистанция" },
-                { Language.Japanese, "最小安全距離" },
-                { Language.Chinese, "最小安全距离" }
-            },
-            ["MinSafeDistanceDesc"] = new() {
-                { Language.English, "Minimum distance ranged characters try to keep from enemies (meters)" },
-                { Language.Korean, "원거리 캐릭터가 적과 유지하려는 최소 거리 (미터)" },
-                { Language.Russian, "Минимальная дистанция, которую дальнобойные персонажи стараются держать от врагов (метры)" },
-                { Language.Japanese, "遠距離キャラクターが敵との間に保つ最小距離（メートル）" },
-                { Language.Chinese, "远程角色与敌人保持的最小距离（米）" }
-            },
+            // ★ v3.110.11: MinSafeDistance 로컬라이제이션 삭제 (WeaponRangeProfile 자동 계산으로 대체).
             ["HealAtHPPercent"] = new() {
                 { Language.English, "Heal at HP%" },
                 { Language.Korean, "힐 시작 HP%" },
@@ -518,20 +505,7 @@ namespace CompanionAI_v3.Settings
                 { Language.Japanese, "味方のHPがこの割合以下になったら回復を開始" },
                 { Language.Chinese, "队友HP降至此百分比以下时开始治疗" }
             },
-            ["MinEnemiesForAoE"] = new() {
-                { Language.English, "Min Enemies for AOE" },
-                { Language.Korean, "AOE 최소 적 수" },
-                { Language.Russian, "Мин. врагов для AOE" },
-                { Language.Japanese, "AOE最小敵数" },
-                { Language.Chinese, "AOE最少敌人数" }
-            },
-            ["MinEnemiesForAoEDesc"] = new() {
-                { Language.English, "Minimum number of enemies to use AOE abilities" },
-                { Language.Korean, "AOE 능력 사용에 필요한 최소 적 수" },
-                { Language.Russian, "Минимальное количество врагов для использования AOE способностей" },
-                { Language.Japanese, "AOE能力を使用するために必要な最小敵数" },
-                { Language.Chinese, "使用AOE技能所需的最少敌人数量" }
-            },
+            // ★ v3.110.11: MinEnemiesForAoE 로컬라이제이션 삭제 (AIConfig.AoE.MinClusterSize로 중앙집중).
 
             // ★ v3.5.20: Performance Settings
             ["PerformanceSettings"] = new() {
@@ -2311,13 +2285,18 @@ namespace CompanionAI_v3.Settings
         public bool UseBuffsBeforeAttack { get; set; } = true;
         public bool FinishLowHPEnemies { get; set; } = true;
         public bool AvoidFriendlyFire { get; set; } = true;
-        public int MinEnemiesForAoE { get; set; } = 2;
+
+        // ★ v3.110.11: MinEnemiesForAoE 삭제 — ClusterDetector.MIN_CLUSTER_SIZE (AIConfig)로 중앙집중.
+        //   이전: per-character 설정 (기본 2). ClusterDetector의 전역 설정과 중복/충돌.
+        //   현재: AIConfig.AoEConfig.MinClusterSize 단일 소스.
 
         // Movement behavior
         public bool AllowRetreat { get; set; } = true;
         public bool SeekCover { get; set; } = true;
-        // ★ v3.1.29: 기본값 7m로 증가 (근접 무기 사거리 3-5m 고려, 여유 확보)
-        public float MinSafeDistance { get; set; } = 7.0f;
+
+        // ★ v3.110.11: MinSafeDistance 삭제 — WeaponRangeProfile에서 무기 특성 기반 자동 계산.
+        //   이전: 기본값 7m가 Cone 무기 봉쇄, 단발 저격기엔 과도. 사용자 튜닝 불가능한 값.
+        //   현재: EffectiveRange × 0.3 자동 계산 (근접 0, Cone r=7→2.1, 볼터 15→4.5).
 
         // Resource management
         public bool ConserveAmmo { get; set; } = false;
@@ -2595,10 +2574,8 @@ namespace CompanionAI_v3.Settings
                     UseBuffsBeforeAttack = DefaultSettings.UseBuffsBeforeAttack,
                     FinishLowHPEnemies = DefaultSettings.FinishLowHPEnemies,
                     AvoidFriendlyFire = DefaultSettings.AvoidFriendlyFire,
-                    MinEnemiesForAoE = DefaultSettings.MinEnemiesForAoE,
                     AllowRetreat = DefaultSettings.AllowRetreat,
                     SeekCover = DefaultSettings.SeekCover,
-                    MinSafeDistance = DefaultSettings.MinSafeDistance,
                     ConserveAmmo = DefaultSettings.ConserveAmmo,
                     HealAtHPPercent = DefaultSettings.HealAtHPPercent,
                     UseKillSimulator = DefaultSettings.UseKillSimulator,

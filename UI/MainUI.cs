@@ -1704,9 +1704,8 @@ namespace CompanionAI_v3.UI
             // Reset button
             if (GUILayout.Button($"<color={UIStyles.Gold}>{L("ResetToDefault")}</color>", UIStyles.Button, GUILayout.Width(UIStyles.Sd(134)), GUILayout.Height(UIStyles.Sd(24))))
             {
-                _editingSettings.MinSafeDistance = 7.0f;
+                // ★ v3.110.11: MinSafeDistance, MinEnemiesForAoE 삭제 (자동 계산 / AIConfig로 이전)
                 _editingSettings.HealAtHPPercent = 50;
-                _editingSettings.MinEnemiesForAoE = 2;
                 _editingSettings.UseKillSimulator = true;
                 _editingSettings.UseAoEOptimization = true;
                 _editingSettings.UsePredictiveMovement = true;
@@ -1728,23 +1727,13 @@ namespace CompanionAI_v3.UI
             GUILayout.Space(15);
 
             // Sliders
-            _editingSettings.MinSafeDistance = DrawSliderSetting(
-                L("MinSafeDistance"),
-                L("MinSafeDistanceDesc"),
-                _editingSettings.MinSafeDistance,
-                3f, 15f, "0.0", "m");
-
+            // ★ v3.110.11: MinSafeDistance 슬라이더 삭제 — WeaponRangeProfile 자동 계산.
+            // ★ v3.110.11: MinEnemiesForAoE 슬라이더 삭제 — AIConfig.AoE.MinClusterSize (고급 설정 탭)로 이전.
             _editingSettings.HealAtHPPercent = DrawSliderSettingInt(
                 L("HealAtHPPercent"),
                 L("HealAtHPPercentDesc"),
                 _editingSettings.HealAtHPPercent,
                 20, 80, "%");
-
-            _editingSettings.MinEnemiesForAoE = DrawSliderSettingInt(
-                L("MinEnemiesForAoE"),
-                L("MinEnemiesForAoEDesc"),
-                _editingSettings.MinEnemiesForAoE,
-                1, 5, "");
 
             GUILayout.EndVertical();
         }

@@ -201,6 +201,10 @@ namespace CompanionAI_v3.Planning.Planners
                 foreach (var atk in filteredAttacks)
                 {
                     float range = CombatAPI.GetAbilityRangeInTiles(atk);
+                    // ★ v3.110.12: 무제한 사거리 필터 — SituationAnalyzer.ComputeBlendedAttackRange와 동일 가드.
+                    // 이전: 힐/버프 같은 사실상 무제한 사거리 능력이 BestAbilityRange=100000으로 기록 →
+                    // MovementPlanner가 "적이 항상 사거리 내"로 오판하여 Support 유닛이 제자리 고착.
+                    if (range >= 1000f) continue;
                     if (range > context.BestAbilityRange)
                         context.BestAbilityRange = range;
                 }
@@ -857,7 +861,7 @@ namespace CompanionAI_v3.Planning.Planners
                 // ★ v3.1.18: 패턴 타입에 따른 분기
                 // ★ v3.1.29: MinEnemiesForAoE 설정값 적용
                 // ★ v3.8.09: GetActualIsDirectional() 사용으로 정확한 판정
-                int minEnemiesForAoE = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+                int minEnemiesForAoE = ClusterDetector.MIN_CLUSTER_SIZE;
                 bool isActuallyDirectional = CombatAPI.GetActualIsDirectional(ability);
 
                 if (isActuallyDirectional)
@@ -1018,7 +1022,7 @@ namespace CompanionAI_v3.Planning.Planners
 
             if (unitTargetedAoE.Count == 0) return null;
 
-            int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+            int minEnemies = ClusterDetector.MIN_CLUSTER_SIZE;
 
             // 각 유닛 타겟 AoE 능력에 대해 최적 타겟 탐색
             PlannedAction bestAction = null;
@@ -1121,7 +1125,7 @@ namespace CompanionAI_v3.Planning.Planners
                 return (null, null);
 
             var unit = situation.Unit;
-            int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+            int minEnemies = ClusterDetector.MIN_CLUSTER_SIZE;
             if (situation.Enemies.Count < minEnemies)
                 return (null, null);
 
@@ -1496,7 +1500,7 @@ namespace CompanionAI_v3.Planning.Planners
                 if (AllyStateCache.HasBuff(situation.Unit, ability)) continue;
 
                 // ★ v3.1.29: MinEnemiesForAoE 설정값 적용
-                int minEnemiesForAoE = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+                int minEnemiesForAoE = ClusterDetector.MIN_CLUSTER_SIZE;
 
                 // 최적 위치 찾기 (적 대상이므로 기존 로직 재사용)
                 var bestPosition = AoESafetyChecker.FindBestAoEPosition(
@@ -1637,7 +1641,7 @@ namespace CompanionAI_v3.Planning.Planners
                 return null;
 
             var aoeConfig = AIConfig.GetAoEConfig();
-            int minEnemiesForAoE = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+            int minEnemiesForAoE = ClusterDetector.MIN_CLUSTER_SIZE;
             var caster = situation.Unit;
 
             // 1. 근접 AOE 능력 찾기 (AvailableAttacks에서)

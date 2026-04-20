@@ -133,7 +133,8 @@ namespace CompanionAI_v3.Analysis
 
             situation.CharacterSettings = charSettings;
             situation.RangePreference = charSettings?.RangePreference ?? RangePreference.Adaptive;
-            situation.MinSafeDistance = charSettings?.MinSafeDistance ?? 5f;
+            // ★ v3.110.11: MinSafeDistance는 WeaponRangeProfile에서 자동 계산됨 (AnalyzeWeapons 참조).
+            // 초기값 0 유지, AnalyzeWeapons 이후 덮어써짐.
         }
 
         private void AnalyzeWeapons(Situation situation, BaseUnitEntity unit)
@@ -144,19 +145,13 @@ namespace CompanionAI_v3.Analysis
             situation.CurrentAmmo = CombatAPI.GetCurrentAmmo(unit);
             situation.MaxAmmo = CombatAPI.GetMaxAmmo(unit);
 
-            // ★ v3.9.24: 무기 사거리 프로필 계산 (중앙집중 관리)
-            situation.WeaponRange = CombatAPI.GetWeaponRangeProfile(unit, situation.MinSafeDistance);
+            // ★ v3.9.24 → v3.110.11: 무기 사거리 프로필 계산 (자동 MinSafeDistance 포함)
+            situation.WeaponRange = CombatAPI.GetWeaponRangeProfile(unit);
 
-            // ★ v3.9.24: MinSafeDistance 클램핑 — 무기 사거리보다 안전 거리가 크면 조정
-            // 산탄총(5 tiles)에 MinSafe=7이면 → ClampedMinSafe=4로 자동 조정
-            // 볼터(18 tiles)에 MinSafe=7이면 → 그대로 7 유지
-            if (situation.WeaponRange.WasMinSafeClamped)
-            {
-                float oldMinSafe = situation.MinSafeDistance;
-                situation.MinSafeDistance = situation.WeaponRange.ClampedMinSafeDistance;
-                Main.Log($"[Analyzer] {unit.CharacterName}: MinSafeDistance clamped {oldMinSafe:F1} → {situation.MinSafeDistance:F1} " +
-                    $"(weapon EffectiveRange={situation.WeaponRange.EffectiveRange:F1})");
-            }
+            // ★ v3.110.11: MinSafeDistance는 무기 특성 기반 자동 계산값 사용.
+            // 이전(v3.110.10까지): 사용자 설정 7m 기반 → Cone 무기 봉쇄.
+            // 현재: EffectiveRange × 0.3. 근접/Scatter=0, Cone r=7→2.1, 볼터 15→4.5.
+            situation.MinSafeDistance = situation.WeaponRange.ClampedMinSafeDistance;
 
             // ★ v3.9.72: 무기 세트 로테이션 분석
             if (situation.CharacterSettings?.EnableWeaponSetRotation == true &&

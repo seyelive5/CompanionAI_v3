@@ -39,20 +39,40 @@ namespace CompanionAI_v3.Planning.Planners
             // 사용 사례: 원거리 fallback으로 Hittable=True인데 PreferMelee라서 공격 못함 → 이동 필요
             // ★ v3.1.29: 원거리 캐릭터가 위험 거리 내에 있으면 후퇴 이동 허용
             // ★ v3.96.0: LLM PriorityTarget이 비-Hittable이면 우회 이동 허용
+            MoveDecisionTracker.Reset();
+
             if (!forceMove && situation.HasHittableEnemies)
             {
                 // 원거리가 위험하면 이동 허용 (공격 가능해도 후퇴 필요)
                 bool isRangedInDanger = situation.PrefersRanged && situation.IsInDanger;
                 bool llmBypass = ShouldBypassHittableGate(situation);
                 if (!isRangedInDanger && !llmBypass)
+                {
+                    MoveDecisionTracker.Set(MoveDecisionReason.NoMoveNeeded_Hittable);
                     return null;
+                }
                 if (llmBypass)
                     Main.Log($"[{roleName}] LLM PriorityTarget is non-hittable — bypassing hittable gate for approach");
                 else if (Main.IsDebugEnabled)
                     Main.LogDebug($"[{roleName}] Ranged in danger - allowing movement despite hittable enemies");
             }
-            if (!situation.HasLivingEnemies) return null;
-            if (situation.NearestEnemy == null) return null;
+            if (!situation.HasLivingEnemies) { MoveDecisionTracker.Set(MoveDecisionReason.NoLivingEnemies); return null; }
+            if (situation.NearestEnemy == null) { MoveDecisionTracker.Set(MoveDecisionReason.NoNearestEnemy); return null; }
+
+            // ★ v3.110.12: 모든 공격 능력이 필터링됐으면 이동 자체가 무의미.
+            // AttackPlanner가 쿨다운/Restriction으로 모든 공격 필터링 시 AllAbilitiesFiltered=true.
+            // 예외: 원거리가 위험 상황(IsInDanger) → 후퇴를 위해 이동 허용.
+            if (!forceMove && attackContext?.AllAbilitiesFiltered == true)
+            {
+                bool needsRetreat = situation.PrefersRanged && situation.IsInDanger;
+                if (!needsRetreat)
+                {
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanMoveOrGapCloser: All abilities filtered and not in danger — skip movement");
+                    MoveDecisionTracker.Set(MoveDecisionReason.AllAbilitiesFiltered, "all attacks filtered, not in danger");
+                    return null;
+                }
+                if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanMoveOrGapCloser: All abilities filtered but ranged in danger — allowing retreat movement");
+            }
 
             // ★ v3.5.18: Blackboard에서 전술적 타겟 결정
             // 우선순위: SharedTarget > BestTarget > NearestEnemy
@@ -759,11 +779,26 @@ namespace CompanionAI_v3.Planning.Planners
                         float nearestEnemyTiles = CombatCache.GetDistanceInTiles(unit, target);
                         if (nearestEnemyTiles <= weaponRange)
                         {
-                            if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanMoveToEnemy: Enemy in range ({nearestEnemyTiles:F1} <= {weaponRange:F1}) but no safe position - staying put");
-                            return null;
+                            // ★ v3.110.12: 현재 위치에서 실제 공격 가능한지 검증.
+                            // 이전: 적이 사거리 내면 "공격 가능하다고 가정"하고 제자리. bestPosition==null은 "모든 후보가
+                            // 필터 실패"이므로 현재 위치도 필터 실패일 가능성 높음.
+                            // 증상: Hittable=0 Best 64% (로그). Best 선택은 했지만 공격 불가한 위치에 고착.
+                            // 수정: 현재 위치 hittable=0이면 approach fallback 경로로 진행.
+                            var currentNode = unit.Position.GetNearestNodeXZ() as CustomGridNodeBase;
+                            int currentHittable = currentNode != null
+                                ? CombatAPI.CountHittableEnemiesFromPosition(unit, currentNode, situation.Enemies, null, null)
+                                : 0;
+                            if (currentHittable > 0)
+                            {
+                                if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanMoveToEnemy: staying put (currentHittable={currentHittable}, enemy {nearestEnemyTiles:F1}t)");
+                                MoveDecisionTracker.Set(MoveDecisionReason.StayingPut_Hittable, $"currentHittable={currentHittable}");
+                                return null;
+                            }
+                            // 현재 위치도 공격 불가 → approach 진행
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanMoveToEnemy: current position unhittable (enemy {nearestEnemyTiles:F1}t), trying approach");
                         }
 
-                        // 사거리 밖 → 접근하되 안전 거리 유지
+                        // 사거리 밖 OR 사거리 내이지만 현재 위치에서 공격 불가 → 접근
                         var safeApproach = MovementAPI.FindBestApproachPosition(unit, target, effectiveMP);
                         if (safeApproach != null)
                         {
@@ -772,6 +807,7 @@ namespace CompanionAI_v3.Planning.Planners
                             if (approachDistToEnemy < situation.MinSafeDistance)
                             {
                                 if (Main.IsDebugEnabled) Main.LogDebug($"[{roleName}] PlanMoveToEnemy: Approach cancelled - would enter danger zone ({approachDistToEnemy:F1} < MinSafe={situation.MinSafeDistance:F1})");
+                                MoveDecisionTracker.Set(MoveDecisionReason.ApproachCancelledBySafety, $"approach {approachDistToEnemy:F1} < MinSafe {situation.MinSafeDistance:F1}");
                                 return null;
                             }
                             Main.Log($"[{roleName}] PlanMoveToEnemy: Safe approach ({approachDistToEnemy:F1} tiles from enemy)");
@@ -1362,7 +1398,9 @@ namespace CompanionAI_v3.Planning.Planners
         {
             float range;
 
-            if (attackContext?.HasValidRange == true)
+            // ★ v3.110.12: 무제한 사거리(>=1000) 방어 — AttackPlanner A.1 수정의 안전망.
+            // 다른 경로에서 무제한 값이 들어와도 WeaponRange 폴백으로 전환.
+            if (attackContext?.HasValidRange == true && attackContext.BestAbilityRange < 1000f)
             {
                 range = attackContext.BestAbilityRange;
                 if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] GetEffectiveRange: ability={range:F1} (from context)");
@@ -1373,7 +1411,8 @@ namespace CompanionAI_v3.Planning.Planners
                 range = situation.BlendedAttackRange > 0
                     ? situation.BlendedAttackRange
                     : situation.WeaponRange.EffectiveRange;
-                if (range <= 0f) range = 15f;  // 안전 폴백
+                // ★ v3.110.12: 무제한/0 방어. 이상치는 15타일(기본값) 폴백.
+                if (range <= 0f || range >= 1000f) range = 15f;
             }
 
             // ★ v3.9.74: 무기 로테이션 활성 시 짧은 사거리 무기 기준 포지셔닝

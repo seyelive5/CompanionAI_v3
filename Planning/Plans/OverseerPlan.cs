@@ -766,7 +766,7 @@ namespace CompanionAI_v3.Planning.Plans
 
             // Phase 4.97: Point-target AoE + Unit-targeted AoE (근접/원거리 공통)
             // ★ v3.19.0: 전략이 AoE 추천 시 적 수 조건 완화
-            int minEnemiesForAoE = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+            int minEnemiesForAoE = ClusterDetector.MIN_CLUSTER_SIZE;
             bool strategyRecommendsAoE = strategy?.ShouldPrioritizeAoE == true;
             if (!didPlanAoE && remainingAP >= 1f && situation.HasAoEAttacks &&
                 (strategyRecommendsAoE || situation.Enemies.Count >= minEnemiesForAoE))

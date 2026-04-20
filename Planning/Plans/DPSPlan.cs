@@ -274,7 +274,7 @@ namespace CompanionAI_v3.Planning.Plans
                     else
                     {
                         // ★ v3.10.0: 전략 없음/미해당 — 기존 Kill Seq vs AoE 비교 로직
-                        int minEnemiesForAoE = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+                        int minEnemiesForAoE = ClusterDetector.MIN_CLUSTER_SIZE;
                         if (situation.HasAoEAttacks && situation.Enemies.Count >= minEnemiesForAoE)
                         {
                             float aoEValue = EstimateAoEValue(situation);
@@ -505,7 +505,7 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.5.37: MinEnemiesForAoE 설정 적용
             // ★ v3.8.96: AvailableAoEAttacks 캐시 사용 + Unit-targeted AoE (Burst/Scatter 등) 추가
             // ★ v3.11.0: 전략이 AoE 추천 시 클러스터 검증 바이패스
-            int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+            int minEnemies = ClusterDetector.MIN_CLUSTER_SIZE;
             if (remainingAP >= 1f && situation.HasAoEAttacks && situation.Enemies.Count >= minEnemies)
             {
                 bool hasAoEOpportunity = false;
@@ -1620,7 +1620,7 @@ namespace CompanionAI_v3.Planning.Plans
         /// </summary>
         private float EstimateAoEValue(Situation situation)
         {
-            int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+            int minEnemies = ClusterDetector.MIN_CLUSTER_SIZE;
             float bestValue = 0f;
             string bestAbilityName = null;
             int bestClusterCount = 0;

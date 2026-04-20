@@ -306,7 +306,7 @@ namespace CompanionAI_v3.Planning.Plans
             if (!didPlanAttack && situation.HasLivingEnemies && situation.HasAoEAttacks)
             {
                 bool useAoEOptimization = situation.CharacterSettings?.UseAoEOptimization ?? true;
-                int minEnemies = situation.CharacterSettings?.MinEnemiesForAoE ?? 2;
+                int minEnemies = ClusterDetector.MIN_CLUSTER_SIZE;
                 bool hasAoEOpportunity = false;
 
                 // ★ v3.19.0: 전략이 AoE를 추천하면 클러스터 검증 스킵

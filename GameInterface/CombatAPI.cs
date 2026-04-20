@@ -1288,12 +1288,10 @@ namespace CompanionAI_v3.GameInterface
             public bool HasDirectionalPattern;
             /// <summary>방향성 패턴 반경 (타일 단위)</summary>
             public float PatternRadius;
-            /// <summary>min(설정값, EffectiveRange - 1) — 안전 거리가 무기 사거리를 초과하지 않도록</summary>
+            /// <summary>★ v3.110.11: 자동 계산된 MinSafeDistance (타일). EffectiveRange × 0.3, 근접/Scatter=0.</summary>
             public float ClampedMinSafeDistance;
             /// <summary>max(0, EffectiveRange - 1) — 후퇴 시 최대 거리</summary>
             public float MaxRetreatDistance;
-            /// <summary>MinSafe가 무기 사거리에 의해 클램핑되었는지</summary>
-            public bool WasMinSafeClamped;
             /// <summary>EffectiveRange <= 8 인 단거리 무기</summary>
             public bool IsShortRange => EffectiveRange <= 8f;
         }
@@ -1302,22 +1300,25 @@ namespace CompanionAI_v3.GameInterface
         private static readonly Dictionary<string, WeaponRangeProfile> _weaponRangeCache = new Dictionary<string, WeaponRangeProfile>();
 
         /// <summary>
-        /// ★ v3.9.24: 무기 사거리 프로필 중앙 계산
+        /// ★ v3.9.24 → v3.110.11: 무기 사거리 프로필 중앙 계산 (자동 MinSafeDistance)
         /// - 무기의 OptimalRange/AttackRange 에서 직접 조회
         /// - 방향성 AoE(Cone/Ray/Sector)면 EffectiveRange = patternRadius
-        /// - ClampedMinSafeDistance = min(configuredMinSafe, EffectiveRange - 1)
+        /// - ClampedMinSafeDistance는 무기 특성에서 자동 계산 (사용자 설정 제거)
+        ///   근접/Scatter: 0
+        ///   Cone/Ray: PatternRadius × 0.3 (근접에서 Cone burst 가능)
+        ///   일반 원거리: EffectiveRange × 0.3
         /// - 모든 서브시스템이 이 하나의 소스에서 무기 사거리를 조회
         /// </summary>
-        public static WeaponRangeProfile GetWeaponRangeProfile(BaseUnitEntity unit, float configuredMinSafe)
+        public static WeaponRangeProfile GetWeaponRangeProfile(BaseUnitEntity unit)
         {
             if (unit == null)
-                return CreateDefaultProfile(configuredMinSafe);
+                return CreateDefaultProfile();
 
             string cacheKey = unit.UniqueId;
             if (_weaponRangeCache.TryGetValue(cacheKey, out var cached))
                 return cached;
 
-            var profile = CalculateWeaponRangeProfile(unit, configuredMinSafe);
+            var profile = CalculateWeaponRangeProfile(unit);
             _weaponRangeCache[cacheKey] = profile;
 
             Main.Log($"[CombatAPI] WeaponRangeProfile for {unit.CharacterName}: " +
@@ -1325,14 +1326,16 @@ namespace CompanionAI_v3.GameInterface
                 $"EffectiveRange={profile.EffectiveRange:F1}, " +
                 $"IsMelee={profile.IsMelee}, IsScatter={profile.IsScatter}, " +
                 $"HasDirectional={profile.HasDirectionalPattern}, PatternRadius={profile.PatternRadius:F1}, " +
-                $"ClampedMinSafe={profile.ClampedMinSafeDistance:F1}" +
-                (profile.WasMinSafeClamped ? " (CLAMPED)" : "") +
-                $", IsShortRange={profile.IsShortRange}");
+                $"AutoMinSafe={profile.ClampedMinSafeDistance:F1}, " +
+                $"IsShortRange={profile.IsShortRange}");
 
             return profile;
         }
 
-        private static WeaponRangeProfile CalculateWeaponRangeProfile(BaseUnitEntity unit, float configuredMinSafe)
+        /// <summary>★ v3.110.11: 무기 특성 기반 자동 MinSafeDistance (타일).</summary>
+        private const float AUTO_MINSAFE_RATIO = 0.3f;
+
+        private static WeaponRangeProfile CalculateWeaponRangeProfile(BaseUnitEntity unit)
         {
             var profile = new WeaponRangeProfile();
 
@@ -1340,7 +1343,7 @@ namespace CompanionAI_v3.GameInterface
             {
                 var primaryHand = unit.Body?.PrimaryHand;
                 if (primaryHand?.HasWeapon != true)
-                    return CreateDefaultProfile(configuredMinSafe);
+                    return CreateDefaultProfile();
 
                 var weapon = primaryHand.Weapon;
                 bool isMelee = weapon.Blueprint.IsMelee;
@@ -1394,41 +1397,39 @@ namespace CompanionAI_v3.GameInterface
                     return profile;
                 }
 
-                // ★ 핵심 로직: MinSafeDistance 클램핑
-                // 무기 사거리가 설정된 안전 거리보다 짧으면 안전 거리를 무기 사거리에 맞춤
-                float maxAllowedMinSafe = profile.EffectiveRange - 1f;
-                if (maxAllowedMinSafe < 0f) maxAllowedMinSafe = 0f;
+                // ★ v3.110.11: 자동 MinSafeDistance 계산 (사용자 설정 제거)
+                // 근거: EffectiveRange × 0.3 = 적절히 가까운 사격 거리
+                //   볼터 단발 (MaxD 15) → 4.5타일
+                //   볼터 Cone (PatternRadius 7) → 2.1타일 (Cone burst 영역 진입 가능)
+                //   산탄총 (MaxD 5) → 1.5타일
+                // 이전: 사용자 설정 7m 고정 → 무기 특성 무시, Cone 사용 봉쇄
+                profile.ClampedMinSafeDistance = Math.Max(1f, profile.EffectiveRange * AUTO_MINSAFE_RATIO);
 
-                if (configuredMinSafe > maxAllowedMinSafe)
-                {
-                    profile.ClampedMinSafeDistance = maxAllowedMinSafe;
-                    profile.WasMinSafeClamped = true;
-                }
-                else
-                {
-                    profile.ClampedMinSafeDistance = configuredMinSafe;
-                }
-
-                profile.MaxRetreatDistance = maxAllowedMinSafe;
+                // MaxRetreatDistance는 여전히 EffectiveRange - 1 (후퇴 상한)
+                float maxAllowedRetreat = profile.EffectiveRange - 1f;
+                if (maxAllowedRetreat < 0f) maxAllowedRetreat = 0f;
+                profile.MaxRetreatDistance = maxAllowedRetreat;
             }
             catch (Exception ex)
             {
                 Main.LogDebug($"[CombatAPI] CalculateWeaponRangeProfile error for {unit.CharacterName}: {ex.Message}");
-                return CreateDefaultProfile(configuredMinSafe);
+                return CreateDefaultProfile();
             }
 
             return profile;
         }
 
-        private static WeaponRangeProfile CreateDefaultProfile(float configuredMinSafe)
+        private static WeaponRangeProfile CreateDefaultProfile()
         {
+            // ★ v3.110.11: 기본 프로필도 EffectiveRange × 0.3 규칙 적용
+            const float DEFAULT_EFFECTIVE_RANGE = 15f;
             return new WeaponRangeProfile
             {
-                MaxRange = 15f,
+                MaxRange = DEFAULT_EFFECTIVE_RANGE,
                 OptimalRange = 0f,
-                EffectiveRange = 15f,
-                ClampedMinSafeDistance = configuredMinSafe,
-                MaxRetreatDistance = 14f,
+                EffectiveRange = DEFAULT_EFFECTIVE_RANGE,
+                ClampedMinSafeDistance = Math.Max(1f, DEFAULT_EFFECTIVE_RANGE * AUTO_MINSAFE_RATIO),
+                MaxRetreatDistance = DEFAULT_EFFECTIVE_RANGE - 1f,
             };
         }
 

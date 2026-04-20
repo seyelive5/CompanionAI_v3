@@ -202,16 +202,28 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
-        /// ★ v3.10.0: 강화된 아군 밀집 패널티
-        /// 1) 물리적 아군 위치: 20pt/tile (기존 10 → 20, 4타일 범위)
-        /// 2) 예약된 이동 목적지: 30pt/tile (다른 유닛이 이번 라운드에 계획한 위치)
-        /// 예약 시스템으로 순차적 턴에서도 위치 분산 보장
+        /// ★ v3.110.9: 아군 밀집 패널티 재조정 — 실전 로그에서 -376까지 폭주하는 케이스 확인.
+        ///
+        /// 이전 (v3.10.0):
+        ///   반경 4타일 선형 감쇠 (0타일=80, 1타일=60, 2타일=40, 3타일=20)
+        ///   예약: 0타일=120, 1타일=90, 2타일=60, 3타일=30
+        ///   파티 5명 + 예약 3~4개가 근처 → -300 이상 흔함.
+        ///   4타일(팀 대형 유지 적정 거리)까지 감점하여 AI가 외톨이 위치 선호 → "너무 멀리" 증상.
+        ///
+        /// 현재: 2단 곡선 — 1타일 이내(실제 겹침)만 강한 페널티, 1~2.5타일은 약한 페널티, 이상은 0.
+        ///   물리적 아군: 0타일=60, 0.5타일=30, 1타일=12, 2타일=4, 2.5+타일=0
+        ///   예약 위치:  0타일=80, 0.5타일=40, 1타일=20, 2타일=5, 2+타일=0
         /// </summary>
         private static float CalculateAllyClusterPenalty(Vector3 position, BaseUnitEntity self)
         {
-            const float CLUSTER_RADIUS_TILES = 4f;
-            const float PENALTY_PER_TILE_ALLY = 20f;       // 물리적 아군: 0타일=80, 1타일=60, 2타일=40
-            const float PENALTY_PER_TILE_RESERVED = 30f;   // 예약 위치: 0타일=120, 1타일=90, 2타일=60
+            const float NEAR_RADIUS_TILES = 1.0f;   // 이 거리 이내는 실제 겹침 영역 → 강한 페널티
+            const float WIDE_RADIUS_ALLY = 2.5f;    // 물리적 아군 영향 최대 거리
+            const float WIDE_RADIUS_RESERVED = 2.0f; // 예약 위치 영향 최대 거리
+
+            const float NEAR_WEIGHT_ALLY = 60f;     // 0타일 기준 최대 페널티
+            const float WIDE_WEIGHT_ALLY = 8f;      // 1~2.5타일 구간 선형 약한 패널티
+            const float NEAR_WEIGHT_RESERVED = 80f;
+            const float WIDE_WEIGHT_RESERVED = 10f;
 
             float penalty = 0f;
             try
@@ -227,24 +239,33 @@ namespace CompanionAI_v3.GameInterface
                         if (!ally.IsPlayerFaction || ally.LifeState.IsDead) continue;
 
                         float distTiles = CombatAPI.MetersToTiles(Vector3.Distance(position, ally.Position));
-                        if (distTiles < CLUSTER_RADIUS_TILES)
+                        if (distTiles < NEAR_RADIUS_TILES)
                         {
-                            penalty += (CLUSTER_RADIUS_TILES - distTiles) * PENALTY_PER_TILE_ALLY;
+                            // 실제 겹침 영역: 강한 페널티
+                            penalty += (NEAR_RADIUS_TILES - distTiles) * NEAR_WEIGHT_ALLY;
+                        }
+                        else if (distTiles < WIDE_RADIUS_ALLY)
+                        {
+                            // 인근: 약한 페널티 (대형 유지와 양립)
+                            penalty += (WIDE_RADIUS_ALLY - distTiles) * WIDE_WEIGHT_ALLY;
                         }
                     }
                 }
 
-                // 2. ★ v3.10.0: 예약된 이동 목적지 패널티 (더 강력)
-                // 다른 유닛이 이번 라운드에 이미 계획한 이동 위치 → 강한 회피
+                // 2. 예약된 이동 목적지 패널티 (물리 위치보다 약간 강함)
                 var reservedPositions = Core.TeamBlackboard.Instance?.GetReservedMovePositions();
                 if (reservedPositions != null)
                 {
                     for (int i = 0; i < reservedPositions.Count; i++)
                     {
                         float distTiles = CombatAPI.MetersToTiles(Vector3.Distance(position, reservedPositions[i]));
-                        if (distTiles < CLUSTER_RADIUS_TILES)
+                        if (distTiles < NEAR_RADIUS_TILES)
                         {
-                            penalty += (CLUSTER_RADIUS_TILES - distTiles) * PENALTY_PER_TILE_RESERVED;
+                            penalty += (NEAR_RADIUS_TILES - distTiles) * NEAR_WEIGHT_RESERVED;
+                        }
+                        else if (distTiles < WIDE_RADIUS_RESERVED)
+                        {
+                            penalty += (WIDE_RADIUS_RESERVED - distTiles) * WIDE_WEIGHT_RESERVED;
                         }
                     }
                 }
@@ -758,31 +779,43 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
-        /// ★ v3.9.26: 명중률% → 위치 보너스 변환
+        /// ★ v3.110.8: 게임 공식 기반 연속 함수로 재설계.
+        ///
+        /// 근거:
+        ///   RuleCalculateAbilityDistanceFactor — (d ≤ MaxD/2 → 1.0, d ≤ MaxD → 0.5, 초과 → 0)
+        ///   RuleCalculateHitChances — hitChance ≈ (BS + 30) × DistanceFactor - Recoil + modifiers
+        ///
+        /// 이전 (v3.9.26 ~ v3.110.7): hitChance integer를 5단계 step으로 매핑 (80/60/40/20 → 20/12/5/-5/-15).
+        ///   문제점:
+        ///   1) 임의 임계값 — 79% vs 80%가 +8점 점프 (비연속)
+        ///   2) Dodge/Parry가 하드 캡이라 실질 명중률은 대부분 ~95%/~50%/0% 3-state로 쏠림 → 5단계 무의미
+        ///   3) Cover 효과가 hitChance에 녹아있어 EvaluatePosition의 CoverScore와 이중 카운팅 위험
+        ///
+        /// 현재: "위치가 직접 통제하는 축"인 DistanceFactor 단독 사용 (연속 0~1).
+        ///   공식: (DistanceFactor - 0.5) × 40
+        ///     1.0 (풀 명중률 영역) → +20
+        ///     0.5 (반토막 영역, 중립) → 0
+        ///     0.0 (사거리 초과) → -20
+        ///   Cover는 EvaluatePosition.CoverScore에서 별도 처리 (중복 방지).
         /// </summary>
         private static float HitChanceToBonus(CombatAPI.HitChanceInfo hitInfo)
         {
             if (hitInfo == null) return 0f;
-            int hitChance = hitInfo.HitChance;
-
-            if (hitChance >= 80) return 20f;
-            if (hitChance >= 60) return 12f;
-            if (hitChance >= 40) return 5f;
-            if (hitChance >= 20) return -5f;
-            return -15f;
+            return (hitInfo.DistanceFactor - 0.5f) * 40f;
         }
 
         /// <summary>
         /// ★ v3.9.26: 폴백 거리 밴드 기반 보너스 (primaryAttack 없을 때)
+        /// ★ v3.110.8: optimalRange를 50%로 수정 — 게임 공식 RuleCalculateAbilityDistanceFactor의
+        /// DistanceFactor 1.0 경계(MaxD/2)와 일치. 이전 0.6은 이미 DistanceFactor=0.5 반토막 영역.
         /// </summary>
-        /// ★ v3.74.2: optimalRange를 60%로 수정 + 최대사거리 근처 이차 감쇠
         private static float CalculateDistanceBandBonus(
             Vector3 position,
             List<BaseUnitEntity> enemies,
             float weaponRange)
         {
             float bestBonus = -10f;
-            float optimalRange = weaponRange * 0.6f;
+            float optimalRange = weaponRange * 0.5f;  // ★ v3.110.8: 0.6 → 0.5 (게임 공식)
 
             for (int i = 0; i < enemies.Count; i++)
             {
@@ -798,9 +831,9 @@ namespace CompanionAI_v3.GameInterface
                 }
                 else if (distTiles <= weaponRange)
                 {
-                    // ★ v3.74.2: 이차 감쇠 — 최대사거리 근처는 더 큰 페널티
+                    // 이차 감쇠 — 최대사거리 근처는 더 큰 페널티
                     float excess = (distTiles - optimalRange) / Math.Max(weaponRange - optimalRange, 1f);
-                    bonus = 15f - (excess * excess) * 20f;  // 60%→15, 80%→11.75, 100%→-5
+                    bonus = 15f - (excess * excess) * 20f;  // 50%→15, 75%→10, 100%→-5
                 }
                 else
                 {
@@ -963,15 +996,16 @@ namespace CompanionAI_v3.GameInterface
                     }
                     else if (nearestEnemyDist <= weaponRange)
                     {
-                        // ★ v3.9.48 → v3.74.2: 최적 사거리(60%) 선호 — 이차 감쇠 강화
-                        // v3.9.48: 선형 deviation*12 → 최대 사거리에서도 20.2점 (차이 4.8점만)
-                        // v3.74.2: 이차 감쇠 → 최대 사거리에서 15.4점 (차이 9.6점)
-                        // minSafe(0%)→15.4, 30%→21.8, 60%→25, 80%→23.4, 100%→15.4
-                        float denominator = weaponRange - minSafeDistance;
-                        float distRatio = denominator > 0.1f
-                            ? (nearestEnemyDist - minSafeDistance) / denominator
-                            : 0.5f;
-                        float optimalRatio = 0.6f;
+                        // ★ v3.110.8: 게임 공식 일치 — RuleCalculateAbilityDistanceFactor에 따르면
+                        //   d ≤ MaxD/2 → DistanceFactor 1.0 (풀 명중률, hitChance ≈ (BS+30)×1.0)
+                        //   d ≤ MaxD   → DistanceFactor 0.5 (반토막, hitChance ≈ (BS+30)×0.5)
+                        // optimalRatio = 0.5 (game MaxD/2) + weaponRange 기준 정규화 (minSafe 배제).
+                        // 이전 (v3.9.48 ~ v3.110.7): optimalRatio=0.6 + minSafe 정규화 → optimal d = minSafe + 0.6×(MaxD-minSafe).
+                        // 예: MaxD=15, minSafe=5 → optimal d=11. 그러나 게임 공식 optimal = MaxD/2 = 7.5타일.
+                        // 즉 이전 공식은 게임 공식보다 3.5타일 멀리 최적점 설정 → DistanceFactor 0.5 영역(반토막 명중률) 선호 버그.
+                        // 이차 감쇠 형태는 유지 (tie-break 연속성).
+                        float distRatio = weaponRange > 0.1f ? (nearestEnemyDist / weaponRange) : 0.5f;
+                        float optimalRatio = 0.5f;
                         float deviation = Math.Abs(distRatio - optimalRatio);
                         score.DistanceScore = 25f - (deviation * deviation) * 60f;
                     }
@@ -990,8 +1024,20 @@ namespace CompanionAI_v3.GameInterface
 
             // ★ v3.9.50: Hittable 적 수 보너스 — 공격 가능 위치에 적극적 보너스
             // 방어 패널티만 있고 공격 기회 보너스가 없으면 항상 후퇴가 유리해짐
+            //
+            // ★ v3.110.9: 포화 곡선으로 변경. 이전 hittable × 8 선형 → hittable 16명이면 +128점
+            //   단일 축이 총점의 35~45% 지배 → "멀리서 많이 보이는 위치" 절대 선호 (근거리 소수 커버 밀림).
+            // 현재: 1~3명 강보상(+10/명), 4명+부터 sqrt 감쇠.
+            //   1명→10, 3명→30, 6명→44, 16명→59.
+            //   16명 대 1명 비중 128:8 = 16배 → 60:10 = 6배로 축소.
+            //   AoE multi-hit 기회는 여전히 선호하되 과도한 독주는 완화.
             if (hittableFromLos > 0)
-                score.AttackScore += hittableFromLos * 8f;
+            {
+                int hc = hittableFromLos;
+                float baseBonus = Math.Min(hc, 3) * 10f;
+                float extraBonus = hc > 3 ? (float)Math.Sqrt(hc - 3) * 8f : 0f;
+                score.AttackScore += baseBonus + extraBonus;
+            }
 
             return score;
         }
@@ -1132,8 +1178,29 @@ namespace CompanionAI_v3.GameInterface
                 if (score.HittableEnemyCount > 0)
                 {
                     // allies가 있으면 scatter safety 반영한 정밀 카운트로 덮어쓰기
-                    score.HittableEnemyCount = CombatAPI.CountHittableEnemiesFromPosition(
+                    int initialLosCount = score.HittableEnemyCount;
+                    int realCount = CombatAPI.CountHittableEnemiesFromPosition(
                         unit, score.Node, enemies, primaryAttack, allies);
+                    score.HittableEnemyCount = realCount;
+
+                    // ★ v3.110.10: AttackScore도 실제 hittable count 기준으로 재계산.
+                    //   이전 (v3.110.9 포함): EvaluatePosition에서 LOS 기반 hittableFromLos로 AttackScore 계산 후
+                    //   여기서 HittableEnemyCount만 실제값으로 덮어쓰고 AttackScore는 유지 → 불일치 버그.
+                    //   증상: "LOS로 5명 보이지만 실제 공격 불가" 위치가 Attack=50 유지하여 LOS 폴백에서 Best로 선택.
+                    //   실증 로그(v3.110.9): Best 34건 중 25건(74%)이 hittable=0이었으나 Attack 보너스 부당 수령.
+                    //   수정: realCount 기준으로 AttackScore 재구성. LOS만 있고 실제 공격 불가면 기본 +20만.
+                    if (realCount != initialLosCount)
+                    {
+                        // HasLosToEnemy 여부로 기본 +20 부여 (EvaluatePosition과 동일 기준).
+                        // 사거리 제약은 이미 LOS 계산 및 상위 필터에서 반영되므로 중복 체크 생략.
+                        float attackBase = score.HasLosToEnemy ? 20f : 0f;
+                        if (realCount > 0)
+                        {
+                            attackBase += Math.Min(realCount, 3) * 10f;
+                            if (realCount > 3) attackBase += (float)Math.Sqrt(realCount - 3) * 8f;
+                        }
+                        score.AttackScore = attackBase;
+                    }
                 }
 
                 // ★ v3.74.2: 진동 방지 — 이전 위치 근처로 되돌아가면 패널티
@@ -1150,15 +1217,21 @@ namespace CompanionAI_v3.GameInterface
 
             // ★ v3.8.48: O(n log n) 정렬 제거 → O(n) MaxByWhere 사용 (100+ 요소 최적화)
             // ★ v3.6.18: 실제 공격 가능한 위치 우선 선택 (HittableEnemyCount > 0)
+            //
+            // ★ v3.110.12: 폴백 체인 단계 라벨링 — 어느 단계가 최종 선택했는지 추적 가능.
+            // 5단계 우선순위: hittable-optimal > hittable-close > hittable-risky > los-optimal > los-risky
+            string selectedBy = "none";
             var best = CollectionHelper.MaxByWhere(scores,
                 s => s.CanStand && s.HittableEnemyCount > 0 && s.DistanceScore >= 20f,
                 s => s.TotalScore);
+            if (best != null) selectedBy = "hittable-optimal";
 
             if (best == null)
             {
                 best = CollectionHelper.MaxByWhere(scores,
                     s => s.CanStand && s.HittableEnemyCount > 0 && s.DistanceScore > 0f,
                     s => s.TotalScore);
+                if (best != null) selectedBy = "hittable-close";
             }
 
             // ★ v3.8.45: 3차 폴백에 MinSafeDistance 체크 추가
@@ -1170,6 +1243,7 @@ namespace CompanionAI_v3.GameInterface
                 best = CollectionHelper.MaxByWhere(scores,
                     s => s.CanStand && s.HittableEnemyCount > 0 && s.DistanceScore >= 0f,
                     s => s.TotalScore);
+                if (best != null) selectedBy = "hittable-risky";
             }
 
             // ★ v3.6.18: 공격 가능 위치 없으면 기존 LOS 기반 폴백 (접근 이동용)
@@ -1179,6 +1253,7 @@ namespace CompanionAI_v3.GameInterface
                 best = CollectionHelper.MaxByWhere(scores,
                     s => s.CanStand && s.HasLosToEnemy && s.DistanceScore >= 20f,
                     s => s.TotalScore);
+                if (best != null) selectedBy = "los-optimal";
             }
 
             // ★ v3.8.45: LOS 폴백도 MinSafeDistance 준수
@@ -1187,11 +1262,52 @@ namespace CompanionAI_v3.GameInterface
                 best = CollectionHelper.MaxByWhere(scores,
                     s => s.CanStand && s.HasLosToEnemy && s.DistanceScore >= 0f,
                     s => s.TotalScore);
+                if (best != null) selectedBy = "los-risky";
             }
 
             if (best != null)
             {
-                Main.Log($"[MovementAPI] FindRangedAttackPosition: Best=({best.Position.x:F1},{best.Position.z:F1}), score={best.TotalScore:F1}, dist={CombatAPI.MetersToTiles(Vector3.Distance(best.Position, enemies.FirstOrDefault()?.Position ?? best.Position)):F1}m, hittable={best.HittableEnemyCount}, cover={best.BestCover}, enemyLoS={(best.HasLosToEnemy ? 1 : 0)}");
+                // ★ v3.110.9: NearestEnemy 거리로 수정 (이전: enemies[0] — 단순히 리스트 첫 항목이라 오해 유발)
+                BaseUnitEntity nearestEnemy = null;
+                float nearestDist = float.MaxValue;
+                for (int i = 0; i < enemies.Count; i++)
+                {
+                    var e = enemies[i];
+                    if (e == null || e.LifeState.IsDead) continue;
+                    float d = Vector3.Distance(best.Position, e.Position);
+                    if (d < nearestDist) { nearestDist = d; nearestEnemy = e; }
+                }
+                float nearestTiles = nearestEnemy != null ? CombatAPI.MetersToTiles(nearestDist) : 0f;
+                Main.Log($"[MovementAPI] FindRangedAttackPosition: Best=({best.Position.x:F1},{best.Position.z:F1}), score={best.TotalScore:F1}, nearestDist={nearestTiles:F1}t ({nearestEnemy?.CharacterName ?? "?"}), hittable={best.HittableEnemyCount}, cover={best.BestCover}, enemyLoS={(best.HasLosToEnemy ? 1 : 0)}, selectedBy={selectedBy}");
+
+                // ★ v3.110.8: 점수 컴포넌트 브레이크다운 — 어느 축이 최종 선택을 좌우했는지 진단용
+                // 목적: DistanceScore 수정(0.6→0.5)의 효과가 다른 축에 상쇄되는지 확인
+                if (Main.IsDebugEnabled)
+                {
+                    Main.LogDebug($"[MovementAPI] Best breakdown: Cover={best.CoverScore:F1}, Distance={best.DistanceScore:F1}, " +
+                        $"Threat=-{best.ThreatScore:F1}, Attack={best.AttackScore:F1}, " +
+                        $"Hit={best.HitChanceBonus:F1}, Path=-{best.PathRiskScore:F1}, " +
+                        $"InfT=-{best.InfluenceThreatScore:F1}, InfC={best.InfluenceControlBonus:F1}, " +
+                        $"AllyC=-{best.AllyClusterPenalty:F1}, Flank={best.FlankingScore:F1}, " +
+                        $"Osc=-{best.OscillationPenalty:F1}");
+
+                    // ★ v3.110.9: InfluenceMap raw 값 진단 — InfT/InfC가 0에 수렴하는 원인 규명
+                    // "위치별 변별력 없음"이 전장 특성(실제로 threat 평탄)인지 로직 희박인지 구분.
+                    if (influenceMap != null && influenceMap.IsValid)
+                    {
+                        float infThreat = influenceMap.GetThreatAt(best.Position);
+                        float infCtrl = influenceMap.GetControlAt(best.Position);
+                        float infCover = influenceMap.GetCoverAt(best.Position);
+                        float infCombined = influenceMap.GetCombinedScore(best.Position);
+                        float infFrontline = influenceMap.GetFrontlineDistance(best.Position);
+                        bool infSafe = influenceMap.IsSafeZone(best.Position);
+                        Main.LogDebug($"[MovementAPI] InfluenceMap@Best: threat={infThreat:F2}, ctrl={infCtrl:F2}, cover={infCover:F2}, combined={infCombined:F2}, frontlineDist={infFrontline:F1}, safeZone={infSafe}");
+                    }
+                    else
+                    {
+                        Main.LogDebug($"[MovementAPI] InfluenceMap@Best: (null or invalid)");
+                    }
+                }
             }
             else
             {

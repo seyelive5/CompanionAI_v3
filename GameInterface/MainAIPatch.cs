@@ -358,7 +358,8 @@ namespace CompanionAI_v3.GameInterface
             }
             catch { }
 
-            float minSafeDistance = settings?.MinSafeDistance ?? 5f;
+            // ★ v3.110.11: 사용자 설정 대신 WeaponRangeProfile 자동 계산값 사용.
+            float minSafeDistance = CombatAPI.GetWeaponRangeProfile(unit).ClampedMinSafeDistance;
 
             Main.Log($"[FindBetterPlace] {unit.CharacterName}: Finding position (range={weaponRange}, safe={minSafeDistance})");
 
