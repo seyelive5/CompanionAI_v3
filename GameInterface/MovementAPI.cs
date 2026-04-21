@@ -973,6 +973,12 @@ namespace CompanionAI_v3.GameInterface
             score.HasLosToEnemy = hasAnyLos;
             score.HittableEnemyCount = hittableFromLos;  // ★ v3.8.78: LOS 기반 hittable count
 
+            // ★ v3.110.19 Phase 1a: HideScore 5축 — 게임 ProtectionTileScorer 패턴.
+            // 방어 관점 cover 완성도 (CoverScore는 공격 관점 aggregate).
+            // 적의 현재 위치 기반. Phase 5에서 AiConsideredMoveVariants로 예측 이동 확장.
+            var hideComponents = TileScorerPort.GetHideScoreComponents(node, unit.SizeRect, enemies);
+            score.ApplyHideComponents(hideComponents);
+
             // ★ v3.110.15: ExposureScore — "이 위치를 공격 가능한 적 수"를 페널티화.
             // hittableFromLos는 대칭 LOS(enemyNode → node) 계산이라 "적→자신 LOS 수"와 동일.
             //
@@ -1305,7 +1311,9 @@ namespace CompanionAI_v3.GameInterface
                 // 목적: DistanceScore 수정(0.6→0.5)의 효과가 다른 축에 상쇄되는지 확인
                 if (Main.IsDebugEnabled)
                 {
-                    Main.LogDebug($"[MovementAPI] Best breakdown: Cover={best.CoverScore:F1}, Distance={best.DistanceScore:F1}, " +
+                    Main.LogDebug($"[MovementAPI] Best breakdown: Cover={best.CoverScore:F1}, " +
+                        $"Hide={best.HideScore:F1}(F{best.HideFullRatio:F2}/A{best.HideAnyRatio:F2}), " +
+                        $"Distance={best.DistanceScore:F1}, " +
                         $"Threat=-{best.ThreatScore:F1}, Attack={best.AttackScore:F1}, " +
                         $"Hit={best.HitChanceBonus:F1}, Path=-{best.PathRiskScore:F1}, " +
                         $"AllyC=-{best.AllyClusterPenalty:F1}, Flank={best.FlankingScore:F1}, " +
