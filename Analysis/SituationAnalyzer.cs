@@ -50,6 +50,8 @@ namespace CompanionAI_v3.Analysis
             _cachedPredictedMoves = null;
             // ★ v3.111.2: MovementAPI 정적 scratchpad도 클리어 (턴 간 stale 방지).
             CompanionAI_v3.GameInterface.MovementAPI.SetPredictedMoves(null);
+            // ★ v3.111.3: Harmony-captured enemy moves 캐시도 전투 간 정리.
+            CompanionAI_v3.GameInterface.EnemyMoveCache.Clear();
         }
 
         /// <summary>
