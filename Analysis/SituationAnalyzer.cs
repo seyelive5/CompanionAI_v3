@@ -26,12 +26,16 @@ namespace CompanionAI_v3.Analysis
         // ★ v3.8.48: per-unit Situation 풀 — 턴당 0 할당 (기존: 1 Situation + 13 List per turn)
         private readonly Dictionary<string, Situation> _situationPool = new Dictionary<string, Situation>();
 
-        // ★ v3.8.80: continuation 턴 캐시 — 같은 턴 내 InfluenceMap/PredictiveThreatMap 재사용
-        // 적은 이동하지 않았으므로 영향력 맵과 위협 맵은 동일
+        // ★ v3.8.80: continuation 턴 캐시 — 같은 턴 내 formation 데이터 재사용
+        // 적은 이동하지 않았으므로 아군 평균 적 거리는 동일
+        // ★ v3.110.18: FrontlineCalculator 제거 — 아군 평균 적 거리만 캐시
         private string _cachedMapUnitId;
         private int _cachedMapRound;
-        private BattlefieldInfluenceMap _cachedInfluenceMap;
-        private PredictiveThreatMap _cachedPredictiveThreatMap;
+        private float _cachedAvgAllyDistToEnemy;
+        private bool _cachedAvgValid;
+
+        // ★ v3.111.0 Phase 5: 턴 시작 1회 계산, continuation 재사용
+        private PredictedEnemyMoves _cachedPredictedMoves;
 
         /// <summary>
         /// ★ v3.8.48: 전투 종료 시 풀 정리
@@ -41,8 +45,9 @@ namespace CompanionAI_v3.Analysis
             _situationPool.Clear();
             _cachedMapUnitId = null;
             _cachedMapRound = -1;
-            _cachedInfluenceMap = null;
-            _cachedPredictiveThreatMap = null;
+            _cachedAvgAllyDistToEnemy = 0f;
+            _cachedAvgValid = false;
+            _cachedPredictedMoves = null;
         }
 
         /// <summary>
@@ -612,58 +617,80 @@ namespace CompanionAI_v3.Analysis
             }
         }
 
+        /// <summary>
+        /// ★ v3.110.18: 아군들의 "가장 가까운 적까지 거리" 평균. 자신 제외.
+        /// formation 전방 오프셋 계산의 기준값. FrontlineCalculator centroid 모델 대체.
+        /// </summary>
+        private static float ComputeAvgAllyDistanceToNearestEnemy(
+            System.Collections.Generic.List<BaseUnitEntity> allies,
+            System.Collections.Generic.List<BaseUnitEntity> enemies,
+            BaseUnitEntity self)
+        {
+            if (allies == null || allies.Count == 0 || enemies == null || enemies.Count == 0)
+                return 0f;
+
+            float sum = 0f;
+            int count = 0;
+            foreach (var ally in allies)
+            {
+                if (ally == null || ally == self || ally.LifeState.IsDead) continue;
+                float minDist = float.MaxValue;
+                foreach (var enemy in enemies)
+                {
+                    if (enemy == null || enemy.LifeState.IsDead) continue;
+                    float d = CombatCache.GetDistance(ally, enemy);
+                    if (d < minDist) minDist = d;
+                }
+                if (minDist < float.MaxValue)
+                {
+                    sum += minDist;
+                    count++;
+                }
+            }
+
+            return count > 0 ? sum / count : 0f;
+        }
+
         private void AnalyzePosition(Situation situation, BaseUnitEntity unit, TurnState turnState)
         {
-            // ★ v3.8.80: continuation 턴 캐시 - 같은 유닛/라운드에서 이미 계산한 맵 재사용
-            // 적은 아군 턴 도중 이동하지 않으므로 영향력/위협 맵은 동일
+            // ★ v3.8.80: continuation 턴 캐시 - 같은 유닛/라운드에서 이미 계산한 formation 재사용
+            // 적은 아군 턴 도중 이동하지 않으므로 아군 평균 적 거리는 동일
+            // ★ v3.110.18: FrontlineCalculator 제거 — centroid/frontline 모델 대신 아군 평균 적 거리만 사용
             string unitId = unit.UniqueId;
             int currentRound = turnState?.CombatRound ?? -1;
             bool isContinuation = turnState != null && turnState.ActionCount > 0
                                   && unitId == _cachedMapUnitId
                                   && currentRound == _cachedMapRound
-                                  && _cachedInfluenceMap != null;
+                                  && _cachedAvgValid;
 
             if (isContinuation)
             {
-                // 캐시된 맵 재사용
-                situation.InfluenceMap = _cachedInfluenceMap;
-                situation.PredictiveThreatMap = _cachedPredictiveThreatMap;
+                situation.AvgAllyDistanceToNearestEnemy = _cachedAvgAllyDistToEnemy;
                 if (Main.IsDebugEnabled)
-                    Main.LogDebug($"[Analyzer] Continuation turn — reusing cached InfluenceMap/PredictiveThreatMap");
+                    Main.LogDebug($"[Analyzer] Continuation turn — reusing cached formation (avgAllyDist={_cachedAvgAllyDistToEnemy:F1}m)");
             }
             else
             {
-                // ★ v3.2.00: 영향력 맵 계산 (위치 평가에 사용)
-                situation.InfluenceMap = BattlefieldInfluenceMap.Compute(
-                    situation.Enemies,
-                    situation.Allies);
-                if (Main.IsDebugEnabled && situation.InfluenceMap.IsValid)
-                {
-                    Main.LogDebug($"[Analyzer] {situation.InfluenceMap}");
-                }
+                situation.AvgAllyDistanceToNearestEnemy = ComputeAvgAllyDistanceToNearestEnemy(situation.Allies, situation.Enemies, unit);
 
-                // ★ v3.4.00: 예측적 위협 맵 계산 (적 이동 예측)
-                bool usePredictiveMovement = situation.CharacterSettings?.UsePredictiveMovement ?? true;
-                if (usePredictiveMovement && situation.Enemies.Count >= 2)
-                {
-                    var mobilities = EnemyMobilityAnalyzer.AnalyzeAllEnemies(situation.Enemies);
-                    situation.PredictiveThreatMap = PredictiveThreatMap.Compute(
-                        situation.Enemies,
-                        mobilities,
-                        situation.InfluenceMap);
-
-                    if (Main.IsDebugEnabled && situation.PredictiveThreatMap.IsValid)
-                    {
-                        Main.LogDebug($"[Analyzer] PredictiveThreat: {situation.PredictiveThreatMap.EnemyCount} enemies analyzed, " +
-                                      $"{situation.PredictiveThreatMap.PredictedSafeZones.Count} safe zones");
-                    }
-                }
-
-                // 캐시 저장
                 _cachedMapUnitId = unitId;
                 _cachedMapRound = currentRound;
-                _cachedInfluenceMap = situation.InfluenceMap;
-                _cachedPredictiveThreatMap = situation.PredictiveThreatMap;
+                _cachedAvgAllyDistToEnemy = situation.AvgAllyDistanceToNearestEnemy;
+                _cachedAvgValid = true;
+
+                if (Main.IsDebugEnabled)
+                    Main.LogDebug($"[Analyzer] Formation: avgAllyDistToNearestEnemy={situation.AvgAllyDistanceToNearestEnemy:F1}m");
+            }
+
+            // ★ v3.111.0 Phase 5: 적 예상 이동 위치 — 같은 유닛/라운드에서 재사용
+            if (isContinuation && _cachedPredictedMoves != null)
+            {
+                situation.PredictedMoves = _cachedPredictedMoves;
+            }
+            else
+            {
+                situation.PredictedMoves = PredictedEnemyMoves.Compute(situation.Enemies);
+                _cachedPredictedMoves = situation.PredictedMoves;
             }
 
             // ★ CombatAPI.ShouldRetreat 사용

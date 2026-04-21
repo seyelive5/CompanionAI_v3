@@ -182,57 +182,43 @@ namespace CompanionAI_v3.Analysis
         /// <summary>이동 필요 (공격 불가)</summary>
         public bool NeedsReposition { get; set; }
 
-        /// <summary>★ v3.2.00: 전장 영향력 맵</summary>
-        public BattlefieldInfluenceMap InfluenceMap { get; set; }
+        /// <summary>
+        /// ★ v3.110.18: 아군들의 "가장 가까운 적까지 거리" 평균 (미터).
+        /// Frontline centroid 모델 제거 — 대신 "파티 전방 오프셋" 용도로 사용.
+        /// 0 이하 = 아군이 적과 교전 중 아님.
+        /// </summary>
+        public float AvgAllyDistanceToNearestEnemy { get; set; }
 
-        /// <summary>★ v3.4.00: 예측적 위협 맵</summary>
-        public PredictiveThreatMap PredictiveThreatMap { get; set; }
-
-        #endregion
-
-        #region Influence Map Helpers (v3.2.00)
-
-        /// <summary>특정 위치의 적 위협도 조회</summary>
-        public float GetThreatAtPosition(UnityEngine.Vector3 pos)
-        {
-            return InfluenceMap?.GetThreatAt(pos) ?? 0f;
-        }
-
-        /// <summary>특정 위치의 아군 통제력 조회</summary>
-        public float GetControlAtPosition(UnityEngine.Vector3 pos)
-        {
-            return InfluenceMap?.GetControlAt(pos) ?? 0f;
-        }
-
-        /// <summary>전선까지의 거리 (양수=적 방향)</summary>
-        public float GetFrontlineDistance(UnityEngine.Vector3 pos)
-        {
-            return InfluenceMap?.GetFrontlineDistance(pos) ?? 0f;
-        }
-
-        /// <summary>팀 전체 위협도 (0-1)</summary>
-        public float TeamThreatLevel => InfluenceMap?.TeamThreatLevel ?? 0f;
+        /// <summary>
+        /// ★ v3.111.0 Phase 5: 적별 예상 이동 위치 집합 (턴 시작 1회 계산).
+        /// HideScore의 "이 위치 엄폐가 적 이동 후에도 유지되는가" 평가에 사용.
+        /// 게임 AsyncTaskNodeInitializeDecisionContext 패턴.
+        /// </summary>
+        public PredictedEnemyMoves PredictedMoves { get; set; }
 
         #endregion
 
-        #region Predictive Threat Helpers (v3.4.00)
+        #region Formation Helpers
 
-        /// <summary>★ v3.4.00: 특정 위치의 예측 위협도 조회 (0-1)</summary>
-        public float GetPredictedThreatAt(UnityEngine.Vector3 pos)
+        /// <summary>
+        /// ★ v3.110.18: 아군 평균 대비 전방 오프셋 (미터, +=적쪽 전진, -=후방).
+        /// 구 GetFrontlineDistance의 centroid 모델 대체.
+        /// </summary>
+        public float GetForwardOffsetFromAllies(UnityEngine.Vector3 pos)
         {
-            return PredictiveThreatMap?.GetPredictedThreatAt(pos) ?? 0f;
-        }
+            if (AvgAllyDistanceToNearestEnemy <= 0f || Enemies == null || Enemies.Count == 0)
+                return 0f;
 
-        /// <summary>★ v3.4.00: 특정 위치가 다음 턴에도 안전할지 확인</summary>
-        public bool IsPositionSafeNextTurn(UnityEngine.Vector3 pos)
-        {
-            return PredictiveThreatMap?.IsPositionSafeNextTurn(pos) ?? true;
-        }
+            float myDistToNearestEnemy = float.MaxValue;
+            foreach (var enemy in Enemies)
+            {
+                if (enemy == null || enemy.LifeState.IsDead) continue;
+                float d = UnityEngine.Vector3.Distance(pos, enemy.Position);
+                if (d < myDistToNearestEnemy) myDistToNearestEnemy = d;
+            }
 
-        /// <summary>★ v3.4.00: 턴 안전도 점수 (0=위험, 1=안전)</summary>
-        public float GetTurnSafetyScore(UnityEngine.Vector3 pos)
-        {
-            return PredictiveThreatMap?.GetTurnSafetyScore(pos) ?? 0.5f;
+            if (myDistToNearestEnemy == float.MaxValue) return 0f;
+            return AvgAllyDistanceToNearestEnemy - myDistToNearestEnemy;
         }
 
         #endregion
@@ -471,8 +457,8 @@ namespace CompanionAI_v3.Analysis
             HasCover = false;
             BetterPositionAvailable = false;
             NeedsReposition = false;
-            InfluenceMap = null;
-            PredictiveThreatMap = null;
+            AvgAllyDistanceToNearestEnemy = 0f;
+            PredictedMoves = null;
 
             // Abilities
             AvailableBuffs.Clear();
