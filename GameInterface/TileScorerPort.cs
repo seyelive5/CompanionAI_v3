@@ -14,12 +14,12 @@ namespace CompanionAI_v3.GameInterface
     public static class TileScorerPort
     {
         /// <summary>
-        /// HideScore 5-tuple 계산. 각 값 0~1 범위.
+        /// HideScore 5-tuple 계산. [0]~[3]은 0~1 범위, [4] HideValue는 가중 합계 (적 수 비례).
         /// [0] FullCoverComplete — 모든 적에게 ≥Full 엄폐 완성 여부 (0 or 1)
         /// [1] AnyCoverComplete  — 모든 적에게 ≥Half 엄폐 완성 여부 (0 or 1)
         /// [2] AnyCoverRatio     — ≥Half 엄폐 비율 (0~1)
         /// [3] FullCoverRatio    — ≥Full 엄폐 비율 (0~1)
-        /// [4] HideValue         — 가중 aggregate (게임 hideCoverValues 역수 기반)
+        /// [4] HideValue         — 가중 aggregate (게임 hideCoverValues 역수 기반, 적 수에 비례한 unbounded 합)
         /// </summary>
         public struct HideScoreComponents
         {
@@ -52,7 +52,6 @@ namespace CompanionAI_v3.GameInterface
                 var enemyNode = enemy.Position.GetNearestNodeXZ() as CustomGridNodeBase;
                 if (enemyNode == null) continue;
 
-                validCount++;
                 try
                 {
                     var los = LosCalculations.GetWarhammerLos(
@@ -67,8 +66,16 @@ namespace CompanionAI_v3.GameInterface
                         fullOrInvisible++;
                     if (coverType != LosCalculations.CoverType.None)
                         halfOrBetter++;
+
+                    // ★ v3.110.19 fix (I2): validCount 증분은 LOS 평가가 완료된 후에만.
+                    // 예외 발생 시 분모 부풀림 방지 (예외 적은 0 기여분으로 은폐도를 낮춰 보이게 함).
+                    validCount++;
                 }
-                catch { }
+                catch (System.Exception ex)
+                {
+                    if (Main.IsDebugEnabled)
+                        Main.LogWarning($"[TileScorerPort] GetWarhammerLos failed for {enemy?.CharacterName}: {ex.Message}");
+                }
             }
 
             if (validCount == 0) return result;
