@@ -892,9 +892,13 @@ namespace CompanionAI_v3.GameInterface
             {
                 apBlue = enemy.CombatState?.ActionPointsBlue ?? 0f;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled)
+                    Main.LogWarning($"[CombatAPI] GetEnemyTurnThreatScore AP read failed for {enemy?.CharacterName}: {ex.Message}");
+            }
 
-            int distCells = (int)GetDistanceInTiles(targetPos, enemy);
+            int distCells = (int)System.Math.Ceiling(GetDistanceInTiles(targetPos, enemy));
             if (distCells <= threatRange) return 1.0f;
             if (distCells <= threatRange + apBlue) return 0.5f;
             return 0f;
