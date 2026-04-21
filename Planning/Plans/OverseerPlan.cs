@@ -397,13 +397,21 @@ namespace CompanionAI_v3.Planning.Plans
                 // ────────────────────────────────────────────────────────────
                 if (usedWarpRelay && situation.FamiliarType == PetType.Raven && !isRavenBuffPhase && !deferDebuffTransition)
                 {
-                    // ★ v3.18.2: 버프 전달 직후 전환된 경우, 커버리지 체크 불필요 (이미 버프 완료)
-                    var aggressiveRelocate = PlanRavenAggressiveRelocate(situation, ref remainingAP, skipCoverageCheck: true);
-                    if (aggressiveRelocate != null)
+                    // ★ v3.111.8: 임시턴에는 aggressive relocate 스킵 (AP/MP 부족 → Raven 사거리 밖 재배치 실패)
+                    if (situation.IsExtraTurn)
                     {
-                        actions.Add(aggressiveRelocate);
-                        didAggressiveRelocate = true;  // ★ v3.18.0
-                        Main.Log($"[Overseer] Phase 3.5.5: Raven aggressive relocate to enemy cluster (DEBUFF MODE)");
+                        Main.Log($"[Overseer] Phase 3.5.5: Skip aggressive relocate — extra turn (AP={situation.CurrentAP:F1}, MP={situation.CurrentMP:F1})");
+                    }
+                    else
+                    {
+                        // ★ v3.18.2: 버프 전달 직후 전환된 경우, 커버리지 체크 불필요 (이미 버프 완료)
+                        var aggressiveRelocate = PlanRavenAggressiveRelocate(situation, ref remainingAP, skipCoverageCheck: true);
+                        if (aggressiveRelocate != null)
+                        {
+                            actions.Add(aggressiveRelocate);
+                            didAggressiveRelocate = true;  // ★ v3.18.0
+                            Main.Log($"[Overseer] Phase 3.5.5: Raven aggressive relocate to enemy cluster (DEBUFF MODE)");
+                        }
                     }
                 }
 
@@ -643,8 +651,13 @@ namespace CompanionAI_v3.Planning.Plans
             // ══════════════════════════════════════════════════════════════
             if (situation.FamiliarType == PetType.Raven && situation.HasFamiliar && remainingAP >= 1f && !isRavenBuffPhase)
             {
+                // ★ v3.111.8: 임시턴에는 aggressive relocate 스킵 (AP/MP 부족 → Raven 사거리 밖 재배치 실패)
+                if (situation.IsExtraTurn)
+                {
+                    Main.Log($"[Overseer] Phase 4.6: Skip aggressive relocate — extra turn (AP={situation.CurrentAP:F1}, MP={situation.CurrentMP:F1})");
+                }
                 // ★ v3.18.0: 문자열 매칭 제거 → didAggressiveRelocate 불리언 플래그
-                if (!didAggressiveRelocate)
+                else if (!didAggressiveRelocate)
                 {
                     var postBuffRelocate = PlanRavenAggressiveRelocate(situation, ref remainingAP, skipCoverageCheck: true);
                     if (postBuffRelocate != null)

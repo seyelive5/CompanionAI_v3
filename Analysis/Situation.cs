@@ -34,6 +34,18 @@ namespace CompanionAI_v3.Analysis
         /// <summary>행동 가능 여부</summary>
         public bool CanAct { get; set; }
 
+        /// <summary>
+        /// ★ v3.111.8: 임시턴(ExtraTurn) 여부 — 쳐부숴라 등 능력으로 부여된 추가 턴인지.
+        /// true면 이동/aggressive relocate/이동 필요 도발 등 스킵.
+        /// </summary>
+        public bool IsExtraTurn { get; set; }
+
+        /// <summary>★ v3.111.8: 임시턴 시 부여된 AP (보통 1-2).</summary>
+        public int ExtraTurnGrantedAP { get; set; }
+
+        /// <summary>★ v3.111.8: 임시턴 시 부여된 MP (보통 0).</summary>
+        public int ExtraTurnGrantedMP { get; set; }
+
         #endregion
 
         #region Settings
@@ -408,6 +420,9 @@ namespace CompanionAI_v3.Analysis
             CurrentMP = 0f;
             CanMove = false;
             CanAct = false;
+            IsExtraTurn = false;           // ★ v3.111.8
+            ExtraTurnGrantedAP = 0;        // ★ v3.111.8
+            ExtraTurnGrantedMP = 0;        // ★ v3.111.8
 
             // Settings
             CharacterSettings = null;

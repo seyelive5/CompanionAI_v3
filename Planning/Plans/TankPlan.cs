@@ -144,6 +144,24 @@ namespace CompanionAI_v3.Planning.Plans
 
                 var bestOption = tauntOptions.Count > 0 ? tauntOptions[0] : null;
 
+                // ★ v3.111.8: 임시턴에 이동 필요한 도발 스킵 (MP=0이라 이동 실패 → 사거리 밖 시전 버그)
+                //   이동 없이 가능한 다음 옵션이 있으면 채택, 없으면 도발 자체 스킵.
+                if (situation.IsExtraTurn && bestOption != null && bestOption.RequiresMove)
+                {
+                    Main.Log($"[Tank] SmartTaunt: Skip best option - extra turn + requires move (AP={situation.CurrentAP:F1}, MP={situation.CurrentMP:F1})");
+                    bestOption = null;
+                    for (int i = 0; i < tauntOptions.Count; i++)
+                    {
+                        var alt = tauntOptions[i];
+                        if (alt != null && !alt.RequiresMove)
+                        {
+                            bestOption = alt;
+                            Main.Log($"[Tank] SmartTaunt: Falling back to no-move option {alt.Ability.Name}");
+                            break;
+                        }
+                    }
+                }
+
                 if (TauntScorer.IsTauntWorthwhile(bestOption))
                 {
                     // ★ v3.5.10: 도발 대상 예약 체크 (중복 도발 방지)

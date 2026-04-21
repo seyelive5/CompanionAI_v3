@@ -52,6 +52,8 @@ namespace CompanionAI_v3.Analysis
             CompanionAI_v3.GameInterface.MovementAPI.SetPredictedMoves(null);
             // ★ v3.111.3: Harmony-captured enemy moves 캐시도 전투 간 정리.
             CompanionAI_v3.GameInterface.EnemyMoveCache.Clear();
+            // ★ v3.111.8: 임시턴 캐시도 전투 종료 시 정리 (전투 간 유출 방지).
+            CompanionAI_v3.GameInterface.ExtraTurnCache.Clear();
         }
 
         /// <summary>
@@ -133,6 +135,18 @@ namespace CompanionAI_v3.Analysis
             situation.CurrentMP = CombatAPI.GetCurrentMP(unit);
             situation.CanMove = situation.CurrentMP > 0 && CombatAPI.CanMove(unit);
             situation.CanAct = CombatAPI.CanAct(unit);
+
+            // ★ v3.111.8: 임시턴(ExtraTurn) 상태 조회 — "쳐부숴라" 등으로 부여된 저자원 추가 턴.
+            // Plan이 이동/aggressive relocate/이동 필요 도발 가드에 사용.
+            var extraTurnInfo = CompanionAI_v3.GameInterface.ExtraTurnCache.Get(unit);
+            situation.IsExtraTurn = extraTurnInfo.IsExtraTurn;
+            situation.ExtraTurnGrantedAP = extraTurnInfo.GrantedAP;
+            situation.ExtraTurnGrantedMP = extraTurnInfo.GrantedMP;
+
+            if (Main.IsDebugEnabled && situation.IsExtraTurn)
+            {
+                Main.LogDebug($"[Analyzer] {unit.CharacterName}: Extra turn detected (AP={situation.ExtraTurnGrantedAP}, MP={situation.ExtraTurnGrantedMP})");
+            }
         }
 
         private void LoadSettings(Situation situation, BaseUnitEntity unit)
