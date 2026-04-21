@@ -164,6 +164,14 @@ namespace CompanionAI_v3.GameInterface
             public float ExposureScore { get; set; }
 
             /// <summary>
+            /// ★ v3.110.20 Phase 2: 각 적이 이 턴에 이 위치를 공격 가능한 확률 합계.
+            /// CombatAPI.GetEnemyTurnThreatScore 반환값 합산 (0 / 0.5 / 1 per enemy).
+            /// 게임 학습된 threatRange + 현재 장비 무기 사거리 + 적 AP 기반 정확한 위협 평가.
+            /// N명의 적이 즉시 공격 가능 = N, 이동 후 공격 가능 N명 = 0.5N, 안전 = 0.
+            /// </summary>
+            public float EnemyTurnThreatSum { get; set; }
+
+            /// <summary>
             /// ★ v3.110.19 Phase 1a: HideScore 5축 (게임 ProtectionTileScorer 패턴).
             /// 방어 관점 — 이 위치가 얼마나 은폐되는가. CoverScore(공격 관점)와 분리.
             /// 계산: TileScorerPort.GetHideScoreComponents 호출 결과를 Task 1.3에서 설정.
@@ -205,7 +213,8 @@ namespace CompanionAI_v3.GameInterface
                                        - AllyClusterPenalty + FlankingScore
                                        - OscillationPenalty
                                        - ExposureScore
-                                       + HideScore;  // ★ v3.110.19 Phase 1a
+                                       + HideScore  // ★ v3.110.19 Phase 1a
+                                       - (EnemyTurnThreatSum * 8f);  // ★ v3.110.20 Phase 2: 적 1명 즉시 공격 가능 = -8점
 
             public bool CanStand { get; set; }
             public bool HasLosToEnemy { get; set; }
@@ -222,7 +231,8 @@ namespace CompanionAI_v3.GameInterface
                 (AllyClusterPenalty > 0 ? $" [AllyCluster:-{AllyClusterPenalty:F1}]" : "") +
                 (FlankingScore > 0 ? $" [Flank:+{FlankingScore:F1}]" : "") +
                 (ExposureScore > 0 ? $" [Expo:-{ExposureScore:F1}]" : "") +
-                (HideScore > 0 ? $" [Hide:+{HideScore:F1}]" : "");
+                (HideScore > 0 ? $" [Hide:+{HideScore:F1}]" : "") +
+                (EnemyTurnThreatSum > 0 ? $" [TurnThreat:-{EnemyTurnThreatSum:F1}]" : "");
         }
 
         public enum MovementGoal
@@ -979,6 +989,17 @@ namespace CompanionAI_v3.GameInterface
             var hideComponents = TileScorerPort.GetHideScoreComponents(node, unit.SizeRect, enemies);
             score.ApplyHideComponents(hideComponents);
 
+            // ★ v3.110.20 Phase 2: 적별 Turn Threat Score 합산.
+            // 게임 EnemyThreatScore 패턴 — 각 적이 이 턴에 이 위치를 공격 가능한가.
+            // threatRange (게임 학습 + 무기 사거리) + AP_Blue 기반.
+            float turnThreatSum = 0f;
+            foreach (var enemy in enemies)
+            {
+                if (enemy == null || enemy.LifeState.IsDead) continue;
+                turnThreatSum += CombatAPI.GetEnemyTurnThreatScore(enemy, node.Vector3Position);
+            }
+            score.EnemyTurnThreatSum = turnThreatSum;
+
             // ★ v3.110.15: ExposureScore — "이 위치를 공격 가능한 적 수"를 페널티화.
             // hittableFromLos는 대칭 LOS(enemyNode → node) 계산이라 "적→자신 LOS 수"와 동일.
             //
@@ -1314,7 +1335,7 @@ namespace CompanionAI_v3.GameInterface
                     Main.LogDebug($"[MovementAPI] Best breakdown: Cover={best.CoverScore:F1}, " +
                         $"Hide={best.HideScore:F1}(F{best.HideFullRatio:F2}/A{best.HideAnyRatio:F2}), " +
                         $"Distance={best.DistanceScore:F1}, " +
-                        $"Threat=-{best.ThreatScore:F1}, Attack={best.AttackScore:F1}, " +
+                        $"Threat=-{best.ThreatScore:F1}, TurnThreat=-{best.EnemyTurnThreatSum:F1}, Attack={best.AttackScore:F1}, " +
                         $"Hit={best.HitChanceBonus:F1}, Path=-{best.PathRiskScore:F1}, " +
                         $"AllyC=-{best.AllyClusterPenalty:F1}, Flank={best.FlankingScore:F1}, " +
                         $"Osc=-{best.OscillationPenalty:F1}, " +
