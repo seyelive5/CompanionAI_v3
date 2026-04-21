@@ -1743,26 +1743,17 @@ namespace CompanionAI_v3.GameInterface
                         unit, unit.Position, pos);
                 }
 
-                // 엄폐 점수 추가
+                // ★ v3.111.2 Phase 6 follow-up: 레거시 CoverScore [15/30/40] 방어 semantics → HideScore로 이관.
+                // Phase 6에서 CoverScore가 공격자 관점 [0~30]로 재정의되어 legacy 대입 불가.
+                // 후퇴 경로의 엄폐도 평가는 HideScore 사용 (EvaluatePosition과 semantics 일관).
                 try
                 {
-                    var coverType = LosCalculations.GetCoverType(pos);
-                    switch (coverType)
-                    {
-                        case LosCalculations.CoverType.Full:
-                            score.CoverScore = 30f;
-                            break;
-                        case LosCalculations.CoverType.Half:
-                            score.CoverScore = 15f;
-                            break;
-                        case LosCalculations.CoverType.Invisible:
-                            score.CoverScore = 40f;
-                            break;
-                    }
+                    var hideComp = TileScorerPort.GetHideScoreComponents(node, unit.SizeRect, enemies);
+                    score.ApplyHideComponents(hideComp);
                 }
                 catch (System.Exception ex)
                 {
-                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] cover score silent: {ex.Message}");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] hide score silent: {ex.Message}");
                 }
 
                 // ★ v3.8.78: LOS 기반 hittable count (기존 CountHittableEnemiesFromPosition 호출 제거)
@@ -2297,8 +2288,10 @@ namespace CompanionAI_v3.GameInterface
             }
             if (defenseMod > 1f)
             {
-                // 방어적 상황: 엄폐/안전 점수에 가중치
-                score.TacticalAdjustment += score.CoverScore * (defenseMod - 1f) * 0.5f;
+                // ★ v3.111.2 Phase 6 follow-up: CoverScore 스케일 변경 (15-40 → 0.01-30, 공격자 semantics).
+                // 방어적 상황의 "엄폐 중시"는 HideScore (방어자 관점, 최대 ~180)로 재타겟팅.
+                // 계수 0.5 → 0.05 (HideScore max가 Cover max의 ~4.5배이므로 총량 유지).
+                score.TacticalAdjustment += score.HideScore * (defenseMod - 1f) * 0.05f;
             }
 
             // 3. CurrentTactic에 따른 조정
@@ -2316,8 +2309,10 @@ namespace CompanionAI_v3.GameInterface
                     break;
 
                 case TacticalSignal.Defend:
-                    // 방어 모드: 엄폐 보너스 증폭
-                    score.TacticalAdjustment += score.CoverScore * 0.3f;
+                    // ★ v3.111.2 Phase 6 follow-up: CoverScore → HideScore로 재타겟팅 (Phase 6 semantics 변경 대응).
+                    // 방어 모드의 "엄폐 중시"는 방어자 관점 HideScore가 적합.
+                    // 계수 0.3 → 0.03 (HideScore max가 Cover max의 ~4.5배이므로 총량 유지).
+                    score.TacticalAdjustment += score.HideScore * 0.03f;
                     break;
             }
 

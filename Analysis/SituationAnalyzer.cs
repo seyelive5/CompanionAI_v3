@@ -48,6 +48,8 @@ namespace CompanionAI_v3.Analysis
             _cachedAvgAllyDistToEnemy = 0f;
             _cachedAvgValid = false;
             _cachedPredictedMoves = null;
+            // ★ v3.111.2: MovementAPI 정적 scratchpad도 클리어 (턴 간 stale 방지).
+            CompanionAI_v3.GameInterface.MovementAPI.SetPredictedMoves(null);
         }
 
         /// <summary>
