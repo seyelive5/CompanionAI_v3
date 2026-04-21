@@ -3,6 +3,7 @@ using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Pathfinding;
 using Kingmaker.View.Covers;
 using Pathfinding;
+using UnityEngine;
 
 namespace CompanionAI_v3.GameInterface
 {
@@ -86,6 +87,54 @@ namespace CompanionAI_v3.GameInterface
             result.FullCoverRatio    = (float)fullOrInvisible / validCount;
             result.HideValue         = hideValue;
             return result;
+        }
+
+        /// <summary>
+        /// ★ v3.110.22 Phase 4: 적별 이동능력 반영 안전거리 점수 (0=근접, 1=모두 안전).
+        /// 게임 ProtectionTileScorer.CalculateStayingAwayScore 패턴.
+        /// 적의 blueprint AP/이동속도 + Forward 방향 고려.
+        /// threatMoveCells = (2 × AP_Blue_initial) / AP_per_cell — 이 적이 실질적으로
+        /// 이동 가능한 최대 거리. 우리 거리가 이 범위 안이면 비례 점수, 초과면 1.0.
+        /// Forward 반영: 적의 사각지대에서 더 유리한 거리 평가.
+        /// </summary>
+        public static float GetStayingAwayScore(
+            CustomGridNodeBase node,
+            BaseUnitEntity self,
+            List<BaseUnitEntity> enemies)
+        {
+            if (node == null || self == null || enemies == null || enemies.Count == 0)
+                return 0f;
+
+            float sum = 0f;
+            int count = 0;
+            foreach (var enemy in enemies)
+            {
+                if (enemy == null || enemy.LifeState.IsDead) continue;
+                var blueprint = enemy.Blueprint;
+                if (blueprint == null) continue;
+
+                try
+                {
+                    float initialAP = blueprint.WarhammerInitialAPBlue;
+                    float apPerCell = Mathf.Max(1f, blueprint.WarhammerMovementApPerCell);
+                    float threatMoveCells = (2f * initialAP) / apPerCell;
+
+                    int distCells = Kingmaker.Utility.WarhammerGeometryUtils.DistanceToInCells(
+                        node.Vector3Position, self.SizeRect, self.Forward,
+                        enemy.Position, enemy.SizeRect, enemy.Forward);
+
+                    // 적이 도달 가능 거리 이상이면 1.0, 안이면 비례
+                    sum += Mathf.Min(distCells, threatMoveCells) / Mathf.Max(1f, threatMoveCells);
+                    count++;
+                }
+                catch (System.Exception ex)
+                {
+                    if (Main.IsDebugEnabled)
+                        Main.LogWarning($"[TileScorerPort] GetStayingAwayScore failed for {enemy?.CharacterName}: {ex.Message}");
+                }
+            }
+
+            return count > 0 ? sum / count : 0f;
         }
     }
 }
