@@ -831,6 +831,75 @@ namespace CompanionAI_v3.GameInterface
             }
         }
 
+        /// <summary>
+        /// ★ v3.110.20: 적의 위협 사거리 (타일 단위).
+        /// 게임 AI 학습 데이터 (GetThreatRange) + 현재 장비 무기 사거리 중 큰 값.
+        /// 게임 학습이 없는 신규 유닛은 무기 사거리로 폴백.
+        /// 게임 패턴: AttackEffectivenessTileScorer.CalculateEnemyTargetThreatScore
+        /// </summary>
+        public static int GetEnemyThreatRangeInTiles(BaseUnitEntity enemy)
+        {
+            if (enemy == null) return 0;
+
+            int learnedRange = 0;
+            try
+            {
+                var dataStorage = Kingmaker.Game.Instance?.Player?.AiCollectedDataStorage;
+                if (dataStorage != null)
+                {
+                    var unitData = dataStorage[enemy];
+                    if (unitData != null && unitData.AttackDataCollection != null)
+                        learnedRange = unitData.AttackDataCollection.GetThreatRange();
+                }
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled)
+                    Main.LogWarning($"[CombatAPI] GetEnemyThreatRange learned failed for {enemy?.CharacterName}: {ex.Message}");
+            }
+
+            int weaponRange = 0;
+            try
+            {
+                var weapon = enemy.GetFirstWeapon();
+                if (weapon != null && weapon.Blueprint != null)
+                    weaponRange = weapon.Blueprint.AttackRange;
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled)
+                    Main.LogWarning($"[CombatAPI] GetEnemyThreatRange weapon failed for {enemy?.CharacterName}: {ex.Message}");
+            }
+
+            return System.Math.Max(learnedRange, weaponRange);
+        }
+
+        /// <summary>
+        /// ★ v3.110.20: 적이 이 턴에 특정 위치를 공격 가능한 확률 (0 / 0.5 / 1).
+        /// 게임 패턴: threatRange + AP_Blue 기준.
+        ///   dist ≤ threatRange        → 1.0 (즉시 공격 가능)
+        ///   dist ≤ threatRange + AP   → 0.5 (이동 후 공격 가능)
+        ///   dist > threatRange + AP   → 0   (이 턴 안전)
+        /// 참조: AttackEffectivenessTileScorer.CalculateEnemyTargetThreatScore (decompile 195-215)
+        /// </summary>
+        public static float GetEnemyTurnThreatScore(BaseUnitEntity enemy, UnityEngine.Vector3 targetPos)
+        {
+            if (enemy == null) return 0f;
+
+            int threatRange = GetEnemyThreatRangeInTiles(enemy);
+            float apBlue = 0f;
+            try
+            {
+                apBlue = enemy.CombatState?.ActionPointsBlue ?? 0f;
+            }
+            catch { }
+
+            int distCells = (int)GetDistanceInTiles(targetPos, enemy);
+            if (distCells <= threatRange) return 1.0f;
+            if (distCells <= threatRange + apBlue) return 0.5f;
+            return 0f;
+        }
+
         public static bool CanMove(BaseUnitEntity unit)
         {
             if (unit == null) return false;
