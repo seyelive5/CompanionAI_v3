@@ -904,6 +904,66 @@ namespace CompanionAI_v3.GameInterface
             return 0f;
         }
 
+        // ★ v3.110.21 Phase 3: UnitPartPriorityTarget 리플렉션 캐시.
+        // m_PriorityTargets가 private이라 FieldInfo 캐싱 필수.
+        private static System.Reflection.FieldInfo _priorityTargetsField;
+        private static bool _priorityTargetsFieldLookupAttempted;
+
+        /// <summary>
+        /// ★ v3.110.21: 이 타겟이 공격자의 "우선 공격 대상" 여부.
+        /// 도발/마크/겨냥 능력으로 UnitPartPriorityTarget.AddTarget된 Buff 리스트 순회.
+        /// Buff.Owner == target이면 priority target.
+        ///
+        /// 게임 API: UnitPartPriorityTarget.GetPriorityTarget(BlueprintBuff)은 forward 전용.
+        /// 역방향 조회 ("이 타겟이 우선인가") 위해 m_PriorityTargets 리플렉션 접근.
+        /// FieldInfo 캐시로 성능 부담 최소화 (조회 1회당 ~마이크로초).
+        /// </summary>
+        public static bool IsPriorityTargetFor(BaseUnitEntity target, BaseUnitEntity attacker)
+        {
+            if (target == null || attacker == null) return false;
+
+            try
+            {
+                var priorityPart = attacker.GetOptional<Kingmaker.UnitLogic.Parts.UnitPartPriorityTarget>();
+                if (priorityPart == null) return false;
+
+                // FieldInfo 1회 lookup + 캐싱
+                if (!_priorityTargetsFieldLookupAttempted)
+                {
+                    _priorityTargetsFieldLookupAttempted = true;
+                    _priorityTargetsField = typeof(Kingmaker.UnitLogic.Parts.UnitPartPriorityTarget)
+                        .GetField("m_PriorityTargets",
+                            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                    if (_priorityTargetsField == null)
+                    {
+                        Main.LogWarning("[CombatAPI] IsPriorityTargetFor: m_PriorityTargets field not found via reflection. Priority target detection disabled.");
+                    }
+                }
+
+                if (_priorityTargetsField == null) return false;
+
+                var targetsList = _priorityTargetsField.GetValue(priorityPart) as System.Collections.IEnumerable;
+                if (targetsList == null) return false;
+
+                foreach (var entityFactRef in targetsList)
+                {
+                    // EntityFactRef<Buff>: public Buff Fact { get; } property
+                    var factProp = entityFactRef?.GetType().GetProperty("Fact");
+                    if (factProp == null) continue;
+
+                    var buff = factProp.GetValue(entityFactRef) as Kingmaker.UnitLogic.Buffs.Buff;
+                    if (buff?.Owner == target) return true;
+                }
+            }
+            catch (System.Exception ex)
+            {
+                if (Main.IsDebugEnabled)
+                    Main.LogWarning($"[CombatAPI] IsPriorityTargetFor reflection failed: {ex.Message}");
+            }
+
+            return false;
+        }
+
         public static bool CanMove(BaseUnitEntity unit)
         {
             if (unit == null) return false;
