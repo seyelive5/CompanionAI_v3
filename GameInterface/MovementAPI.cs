@@ -185,6 +185,20 @@ namespace CompanionAI_v3.GameInterface
                 HideAnyRatio * 15f +
                 HideValue * 10f;
 
+            /// <summary>
+            /// ★ v3.110.19 Phase 1a: HideScoreComponents → PositionScore Hide fields 일괄 복사.
+            /// TileScorerPort.HideScoreComponents 5개 필드를 PositionScore.Hide* 5개로 매핑.
+            /// 명명 불일치 (FullCoverComplete ↔ HideFullComplete 등) 타이포 리스크 방지.
+            /// </summary>
+            public void ApplyHideComponents(TileScorerPort.HideScoreComponents c)
+            {
+                HideFullComplete = c.FullCoverComplete;
+                HideAnyComplete  = c.AnyCoverComplete;
+                HideAnyRatio     = c.AnyCoverRatio;
+                HideFullRatio    = c.FullCoverRatio;
+                HideValue        = c.HideValue;
+            }
+
             public float TotalScore => CoverScore + DistanceScore - ThreatScore + AttackScore
                                        + SharedTargetBonus + TacticalAdjustment
                                        - PathRiskScore + HitChanceBonus + MeleeAoESplashBonus
