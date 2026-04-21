@@ -215,14 +215,35 @@ namespace CompanionAI_v3.Planning.Plans
                             }
                             else
                             {
-                                // 단일 타겟 도발: 자신에게 시전 (Self-Target 도발)
-                                tauntAction = PlannedAction.Buff(bestOption.Ability, situation.Unit,
-                                    $"Taunt - protecting {bestOption.EnemiesTargetingAllies} allies from threats", apCost);
+                                // ★ v3.111.5: 단일 타겟 도발 — 실제 적 타겟으로 시전
+                                // 이전: situation.Unit(자기자신)로 시전하여 게임 내장 LOS/Range 검증을 우회
+                                //       → 벽 너머/사거리 밖 적에게도 도발이 실행되는 버그
+                                // 수정: bestOption.AffectedEnemies[0]을 타겟으로 지정하여
+                                //       CanUseAbilityOn 경로에서 Enemy-target 검증이 정상 동작
+                                var singleTauntTarget = (bestOption.AffectedEnemies != null && bestOption.AffectedEnemies.Count > 0)
+                                    ? bestOption.AffectedEnemies[0]
+                                    : primaryTauntTarget;
+
+                                if (singleTauntTarget != null)
+                                {
+                                    tauntAction = PlannedAction.Buff(bestOption.Ability, singleTauntTarget,
+                                        $"Taunt -> {singleTauntTarget.CharacterName} (protecting {bestOption.EnemiesTargetingAllies} allies)", apCost);
+                                }
+                                else
+                                {
+                                    // 폴백: 적 타겟을 찾지 못하면 도발 시도 자체를 스킵
+                                    Main.LogWarning($"[Tank] SmartTaunt: single-target taunt {bestOption.Ability.Name} — no enemy target found, skipping");
+                                    tauntAction = null;
+                                }
                             }
 
                             // ★ v3.11.2: 예약 타겟 추적 (실패 시 ReleaseTaunt에 사용)
-                            tauntAction.ReservedTarget = primaryTauntTarget;
-                            actions.Add(tauntAction);
+                            // ★ v3.111.5: tauntAction이 null일 수 있음 (단일 타겟 폴백 실패)
+                            if (tauntAction != null)
+                            {
+                                tauntAction.ReservedTarget = primaryTauntTarget;
+                                actions.Add(tauntAction);
+                            }
                         }
                     }
                 }
@@ -599,16 +620,18 @@ namespace CompanionAI_v3.Planning.Plans
                                       situation.HasLivingEnemies &&
                                       situation.NearestEnemyDistance > meleeEngageDistance;
 
-            // ★ v3.2.25: Tank 전선 유지 - 전선 뒤에 있으면 전진 필요
+            // ★ v3.2.25: Tank 전선 유지 - 아군 평균보다 뒤처지면 전진 필요
+            // ★ v3.110.18: Frontline centroid 제거 — 아군 평균 적 거리 대비 자신의 적 거리로 판정
+            //   offset = avgAllyDistToEnemy - myDistToEnemy
+            //   offset < -5 = 내가 아군 평균보다 적으로부터 5m+ 더 멀다 = 뒤처짐
             bool shouldAdvanceToFrontline = false;
-            if (situation.InfluenceMap != null && situation.InfluenceMap.IsValid && situation.HasLivingEnemies)
+            if (situation.HasLivingEnemies && situation.AvgAllyDistanceToNearestEnemy > 0f)
             {
-                float frontlineDist = situation.InfluenceMap.GetFrontlineDistance(situation.Unit.Position);
-                // 전선 뒤(-5m 이하)에 있으면 전진 필요
-                if (frontlineDist < -5f)
+                float forwardOffset = situation.GetForwardOffsetFromAllies(situation.Unit.Position);
+                if (forwardOffset < -5f)
                 {
                     shouldAdvanceToFrontline = true;
-                    if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 8: Behind frontline ({frontlineDist:F1}m) - should advance");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[Tank] Phase 8: Behind party avg ({forwardOffset:F1}m offset) - should advance");
                 }
             }
 
@@ -674,13 +697,14 @@ namespace CompanionAI_v3.Planning.Plans
                     retreatReason = $"enemy too close ({situation.NearestEnemyDistance:F1}m)";
                 }
 
-                if (situation.InfluenceMap != null && situation.InfluenceMap.IsValid)
+                // ★ v3.110.18: Frontline 제거 — 아군 평균보다 전진한 상태면 후퇴
+                if (situation.AvgAllyDistanceToNearestEnemy > 0f)
                 {
-                    float frontlineDist = situation.InfluenceMap.GetFrontlineDistance(situation.Unit.Position);
-                    if (frontlineDist > -5f)
+                    float forwardOffset = situation.GetForwardOffsetFromAllies(situation.Unit.Position);
+                    if (forwardOffset > 3f)
                     {
                         needsSafeRetreat = true;
-                        retreatReason = $"too close to frontline ({frontlineDist:F1}m)";
+                        retreatReason = $"ahead of party ({forwardOffset:F1}m forward)";
                     }
                 }
 

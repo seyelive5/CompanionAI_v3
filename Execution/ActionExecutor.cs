@@ -230,7 +230,15 @@ namespace CompanionAI_v3.Execution
                 }
             }
 
-            if ((action.Type == ActionType.Attack || action.Type == ActionType.Debuff)
+            // ★ v3.111.5: Buff w/ enemy target (도발 등) 도 재검증에 포함
+            //   - 기존: Attack/Debuff만 체크 → 도발이 Buff ActionType이라 이동 후 LOS/사거리 검증 누락
+            //   - 신: 적 타겟 Buff(enemy-target Buff, e.g. Taunt)도 동일한 재검증 수행
+            bool needsReachabilityCheck =
+                action.Type == ActionType.Attack ||
+                action.Type == ActionType.Debuff ||
+                (action.Type == ActionType.Buff && targetUnit != null && casterUnit != null && targetUnit != casterUnit);
+
+            if (needsReachabilityCheck
                 && casterUnit != null && targetUnit != null
                 && (action.AllTargets == null || action.AllTargets.Count == 0))
             {
