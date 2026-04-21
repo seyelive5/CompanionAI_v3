@@ -125,11 +125,10 @@ namespace CompanionAI_v3.GameInterface
             public float AttackScore { get; set; }
             public float APCost { get; set; }
 
-            /// <summary>★ v3.2.00: 영향력 맵 기반 위협 점수</summary>
-            public float InfluenceThreatScore { get; set; }
-
-            /// <summary>★ v3.2.00: 아군 통제 구역 보너스</summary>
-            public float InfluenceControlBonus { get; set; }
+            // ★ v3.110.16: InfluenceThreatScore/InfluenceControlBonus 제거 (Phase C).
+            //   InfluenceMap의 역제곱 거리 기반 threat/ctrl은 ThreatScore/CoverScore와 중복되며
+            //   실증 로그상 유의미 기여 작음. ExposureScore(v3.110.15)가 "적 밀집 회피" 역할 대체.
+            //   ApplyInfluenceScores 메서드 + 관련 influenceMap 파라미터 함께 제거됨.
 
             /// <summary>★ v3.5.18: Blackboard 통합 - SharedTarget 접근 보너스</summary>
             public float SharedTargetBonus { get; set; }
@@ -158,12 +157,41 @@ namespace CompanionAI_v3.GameInterface
             /// <summary>★ v3.74.2: 진동 방지 패널티 (이전 위치로 되돌아가면 감점)</summary>
             public float OscillationPenalty { get; set; }
 
+            /// <summary>★ v3.110.15: 노출도 패널티 (자신을 볼 수 있는 적 수 기반).
+            /// InfluenceMap의 원래 의도(적 밀집 회피)를 게임 API로 정확히 구현.
+            /// hittableFromLos는 대칭 LOS라 "적→자신 LOS 수"와 동일 — 재사용.
+            /// 사용자 증상 "Support/원거리가 적 밀집 한복판 포지셔닝" 직접 해결.</summary>
+            public float ExposureScore { get; set; }
+
+            /// <summary>
+            /// ★ v3.110.19 Phase 1a: HideScore 5축 (게임 ProtectionTileScorer 패턴).
+            /// 방어 관점 — 이 위치가 얼마나 은폐되는가. CoverScore(공격 관점)와 분리.
+            /// 계산: TileScorerPort.GetHideScoreComponents 호출 결과를 Task 1.3에서 설정.
+            /// </summary>
+            public float HideFullComplete { get; set; }   // 0 or 1: 모든 적에게 ≥Full 엄폐 완성
+            public float HideAnyComplete { get; set; }    // 0 or 1: 모든 적에게 ≥Half 엄폐 완성
+            public float HideAnyRatio { get; set; }       // 0~1: ≥Half 엄폐 비율
+            public float HideFullRatio { get; set; }      // 0~1: ≥Full 엄폐 비율
+            public float HideValue { get; set; }          // 가중 합계 (적 수 비례, unbounded)
+
+            /// <summary>
+            /// HideScore 가중 합산 — TotalScore 기여값.
+            /// FullComplete=50 (완전 은폐 특별 보너스), AnyComplete=20, Ratios*15, HideValue*10.
+            /// </summary>
+            public float HideScore =>
+                HideFullComplete * 50f +
+                HideAnyComplete * 20f +
+                HideFullRatio * 15f +
+                HideAnyRatio * 15f +
+                HideValue * 10f;
+
             public float TotalScore => CoverScore + DistanceScore - ThreatScore + AttackScore
-                                       - InfluenceThreatScore + InfluenceControlBonus
                                        + SharedTargetBonus + TacticalAdjustment
                                        - PathRiskScore + HitChanceBonus + MeleeAoESplashBonus
                                        - AllyClusterPenalty + FlankingScore
-                                       - OscillationPenalty;
+                                       - OscillationPenalty
+                                       - ExposureScore
+                                       + HideScore;  // ★ v3.110.19 Phase 1a
 
             public bool CanStand { get; set; }
             public bool HasLosToEnemy { get; set; }
@@ -172,15 +200,15 @@ namespace CompanionAI_v3.GameInterface
 
             public override string ToString() =>
                 $"Pos({Position.x:F1},{Position.z:F1}) Score={TotalScore:F1}" +
-                (InfluenceThreatScore > 0 || InfluenceControlBonus > 0
-                    ? $" [Inf:T{InfluenceThreatScore:F1}/C{InfluenceControlBonus:F1}]" : "") +
                 (SharedTargetBonus > 0 ? $" [ST:{SharedTargetBonus:F1}]" : "") +
                 (TacticalAdjustment != 0 ? $" [Tac:{TacticalAdjustment:F1}]" : "") +
                 (PathRiskScore > 0 ? $" [Path:{PathRiskScore:F1}]" : "") +
                 (HitChanceBonus != 0 ? $" [Hit:{HitChanceBonus:F1}]" : "") +
                 (MeleeAoESplashBonus > 0 ? $" [Splash:{MeleeAoESplashBonus:F1}]" : "") +
                 (AllyClusterPenalty > 0 ? $" [AllyCluster:-{AllyClusterPenalty:F1}]" : "") +
-                (FlankingScore > 0 ? $" [Flank:+{FlankingScore:F1}]" : "");
+                (FlankingScore > 0 ? $" [Flank:+{FlankingScore:F1}]" : "") +
+                (ExposureScore > 0 ? $" [Expo:-{ExposureScore:F1}]" : "") +
+                (HideScore > 0 ? $" [Hide:+{HideScore:F1}]" : "");
         }
 
         public enum MovementGoal
@@ -548,14 +576,12 @@ namespace CompanionAI_v3.GameInterface
         /// <param name="startPos">시작 위치</param>
         /// <param name="endNode">목표 노드</param>
         /// <param name="pathCell">경로 셀 (경로 정보 포함)</param>
-        /// <param name="influenceMap">영향력 맵 (위협 조회용)</param>
         /// <returns>경로 평균 위험도 (0 = 안전, 높을수록 위험)</returns>
         public static float EvaluatePathRisk(
             BaseUnitEntity unit,
             Vector3 startPos,
             CustomGridNodeBase endNode,
-            WarhammerPathPlayerCell pathCell,
-            BattlefieldInfluenceMap influenceMap)
+            WarhammerPathPlayerCell pathCell)
         {
             // ★ v3.8.13: AI 셀로 변환하여 통합 메서드 호출
             var aiCell = new WarhammerPathAiCell(
@@ -567,7 +593,7 @@ namespace CompanionAI_v3.GameInterface
                 pathCell.IsCanStand,
                 0, 0, 0  // 플레이어 셀에는 위협 데이터 없음
             );
-            return EvaluatePathRiskAi(unit, startPos, endNode, aiCell, influenceMap);
+            return EvaluatePathRiskAi(unit, startPos, endNode, aiCell);
         }
 
         /// <summary>
@@ -583,8 +609,7 @@ namespace CompanionAI_v3.GameInterface
             BaseUnitEntity unit,
             Vector3 startPos,
             CustomGridNodeBase endNode,
-            WarhammerPathAiCell pathCell,
-            BattlefieldInfluenceMap influenceMap)
+            WarhammerPathAiCell pathCell)
         {
             if (unit == null || endNode == null || pathCell.Node == null)
                 return 0f;
@@ -613,12 +638,7 @@ namespace CompanionAI_v3.GameInterface
                     if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] PathRiskAi: AoO={pathProvokedAttacks}, AoE={pathEnteredAoE}, DmgAoE={pathDamagingAoESteps} -> Risk={totalRisk:F1}");
                 }
 
-                // 추가: 영향력 맵 기반 위협 (적 밀집도) - 목적지에서만 평가
-                if (influenceMap != null && influenceMap.IsValid)
-                {
-                    float influenceThreat = influenceMap.GetThreatAt(endNode.Vector3Position);
-                    totalRisk += influenceThreat * 3f;
-                }
+                // ★ v3.110.16: InfluenceMap threat 누적 제거 — EvaluatePosition의 ThreatScore가 이미 커버.
             }
             catch (Exception ex)
             {
@@ -631,42 +651,20 @@ namespace CompanionAI_v3.GameInterface
 
         /// <summary>
         /// ★ v3.5.41: 단순 거리 기반 경로 위험도 평가 (ParentNode 없을 때 사용)
-        /// 경로 정보 없이 시작점과 끝점 사이를 샘플링하여 위협 평가
+        /// ★ v3.110.16: influenceMap 파라미터 제거. 현재 구현체는 샘플링 기반이지만 InfluenceMap.threat 조회에 의존했음.
+        /// InfluenceMap 제거 후 별도 위협 평가 필요 시 AiBrainHelper.TryFindThreats 기반으로 재구성 가능.
+        /// 지금은 단순화 — 경로 위험 평가는 EvaluatePathRiskAi (AI 셀 기반)가 주 경로.
         /// </summary>
         public static float EvaluatePathRiskSimple(
             BaseUnitEntity unit,
             Vector3 startPos,
-            Vector3 endPos,
-            BattlefieldInfluenceMap influenceMap)
+            Vector3 endPos)
         {
-            if (unit == null || influenceMap == null || !influenceMap.IsValid)
-                return 0f;
-
-            float totalRisk = 0f;
-            int sampleCount = 0;
-
-            try
-            {
-                float distance = Vector3.Distance(startPos, endPos);
-                int samples = Math.Max(3, (int)(distance / 3f));  // 3m 간격으로 샘플링
-
-                for (int i = 0; i <= samples; i++)
-                {
-                    float t = samples > 0 ? (float)i / samples : 0f;
-                    var samplePos = Vector3.Lerp(startPos, endPos, t);
-
-                    float threatAtSample = influenceMap.GetThreatAt(samplePos);
-                    totalRisk += threatAtSample;
-                    sampleCount++;
-                }
-            }
-            catch (Exception ex)
-            {
-                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] EvaluatePathRiskSimple error: {ex.Message}");
-                return 0f;
-            }
-
-            return sampleCount > 0 ? totalRisk / sampleCount * 3f : 0f;
+            // ★ v3.110.16: InfluenceMap.GetThreatAt 기반 샘플링 제거. 현재 stub으로 0 반환.
+            //   본래 Simple 경로는 ParentNode 없는 타일용 폴백이었으나 실제 EvaluatePathRiskAi가
+            //   대부분 커버. 이 stub 유지는 호출 시그니처 안정성 목적.
+            //   AI 셀 위협 데이터(ProvokedAttacks/EnteredAoE)가 없는 희귀 케이스에 한해 0 반환.
+            return 0f;
         }
 
         /// <summary>
@@ -961,6 +959,21 @@ namespace CompanionAI_v3.GameInterface
             score.HasLosToEnemy = hasAnyLos;
             score.HittableEnemyCount = hittableFromLos;  // ★ v3.8.78: LOS 기반 hittable count
 
+            // ★ v3.110.15: ExposureScore — "이 위치를 공격 가능한 적 수"를 페널티화.
+            // hittableFromLos는 대칭 LOS(enemyNode → node) 계산이라 "적→자신 LOS 수"와 동일.
+            //
+            // 공식: sqrt(exposed) × 10
+            //   1명: 10, 3명: 17, 5명: 22, 8명: 28, 10명: 32, 15명: 39, 20명: 45
+            // 이전 v3.110.15a 공식 `min(hittable, 5) × 5`는 대부분 전장에서 5+ 노출이라 모두 cap=25로
+            // saturate → 변별력 0. 실증 로그 27건 전부 -25.0 동일.
+            //
+            // sqrt 감쇠로 cap 제거. 많은 적에 노출될수록 더 큰 페널티지만 증가율 감소.
+            // Attack score(53 평균, 83 최대)와 균형 — 충분히 유의미하되 공격 기회를 완전히 포기시키진 않음.
+            // InfluenceMap threat축의 원래 의도를 게임 API로 정확히 구현 (벽/고저차/엄폐 자동 반영).
+            score.ExposureScore = hittableFromLos > 0
+                ? Mathf.Sqrt(hittableFromLos) * 10f
+                : 0f;
+
             switch (goal)
             {
                 case MovementGoal.FindCover:
@@ -1059,9 +1072,7 @@ namespace CompanionAI_v3.GameInterface
             float weaponRange = Settings.SC.FallbackWeaponRange,
             float minSafeDistance = 5f,
             float predictedMP = 0f,
-            BattlefieldInfluenceMap influenceMap = null,
             AIRole role = AIRole.Auto,
-            Analysis.PredictiveThreatMap predictiveMap = null,
             Vector3? lastMoveOrigin = null)
         {
             // ★ v3.8.13: AI용 패스파인딩 사용 - 경로 위협 데이터(ProvokedAttacks, EnteredAoE) 포함
@@ -1132,29 +1143,25 @@ namespace CompanionAI_v3.GameInterface
                 // ★ v3.10.0: 아군 밀집 패널티 (이동 위치 분산)
                 score.AllyClusterPenalty = CalculateAllyClusterPenalty(score.Position, unit);
 
-                // ★ v3.2.25: 영향력 맵 + Role별 Frontline 점수 적용
-                // ★ v3.4.00: 예측 위협 맵 점수 추가
-                if (influenceMap != null && influenceMap.IsValid)
+                // ★ v3.110.16: ApplyInfluenceScores 제거 (Phase C). Blackboard 기반 점수는 직접 호출.
+                ApplyBlackboardScores(score, score.Position, role);
+
+                // ★ v3.8.13: AI 셀에서 직접 경로 위험도 평가 (실제 위협 데이터 활용)
+                // AI 패스파인더가 이미 경로 상의 AoO, AoE 진입 횟수를 계산해둠
+                var originalTile = tiles.Values.FirstOrDefault(t =>
+                    t.Node == score.Node);
+
+                if (originalTile.Node != null)
                 {
-                    ApplyInfluenceScores(score, influenceMap, role, predictiveMap);
-
-                    // ★ v3.8.13: AI 셀에서 직접 경로 위험도 평가 (실제 위협 데이터 활용)
-                    // AI 패스파인더가 이미 경로 상의 AoO, AoE 진입 횟수를 계산해둠
-                    var originalTile = tiles.Values.FirstOrDefault(t =>
-                        t.Node == score.Node);
-
-                    if (originalTile.Node != null)
-                    {
-                        // AI 셀의 경로 위협 데이터 직접 활용
-                        score.PathRiskScore = EvaluatePathRiskAi(
-                            unit, unit.Position, score.Node, originalTile, influenceMap);
-                    }
-                    else
-                    {
-                        // 폴백: 단순 샘플링 방식
-                        score.PathRiskScore = EvaluatePathRiskSimple(
-                            unit, unit.Position, score.Position, influenceMap);
-                    }
+                    // AI 셀의 경로 위협 데이터 직접 활용
+                    score.PathRiskScore = EvaluatePathRiskAi(
+                        unit, unit.Position, score.Node, originalTile);
+                }
+                else
+                {
+                    // 폴백: 단순 샘플링 방식
+                    score.PathRiskScore = EvaluatePathRiskSimple(
+                        unit, unit.Position, score.Position);
                 }
 
                 // ★ v3.9.26: 게임 실제 명중률 기반 위치 보너스 (Scatter/근접 예외)
@@ -1287,26 +1294,11 @@ namespace CompanionAI_v3.GameInterface
                     Main.LogDebug($"[MovementAPI] Best breakdown: Cover={best.CoverScore:F1}, Distance={best.DistanceScore:F1}, " +
                         $"Threat=-{best.ThreatScore:F1}, Attack={best.AttackScore:F1}, " +
                         $"Hit={best.HitChanceBonus:F1}, Path=-{best.PathRiskScore:F1}, " +
-                        $"InfT=-{best.InfluenceThreatScore:F1}, InfC={best.InfluenceControlBonus:F1}, " +
                         $"AllyC=-{best.AllyClusterPenalty:F1}, Flank={best.FlankingScore:F1}, " +
-                        $"Osc=-{best.OscillationPenalty:F1}");
+                        $"Osc=-{best.OscillationPenalty:F1}, " +
+                        $"Exposure=-{best.ExposureScore:F1}");
 
-                    // ★ v3.110.9: InfluenceMap raw 값 진단 — InfT/InfC가 0에 수렴하는 원인 규명
-                    // "위치별 변별력 없음"이 전장 특성(실제로 threat 평탄)인지 로직 희박인지 구분.
-                    if (influenceMap != null && influenceMap.IsValid)
-                    {
-                        float infThreat = influenceMap.GetThreatAt(best.Position);
-                        float infCtrl = influenceMap.GetControlAt(best.Position);
-                        float infCover = influenceMap.GetCoverAt(best.Position);
-                        float infCombined = influenceMap.GetCombinedScore(best.Position);
-                        float infFrontline = influenceMap.GetFrontlineDistance(best.Position);
-                        bool infSafe = influenceMap.IsSafeZone(best.Position);
-                        Main.LogDebug($"[MovementAPI] InfluenceMap@Best: threat={infThreat:F2}, ctrl={infCtrl:F2}, cover={infCover:F2}, combined={infCombined:F2}, frontlineDist={infFrontline:F1}, safeZone={infSafe}");
-                    }
-                    else
-                    {
-                        Main.LogDebug($"[MovementAPI] InfluenceMap@Best: (null or invalid)");
-                    }
+                    // ★ v3.110.16: InfluenceMap@Best 진단 로그 제거 — InfT/InfC 축 자체가 사라짐.
                 }
             }
             else
@@ -1330,9 +1322,7 @@ namespace CompanionAI_v3.GameInterface
             BaseUnitEntity target,
             float meleeRange = 2f,
             float predictedMP = 0f,
-            BattlefieldInfluenceMap influenceMap = null,
             AIRole role = AIRole.Auto,
-            Analysis.PredictiveThreatMap predictiveMap = null,
             AbilityData meleeAoEAbility = null,
             List<BaseUnitEntity> enemies = null,
             Vector3? lastMoveOrigin = null)
@@ -1413,24 +1403,18 @@ namespace CompanionAI_v3.GameInterface
                     ThreatScore = threatScore
                 };
 
-                // ★ v3.2.25: 영향력 맵 + Role별 Frontline 점수 적용
-                // ★ v3.4.00: 예측 위협 맵 점수 추가
-                // ★ v3.8.13: AI 셀로 경로 위험도 평가
-                if (influenceMap != null && influenceMap.IsValid)
-                {
-                    ApplyInfluenceScores(posScore, influenceMap, role, predictiveMap);
+                // ★ v3.110.16: ApplyInfluenceScores 제거. Blackboard + PathRisk 직접 호출.
+                ApplyBlackboardScores(posScore, pos, role);
 
-                    // ★ v3.8.13: AI 셀의 경로 위협 데이터 직접 활용
-                    if (aiCell.Node != null)
-                    {
-                        posScore.PathRiskScore = EvaluatePathRiskAi(
-                            unit, unitPos, node, aiCell, influenceMap);
-                    }
-                    else
-                    {
-                        posScore.PathRiskScore = EvaluatePathRiskSimple(
-                            unit, unitPos, pos, influenceMap);
-                    }
+                if (aiCell.Node != null)
+                {
+                    posScore.PathRiskScore = EvaluatePathRiskAi(
+                        unit, unitPos, node, aiCell);
+                }
+                else
+                {
+                    posScore.PathRiskScore = EvaluatePathRiskSimple(
+                        unit, unitPos, pos);
                 }
 
                 // ★ v3.8.50: 근접 AOE 스플래시 보너스
@@ -1490,13 +1474,11 @@ namespace CompanionAI_v3.GameInterface
             List<BaseUnitEntity> enemies,
             float minSafeDistance = 8f,
             float predictedMP = 0f,
-            BattlefieldInfluenceMap influenceMap = null,
-            AIRole role = AIRole.Auto,
-            Analysis.PredictiveThreatMap predictiveMap = null)
+            AIRole role = AIRole.Auto)
         {
             // 기본 호출 - maxSafeDistance는 무제한 (0)
             return FindRetreatPositionSync(unit, enemies, minSafeDistance, 0f, predictedMP,
-                influenceMap, role, predictiveMap, null, 0f);
+                role, null, 0f);
         }
 
         /// <summary>
@@ -1511,9 +1493,7 @@ namespace CompanionAI_v3.GameInterface
             float minSafeDistance,
             float maxSafeDistance,
             float predictedMP,
-            BattlefieldInfluenceMap influenceMap,
             AIRole role,
-            Analysis.PredictiveThreatMap predictiveMap,
             Vector3? familiarPosition,
             float maxFamiliarDistanceMeters)
         {
@@ -1657,24 +1637,18 @@ namespace CompanionAI_v3.GameInterface
                     AllyClusterPenalty = allyClusterPenalty
                 };
 
-                // ★ v3.2.25: 영향력 맵 + Role별 Frontline 점수 적용
-                // ★ v3.4.00: 예측 위협 맵 점수 추가
-                // ★ v3.8.13: AI 셀로 경로 위험도 평가
-                if (influenceMap != null && influenceMap.IsValid)
-                {
-                    ApplyInfluenceScores(score, influenceMap, role, predictiveMap);
+                // ★ v3.110.16: ApplyInfluenceScores 제거. Blackboard + PathRisk 직접 호출.
+                ApplyBlackboardScores(score, pos, role);
 
-                    // ★ v3.8.13: AI 셀의 경로 위협 데이터 직접 활용
-                    if (aiCell.Node != null)
-                    {
-                        score.PathRiskScore = EvaluatePathRiskAi(
-                            unit, unit.Position, node, aiCell, influenceMap);
-                    }
-                    else
-                    {
-                        score.PathRiskScore = EvaluatePathRiskSimple(
-                            unit, unit.Position, pos, influenceMap);
-                    }
+                if (aiCell.Node != null)
+                {
+                    score.PathRiskScore = EvaluatePathRiskAi(
+                        unit, unit.Position, node, aiCell);
+                }
+                else
+                {
+                    score.PathRiskScore = EvaluatePathRiskSimple(
+                        unit, unit.Position, pos);
                 }
 
                 // 엄폐 점수 추가
@@ -1816,6 +1790,9 @@ namespace CompanionAI_v3.GameInterface
             // 게임 PathAiCell.StepsInsideDamagingAoE가 감지 못하는 AoE도 CombatAPI로 체크
             bool avoidHazardZones = !CombatAPI.IsUnitInHazardZone(unit);
 
+            // ★ v3.110.13: 타겟 공격 가능성 체크용 — 단일 타겟 리스트 재사용 (GC 절감)
+            var singleTargetList = new List<BaseUnitEntity>(1) { target };
+
             // ★ v3.9.38: A* 경로 기반 접근 위치 선택
             // 유클리드 거리가 아닌 실제 A* 경로를 따라 가장 먼 도달 가능 지점 선택
             // 벽/장애물을 올바르게 돌아가는 다중 턴 이동이 가능
@@ -1829,13 +1806,34 @@ namespace CompanionAI_v3.GameInterface
                 }
                 else
                 {
-                    Main.Log($"[MovementAPI] {unit.CharacterName}: A* approach to ({pathResult.Position.x:F1},{pathResult.Position.z:F1}) dist={Vector3.Distance(pathResult.Position, targetPos):F1}m, pathRisk={pathResult.PathRiskScore:F1} to {target.CharacterName}");
-                    return pathResult;
+                    // ★ v3.110.13: A* 결과 hittable 검증 — 공격 가능하면 즉시 채택.
+                    // hittable=0이면 Euclidean 폴백의 hittable-first 탐색에 기회 부여.
+                    int pathHittable = pathResult.Node != null
+                        ? CombatAPI.CountHittableEnemiesFromPosition(unit, pathResult.Node, singleTargetList, null, null)
+                        : 0;
+                    if (pathHittable > 0)
+                    {
+                        pathResult.HittableEnemyCount = pathHittable;
+                        pathResult.HasLosToEnemy = true;
+                        Main.Log($"[MovementAPI] {unit.CharacterName}: A* approach to ({pathResult.Position.x:F1},{pathResult.Position.z:F1}) dist={Vector3.Distance(pathResult.Position, targetPos):F1}m, pathRisk={pathResult.PathRiskScore:F1}, hittable={pathHittable} to {target.CharacterName}");
+                        return pathResult;
+                    }
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* approach hittable=0 ({pathResult.Position.x:F1},{pathResult.Position.z:F1}), trying Euclidean hittable-first");
                 }
             }
+            else
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* path failed, falling back to Euclidean approach");
+            }
 
-            // ★ 폴백: A* 경로 실패 시 기존 유클리드 방식 사용
-            if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] {unit.CharacterName}: A* path failed, falling back to Euclidean approach");
+            // ★ v3.110.13: 2-tier 선택 — hittable > 0 우선, 없으면 기존 거리 최소 폴백.
+            // 이전(~v3.110.12): 거리+경로위험만 평가. 반환 위치가 hittable=0이어도 승인 →
+            // v3.110.12의 "staying put → approach 우회" 수정이 또 다른 hittable=0 위치로 수렴하는
+            // 증상의 근본 원인. 접근의 목표는 "공격 가능해지는 위치"여야 함.
+            PositionScore hittableCandidate = null;
+            float hittableClosestDist = float.MaxValue;
+            float hittableLowestRisk = float.MaxValue;
+            int hittableBestCount = 0;
 
             PositionScore closestCandidate = null;
             float closestDist = float.MaxValue;
@@ -1856,25 +1854,56 @@ namespace CompanionAI_v3.GameInterface
 
                 float pathRisk = aiCell.ProvokedAttacks * WEIGHT_AOO + aiCell.EnteredAoE * WEIGHT_AOE_ENTRY + aiCell.StepsInsideDamagingAoE * WEIGHT_DAMAGING_AOE_STEP;
 
-                // ★ v3.9.52: currentDist 가드 제거 — 게임 네이티브 AI와 동일하게
-                // 도달 가능한 모든 셀 중 타겟에 가장 가까운 셀 선택 (벽 우회 시 필수)
-                if (distToTarget < closestDist || (distToTarget == closestDist && pathRisk < lowestPathRisk))
+                // ★ v3.110.13: hittable 분류 — 이 위치에서 target 공격 가능 여부
+                int hittable = CombatAPI.CountHittableEnemiesFromPosition(unit, node, singleTargetList, null, null);
+
+                if (hittable > 0)
                 {
-                    closestDist = distToTarget;
-                    lowestPathRisk = pathRisk;
-                    closestCandidate = new PositionScore
+                    // hittable 후보: 최단 거리 + 최저 위험 우선
+                    if (distToTarget < hittableClosestDist || (distToTarget == hittableClosestDist && pathRisk < hittableLowestRisk))
                     {
-                        Node = node,
-                        CanStand = true,
-                        DistanceScore = 100f - distToTarget,
-                        PathRiskScore = pathRisk
-                    };
+                        hittableClosestDist = distToTarget;
+                        hittableLowestRisk = pathRisk;
+                        hittableBestCount = hittable;
+                        hittableCandidate = new PositionScore
+                        {
+                            Node = node,
+                            CanStand = true,
+                            DistanceScore = 100f - distToTarget,
+                            PathRiskScore = pathRisk,
+                            HittableEnemyCount = hittable,
+                            HasLosToEnemy = true
+                        };
+                    }
                 }
+                else
+                {
+                    // 일반 후보: 기존 로직 (hittable 없을 때 폴백)
+                    if (distToTarget < closestDist || (distToTarget == closestDist && pathRisk < lowestPathRisk))
+                    {
+                        closestDist = distToTarget;
+                        lowestPathRisk = pathRisk;
+                        closestCandidate = new PositionScore
+                        {
+                            Node = node,
+                            CanStand = true,
+                            DistanceScore = 100f - distToTarget,
+                            PathRiskScore = pathRisk,
+                        };
+                    }
+                }
+            }
+
+            // hittable 후보 우선 선택
+            if (hittableCandidate != null)
+            {
+                Main.Log($"[MovementAPI] {unit.CharacterName}: Euclidean approach (hittable) to ({hittableCandidate.Position.x:F1},{hittableCandidate.Position.z:F1}) dist={hittableClosestDist:F1}m, pathRisk={hittableLowestRisk:F1}, hittable={hittableBestCount} to {target.CharacterName}");
+                return hittableCandidate;
             }
 
             if (closestCandidate != null)
             {
-                Main.Log($"[MovementAPI] {unit.CharacterName}: Euclidean approach to ({closestCandidate.Position.x:F1},{closestCandidate.Position.z:F1}) dist={closestDist:F1}m, pathRisk={lowestPathRisk:F1} to {target.CharacterName}");
+                Main.Log($"[MovementAPI] {unit.CharacterName}: Euclidean approach (closest, hittable=0) to ({closestCandidate.Position.x:F1},{closestCandidate.Position.z:F1}) dist={closestDist:F1}m, pathRisk={lowestPathRisk:F1} to {target.CharacterName}");
             }
 
             return closestCandidate;
@@ -2103,76 +2132,13 @@ namespace CompanionAI_v3.GameInterface
 
         #region Influence Map Integration (v3.2.00)
 
-        /// <summary>
-        /// ★ v3.2.25: 영향력 맵 기반 위협/통제 점수 적용 (Role별 Frontline 점수 포함)
-        /// ★ v3.4.00: 예측 위협 맵 지원 추가
-        /// ★ v3.5.18: Response Curves + Blackboard 통합
-        ///
-        /// - 적 밀집 지역 회피 (InfluenceThreatScore) - ThreatCountPenalty 커브 적용
-        /// - 아군 통제 구역 선호 (InfluenceControlBonus) - SafetyByDistance 커브 적용
-        /// - Role별 전선 위치 선호/회피
-        /// - 예측 위협 반영 (다음 턴 적 이동 고려)
-        /// - SharedTarget 접근 보너스 (Blackboard)
-        /// - TeamConfidence 기반 전술 조정 (Blackboard)
-        /// </summary>
-        private static void ApplyInfluenceScores(
-            PositionScore score,
-            BattlefieldInfluenceMap influenceMap,
-            AIRole role = AIRole.Auto,
-            Analysis.PredictiveThreatMap predictiveMap = null)
-        {
-            if (score == null || influenceMap == null || !influenceMap.IsValid)
-                return;
-
-            var pos = score.Position;
-
-            // ★ v3.5.18: Response Curves 적용
-            // 적 밀집도 기반 위협 - ThreatCountPenalty 커브 사용
-            float threatDensity = influenceMap.GetThreatAt(pos);
-            float threatMultiplier = CurvePresets.ThreatCountPenalty?.Evaluate(threatDensity) ?? (threatDensity * 8f);
-            score.InfluenceThreatScore = threatMultiplier;
-
-            // 아군 통제 구역 보너스 - SafetyByDistance 커브 개념 적용
-            float allyControl = influenceMap.GetControlAt(pos);
-            float safetyMultiplier = CurvePresets.SafetyByDistance?.Evaluate(allyControl * 10f) ?? (allyControl * 4f);
-            score.InfluenceControlBonus = safetyMultiplier;
-
-            // ★ v3.5.00: CoverMap 보너스 - CoverValue 커브 적용
-            float coverQuality = influenceMap.GetCoverAt(pos);
-            float coverBonus = CurvePresets.CoverValue?.Evaluate(coverQuality) ?? (coverQuality * 12f);
-            score.InfluenceControlBonus += coverBonus;
-
-            // ★ v3.5.00: PDF 방법론 통합 점수
-            float combinedTacticalScore = influenceMap.GetCombinedScore(pos);
-            score.InfluenceControlBonus += combinedTacticalScore * 8f;
-
-            // ★ v3.2.25: Frontline 거리 기반 Role별 점수
-            float frontlineDist = influenceMap.GetFrontlineDistance(pos);
-            ApplyFrontlineScore(score, frontlineDist, role);
-
-            // 안전 구역 추가 보너스
-            if (influenceMap.IsSafeZone(pos))
-            {
-                score.InfluenceControlBonus += 5f;
-            }
-
-            // ★ v3.4.00: 예측 위협 점수 (다음 턴 적 이동 고려)
-            if (predictiveMap != null && predictiveMap.IsValid)
-            {
-                float predictedThreat = predictiveMap.GetPredictedThreatAt(pos);
-                float turnSafety = predictiveMap.GetTurnSafetyScore(pos);
-
-                score.InfluenceThreatScore += predictedThreat * 6f;
-
-                if (turnSafety > 0.7f)
-                {
-                    score.InfluenceControlBonus += turnSafety * 10f;
-                }
-            }
-
-            // ★ v3.5.18: Blackboard 통합 - SharedTarget 접근 보너스
-            ApplyBlackboardScores(score, pos, role);
-        }
+        // ★ v3.110.16: ApplyInfluenceScores 메서드 제거 (Phase C).
+        //   InfluenceMap 기반 InfT/InfC 축은 역제곱 거리 추정으로 정보 가치 낮고 ThreatScore/CoverScore와 중복.
+        //   ExposureScore(v3.110.15, sqrt(hittable) × 10)가 "적 밀집 회피" 역할 대체.
+        //   Frontline 기반 Role 페널티(ApplyFrontlineScore)도 함께 제거.
+        //
+        //   Blackboard 기반 점수(SharedTargetBonus, TacticalAdjustment)는 의미 있으므로 유지.
+        //   EvaluatePosition에서 직접 ApplyBlackboardScores를 호출하도록 이동.
 
         /// <summary>
         /// ★ v3.5.18: Blackboard 기반 점수 적용
@@ -2272,65 +2238,8 @@ namespace CompanionAI_v3.GameInterface
             }
         }
 
-        /// <summary>
-        /// ★ v3.2.25: Role별 전선 위치 점수
-        /// ★ v3.9.48: 전선 점수 완화 — 전진 억제 해소
-        /// 기존: Support 4f/m (무캡), DPS 3f/m (10m+) → 과도한 전진 억제
-        /// 개선: 페널티 시작 거리 확대, 감점 약화, 상한 설정
-        /// </summary>
-        private static void ApplyFrontlineScore(PositionScore score, float frontlineDist, AIRole role)
-        {
-            switch (role)
-            {
-                case AIRole.Tank:
-                    // Tank: 전선 앞(0~8m)에서 보너스, 후방(-5m 이하) 페널티
-                    if (frontlineDist >= 0f && frontlineDist <= 8f)
-                    {
-                        score.InfluenceControlBonus += 15f;  // 전선 앞 적극 위치
-                    }
-                    else if (frontlineDist < -5f)
-                    {
-                        score.InfluenceThreatScore += 10f;  // 전선 뒤 = 역할 수행 불가
-                    }
-                    break;
-
-                case AIRole.DPS:
-                    // ★ v3.9.48: 고립 페널티 완화 (10m/3f → 15m/2f, 상한 20)
-                    if (frontlineDist > 15f)
-                    {
-                        float isolationPenalty = Math.Min(20f, (frontlineDist - 15f) * 2f);
-                        score.InfluenceThreatScore += isolationPenalty;
-                    }
-                    break;
-
-                case AIRole.Support:
-                    // ★ v3.9.48: 전선 앞 페널티 완화 (0m/4f → 5m/2f, 상한 15)
-                    // Support도 전투 상황에 따라 전선 근처까지 전진 가능
-                    if (frontlineDist < -5f)
-                    {
-                        score.InfluenceControlBonus += 10f;  // 후방 안전 위치
-                    }
-                    else if (frontlineDist > 5f)
-                    {
-                        float penalty = Math.Min(15f, (frontlineDist - 5f) * 2f);
-                        score.InfluenceThreatScore += penalty;
-                    }
-                    break;
-
-                // Auto/기타: 기본 동작 (추가 점수 없음)
-            }
-        }
-
-        /// <summary>
-        /// ★ v3.2.00: 영향력 맵에서 가장 안전한 위치 반환
-        /// </summary>
-        public static Vector3? GetSafestPosition(BattlefieldInfluenceMap influenceMap, Vector3 currentPos)
-        {
-            if (influenceMap == null || !influenceMap.IsValid)
-                return null;
-
-            return influenceMap.GetNearestSafeZone(currentPos);
-        }
+        // ★ v3.110.16: ApplyFrontlineScore 제거 (Phase C). InfT/InfC 필드가 제거됐으므로 이 함수도 무효.
+        // ★ v3.110.16: GetSafestPosition 제거 (InfluenceMap.SafeZones 의존).
 
         #endregion
     }
