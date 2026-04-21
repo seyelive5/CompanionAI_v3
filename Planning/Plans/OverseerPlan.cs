@@ -373,11 +373,19 @@ namespace CompanionAI_v3.Planning.Plans
                 // ★ v3.18.2: BUFF → DEBUFF 턴 중 전환
                 // 버프 모드에서 WarpRelay 전달 완료 → 남은 턴은 디버프 모드로 전환
                 // 사람 플레이어: 아군 버프 전달 → 즉시 적에게 이동하여 Hex/공격
+                //
+                // ★ v3.111.6 Fix A: 한 턴에 BUFF + DEBUFF 양쪽 다 하지 않음
+                //   기존: WarpRelay 1회 성공만으로 즉시 DEBUFF 전환 + aggressive relocate
+                //         → Raven이 적 클러스터로 14m+ 도주 → 다음 턴 keystone LOS 차단
+                //         → 자기 자신 버프 폴백 버그
+                //   신:   BUFF 페이즈에서 WarpRelay 쓴 턴은 DEBUFF 전환 보류
+                //         transition은 1턴 지연 → 다음 턴 FamiliarPositioner가 자연스럽게 DEBUFF 판정
+                //   이로써 Raven은 이번 턴 아군 근처 유지 → 다음 턴도 버프 확산 가능
                 // ────────────────────────────────────────────────────────────
-                if (isRavenBuffPhase && usedWarpRelay && situation.FamiliarType == PetType.Raven)
+                bool deferDebuffTransition = isRavenBuffPhase && usedWarpRelay && situation.FamiliarType == PetType.Raven;
+                if (deferDebuffTransition)
                 {
-                    isRavenBuffPhase = false;
-                    Main.Log($"[Overseer] ★ Raven BUFF→DEBUFF transition: WarpRelay delivered to allies, switching to enemy positioning");
+                    Main.Log($"[Overseer] ★ v3.111.6: BUFF→DEBUFF transition DEFERRED — WarpRelay 쓴 턴에 aggressive relocate 금지 (Raven 아군 근처 유지)");
                 }
 
                 // ────────────────────────────────────────────────────────────
@@ -385,8 +393,9 @@ namespace CompanionAI_v3.Planning.Plans
                 // ★ v3.8.52: 버프 페이즈에서는 스킵 (Raven은 아군 근처에 있어야 함)
                 //            공격 페이즈에서만 적 밀집 지역으로 이동
                 // ★ v3.18.2: BUFF→DEBUFF 전환 후에는 항상 실행 (skipCoverageCheck)
+                // ★ v3.111.6 Fix A: deferDebuffTransition 상태에서는 relocate 금지
                 // ────────────────────────────────────────────────────────────
-                if (usedWarpRelay && situation.FamiliarType == PetType.Raven && !isRavenBuffPhase)
+                if (usedWarpRelay && situation.FamiliarType == PetType.Raven && !isRavenBuffPhase && !deferDebuffTransition)
                 {
                     // ★ v3.18.2: 버프 전달 직후 전환된 경우, 커버리지 체크 불필요 (이미 버프 완료)
                     var aggressiveRelocate = PlanRavenAggressiveRelocate(situation, ref remainingAP, skipCoverageCheck: true);
@@ -1037,13 +1046,14 @@ namespace CompanionAI_v3.Planning.Plans
                     retreatReason = $"enemy too close ({situation.NearestEnemyDistance:F1}m)";
                 }
 
-                if (situation.InfluenceMap != null && situation.InfluenceMap.IsValid)
+                // ★ v3.110.18: Frontline 제거 — 아군 평균보다 전진한 상태면 후퇴
+                if (situation.AvgAllyDistanceToNearestEnemy > 0f)
                 {
-                    float frontlineDist = situation.InfluenceMap.GetFrontlineDistance(situation.Unit.Position);
-                    if (frontlineDist > -5f)
+                    float forwardOffset = situation.GetForwardOffsetFromAllies(situation.Unit.Position);
+                    if (forwardOffset > 3f)
                     {
                         needsSafeRetreat = true;
-                        retreatReason = $"too close to frontline ({frontlineDist:F1}m)";
+                        retreatReason = $"ahead of party ({forwardOffset:F1}m forward)";
                     }
                 }
 
@@ -1515,6 +1525,26 @@ namespace CompanionAI_v3.Planning.Plans
             int supportRangeTiles = FamiliarAPI.GetRavenSupportRange(raven);
             float MAX_RAVEN_RELOCATE_METERS = CombatAPI.TilesToMeters(supportRangeTiles);
 
+            // ★ v3.111.6 Fix B: 마스터의 keystone 버프 최대 사거리 계산
+            //   기존: familiar safe range만 체크 → Raven이 마스터 사거리 밖으로 이동 가능
+            //   → 다음 턴 마스터가 Raven에게 WarpRelay 대상 버프 전달 불가
+            //   → 자기 자신 폴백 버그
+            //   신: keystone buff max range + 3t 여유를 하드 제약
+            float maxKeystoneBuffRangeTiles = 12f;  // 폴백: 대부분 keystone buff 사거리
+            if (situation.AvailableBuffs != null && situation.FamiliarType.HasValue)
+            {
+                var keystoneBuffs = FamiliarAbilities.FilterAbilitiesForFamiliarSpread(
+                    situation.AvailableBuffs, situation.FamiliarType.Value);
+                foreach (var kb in keystoneBuffs)
+                {
+                    int rangeTiles = CombatAPI.GetAbilityRangeInTiles(kb);
+                    if (rangeTiles > maxKeystoneBuffRangeTiles) maxKeystoneBuffRangeTiles = rangeTiles;
+                }
+            }
+            // 여유 3t — familiar이 Master 반경 내에 있되 소폭 초과 허용
+            float masterBuffRangeConstraintTiles = maxKeystoneBuffRangeTiles + 3f;
+            if (Main.IsDebugEnabled) Main.LogDebug($"[Overseer] RavenAggressiveRelocate: Master keystone buff max range={maxKeystoneBuffRangeTiles}t, constraint={masterBuffRangeConstraintTiles}t");
+
             var validAllies = situation.Allies?
                 .Where(a => a != null && a.IsConscious && !FamiliarAPI.IsFamiliar(a))
                 .ToList() ?? new List<BaseUnitEntity>();
@@ -1593,9 +1623,16 @@ namespace CompanionAI_v3.Planning.Plans
             {
                 Vector3 pos = node.Vector3Position;
 
-                // 마스터 사거리 제한
+                // 마스터 사거리 제한 (Relocate 능력의 사거리)
                 float distFromMaster = Vector3.Distance(unitPos, pos);
                 if (distFromMaster > maxRange)
+                    continue;
+
+                // ★ v3.111.6 Fix B: 마스터 keystone 버프 사거리 하드 제약
+                // Raven이 마스터의 버프 사거리 + 여유 3t 밖으로 나가지 못하도록
+                // (다음 턴 WarpRelay 버프 전달 가능성 보장)
+                float distFromMasterTilesHardCheck = CombatAPI.MetersToTiles(distFromMaster);
+                if (distFromMasterTilesHardCheck > masterBuffRangeConstraintTiles)
                     continue;
 
                 // ★ v3.8.55: Raven support ability 실제 사거리 제한
