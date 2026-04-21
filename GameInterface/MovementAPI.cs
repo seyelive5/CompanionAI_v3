@@ -132,6 +132,10 @@ namespace CompanionAI_v3.GameInterface
             public CustomGridNodeBase Node { get; set; }
             public Vector3 Position => Node?.Vector3Position ?? Vector3.zero;
 
+            /// <summary>
+            /// ★ v3.111.1: 공격자 관점 fire efficiency (0~30). 게임 fireCoverValues 역수 체계.
+            /// 적 cover 높을수록 우리 공격 효율 ↓. HideScore(방어 관점)와 쌍으로 trade-off.
+            /// </summary>
             public float CoverScore { get; set; }
             public float DistanceScore { get; set; }
             public float ThreatScore { get; set; }
@@ -951,8 +955,11 @@ namespace CompanionAI_v3.GameInterface
             if (enemies == null || enemies.Count == 0)
                 return score;
 
-            float totalCoverScore = 0f;
-            float maxSingleCover = 0f;  // ★ v3.9.26: 최대 단일 엄폐 점수 추적
+            // ★ v3.111.1 Phase 6: CoverScore 공격자 관점 재설계.
+            // 기존 [None=0, Half=15, Full=30, Invisible=40] 방어 aggregate → HideScore와 중복.
+            // 신: 게임 fireCoverValues [None=1.0, Half=0.02, Full=0.0004, Invisible=0] 반영 — 공격 효율.
+            // 적의 cover가 높을수록 우리 공격 효율 ↓. 평균 × 30으로 스케일 (0~30 범위).
+            float fireEfficiencySum = 0f;
             float nearestEnemyDist = float.MaxValue;
             bool hasAnyLos = false;
             int hittableFromLos = 0;  // ★ v3.8.78: LOS 기반 hittable count (CountHittable 중복 제거)
@@ -982,21 +989,16 @@ namespace CompanionAI_v3.GameInterface
                         hittableFromLos++;  // ★ v3.8.78: LOS 있으면 hittable 카운트
                     }
 
-                    float coverVal = 0f;
+                    // coverType 기반 fire efficiency 누적 (LOS 대칭 가정 — 벽 기반 cover는 양방향 동일)
+                    float fireEff = 0f;
                     switch (coverType)
                     {
-                        case LosCalculations.CoverType.Invisible:
-                            coverVal = 40f;
-                            break;
-                        case LosCalculations.CoverType.Full:
-                            coverVal = 30f;
-                            break;
-                        case LosCalculations.CoverType.Half:
-                            coverVal = 15f;
-                            break;
+                        case LosCalculations.CoverType.None:      fireEff = 1.0f;    break;
+                        case LosCalculations.CoverType.Half:      fireEff = 0.02f;   break;
+                        case LosCalculations.CoverType.Full:      fireEff = 0.0004f; break;
+                        case LosCalculations.CoverType.Invisible: fireEff = 0f;      break;
                     }
-                    totalCoverScore += coverVal;
-                    if (coverVal > maxSingleCover) maxSingleCover = coverVal;
+                    fireEfficiencySum += fireEff;
 
                     if (coverType > score.BestCover)
                         score.BestCover = coverType;
@@ -1004,11 +1006,10 @@ namespace CompanionAI_v3.GameInterface
                 catch { }
             }
 
-            // ★ v3.9.26: Max-Weighted CoverScore — 가장 좋은 엄폐를 중시
-            // 기존: 평균 → 적 5명 중 1명만 Full Cover면 30/5=6 (무의미)
-            // 개선: max*0.6 + avg*0.4 → 30*0.6 + 6*0.4 = 20.4 (유의미)
-            float avgCover = validEnemyCount > 0 ? totalCoverScore / validEnemyCount : 0f;
-            score.CoverScore = maxSingleCover * 0.6f + avgCover * 0.4f;
+            // ★ v3.111.1 Phase 6: 공격자 관점 fire efficiency 평균 × 30.
+            // 0~30 범위 (모두 완전 노출 = 30, 모두 Full cover = ~0.01).
+            float avgFireEff = validEnemyCount > 0 ? fireEfficiencySum / validEnemyCount : 0f;
+            score.CoverScore = avgFireEff * 30f;
             score.HasLosToEnemy = hasAnyLos;
             score.HittableEnemyCount = hittableFromLos;  // ★ v3.8.78: LOS 기반 hittable count
 
