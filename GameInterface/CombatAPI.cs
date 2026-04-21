@@ -1479,6 +1479,41 @@ namespace CompanionAI_v3.GameInterface
                 bool isMelee = weapon.Blueprint.IsMelee;
                 profile.IsMelee = isMelee;
 
+                // ★ v3.111.4: Psyker 오감지 방지 — primaryHand가 melee staff여도
+                //   실제 주공격이 Directional AoE(Cone/Ray/Sector) 사이킥이면 ranged 취급.
+                //   증상: 카시아(Psyker Support) staff 착용 → melee 판정 → EffectiveRange=1,
+                //         MinSafe=0 → AI가 1타일 밀착이 "최적"이라 착각.
+                //   수정: melee 조기 return 전에 Cone/Ray/Sector 주공격 능력 탐지.
+                var directionalAoE = TryFindDirectionalAoEPrimaryAttack(unit);
+                if (directionalAoE.ability != null && directionalAoE.radius > 3f)
+                {
+                    profile.IsMelee = false;  // ranged 포지셔닝으로 전환
+                    profile.HasDirectionalPattern = true;
+                    profile.PatternRadius = directionalAoE.radius;
+                    profile.MaxRange = directionalAoE.radius;
+                    profile.OptimalRange = 0f;
+                    // Cone/Ray는 시전자 위치에서 패턴 반경까지만 닿음
+                    profile.EffectiveRange = directionalAoE.radius;
+                    // Scatter 여부는 패턴 특성과 별개로 체크
+                    profile.IsScatter = directionalAoE.ability.IsScatter;
+                    if (profile.IsScatter)
+                    {
+                        profile.ClampedMinSafeDistance = 0f;
+                    }
+                    else
+                    {
+                        profile.ClampedMinSafeDistance = Math.Max(1f, profile.EffectiveRange * AUTO_MINSAFE_RATIO);
+                    }
+                    float maxAllowedRetreatDir = profile.EffectiveRange - 1f;
+                    if (maxAllowedRetreatDir < 0f) maxAllowedRetreatDir = 0f;
+                    profile.MaxRetreatDistance = maxAllowedRetreatDir;
+
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] {unit.CharacterName}: Directional AoE primary attack " +
+                        $"detected ({directionalAoE.ability.Name}, radius={directionalAoE.radius:F1}t) — " +
+                        $"overriding melee=>ranged profile.");
+                    return profile;
+                }
+
                 if (isMelee)
                 {
                     // 근접 무기: 사거리 = AttackRange (보통 2 타일)
@@ -1561,6 +1596,42 @@ namespace CompanionAI_v3.GameInterface
                 ClampedMinSafeDistance = Math.Max(1f, DEFAULT_EFFECTIVE_RANGE * AUTO_MINSAFE_RATIO),
                 MaxRetreatDistance = DEFAULT_EFFECTIVE_RANGE - 1f,
             };
+        }
+
+        /// <summary>
+        /// ★ v3.111.4: Directional AoE(Cone/Ray/Sector) 주공격 능력 탐지.
+        /// Psyker(카시아 등)가 staff 착용한 채 실제로는 Cone 사이킥을 주무기로 쓸 때,
+        /// primaryHand melee 감지로 인한 오분류를 바로잡기 위한 helper.
+        ///
+        /// 반환: (ability, radius[tile]) 튜플. 해당 없으면 (null, 0).
+        /// 조건:
+        ///   1. FindAnyAttackAbility(PreferRanged)가 Psyker에서 non-melee 사이킥 공격을 찾음
+        ///   2. 해당 능력의 PatternInfo가 Cone/Ray/Sector(CanBeDirectional=true)
+        ///   3. IsMelee=false (짧은 melee sweep ability 제외)
+        ///   4. radius > 3 tile — 호출측에서 필터링 (상수값은 호출측에서 조정)
+        /// </summary>
+        private static (AbilityData ability, float radius) TryFindDirectionalAoEPrimaryAttack(BaseUnitEntity unit)
+        {
+            if (unit == null) return (null, 0f);
+            try
+            {
+                var primary = FindAnyAttackAbility(unit, Settings.RangePreference.PreferRanged);
+                if (primary == null) return (null, 0f);
+
+                // 명시적 melee 스킬은 제외 (예: 체인소드 sweep)
+                if (primary.IsMelee) return (null, 0f);
+
+                var patternInfo = GetPatternInfo(primary);
+                if (patternInfo == null || !patternInfo.IsValid) return (null, 0f);
+                if (!patternInfo.CanBeDirectional) return (null, 0f);
+
+                return (primary, patternInfo.Radius);
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] TryFindDirectionalAoEPrimaryAttack error for {unit?.CharacterName}: {ex.Message}");
+                return (null, 0f);
+            }
         }
 
         /// <summary>
