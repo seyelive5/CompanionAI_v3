@@ -172,6 +172,20 @@ namespace CompanionAI_v3.GameInterface
             public float EnemyTurnThreatSum { get; set; }
 
             /// <summary>
+            /// ★ v3.110.22 Phase 4: 적 이동능력 반영 안전거리 점수 (0=근접, 1=모두 안전).
+            /// TileScorerPort.GetStayingAwayScore 원본 값. 게임 ProtectionTileScorer 패턴.
+            /// </summary>
+            public float StayingAwayScore { get; set; }
+
+            /// <summary>
+            /// ★ v3.110.22 Phase 4: StayingAwayScore × goal-based weight.
+            /// Retreat/FindCover = 40/30 (적극적 원거리 유지), RangedAttack = 25 (중간),
+            /// 근접 approach = 10 (낮음 — 근거리 공격 방해 방지).
+            /// TotalScore에 직접 기여하는 가중값.
+            /// </summary>
+            public float StayingAwayBonus { get; set; }
+
+            /// <summary>
             /// ★ v3.110.19 Phase 1a: HideScore 5축 (게임 ProtectionTileScorer 패턴).
             /// 방어 관점 — 이 위치가 얼마나 은폐되는가. CoverScore(공격 관점)와 분리.
             /// 계산: TileScorerPort.GetHideScoreComponents 호출 결과를 Task 1.3에서 설정.
@@ -214,7 +228,8 @@ namespace CompanionAI_v3.GameInterface
                                        - OscillationPenalty
                                        - ExposureScore
                                        + HideScore  // ★ v3.110.19 Phase 1a
-                                       - (EnemyTurnThreatSum * 8f);  // ★ v3.110.20 Phase 2: 적 1명 즉시 공격 가능 = -8점
+                                       - (EnemyTurnThreatSum * 8f)  // ★ v3.110.20 Phase 2
+                                       + StayingAwayBonus;  // ★ v3.110.22 Phase 4
 
             public bool CanStand { get; set; }
             public bool HasLosToEnemy { get; set; }
@@ -232,7 +247,8 @@ namespace CompanionAI_v3.GameInterface
                 (FlankingScore > 0 ? $" [Flank:+{FlankingScore:F1}]" : "") +
                 (ExposureScore > 0 ? $" [Expo:-{ExposureScore:F1}]" : "") +
                 (HideScore > 0 ? $" [Hide:+{HideScore:F1}]" : "") +
-                (EnemyTurnThreatSum > 0 ? $" [TurnThreat:-{EnemyTurnThreatSum:F1}]" : "");
+                (EnemyTurnThreatSum > 0 ? $" [TurnThreat:-{EnemyTurnThreatSum:F1}]" : "") +
+                (StayingAwayBonus > 0 ? $" [StayAway:+{StayingAwayBonus:F1}]" : "");
         }
 
         public enum MovementGoal
@@ -1015,6 +1031,20 @@ namespace CompanionAI_v3.GameInterface
                 ? Mathf.Sqrt(hittableFromLos) * 10f
                 : 0f;
 
+            // ★ v3.110.22 Phase 4: StayingAwayScore — 적 이동능력 반영 안전거리.
+            //   goal별 가중치: Retreat/FindCover 적극적 거리 유지, 근접 approach는 낮음.
+            score.StayingAwayScore = TileScorerPort.GetStayingAwayScore(node, unit, enemies);
+            float stayingWeight;
+            switch (goal)
+            {
+                case MovementGoal.Retreat:              stayingWeight = 40f; break;
+                case MovementGoal.FindCover:            stayingWeight = 30f; break;
+                case MovementGoal.RangedAttackPosition: stayingWeight = 25f; break;
+                case MovementGoal.MaintainDistance:     stayingWeight = 20f; break;
+                default:                                 stayingWeight = 10f; break;  // Approach/AttackPosition 등 근접 계열
+            }
+            score.StayingAwayBonus = score.StayingAwayScore * stayingWeight;
+
             switch (goal)
             {
                 case MovementGoal.FindCover:
@@ -1335,7 +1365,9 @@ namespace CompanionAI_v3.GameInterface
                     Main.LogDebug($"[MovementAPI] Best breakdown: Cover={best.CoverScore:F1}, " +
                         $"Hide={best.HideScore:F1}(F{best.HideFullRatio:F2}/A{best.HideAnyRatio:F2}), " +
                         $"Distance={best.DistanceScore:F1}, " +
-                        $"Threat=-{best.ThreatScore:F1}, TurnThreat=-{best.EnemyTurnThreatSum:F1}, Attack={best.AttackScore:F1}, " +
+                        $"Threat=-{best.ThreatScore:F1}, TurnThreat=-{best.EnemyTurnThreatSum:F1}, " +
+                        $"StayAway={best.StayingAwayScore:F2}({best.StayingAwayBonus:F1}), " +
+                        $"Attack={best.AttackScore:F1}, " +
                         $"Hit={best.HitChanceBonus:F1}, Path=-{best.PathRiskScore:F1}, " +
                         $"AllyC=-{best.AllyClusterPenalty:F1}, Flank={best.FlankingScore:F1}, " +
                         $"Osc=-{best.OscillationPenalty:F1}, " +
