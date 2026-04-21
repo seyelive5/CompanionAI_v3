@@ -136,16 +136,28 @@ namespace CompanionAI_v3.Analysis
             situation.CanMove = situation.CurrentMP > 0 && CombatAPI.CanMove(unit);
             situation.CanAct = CombatAPI.CanAct(unit);
 
-            // ★ v3.111.8: 임시턴(ExtraTurn) 상태 조회 — "쳐부숴라" 등으로 부여된 저자원 추가 턴.
-            // Plan이 이동/aggressive relocate/이동 필요 도발 가드에 사용.
+            // ★ v3.111.10: 하이브리드 ExtraTurn 감지 — Harmony 플래그 + 실제 AP/MP 검증.
+            // v3.111.9에서 50% false positive 발견:
+            //   - GrantedAP/MP와 실제 게임 API 값 불일치 (게임이 턴 시작 직후 재할당)
+            //   - AsExtraTurn=true인데도 MP=14 같은 정상 턴 값 케이스
+            // → Harmony 플래그는 필요조건, 실제 저자원 상태가 충분조건.
             var extraTurnInfo = CompanionAI_v3.GameInterface.ExtraTurnCache.Get(unit);
-            situation.IsExtraTurn = extraTurnInfo.IsExtraTurn;
+            bool harmonyFlag = extraTurnInfo.IsExtraTurn;
+            bool actualLowResource = situation.CurrentAP <= 2f && situation.CurrentMP <= 5f;
+            situation.IsExtraTurn = harmonyFlag && actualLowResource;
             situation.ExtraTurnGrantedAP = extraTurnInfo.GrantedAP;
             situation.ExtraTurnGrantedMP = extraTurnInfo.GrantedMP;
 
-            if (Main.IsDebugEnabled && situation.IsExtraTurn)
+            if (Main.IsDebugEnabled)
             {
-                Main.LogDebug($"[Analyzer] {unit.CharacterName}: Extra turn detected (AP={situation.ExtraTurnGrantedAP}, MP={situation.ExtraTurnGrantedMP})");
+                if (situation.IsExtraTurn)
+                {
+                    Main.LogDebug($"[Analyzer] {unit.CharacterName}: Extra turn CONFIRMED (harmony+lowresource) — AP={situation.CurrentAP:F1}, MP={situation.CurrentMP:F1}");
+                }
+                else if (harmonyFlag && !actualLowResource)
+                {
+                    Main.LogDebug($"[Analyzer] {unit.CharacterName}: Extra turn FALSE POSITIVE — harmony=true but AP={situation.CurrentAP:F1}, MP={situation.CurrentMP:F1} (normal turn)");
+                }
             }
         }
 
