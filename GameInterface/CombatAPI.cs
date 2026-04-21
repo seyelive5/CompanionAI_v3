@@ -1599,39 +1599,78 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
-        /// ★ v3.111.4: Directional AoE(Cone/Ray/Sector) 주공격 능력 탐지.
-        /// Psyker(카시아 등)가 staff 착용한 채 실제로는 Cone 사이킥을 주무기로 쓸 때,
-        /// primaryHand melee 감지로 인한 오분류를 바로잡기 위한 helper.
+        /// ★ v3.111.7: Directional AoE(Cone/Ray/Sector) 주공격 능력 직접 탐지.
+        ///
+        /// v3.111.4는 FindAnyAttackAbility 경유 → AbilityDatabase.IsReload → GetTiming →
+        /// AutoDetectTiming → IsMultiTarget → CacheAbility → AbilityData.Name getter →
+        /// LocalizedString.op_Implicit 사전존재 예외로 Psyker에서 항상 실패.
+        ///
+        /// v3.111.7 재구현: unit.Abilities.RawFacts 직접 iteration + 개별 ability try/catch.
+        /// AbilityDatabase.*/BlueprintCache.* 호출 회피 (Name getter 예외 회피).
+        /// Blueprint.CanTargetEnemies / Blueprint.IsMelee 만 사용 (localization 무관).
+        /// 최대 반경 Directional 능력을 선택.
         ///
         /// 반환: (ability, radius[tile]) 튜플. 해당 없으면 (null, 0).
-        /// 조건:
-        ///   1. FindAnyAttackAbility(PreferRanged)가 Psyker에서 non-melee 사이킥 공격을 찾음
-        ///   2. 해당 능력의 PatternInfo가 Cone/Ray/Sector(CanBeDirectional=true)
-        ///   3. IsMelee=false (짧은 melee sweep ability 제외)
-        ///   4. radius > 3 tile — 호출측에서 필터링 (상수값은 호출측에서 조정)
         /// </summary>
         private static (AbilityData ability, float radius) TryFindDirectionalAoEPrimaryAttack(BaseUnitEntity unit)
         {
             if (unit == null) return (null, 0f);
+
+            AbilityData best = null;
+            float bestRadius = 0f;
+
             try
             {
-                var primary = FindAnyAttackAbility(unit, Settings.RangePreference.PreferRanged);
-                if (primary == null) return (null, 0f);
+                // ★ v3.111.7: 기존 CombatAPI 패턴 그대로 (line 1759 참고) — AbilityDatabase 미경유
+                var rawAbilities = unit.Abilities?.RawFacts;
+                if (rawAbilities == null) return (null, 0f);
 
-                // 명시적 melee 스킬은 제외 (예: 체인소드 sweep)
-                if (primary.IsMelee) return (null, 0f);
+                foreach (var ability in rawAbilities)
+                {
+                    try
+                    {
+                        var abilityData = ability?.Data;
+                        if (abilityData == null) continue;
 
-                var patternInfo = GetPatternInfo(primary);
-                if (patternInfo == null || !patternInfo.IsValid) return (null, 0f);
-                if (!patternInfo.CanBeDirectional) return (null, 0f);
+                        var bp = abilityData.Blueprint;
+                        if (bp == null) continue;
 
-                return (primary, patternInfo.Radius);
+                        // 적 타겟 가능한 공격 능력만 (버프/힐/자기타겟 제외)
+                        // Blueprint 프로퍼티는 LocalizedString 미경유 — 안전
+                        if (!bp.CanTargetEnemies) continue;
+
+                        // 명시적 melee 스킬 제외 (체인소드 sweep 등)
+                        // ★ v3.111.7: IsMelee는 AbilityData 프로퍼티 (Weapon.Blueprint.IsMelee 래핑)
+                        if (abilityData.IsMelee) continue;
+
+                        // PatternInfo는 GetAoERadius/GetPatternType/AssetGuid 만 사용 — AbilityDatabase 미경유
+                        var patternInfo = GetPatternInfo(abilityData);
+                        if (patternInfo == null || !patternInfo.IsValid) continue;
+                        if (!patternInfo.CanBeDirectional) continue;
+                        if (patternInfo.Radius <= 3f) continue;
+
+                        // 최대 반경 능력 선택 (복수 Directional 능력이 있을 경우 주무기 선호)
+                        if (patternInfo.Radius > bestRadius)
+                        {
+                            best = abilityData;
+                            bestRadius = patternInfo.Radius;
+                        }
+                    }
+                    catch
+                    {
+                        // ★ v3.111.7: 개별 ability 처리 실패 → 다음으로 (안전 스킵)
+                        // LocalizedString 예외는 특정 능력에서만 발생하므로 격리 필요
+                        continue;
+                    }
+                }
             }
             catch (Exception ex)
             {
-                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] TryFindDirectionalAoEPrimaryAttack error for {unit?.CharacterName}: {ex.Message}");
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] TryFindDirectionalAoEPrimaryAttack iteration failed for {unit?.CharacterName}: {ex.Message}");
                 return (null, 0f);
             }
+
+            return (best, bestRadius);
         }
 
         /// <summary>
