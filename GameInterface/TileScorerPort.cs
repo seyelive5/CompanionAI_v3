@@ -136,5 +136,99 @@ namespace CompanionAI_v3.GameInterface
 
             return count > 0 ? sum / count : 0f;
         }
+
+        /// <summary>
+        /// ★ v3.111.0 Phase 5: 적 예상 이동 위치까지 고려한 worst-case 엄폐 완성도.
+        /// 게임 ProtectionTileScorer.GetEnsuredCovers 패턴.
+        /// 각 적의 예상 이동 위치 중 "가장 나쁜 cover" (가장 노출된 각도)를 해당 적의
+        /// ensured cover로 사용. 적이 어디로 움직여도 최소 이 정도 엄폐는 보장됨.
+        /// predictedMoves가 null/빈이면 GetHideScoreComponents와 동일 (현재 위치만 체크).
+        /// </summary>
+        public static HideScoreComponents GetEnsuredCoverComponents(
+            CustomGridNodeBase node,
+            IntRect unitSizeRect,
+            List<BaseUnitEntity> enemies,
+            CompanionAI_v3.Analysis.PredictedEnemyMoves predictedMoves)
+        {
+            var result = new HideScoreComponents();
+            if (enemies == null || enemies.Count == 0 || node == null) return result;
+
+            int validCount = 0;
+            int fullOrInvisible = 0;
+            int halfOrBetter = 0;
+            float hideValue = 0f;
+
+            foreach (var enemy in enemies)
+            {
+                if (enemy == null || enemy.LifeState.IsDead) continue;
+
+                try
+                {
+                    // 예상 이동 위치 목록 (없으면 현재 위치만)
+                    var moveVariants = predictedMoves?.GetMovesFor(enemy);
+
+                    // 각 예상 위치에서 node로의 LOS 계산 → worst cover 취함
+                    LosCalculations.CoverType worstCover = LosCalculations.CoverType.Invisible;
+                    bool anyEvaluated = false;
+
+                    if (moveVariants != null && moveVariants.Count > 0)
+                    {
+                        foreach (var variantNode in moveVariants)
+                        {
+                            var customNode = variantNode as CustomGridNodeBase;
+                            if (customNode == null) continue;
+                            var los = LosCalculations.GetWarhammerLos(
+                                customNode, enemy.SizeRect, node, unitSizeRect);
+                            var coverType = los.CoverType;
+                            // "worst" = smallest enum value (None < Half < Full < Invisible)
+                            if (!anyEvaluated || coverType < worstCover)
+                            {
+                                worstCover = coverType;
+                                anyEvaluated = true;
+                            }
+                        }
+                    }
+
+                    // Variants 없거나 모두 실패 → 현재 위치 기반 fallback
+                    if (!anyEvaluated)
+                    {
+                        var enemyNode = enemy.Position.GetNearestNodeXZ() as CustomGridNodeBase;
+                        if (enemyNode == null) continue;
+                        var los = LosCalculations.GetWarhammerLos(
+                            enemyNode, enemy.SizeRect, node, unitSizeRect);
+                        worstCover = los.CoverType;
+                    }
+
+                    int idx = (int)worstCover;
+                    if (idx >= 0 && idx < 4)
+                    {
+                        // hideCoverValues = [None=0, Half=0.0004, Full=0.02, Invisible=1]
+                        hideValue += idx == 0 ? 0f : (idx == 1 ? 0.0004f : (idx == 2 ? 0.02f : 1f));
+                    }
+
+                    if (worstCover == LosCalculations.CoverType.Full ||
+                        worstCover == LosCalculations.CoverType.Invisible)
+                        fullOrInvisible++;
+                    if (worstCover != LosCalculations.CoverType.None)
+                        halfOrBetter++;
+
+                    validCount++;
+                }
+                catch (System.Exception ex)
+                {
+                    if (Main.IsDebugEnabled)
+                        Main.LogWarning($"[TileScorerPort] GetEnsuredCoverComponents failed for {enemy?.CharacterName}: {ex.Message}");
+                }
+            }
+
+            if (validCount == 0) return result;
+
+            result.FullCoverComplete = (fullOrInvisible == validCount) ? 1f : 0f;
+            result.AnyCoverComplete  = (halfOrBetter == validCount) ? 1f : 0f;
+            result.AnyCoverRatio     = (float)halfOrBetter / validCount;
+            result.FullCoverRatio    = (float)fullOrInvisible / validCount;
+            result.HideValue         = hideValue;
+            return result;
+        }
     }
 }

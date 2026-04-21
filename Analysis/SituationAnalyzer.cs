@@ -693,6 +693,9 @@ namespace CompanionAI_v3.Analysis
                 _cachedPredictedMoves = situation.PredictedMoves;
             }
 
+            // ★ v3.111.0 Phase 5: MovementAPI.EvaluatePosition이 정적 필드로 접근
+            CompanionAI_v3.GameInterface.MovementAPI.SetPredictedMoves(situation.PredictedMoves);
+
             // ★ CombatAPI.ShouldRetreat 사용
             situation.IsInDanger = CombatAPI.ShouldRetreat(
                 unit,

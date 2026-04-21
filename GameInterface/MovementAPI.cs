@@ -58,6 +58,19 @@ namespace CompanionAI_v3.GameInterface
             if (Main.IsDebugEnabled) Main.LogDebug("[MovementAPI] AI pathfinding cache invalidated (2-slot)");
         }
 
+        // ★ v3.111.0 Phase 5: 턴 시작 시 SituationAnalyzer가 설정. EvaluatePosition이 조회.
+        // 적 예상 이동 위치를 HideScore worst-case 계산에 전달하기 위한 정적 스크래치패드.
+        private static CompanionAI_v3.Analysis.PredictedEnemyMoves _currentPredictedMoves;
+
+        /// <summary>
+        /// ★ v3.111.0 Phase 5: 현재 턴의 적 예상 이동 위치 설정 (SituationAnalyzer 호출).
+        /// EvaluatePosition이 이 필드를 읽어 GetEnsuredCoverComponents vs GetHideScoreComponents 선택.
+        /// </summary>
+        public static void SetPredictedMoves(CompanionAI_v3.Analysis.PredictedEnemyMoves pm)
+        {
+            _currentPredictedMoves = pm;
+        }
+
         /// <summary>★ v3.8.78: 2-슬롯 LRU 캐시 저장</summary>
         private static void CacheAiTiles(string unitId, float ap, int turnNumber, Dictionary<GraphNode, WarhammerPathAiCell> tiles)
         {
@@ -999,10 +1012,13 @@ namespace CompanionAI_v3.GameInterface
             score.HasLosToEnemy = hasAnyLos;
             score.HittableEnemyCount = hittableFromLos;  // ★ v3.8.78: LOS 기반 hittable count
 
-            // ★ v3.110.19 Phase 1a: HideScore 5축 — 게임 ProtectionTileScorer 패턴.
-            // 방어 관점 cover 완성도 (CoverScore는 공격 관점 aggregate).
-            // 적의 현재 위치 기반. Phase 5에서 AiConsideredMoveVariants로 예측 이동 확장.
-            var hideComponents = TileScorerPort.GetHideScoreComponents(node, unit.SizeRect, enemies);
+            // ★ v3.111.0 Phase 5: predictedMoves 주어지면 ensured cover (적 예상 이동 후에도 유지되는 엄폐),
+            //   없으면 Phase 1a fallback (적 현재 위치 기반).
+            // _currentPredictedMoves는 SituationAnalyzer가 턴 시작 시 SetPredictedMoves로 설정.
+            var pm = _currentPredictedMoves;
+            var hideComponents = pm != null
+                ? TileScorerPort.GetEnsuredCoverComponents(node, unit.SizeRect, enemies, pm)
+                : TileScorerPort.GetHideScoreComponents(node, unit.SizeRect, enemies);
             score.ApplyHideComponents(hideComponents);
 
             // ★ v3.110.20 Phase 2: 적별 Turn Threat Score 합산.
