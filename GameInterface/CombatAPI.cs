@@ -942,16 +942,13 @@ namespace CompanionAI_v3.GameInterface
 
                 if (_priorityTargetsField == null) return false;
 
-                var targetsList = _priorityTargetsField.GetValue(priorityPart) as System.Collections.IEnumerable;
-                if (targetsList == null) return false;
+                var typedList = _priorityTargetsField.GetValue(priorityPart)
+                    as System.Collections.Generic.List<Kingmaker.EntitySystem.EntityFactRef<Kingmaker.UnitLogic.Buffs.Buff>>;
+                if (typedList == null) return false;
 
-                foreach (var entityFactRef in targetsList)
+                foreach (var entityFactRef in typedList)
                 {
-                    // EntityFactRef<Buff>: public Buff Fact { get; } property
-                    var factProp = entityFactRef?.GetType().GetProperty("Fact");
-                    if (factProp == null) continue;
-
-                    var buff = factProp.GetValue(entityFactRef) as Kingmaker.UnitLogic.Buffs.Buff;
+                    var buff = entityFactRef.Fact;
                     if (buff?.Owner == target) return true;
                 }
             }
