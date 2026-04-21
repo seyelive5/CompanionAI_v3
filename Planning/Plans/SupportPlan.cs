@@ -481,7 +481,12 @@ namespace CompanionAI_v3.Planning.Plans
                 if (Main.IsDebugEnabled) Main.LogDebug($"[Support] Skip safe retreat - no remaining MP after planned abilities");
             }
 
-            if (!alreadyHasMoveAction && remainingMP > 0 && situation.CanMove && situation.PrefersRanged)
+            // ★ v3.111.9: 임시턴 스킵 (AP/MP 부족 → 후퇴 실패 → 엉뚱한 fallback 버그)
+            if (situation.IsExtraTurn && !alreadyHasMoveAction && remainingMP > 0 && situation.CanMove && situation.PrefersRanged)
+            {
+                Main.Log($"[Support] Phase 8.5: Skip post-action retreat — extra turn (AP={situation.CurrentAP:F1}, MP={situation.CurrentMP:F1})");
+            }
+            else if (!alreadyHasMoveAction && remainingMP > 0 && situation.CanMove && situation.PrefersRanged)
             {
                 bool needsRetreat = false;
                 string retreatReason = "";
@@ -494,14 +499,14 @@ namespace CompanionAI_v3.Planning.Plans
                 }
 
                 // ★ v3.2.25: 전선 앞(0m 이상)에 있으면 후퇴 필요
-                if (situation.InfluenceMap != null && situation.InfluenceMap.IsValid)
+                // ★ v3.110.18: Frontline 제거 — 아군 평균보다 전진한 상태면 후퇴
+                if (situation.AvgAllyDistanceToNearestEnemy > 0f)
                 {
-                    float frontlineDist = situation.InfluenceMap.GetFrontlineDistance(situation.Unit.Position);
-                    // 전선 앞에 있거나 전선에 너무 가까우면 (-5m 이상)
-                    if (frontlineDist > -5f)
+                    float forwardOffset = situation.GetForwardOffsetFromAllies(situation.Unit.Position);
+                    if (forwardOffset > 3f)
                     {
                         needsRetreat = true;
-                        retreatReason = $"too close to frontline ({frontlineDist:F1}m)";
+                        retreatReason = $"ahead of party ({forwardOffset:F1}m forward)";
                     }
                 }
 
@@ -559,7 +564,12 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            if (needsMoveToAlly && remainingMP > 0)
+            // ★ v3.111.9: 임시턴 스킵 (AP/MP 부족 → 이동 실패 → 엉뚱한 fallback 버그)
+            if (situation.IsExtraTurn && (needsMoveToAlly || (!hasMoveInPlan && needsMovement)))
+            {
+                Main.Log($"[Support] Phase 9: Skip move — extra turn (AP={situation.CurrentAP:F1}, MP={situation.CurrentMP:F1})");
+            }
+            else if (needsMoveToAlly && remainingMP > 0)
             {
                 // 아군 밀집 지역 방향으로 이동
                 var moveToAlly = PlanMoveTowardAllies(situation, remainingMP);
@@ -605,7 +615,8 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // ★ v3.8.74: Phase 8.7 - Tactical Reposition (공격 쿨다운 시 다음 턴 최적 위치)
-            if (!hasMoveInPlan && noAttackNoApproach && remainingMP > 0 && situation.HasLivingEnemies)
+            // ★ v3.111.9: 임시턴 스킵 (MP=0 → 잘못된 위치로 이동)
+            if (!situation.IsExtraTurn && !hasMoveInPlan && noAttackNoApproach && remainingMP > 0 && situation.HasLivingEnemies)
             {
                 var tacticalRepos = PlanTacticalReposition(situation, remainingMP);
                 if (tacticalRepos != null)
