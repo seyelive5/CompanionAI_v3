@@ -101,10 +101,16 @@ namespace CompanionAI_v3.Analysis
         private const float BUFF_SELF_PENALTY = 5f;
         private const float BUFF_LOW_HP_BONUS = 15f;
 
-        // ── Frontline (ScoreEnemy) ──
-        private const float FRONTLINE_ISOLATION_THRESHOLD = 15f;
-        private const float FRONTLINE_ISOLATION_RATE = 2f;
-        private const float FRONTLINE_PROXIMITY_BONUS = 10f;
+        // ── Isolation / Proximity (ScoreEnemy) ──
+        // ★ v3.110.18: Frontline centroid 제거 — 아군과 타겟의 직접 거리 기반
+        private const float TARGET_ISOLATION_THRESHOLD = 20f;  // 가장 가까운 아군이 20m+ 떨어진 타겟 = 추격 위험
+        private const float TARGET_ISOLATION_RATE = 2f;
+        private const float TARGET_PROXIMITY_THRESHOLD = 8f;   // 가장 가까운 아군이 8m 이내 = 이미 교전 중
+        private const float TARGET_PROXIMITY_BONUS = 10f;
+
+        // ── Priority Target (UnitPartPriorityTarget 인스턴스 레벨 — 도발/마크/겨냥) ──
+        // ★ v3.110.21 Phase 3: 게임 UnitPartPriorityTarget이 설정한 우선 타겟에 강한 가점.
+        private const float PRIORITY_TARGET_BONUS = 40f;
 
         // ── Difficulty (ScoreEnemy) ──
         private const float DIFFICULTY_ELITE = 8f;
@@ -372,24 +378,38 @@ namespace CompanionAI_v3.Analysis
                     score += alliesTargeting * ENEMY_ALLIES_TARGETING_BONUS;
                 }
 
-                // ★ v3.2.25: 전선 기반 고립 페널티
-                // 전선 너머 15m 이상인 적은 추격 위험 (고립/매복 위험)
-                if (situation.InfluenceMap != null && situation.InfluenceMap.IsValid)
+                // ★ v3.110.21 Phase 3: 인스턴스 레벨 우선 타겟 체크 (도발/마크/겨냥).
+                // UnitPartPriorityTarget에 설정된 타겟이면 강한 우선순위 가점.
+                // 게임 상에서 특정 능력이 "이 적을 쳐라"를 명시한 상태라 최우선 반영.
+                if (CombatAPI.IsPriorityTargetFor(target, situation.Unit))
                 {
-                    float frontlineDist = situation.InfluenceMap.GetFrontlineDistance(target.Position);
+                    score += PRIORITY_TARGET_BONUS;
+                    Main.LogDebug($"[TargetScorer] {target.CharacterName}: +{PRIORITY_TARGET_BONUS:F0} priority target (taunted/marked)");
+                }
 
-                    // 전선 너머 15m 이상 = 추격 위험
-                    if (frontlineDist > FRONTLINE_ISOLATION_THRESHOLD)
+                // ★ v3.110.18: Frontline centroid 제거 — 타겟-아군 직접 거리로 고립/근접 판정
+                //   타겟에서 가장 가까운 아군까지 거리로:
+                //   - 20m+ → 추격 시 고립 위험 (페널티)
+                //   - 8m 이내 → 이미 아군과 교전 중 (우선순위 보너스)
+                if (situation.Allies != null && situation.Allies.Count > 0)
+                {
+                    float minAllyDistToTarget = float.MaxValue;
+                    foreach (var ally in situation.Allies)
                     {
-                        float isolationPenalty = (frontlineDist - FRONTLINE_ISOLATION_THRESHOLD) * FRONTLINE_ISOLATION_RATE;
-                        score -= isolationPenalty;
-                        Main.LogDebug($"[TargetScorer] {target.CharacterName}: -{isolationPenalty:F0} isolation (frontline+{frontlineDist:F1}m)");
+                        if (ally == null || ally.LifeState.IsDead) continue;
+                        float d = UnityEngine.Vector3.Distance(ally.Position, target.Position);
+                        if (d < minAllyDistToTarget) minAllyDistToTarget = d;
                     }
 
-                    // 전선 근처 적 우선 (도달 용이, 팀 지원 가능)
-                    if (frontlineDist >= -5f && frontlineDist <= 5f)
+                    if (minAllyDistToTarget > TARGET_ISOLATION_THRESHOLD)
                     {
-                        score += FRONTLINE_PROXIMITY_BONUS;
+                        float isolationPenalty = (minAllyDistToTarget - TARGET_ISOLATION_THRESHOLD) * TARGET_ISOLATION_RATE;
+                        score -= isolationPenalty;
+                        Main.LogDebug($"[TargetScorer] {target.CharacterName}: -{isolationPenalty:F0} isolation (nearest ally {minAllyDistToTarget:F1}m)");
+                    }
+                    else if (minAllyDistToTarget < TARGET_PROXIMITY_THRESHOLD)
+                    {
+                        score += TARGET_PROXIMITY_BONUS;
                     }
                 }
 
