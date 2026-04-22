@@ -280,17 +280,45 @@ git commit -m "refactor(v3.111.22): Weapon (Ammo/Set/Range) region → CombatAPI
 
 ---
 
-## Session 3+ 개요 (후속 세션)
+## Session 3 — UnitQueries 추출 (실측 line 기반, HEAD 4484714)
 
-**Session 3**:
-- Task: `CombatAPI.UnitQueries.cs` (Unit State 포함 — `_priorityTargetsFieldLookupAttempted` L932 필드 이동) + `CombatAPI.AbilityChecks.cs` 중 하나.
+**목표**: `CombatAPI.UnitQueries.cs` 신설 + 5 region 이동. 3 청크, 총 ~663 줄.
 
-**Session 4-6**:
-- `CombatAPI.AbilityDetection.cs`, `CombatAPI.TargetingAPI.cs`, `CombatAPI.AoESupport.cs`.
-- `_damagingAoECache`, `_lastHazardCheckUnit/IsPsychic` 필드 AbilityDetection 으로 이동.
+**현재 line 번호** (Session 2 이후 재조회 완료):
 
-**Session 7 (최종)**:
-- `CombatAPI.Abilities.cs` (1,308 줄 단일 region) — 내용 스캔 후 추가 분할 가능성 평가.
+| # | region | 현재 line | 줄수 | 청크 | 이동할 private static |
+|:--:|---|---|:--:|:--:|---|
+| 1 | Unit State | L769-1117 | 349 | A (연속 ①②) | `_enemyThreatRangeCache` L842, `_priorityTargetsField` L930, `_priorityTargetsFieldLookupAttempted` L931 |
+| 2 | Unit Lists | L1119-1202 | 84 | A (연속 ①②) | — |
+| 3 | Unit Stat Query API | L5167-5223 | 57 | B (연속 ③④) | — |
+| 4 | Dodge/Parry Estimation | L5225-5315 | 91 | B (연속 ③④) | `EstimateDodgeFromStats` L5257, `EstimateParryFromStats` L5295, `CalculateEffectiveHitChance` L5307 |
+| 5 | Archetype Detection API | L5354-5433 | 80 | C (단독) | `_archetypeCache` L5367 |
+
+**삭제 순서 (high-to-low)**: 청크 C → B → A. 청크 A 가 가장 크고 shared-field 밀집도 높음 — 신중.
+
+**주의**:
+- Chunk B (L5167-5315) 와 Chunk C (L5354-5433) 사이에 Flanking region (L5317-5352) 이 **잔존** — extraction 대상 아님. 삭제 시 Flanking 경계 보존 필수
+- Unit State 의 3 private static 필드 + Archetype 의 1 캐시 = 총 4 필드 이동. **모두 각 region 내부**. cross-region 참조 없음 재확인
+- Dodge/Parry 의 3 private static 메서드 = TacticalQueries 의 `EvaluateRetreatPosition` 패턴과 유사. region 내부만 사용 검증 필요
+
+**추출 후 예상**: `CombatAPI.cs`: 5435 → ~4772 (−663), `UnitQueries.cs` ~680 줄.
+
+**난이도**: ★★ (5 region / 3 청크 / 4 필드 + 3 메서드). Session 2 수준. 가장 큰 Unit State 청크가 Reflection / LINQ 등 복잡한 namespace 사용 가능성 높음.
+
+---
+
+## Session 4+ 개요 (후속 세션)
+
+**Session 4**:
+- Task: `CombatAPI.AbilityChecks.cs` (Ability Checks L66-767 + Ability Filtering, 2 비연속 region)
+
+**Session 5-7**:
+- `CombatAPI.AbilityDetection.cs` (Type Detection + Detection API + Classification + Damaging AoE; `_damagingAoECache/_lastHazardCheck*` 이동)
+- `CombatAPI.TargetingAPI.cs` (Target Scoring + Damage Prediction + Hit Chance + Flanking + Targeting Detection; `CalculateTargetScore` 2개 메서드 이동)
+- `CombatAPI.AoESupport.cs` (AOE Support + Self-Targeted AOE + Pattern Info Cache + Game Pattern API; `PatternCache` 이동)
+
+**Session 8 (최종)**:
+- `CombatAPI.Abilities.cs` (1,308 줄 단일 region — `PreyAbilityGuids` 등 내부 상태 포함). 내용 스캔 후 추가 분할 가능성 평가.
 - 잔존 `CombatAPI.cs` 는 Unit Conversion + shared cache 필드만 남음 (~200 줄).
 
 ---
