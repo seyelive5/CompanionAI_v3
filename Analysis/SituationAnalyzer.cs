@@ -52,8 +52,7 @@ namespace CompanionAI_v3.Analysis
             CompanionAI_v3.GameInterface.MovementAPI.SetPredictedMoves(null);
             // ★ v3.111.3: Harmony-captured enemy moves 캐시도 전투 간 정리.
             CompanionAI_v3.GameInterface.EnemyMoveCache.Clear();
-            // ★ v3.111.8: 임시턴 캐시도 전투 종료 시 정리 (전투 간 유출 방지).
-            CompanionAI_v3.GameInterface.ExtraTurnCache.Clear();
+            // ★ v3.111.12: ExtraTurnCache 삭제됨 — Initiative.InterruptingOrder canonical API로 교체.
         }
 
         /// <summary>
@@ -136,28 +135,17 @@ namespace CompanionAI_v3.Analysis
             situation.CanMove = situation.CurrentMP > 0 && CombatAPI.CanMove(unit);
             situation.CanAct = CombatAPI.CanAct(unit);
 
-            // ★ v3.111.10: 하이브리드 ExtraTurn 감지 — Harmony 플래그 + 실제 AP/MP 검증.
-            // v3.111.9에서 50% false positive 발견:
-            //   - GrantedAP/MP와 실제 게임 API 값 불일치 (게임이 턴 시작 직후 재할당)
-            //   - AsExtraTurn=true인데도 MP=14 같은 정상 턴 값 케이스
-            // → Harmony 플래그는 필요조건, 실제 저자원 상태가 충분조건.
-            var extraTurnInfo = CompanionAI_v3.GameInterface.ExtraTurnCache.Get(unit);
-            bool harmonyFlag = extraTurnInfo.IsExtraTurn;
-            bool actualLowResource = situation.CurrentAP <= 2f && situation.CurrentMP <= 5f;
-            situation.IsExtraTurn = harmonyFlag && actualLowResource;
-            situation.ExtraTurnGrantedAP = extraTurnInfo.GrantedAP;
-            situation.ExtraTurnGrantedMP = extraTurnInfo.GrantedMP;
+            // ★ v3.111.12: Canonical API 기반 ExtraTurn 감지.
+            //   디컴파일 TurnController.GetInterruptingOrder 로직을 CombatAPI.IsExtraTurn으로 감쌈.
+            //   v3.111.10 하이브리드(Harmony+threshold) 대비:
+            //     - 결정적: threshold 편향(저자원 정상턴 오탐) 제거.
+            //     - 즉시성: 턴 시작 직후 게임 상태 그대로 반영.
+            //     - 레이싱 없음: StartUnitTurnInternal 이후 SetYellowPoint 재할당과 무관.
+            situation.IsExtraTurn = CombatAPI.IsExtraTurn(unit);
 
-            if (Main.IsDebugEnabled)
+            if (Main.IsDebugEnabled && situation.IsExtraTurn)
             {
-                if (situation.IsExtraTurn)
-                {
-                    Main.LogDebug($"[Analyzer] {unit.CharacterName}: Extra turn CONFIRMED (harmony+lowresource) — AP={situation.CurrentAP:F1}, MP={situation.CurrentMP:F1}");
-                }
-                else if (harmonyFlag && !actualLowResource)
-                {
-                    Main.LogDebug($"[Analyzer] {unit.CharacterName}: Extra turn FALSE POSITIVE — harmony=true but AP={situation.CurrentAP:F1}, MP={situation.CurrentMP:F1} (normal turn)");
-                }
+                Main.LogDebug($"[Analyzer] {unit.CharacterName}: Extra turn CONFIRMED (InterruptingOrder>0) — AP={situation.CurrentAP:F1}, MP={situation.CurrentMP:F1}");
             }
         }
 

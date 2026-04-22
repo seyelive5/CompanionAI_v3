@@ -44,6 +44,8 @@ using Kingmaker.EntitySystem.Stats;          // ★ v3.26.0: ModifiableValue
 using Kingmaker.Enums;                       // ★ v3.28.0: Size (플랭킹 공격 방향)
 using Kingmaker.Blueprints.Root;             // ★ v3.28.0: ProgressionRoot (아키타입 감지)
 using Kingmaker.UnitLogic.Progression.Paths; // ★ v3.28.0: BlueprintCareerPath
+using Kingmaker.Controllers.TurnBased;        // ★ v3.111.12: Initiative.InterruptingOrder
+using Kingmaker.UnitLogic.Squads;              // ★ v3.111.12: PartSquadExtension.GetSquadOptional
 
 namespace CompanionAI_v3.GameInterface
 {
@@ -979,6 +981,38 @@ namespace CompanionAI_v3.GameInterface
             catch (Exception ex)
             {
                 if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] CanAct failed for {unit?.CharacterName}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// ★ v3.111.12: 게임 canonical API 기반 ExtraTurn(임시턴) 감지.
+        /// 디컴파일 참조: TurnController.GetInterruptingOrder (private static helper).
+        ///   - 일반 유닛: unit.Initiative.InterruptingOrder > 0
+        ///   - Squad 유닛: squad.Initiative.InterruptingOrder > 0 (companions는 squad 아니지만 safety)
+        /// 게임이 TurnOrderQueue.InterruptCurrentUnit에서 셋업, TurnController.EndUnitTurn에서 0 리셋.
+        /// v3.111.8 ~ 10의 Harmony hybrid를 대체 — 결정적, 즉시성, 레이싱 없음.
+        /// </summary>
+        public static bool IsExtraTurn(BaseUnitEntity unit)
+        {
+            if (unit == null) return false;
+            try
+            {
+                if (unit.Initiative == null) return false;
+
+                // Squad 경로 (defense-in-depth — companions는 not-in-squad지만 enemy mob에 섞일 가능성)
+                if (unit.IsInSquad)
+                {
+                    var squadPart = unit.GetSquadOptional();
+                    var squad = squadPart?.Squad;
+                    return squad?.Initiative != null && squad.Initiative.InterruptingOrder > 0;
+                }
+
+                return unit.Initiative.InterruptingOrder > 0;
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] IsExtraTurn failed for {unit?.CharacterName}: {ex.Message}");
                 return false;
             }
         }
