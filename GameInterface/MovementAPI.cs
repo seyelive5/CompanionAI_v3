@@ -1497,6 +1497,27 @@ namespace CompanionAI_v3.GameInterface
                     ThreatScore = threatScore
                 };
 
+                // ★ v3.111.16 Phase C.2: Phase 1-6 방어 축 통합 — HideScore + EnemyTurnThreatSum.
+                //   근접 유닛도 "엄폐된 위치", "다음 턴 위협 회피" 혜택.
+                //   StayingAwayBonus는 근접 approach와 반의어이므로 0 유지.
+                //   CoverScore(공격자 관점)는 근접 영향 낮아 제외.
+                if (enemies != null && enemies.Count > 0)
+                {
+                    var pm = _currentPredictedMoves;
+                    var hideComponents = pm != null
+                        ? TileScorerPort.GetEnsuredCoverComponents(node, unit.SizeRect, enemies, pm)
+                        : TileScorerPort.GetHideScoreComponents(node, unit.SizeRect, enemies);
+                    posScore.ApplyHideComponents(hideComponents);
+
+                    float turnThreatSum = 0f;
+                    foreach (var e in enemies)
+                    {
+                        if (e == null || e.LifeState.IsDead) continue;
+                        turnThreatSum += CombatAPI.GetEnemyTurnThreatScore(e, node.Vector3Position);
+                    }
+                    posScore.EnemyTurnThreatSum = turnThreatSum;
+                }
+
                 // ★ v3.110.16: ApplyInfluenceScores 제거. Blackboard + PathRisk 직접 호출.
                 ApplyBlackboardScores(posScore, pos, role);
 
