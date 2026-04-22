@@ -753,3 +753,71 @@ float hitChanceBonus = CalculateHitChanceBonus(unit, position, ability);
 2. **Scatter/Melee는 명중률 계산 불필요** - 항상 100%
 3. **95% 상한 존재** - 초과분은 크리티컬로 전환
 4. **위치 평가 시 명중률 고려 필수**
+
+---
+
+## 16. Canonical 게임 API 먼저 찾기 (v3.111.12 Phase B.1)
+
+### 문제
+
+v3.111.8~10에서 ExtraTurn(임시턴) 감지를 Harmony patch + AP/MP threshold hybrid로 구현.
+- v3.111.8: `TurnController.StartUnitTurnInternal` Postfix로 `InterruptionData.AsExtraTurn` 캡처
+- v3.111.9: 50% false positive 발견 (GrantedAP/MP가 실제 게임 API 값과 불일치)
+- v3.111.10: AP/MP threshold(`AP<=2 && MP<=5`) 추가 hybrid로 false positive 해결
+- **결과**: 3번 iteration, Harmony patch + static cache + threshold 편향 잔존
+
+### 원인
+
+게임에 이미 `Initiative.InterruptingOrder` (public property)가 있었고, `TurnController.GetInterruptingOrder`가 squad-aware로 이 값을 사용. 디컴파일 5분 grep으로 찾을 수 있었음.
+
+### 해결 (Phase B.1)
+
+```csharp
+// ✅ Canonical API 직접 조회 — Harmony 불필요, threshold 불필요
+public static bool IsExtraTurn(BaseUnitEntity unit)
+{
+    if (unit.IsInSquad) { var s = unit.GetSquadOptional()?.Squad; return s?.Initiative?.InterruptingOrder > 0; }
+    return unit.Initiative.InterruptingOrder > 0;
+}
+```
+
+- Harmony patch 완전 삭제 (ExtraTurnPatch.cs, 106줄)
+- threshold bias 완전 제거 (false positive 0%)
+- `AP=1, MP=14` 같은 high-resource ExtraTurn도 정확 감지 (hybrid는 false negative였을 케이스)
+
+### 교훈
+
+1. **게임 API 우선**: 모드 구현 전 반드시 디컴파일에서 동일 개념 API 찾기. `private static`이면 로직 mirror, `public`이면 직접 사용.
+2. **Harmony는 최후 수단**: API가 없거나 callback이 필요한 경우에만.
+3. **threshold보다 boolean 신호**: 게임이 명시적 flag(`InterruptingOrder > 0`)를 쓰면 우리도 그걸 쓰자. AP/MP threshold는 edge case에서 깨짐.
+
+---
+
+## 17. 런타임 로그 증거 없이 "완료" 선언 금지 (v3.111.19 Phase D.4)
+
+### 문제
+
+v3.111.0 Phase 5 ("async enemy move prediction"): 빌드 클린 + 코드 리뷰 통과 → "완료" 선언 → 배포 → 인게임 테스트에서 발견:
+- `task.Wait` 데드락으로 **0% 효과** (AI thread가 block)
+- 턴당 ~750ms stutter (메인 스레드 대기)
+- 빌드 성공 ≠ 작동
+
+v3.111.3에서 `EnemyMoveCache` Harmony 방식으로 재구현하여 실제 완료.
+
+### 원인
+
+"빌드 클린 + 로직 검토"를 "완료"의 충분 조건으로 간주. 실제 동작은 미확인.
+
+### 해결 (Phase D.4)
+
+WORK_TRACKER.md의 "작업 완료 판정 기준"에 6번 항목 추가:
+
+> **런타임 로그 증거 확인**: 기대 동작이 `GameLogFull.txt`에 증거로 찍히는가?
+> 예: `[Analyzer] Extra turn CONFIRMED`, `Hide=33.6(F0.93/A0.93)`, `StayAway=0.70(17.6)`
+> 빌드 클린 ≠ 실행 증명. 로그에 증거 없으면 완료 아님.
+
+### 교훈
+
+1. **로그 = 증명**: 기능이 "실제로 실행됨"을 로그로 증명. 예상 메시지 미리 정의 후 확인.
+2. **배포 ≠ 완료**: 최소 한 번 인게임 세션으로 돌려보고 로그 확인.
+3. **선언-현실 gap 방지**: 완료 선언 전 검증 체크리스트 필수.

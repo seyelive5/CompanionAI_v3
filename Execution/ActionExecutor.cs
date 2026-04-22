@@ -230,13 +230,16 @@ namespace CompanionAI_v3.Execution
                 }
             }
 
-            // ★ v3.111.5: Buff w/ enemy target (도발 등) 도 재검증에 포함
-            //   - 기존: Attack/Debuff만 체크 → 도발이 Buff ActionType이라 이동 후 LOS/사거리 검증 누락
-            //   - 신: 적 타겟 Buff(enemy-target Buff, e.g. Taunt)도 동일한 재검증 수행
+            // ★ v3.111.19 Phase D.3: ActionType 대신 target-shape 기반 재검증.
+            //   기존 v3.111.5는 Attack/Debuff/Buff-hostile만 체크 → Heal/Support/Special은
+            //   이동 후 사거리/LOS 재검증 누락 (자기 자신이 아닌 유닛 타겟이면 모두 필요).
+            //   새 조건: non-self unit target이면 ActionType 무관하게 재검증.
+            //     - Heal(아군 타겟): 이동 후 아군 사거리 이탈 가능
+            //     - Support(아군/적 타겟): 동일
+            //     - Special(unit 타겟): 동일
+            //   Self-target(자기 버프 등)과 Point target(AoE)은 targetUnit==null/self → skip.
             bool needsReachabilityCheck =
-                action.Type == ActionType.Attack ||
-                action.Type == ActionType.Debuff ||
-                (action.Type == ActionType.Buff && targetUnit != null && casterUnit != null && targetUnit != casterUnit);
+                targetUnit != null && casterUnit != null && targetUnit != casterUnit;
 
             if (needsReachabilityCheck
                 && casterUnit != null && targetUnit != null

@@ -180,6 +180,11 @@ namespace CompanionAI_v3.GameInterface
             {
                 Main.Log("[TurnEventHandler] Combat started");
 
+                // ★ v3.111.19 Phase D.5: Defense-in-depth — combat end cleanup이 누락되는 경로
+                //   (게임 crash, save/load, 비정상 종료 등)에서 stale cache 방지.
+                //   정상 흐름에서는 OnCombatEnd → ClearPool에서 이미 Clear됨.
+                EnemyMoveCache.Clear();
+
                 // ★ v3.82.0: LLM Scorer Cache + Pre-compute 초기화
                 Planning.LLM.LLMScorerCache.Clear();
                 Planning.LLM.LLMPreCompute.Clear();
