@@ -986,6 +986,33 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
+        /// ★ v3.111.14: 능력 표시명 안전 조회 — LocalizedString 예외 격리.
+        /// ability.Name(대문자 N)은 LocalizedString 경유 → 번역 key 누락/깨진 asset reference 시 예외.
+        /// bp.name(소문자 n)은 Unity ScriptableObject 내부 이름 → 번역 비경유, 항상 안전.
+        /// 로그/디버그 문자열 interpolation에서 사용 (매칭 용도 아님 — 매칭은 GUID 기반 유지).
+        /// </summary>
+        public static string GetAbilityDisplayName(AbilityData ability)
+        {
+            if (ability == null) return "null";
+            try
+            {
+                var name = ability.Name;
+                if (!string.IsNullOrEmpty(name)) return name;
+            }
+            catch { /* LocalizedString 예외 → fallback */ }
+
+            try
+            {
+                var bp = ability.Blueprint;
+                return bp?.name ?? "Unknown";
+            }
+            catch
+            {
+                return "Unknown";
+            }
+        }
+
+        /// <summary>
         /// ★ v3.111.12: 게임 canonical API 기반 ExtraTurn(임시턴) 감지.
         /// 디컴파일 참조: TurnController.GetInterruptingOrder (private static helper).
         ///   - 일반 유닛: unit.Initiative.InterruptingOrder > 0
@@ -1834,25 +1861,33 @@ namespace CompanionAI_v3.GameInterface
 
                 foreach (var ability in rawAbilities)
                 {
-                    var data = ability?.Data;
-                    if (data == null) continue;
-
-                    // ★ v3.6.20: IsAbilityAvailable(out reasons)와 동일한 로직 사용
-                    List<string> reasons;
-                    if (!IsAbilityAvailable(data, out reasons))
+                    try
                     {
-                        if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Filtered out {data.Name}: {string.Join(", ", reasons)}");
-                        continue;
-                    }
+                        var data = ability?.Data;
+                        if (data == null) continue;
 
-                    // ★ v3.5.32: 중복 그룹 체크 - 계획 단계에서 필터링
-                    if (HasDuplicateAbilityGroups(data))
+                        // ★ v3.6.20: IsAbilityAvailable(out reasons)와 동일한 로직 사용
+                        List<string> reasons;
+                        if (!IsAbilityAvailable(data, out reasons))
+                        {
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Filtered out {GetAbilityDisplayName(data)}: {string.Join(", ", reasons)}");
+                            continue;
+                        }
+
+                        // ★ v3.5.32: 중복 그룹 체크 - 계획 단계에서 필터링
+                        if (HasDuplicateAbilityGroups(data))
+                        {
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Filtered out {GetAbilityDisplayName(data)}: duplicate ability groups (game data bug)");
+                            continue;
+                        }
+
+                        abilities.Add(data);
+                    }
+                    catch (Exception iterEx)
                     {
-                        if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Filtered out {data.Name}: duplicate ability groups (game data bug)");
-                        continue;
+                        // ★ v3.111.14: 단일 능력 처리 실패 → 다음으로 (LocalizedString 등 예외 격리)
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] GetAvailableAbilities: skip ability due to {iterEx.GetType().Name}: {iterEx.Message}");
                     }
-
-                    abilities.Add(data);
                 }
             }
             catch (Exception ex)
@@ -1894,64 +1929,72 @@ namespace CompanionAI_v3.GameInterface
 
                 foreach (var ability in rawAbilities)
                 {
-                    var abilityData = ability?.Data;
-                    if (abilityData == null) continue;
-
-                    // 1. 무기 공격만
-                    if (abilityData.Weapon == null) continue;
-
-                    // 2. 재장전 제외
-                    if (AbilityDatabase.IsReload(abilityData)) continue;
-
-                    // 3. ★ v3.0.17: 수류탄/폭발물 제외 (v2.2 포팅)
-                    if (CombatHelpers.IsGrenadeOrExplosive(abilityData))
+                    try
                     {
-                        if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Skipping {abilityData.Name}: IsGrenadeOrExplosive");
-                        continue;
-                    }
+                        var abilityData = ability?.Data;
+                        if (abilityData == null) continue;
 
-                    // 4. ★ v3.0.18: CanTargetEnemies 체크 (v3.0.16에서 누락됨!)
-                    // "칼날" 같은 스킬은 Weapon != null 이지만 적을 타겟할 수 없음
-                    // ★ v3.9.92: DangerousAoE (화염방사기 Cone/Ray)는 포인트 타겟이지만
-                    //   적 위치를 타겟할 수 있으므로 includeDangerousAoE=true 시 허용
-                    var bp = abilityData.Blueprint;
-                    if (bp != null && !bp.CanTargetEnemies)
-                    {
-                        if (includeDangerousAoE && AbilityDatabase.IsDangerousAoE(abilityData))
+                        // 1. 무기 공격만
+                        if (abilityData.Weapon == null) continue;
+
+                        // 2. 재장전 제외
+                        if (AbilityDatabase.IsReload(abilityData)) continue;
+
+                        // 3. ★ v3.0.17: 수류탄/폭발물 제외 (v2.2 포팅)
+                        if (CombatHelpers.IsGrenadeOrExplosive(abilityData))
                         {
-                            // DangerousAoE 포인트 타겟 — 위치 평가에 사용 가능
-                        }
-                        else
-                        {
-                            if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Skipping {abilityData.Name}: CanTargetEnemies=false");
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Skipping {GetAbilityDisplayName(abilityData)}: IsGrenadeOrExplosive");
                             continue;
                         }
-                    }
 
-                    // 5. ★ v3.0.17: 핵심! GetUnavailabilityReasons() 체크 (v2.2 포팅)
-                    List<string> reasons;
-                    if (!IsAbilityAvailable(abilityData, out reasons))
-                    {
-                        if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Skipping {abilityData.Name}: {string.Join(", ", reasons)}");
-                        continue;
-                    }
-
-                    // 5. ★ v3.0.27: RangePreference에 맞는 무기 중 사거리가 가장 긴 것 선택
-                    // 기존: 첫 번째 선호 무기에서 break → 사거리 짧은 "현상금 청구" 문제
-                    if (CombatHelpers.IsPreferredWeaponType(abilityData, preference))
-                    {
-                        float range = GetAbilityRange(abilityData);
-                        if (preferredAttack == null || range > preferredRange)
+                        // 4. ★ v3.0.18: CanTargetEnemies 체크 (v3.0.16에서 누락됨!)
+                        // "칼날" 같은 스킬은 Weapon != null 이지만 적을 타겟할 수 없음
+                        // ★ v3.9.92: DangerousAoE (화염방사기 Cone/Ray)는 포인트 타겟이지만
+                        //   적 위치를 타겟할 수 있으므로 includeDangerousAoE=true 시 허용
+                        var bp = abilityData.Blueprint;
+                        if (bp != null && !bp.CanTargetEnemies)
                         {
-                            preferredAttack = abilityData;
-                            preferredRange = range;
-                            if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Found preferred ({preference}) attack: {abilityData.Name} (range={range:F1})");
+                            if (includeDangerousAoE && AbilityDatabase.IsDangerousAoE(abilityData))
+                            {
+                                // DangerousAoE 포인트 타겟 — 위치 평가에 사용 가능
+                            }
+                            else
+                            {
+                                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Skipping {GetAbilityDisplayName(abilityData)}: CanTargetEnemies=false");
+                                continue;
+                            }
                         }
-                        // ★ v3.0.27: break 제거 - 더 긴 사거리 무기를 찾기 위해 계속 검색
+
+                        // 5. ★ v3.0.17: 핵심! GetUnavailabilityReasons() 체크 (v2.2 포팅)
+                        List<string> reasons;
+                        if (!IsAbilityAvailable(abilityData, out reasons))
+                        {
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Skipping {GetAbilityDisplayName(abilityData)}: {string.Join(", ", reasons)}");
+                            continue;
+                        }
+
+                        // 5. ★ v3.0.27: RangePreference에 맞는 무기 중 사거리가 가장 긴 것 선택
+                        // 기존: 첫 번째 선호 무기에서 break → 사거리 짧은 "현상금 청구" 문제
+                        if (CombatHelpers.IsPreferredWeaponType(abilityData, preference))
+                        {
+                            float range = GetAbilityRange(abilityData);
+                            if (preferredAttack == null || range > preferredRange)
+                            {
+                                preferredAttack = abilityData;
+                                preferredRange = range;
+                                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Found preferred ({preference}) attack: {GetAbilityDisplayName(abilityData)} (range={range:F1})");
+                            }
+                            // ★ v3.0.27: break 제거 - 더 긴 사거리 무기를 찾기 위해 계속 검색
+                        }
+                        else if (fallbackAttack == null)
+                        {
+                            fallbackAttack = abilityData;  // 폴백용 저장
+                        }
                     }
-                    else if (fallbackAttack == null)
+                    catch (Exception iterEx)
                     {
-                        fallbackAttack = abilityData;  // 폴백용 저장
+                        // ★ v3.111.14: per-ability 예외 격리 (LocalizedString 등) → 다음 능력으로
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] FindAnyAttackAbility: skip ability due to {iterEx.GetType().Name}: {iterEx.Message}");
                     }
                 }
 
@@ -1967,21 +2010,29 @@ namespace CompanionAI_v3.GameInterface
                 {
                     foreach (var ability in rawAbilities)
                     {
-                        var abilityData = ability?.Data;
-                        if (abilityData == null) continue;
-
-                        // 무기 아닌 공격성 능력 (사이킥 공격 등)
-                        if (abilityData.Weapon != null) continue;
-                        if (!IsOffensiveAbility(abilityData)) continue;
-
-                        // 근접 스킬 제외
-                        if (abilityData.IsMelee) continue;
-
-                        List<string> reasons;
-                        if (IsAbilityAvailable(abilityData, out reasons))
+                        try
                         {
-                            if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Found ranged offensive ability (pref={preference}): {abilityData.Name}");
-                            return abilityData;
+                            var abilityData = ability?.Data;
+                            if (abilityData == null) continue;
+
+                            // 무기 아닌 공격성 능력 (사이킥 공격 등)
+                            if (abilityData.Weapon != null) continue;
+                            if (!IsOffensiveAbility(abilityData)) continue;
+
+                            // 근접 스킬 제외
+                            if (abilityData.IsMelee) continue;
+
+                            List<string> reasons;
+                            if (IsAbilityAvailable(abilityData, out reasons))
+                            {
+                                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Found ranged offensive ability (pref={preference}): {GetAbilityDisplayName(abilityData)}");
+                                return abilityData;
+                            }
+                        }
+                        catch (Exception iterEx)
+                        {
+                            // ★ v3.111.14: per-ability 예외 격리 (psyker LocalizedString 핫스팟)
+                            if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] FindAnyAttackAbility psyker fallback: skip ability due to {iterEx.GetType().Name}: {iterEx.Message}");
                         }
                     }
                 }
@@ -1989,24 +2040,32 @@ namespace CompanionAI_v3.GameInterface
                 // 폴백 무기 사용
                 if (fallbackAttack != null)
                 {
-                    if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] No preferred weapon, using fallback: {fallbackAttack.Name}");
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] No preferred weapon, using fallback: {GetAbilityDisplayName(fallbackAttack)}");
                     return fallbackAttack;
                 }
 
                 // ★ v3.0.17: 무기 공격이 없으면 공격성 능력 찾기 (v2.2 포팅)
                 foreach (var ability in rawAbilities)
                 {
-                    var abilityData = ability?.Data;
-                    if (abilityData == null) continue;
-
-                    if (IsOffensiveAbility(abilityData))
+                    try
                     {
-                        List<string> reasons;
-                        if (IsAbilityAvailable(abilityData, out reasons))
+                        var abilityData = ability?.Data;
+                        if (abilityData == null) continue;
+
+                        if (IsOffensiveAbility(abilityData))
                         {
-                            if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Found offensive ability as fallback: {abilityData.Name}");
-                            return abilityData;
+                            List<string> reasons;
+                            if (IsAbilityAvailable(abilityData, out reasons))
+                            {
+                                if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] Found offensive ability as fallback: {GetAbilityDisplayName(abilityData)}");
+                                return abilityData;
+                            }
                         }
+                    }
+                    catch (Exception iterEx)
+                    {
+                        // ★ v3.111.14: per-ability 예외 격리
+                        if (Main.IsDebugEnabled) Main.LogDebug($"[CombatAPI] FindAnyAttackAbility offensive fallback: skip ability due to {iterEx.GetType().Name}: {iterEx.Message}");
                     }
                 }
             }

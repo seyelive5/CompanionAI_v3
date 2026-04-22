@@ -781,7 +781,7 @@ namespace CompanionAI_v3.Analysis
                 // ★ LESSONS_LEARNED 10.3: Veil 체크 - 사이킥 능력 안전성
                 if (CombatAPI.IsPsychicAbility(ability) && !CombatAPI.IsPsychicSafeToUse(ability))
                 {
-                    Main.LogDebug($"[Analyzer] Blocked psychic {ability.Name}: Veil too high ({CombatAPI.GetVeilThickness()})");
+                    Main.LogDebug($"[Analyzer] Blocked psychic {CombatAPI.GetAbilityDisplayName(ability)}: Veil too high ({CombatAPI.GetVeilThickness()})");
                     continue;  // 이 능력 스킵
                 }
 
@@ -799,7 +799,7 @@ namespace CompanionAI_v3.Analysis
                 // ★ v3.7.30: 블루프린트 캐시에 자동 추가 + GUID 로깅
                 Data.BlueprintCache.CacheAbility(ability);
                 string guid = bp?.AssetGuid?.ToString() ?? "null";
-                Main.LogDebug($"[Analyzer] Ability: {ability.Name} [{guid}] -> Timing={timing}, " +
+                Main.LogDebug($"[Analyzer] Ability: {CombatAPI.GetAbilityDisplayName(ability)} [{guid}] -> Timing={timing}, " +
                     $"CanTargetSelf={bp?.CanTargetSelf}, CanTargetFriends={bp?.CanTargetFriends}, " +
                     $"CanTargetEnemies={bp?.CanTargetEnemies}, CanTargetPoint={bp?.CanTargetPoint}, " +
                     $"Range={rangeInfo}, Weapon={ability.Weapon != null}");
@@ -821,14 +821,14 @@ namespace CompanionAI_v3.Analysis
                             float hpThreshold = AbilityDatabase.GetHPThreshold(ability);
                             if (hpThreshold > 0 && situation.HPPercent < hpThreshold)
                             {
-                                Main.LogDebug($"[Analyzer] Blocked SelfDamage {ability.Name}: HP {situation.HPPercent:F0}% < threshold {hpThreshold}%");
+                                Main.LogDebug($"[Analyzer] Blocked SelfDamage {CombatAPI.GetAbilityDisplayName(ability)}: HP {situation.HPPercent:F0}% < threshold {hpThreshold}%");
                                 break;  // HP 부족 - 추가하지 않음
                             }
                             // HP 충분하면 버프로 추가 (TurnPlanner에서 상황에 맞게 사용)
                             if (!AllyStateCache.HasBuff(unit, ability))
                             {
                                 situation.AvailableBuffs.Add(ability);
-                                Main.LogDebug($"[Analyzer] SelfDamage available: {ability.Name} (HP={situation.HPPercent:F0}% >= {hpThreshold}%)");
+                                Main.LogDebug($"[Analyzer] SelfDamage available: {CombatAPI.GetAbilityDisplayName(ability)} (HP={situation.HPPercent:F0}% >= {hpThreshold}%)");
                             }
                         }
                         break;
@@ -840,7 +840,7 @@ namespace CompanionAI_v3.Analysis
                             float hpThreshold = AbilityDatabase.GetHPThreshold(ability);
                             if (hpThreshold > 0 && situation.HPPercent < hpThreshold)
                             {
-                                Main.LogDebug($"[Analyzer] Blocked {timing} {ability.Name}: HP {situation.HPPercent:F0}% < threshold {hpThreshold}%");
+                                Main.LogDebug($"[Analyzer] Blocked {timing} {CombatAPI.GetAbilityDisplayName(ability)}: HP {situation.HPPercent:F0}% < threshold {hpThreshold}%");
                                 break;
                             }
                             // 이미 활성화된 버프 제외
@@ -854,7 +854,7 @@ namespace CompanionAI_v3.Analysis
                                     bool isOff = AbilityDatabase.IsOffensiveBuff(ability);
                                     string buffType = isDef && isOff ? "Mixed"
                                         : isDef ? "Defensive" : isOff ? "Offensive" : "Unclassified";
-                                    Main.LogDebug($"[Analyzer] BuffClassify: {ability.Name} → {buffType}");
+                                    Main.LogDebug($"[Analyzer] BuffClassify: {CombatAPI.GetAbilityDisplayName(ability)} → {buffType}");
                                 }
                             }
                         }
@@ -891,7 +891,7 @@ namespace CompanionAI_v3.Analysis
                         // ★ v3.8.62: BlueprintCache 캐시 사용 (GetComponent O(n) → O(1))
                         if (Data.BlueprintCache.IsMultiTarget(ability))
                         {
-                            Main.LogDebug($"[Analyzer] Excluded MultiTarget from PositionalBuff: {ability.Name}");
+                            Main.LogDebug($"[Analyzer] Excluded MultiTarget from PositionalBuff: {CombatAPI.GetAbilityDisplayName(ability)}");
                             break;
                         }
                         situation.AvailablePositionalBuffs.Add(ability);
@@ -909,11 +909,11 @@ namespace CompanionAI_v3.Analysis
                             float hpThreshold = AbilityDatabase.GetHPThreshold(ability);
                             if (hpThreshold > 0 && situation.HPPercent < hpThreshold)
                             {
-                                Main.LogDebug($"[Analyzer] Blocked Marker {ability.Name}: HP {situation.HPPercent:F0}% < threshold {hpThreshold}%");
+                                Main.LogDebug($"[Analyzer] Blocked Marker {CombatAPI.GetAbilityDisplayName(ability)}: HP {situation.HPPercent:F0}% < threshold {hpThreshold}%");
                                 break;  // HP 부족 - 추가하지 않음
                             }
                             situation.AvailableMarkers.Add(ability);
-                            Main.LogDebug($"[Analyzer] Marker available: {ability.Name}");
+                            Main.LogDebug($"[Analyzer] Marker available: {CombatAPI.GetAbilityDisplayName(ability)}");
                         }
                         break;
 
@@ -924,7 +924,7 @@ namespace CompanionAI_v3.Analysis
                     case AbilityTiming.ChainEffect:
                         situation.AvailableSpecialAbilities.Add(ability);
                         situation.AvailableAttacks.Add(ability);  // ★ v3.0.96: Hittable 체크용
-                        Main.LogDebug($"[Analyzer] Special attack added: {ability.Name} (Timing={timing})");
+                        Main.LogDebug($"[Analyzer] Special attack added: {CombatAPI.GetAbilityDisplayName(ability)} (Timing={timing})");
                         break;
 
                     // ★ v3.0.38: 명시적 타이밍 처리 추가
@@ -943,7 +943,7 @@ namespace CompanionAI_v3.Analysis
                             float hpThreshold = AbilityDatabase.GetHPThreshold(ability);
                             if (hpThreshold > 0 && situation.HPPercent < hpThreshold)
                             {
-                                Main.LogDebug($"[Analyzer] Blocked TurnEnding {ability.Name}: HP {situation.HPPercent:F0}% < threshold {hpThreshold}%");
+                                Main.LogDebug($"[Analyzer] Blocked TurnEnding {CombatAPI.GetAbilityDisplayName(ability)}: HP {situation.HPPercent:F0}% < threshold {hpThreshold}%");
                                 break;  // HP 부족 - 추가하지 않음
                             }
                             situation.AvailableBuffs.Add(ability);
@@ -962,13 +962,13 @@ namespace CompanionAI_v3.Analysis
                         // ★ v3.8.62: BlueprintCache 캐시 사용
                         if (Data.BlueprintCache.IsMultiTarget(ability))
                         {
-                            Main.LogDebug($"[Analyzer] Excluded MultiTarget ability (component): {ability.Name}");
+                            Main.LogDebug($"[Analyzer] Excluded MultiTarget ability (component): {CombatAPI.GetAbilityDisplayName(ability)}");
                             break;
                         }
                         // ★ v3.7.27: 명시적 체크도 유지 (이름/GUID 기반)
                         if (FamiliarAbilities.IsMultiTargetFamiliarAbility(ability))
                         {
-                            Main.LogDebug($"[Analyzer] Excluded MultiTarget familiar ability: {ability.Name}");
+                            Main.LogDebug($"[Analyzer] Excluded MultiTarget familiar ability: {CombatAPI.GetAbilityDisplayName(ability)}");
                             break;
                         }
                         situation.AvailableAttacks.Add(ability);
@@ -976,12 +976,12 @@ namespace CompanionAI_v3.Analysis
 
                     // ★ v3.7.27: FamiliarOnly -> FamiliarAbilities에서만 처리 (AvailableAttacks에 추가 안 함)
                     case AbilityTiming.FamiliarOnly:
-                        Main.LogDebug($"[Analyzer] FamiliarOnly ability skipped: {ability.Name}");
+                        Main.LogDebug($"[Analyzer] FamiliarOnly ability skipped: {CombatAPI.GetAbilityDisplayName(ability)}");
                         break;
 
                     // DangerousAoE -> AvailableAttacks (주의해서 사용)
                     case AbilityTiming.DangerousAoE:
-                        Main.LogDebug($"[Analyzer] DangerousAoE: {ability.Name} - added with caution");
+                        Main.LogDebug($"[Analyzer] DangerousAoE: {CombatAPI.GetAbilityDisplayName(ability)} - added with caution");
                         situation.AvailableAttacks.Add(ability);
                         break;
 
@@ -994,14 +994,14 @@ namespace CompanionAI_v3.Analysis
                     // CC는 디버프의 하위집합 → PlanDebuff() 경로에서 소비됨
                     case AbilityTiming.CrowdControl:
                         situation.AvailableDebuffs.Add(ability);
-                        Main.LogDebug($"[Analyzer] CrowdControl: {ability.Name} -> Debuffs");
+                        Main.LogDebug($"[Analyzer] CrowdControl: {CombatAPI.GetAbilityDisplayName(ability)} -> Debuffs");
                         break;
 
                     // ★ v3.21.4: Grenade -> AvailableAttacks (수류탄, 투척)
                     // AoE 분류 코드에서 point-target AoE 감지 → 클러스터 최적화에 포함
                     case AbilityTiming.Grenade:
                         situation.AvailableAttacks.Add(ability);
-                        Main.LogDebug($"[Analyzer] Grenade: {ability.Name} -> Attacks");
+                        Main.LogDebug($"[Analyzer] Grenade: {CombatAPI.GetAbilityDisplayName(ability)} -> Attacks");
                         break;
 
                     default:
@@ -1012,7 +1012,7 @@ namespace CompanionAI_v3.Analysis
                             // ★ v3.8.62: BlueprintCache 캐시 사용
                             if (Data.BlueprintCache.IsMultiTarget(ability))
                             {
-                                Main.LogDebug($"[Analyzer] Excluded MultiTarget from default attacks: {ability.Name}");
+                                Main.LogDebug($"[Analyzer] Excluded MultiTarget from default attacks: {CombatAPI.GetAbilityDisplayName(ability)}");
                                 break;
                             }
                             situation.AvailableAttacks.Add(ability);
@@ -1026,17 +1026,17 @@ namespace CompanionAI_v3.Analysis
                                 && bp.EffectOnAlly == Kingmaker.UnitLogic.Abilities.Blueprints.AbilityEffectOnUnit.Helpful)
                             {
                                 situation.AvailableBuffs.Add(ability);
-                                Main.LogDebug($"[Analyzer] Default->Buff (ally-helpful): {ability.Name}");
+                                Main.LogDebug($"[Analyzer] Default->Buff (ally-helpful): {CombatAPI.GetAbilityDisplayName(ability)}");
                             }
                             else if (bp != null && bp.CanTargetSelf == true && bp.CanTargetEnemies != true
                                      && bp.EffectOnAlly == Kingmaker.UnitLogic.Abilities.Blueprints.AbilityEffectOnUnit.Helpful)
                             {
                                 situation.AvailableBuffs.Add(ability);
-                                Main.LogDebug($"[Analyzer] Default->Buff (self-helpful): {ability.Name}");
+                                Main.LogDebug($"[Analyzer] Default->Buff (self-helpful): {CombatAPI.GetAbilityDisplayName(ability)}");
                             }
                             else
                             {
-                                Main.LogDebug($"[Analyzer] ★ UNCLASSIFIED DROPPED: {ability.Name} [{guid}] " +
+                                Main.LogDebug($"[Analyzer] ★ UNCLASSIFIED DROPPED: {CombatAPI.GetAbilityDisplayName(ability)} [{guid}] " +
                                     $"Timing={timing}, TargetEnemy={bp?.CanTargetEnemies}, " +
                                     $"TargetFriend={bp?.CanTargetFriends}, TargetSelf={bp?.CanTargetSelf}, " +
                                     $"EffectOnAlly={bp?.EffectOnAlly}, EffectOnEnemy={bp?.EffectOnEnemy}");
@@ -1543,7 +1543,7 @@ namespace CompanionAI_v3.Analysis
                         // 적에게 해로운 AOE → 공격으로 분류
                         if (ability.Blueprint?.EffectOnEnemy == Kingmaker.UnitLogic.Abilities.Blueprints.AbilityEffectOnUnit.Harmful)
                         {
-                            Main.LogDebug($"[Analyzer] Point AOE attack detected: {ability.Name}");
+                            Main.LogDebug($"[Analyzer] Point AOE attack detected: {CombatAPI.GetAbilityDisplayName(ability)}");
                             return true;
                         }
                     }
