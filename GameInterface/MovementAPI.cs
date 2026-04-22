@@ -211,11 +211,13 @@ namespace CompanionAI_v3.GameInterface
             public float HideAnyComplete { get; set; }    // 0 or 1: 모든 적에게 ≥Half 엄폐 완성
             public float HideAnyRatio { get; set; }       // 0~1: ≥Half 엄폐 비율
             public float HideFullRatio { get; set; }      // 0~1: ≥Full 엄폐 비율
-            public float HideValue { get; set; }          // 가중 합계 (적 수 비례, unbounded)
+            public float HideValue { get; set; }          // ★ v3.111.15 Phase C.1: per-enemy 평균 엄폐 품질 [0, 1].
 
             /// <summary>
             /// HideScore 가중 합산 — TotalScore 기여값.
-            /// FullComplete=50 (완전 은폐 특별 보너스), AnyComplete=20, Ratios*15, HideValue*10.
+            /// FullComplete*50 (완전 은폐 특별 보너스) + AnyComplete*20 + Ratios*15 + HideValue*10.
+            /// ★ v3.111.15 Phase C.1: HideValue 정규화로 max 180 → 110.
+            ///   TacticalAdjustment 계수(MovementAPI:2293,2314)는 미조정 — 인게임 튜닝 시 재검토.
             /// </summary>
             public float HideScore =>
                 HideFullComplete * 50f +
@@ -2289,8 +2291,9 @@ namespace CompanionAI_v3.GameInterface
             if (defenseMod > 1f)
             {
                 // ★ v3.111.2 Phase 6 follow-up: CoverScore 스케일 변경 (15-40 → 0.01-30, 공격자 semantics).
-                // 방어적 상황의 "엄폐 중시"는 HideScore (방어자 관점, 최대 ~180)로 재타겟팅.
-                // 계수 0.5 → 0.05 (HideScore max가 Cover max의 ~4.5배이므로 총량 유지).
+                // 방어적 상황의 "엄폐 중시"는 HideScore (방어자 관점)로 재타겟팅.
+                // ★ v3.111.15 Phase C.1: HideValue 정규화로 HideScore max 180 → 110.
+                //   계수 0.05는 미조정(튜닝 대상). 만약 방어 모드 엄폐 선호가 약해지면 0.08로 상향.
                 score.TacticalAdjustment += score.HideScore * (defenseMod - 1f) * 0.05f;
             }
 
@@ -2311,7 +2314,7 @@ namespace CompanionAI_v3.GameInterface
                 case TacticalSignal.Defend:
                     // ★ v3.111.2 Phase 6 follow-up: CoverScore → HideScore로 재타겟팅 (Phase 6 semantics 변경 대응).
                     // 방어 모드의 "엄폐 중시"는 방어자 관점 HideScore가 적합.
-                    // 계수 0.3 → 0.03 (HideScore max가 Cover max의 ~4.5배이므로 총량 유지).
+                    // ★ v3.111.15 Phase C.1: HideValue 정규화로 HideScore max 180 → 110. 계수 미조정(튜닝 대상).
                     score.TacticalAdjustment += score.HideScore * 0.03f;
                     break;
             }

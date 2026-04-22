@@ -15,12 +15,12 @@ namespace CompanionAI_v3.GameInterface
     public static class TileScorerPort
     {
         /// <summary>
-        /// HideScore 5-tuple 계산. [0]~[3]은 0~1 범위, [4] HideValue는 가중 합계 (적 수 비례).
+        /// HideScore 5-tuple 계산. 모든 필드 [0, 1] 범위로 정규화됨 (★ v3.111.15 Phase C.1).
         /// [0] FullCoverComplete — 모든 적에게 ≥Full 엄폐 완성 여부 (0 or 1)
         /// [1] AnyCoverComplete  — 모든 적에게 ≥Half 엄폐 완성 여부 (0 or 1)
         /// [2] AnyCoverRatio     — ≥Half 엄폐 비율 (0~1)
         /// [3] FullCoverRatio    — ≥Full 엄폐 비율 (0~1)
-        /// [4] HideValue         — 가중 aggregate (게임 hideCoverValues 역수 기반, 적 수에 비례한 unbounded 합)
+        /// [4] HideValue         — per-enemy 평균 엄폐 품질 (0~1). hideCoverValues=[None=0, Half=0.0004, Full=0.02, Invisible=1]의 평균.
         /// </summary>
         public struct HideScoreComponents
         {
@@ -85,7 +85,9 @@ namespace CompanionAI_v3.GameInterface
             result.AnyCoverComplete  = (halfOrBetter == validCount) ? 1f : 0f;
             result.AnyCoverRatio     = (float)halfOrBetter / validCount;
             result.FullCoverRatio    = (float)fullOrInvisible / validCount;
-            result.HideValue         = hideValue;
+            // ★ v3.111.15 Phase C.1: 적 수 비례 unbounded 합 → per-enemy 평균 [0, 1]로 정규화.
+            //   Ratio 필드들이 이미 /validCount 패턴 사용 → 일관성. HideScore max 180 → 110.
+            result.HideValue         = hideValue / validCount;
             return result;
         }
 
@@ -227,7 +229,8 @@ namespace CompanionAI_v3.GameInterface
             result.AnyCoverComplete  = (halfOrBetter == validCount) ? 1f : 0f;
             result.AnyCoverRatio     = (float)halfOrBetter / validCount;
             result.FullCoverRatio    = (float)fullOrInvisible / validCount;
-            result.HideValue         = hideValue;
+            // ★ v3.111.15 Phase C.1: GetHideScoreComponents와 동일 정규화.
+            result.HideValue         = hideValue / validCount;
             return result;
         }
     }
