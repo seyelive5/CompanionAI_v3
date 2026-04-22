@@ -52,7 +52,7 @@ namespace CompanionAI_v3.GameInterface
     /// <summary>
     /// 게임 API 래퍼 - 모든 게임 상호작용을 중앙화
     /// </summary>
-    public static class CombatAPI
+    public static partial class CombatAPI
     {
         // ★ v3.8.80: GetAvailableAbilities 프레임 캐시
         // 같은 프레임 내 동일 유닛에 대한 반복 호출 방지 (Analyze + Plan = 4+회/프레임)
