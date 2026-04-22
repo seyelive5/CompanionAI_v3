@@ -307,18 +307,43 @@ git commit -m "refactor(v3.111.22): Weapon (Ammo/Set/Range) region → CombatAPI
 
 ---
 
-## Session 4+ 개요 (후속 세션)
+## Session 4 — AbilityChecks 추출 (실측 line 기반, HEAD 647ecab)
 
-**Session 4**:
-- Task: `CombatAPI.AbilityChecks.cs` (Ability Checks L66-767 + Ability Filtering, 2 비연속 region)
+**목표**: `CombatAPI.AbilityChecks.cs` 신설 + 2 region 이동. 2 청크 비연속, 총 ~754 줄.
 
-**Session 5-7**:
-- `CombatAPI.AbilityDetection.cs` (Type Detection + Detection API + Classification + Damaging AoE; `_damagingAoECache/_lastHazardCheck*` 이동)
-- `CombatAPI.TargetingAPI.cs` (Target Scoring + Damage Prediction + Hit Chance + Flanking + Targeting Detection; `CalculateTargetScore` 2개 메서드 이동)
+**현재 line 번호** (Session 3 이후 재조회 완료):
+
+| # | region | 현재 line | 줄수 | 청크 | 이동할 private static |
+|:--:|---|---|:--:|:--:|---|
+| 1 | Ability Checks | L59-760 | 702 | A (단독) | `GetRestrictionReason` L180, `GetUnavailabilityReason` L320 |
+| 2 | Ability Filtering (Timing-Aware) | L2656-2707 | 52 | B (단독) | — |
+
+**삭제 순서 (high-to-low)**: 청크 B → A.
+
+**주의**:
+- **청크 A 는 파일 최상단 region** (L59 = 공유 캐시 필드 L50-57 바로 다음). 삭제 시 상단 공유 필드 (frame cache 5개) 가 잔존 필수
+- 청크 A 와 B 사이에 거대한 **Abilities region (L762-2070, 1309줄)** 잔존 — 삭제 순서 엄수 (B 먼저 → A 나중)
+- 2 private static method 이동 (`GetRestrictionReason`, `GetUnavailabilityReason`) — 각 Ability Checks 내부. cross-region 참조 재확인 필요
+
+**추출 후 예상**: `CombatAPI.cs`: 4762 → ~4008 (−754), `AbilityChecks.cs` ~770 줄.
+
+**난이도**: ★ (2 비연속, 단순 structure, cache field 0). Session 1 Task 3 (WeaponSystem) 에 근접. Session 3 (UnitQueries) 보다 단순.
+
+---
+
+## Session 5+ 개요 (후속 세션)
+
+**Session 5**:
+- `CombatAPI.AbilityDetection.cs` (Type Detection + Detection API + Classification + Damaging AoE, 4 비연속; `_damagingAoECache/_lastHazardCheck*` + `HasDamagingComponents`/`ContainsDamageAction` 이동)
+
+**Session 6**:
+- `CombatAPI.TargetingAPI.cs` (Target Scoring + Damage Prediction + Hit Chance + Flanking + Targeting Detection; 2× `CalculateTargetScore` 메서드 이동)
+
+**Session 7**:
 - `CombatAPI.AoESupport.cs` (AOE Support + Self-Targeted AOE + Pattern Info Cache + Game Pattern API; `PatternCache` 이동)
 
 **Session 8 (최종)**:
-- `CombatAPI.Abilities.cs` (1,308 줄 단일 region — `PreyAbilityGuids` 등 내부 상태 포함). 내용 스캔 후 추가 분할 가능성 평가.
+- `CombatAPI.Abilities.cs` (1,308 줄 단일 region — `PreyAbilityGuids` + 2× 헬퍼 메서드 포함). 내용 스캔 후 추가 분할 가능성 평가.
 - 잔존 `CombatAPI.cs` 는 Unit Conversion + shared cache 필드만 남음 (~200 줄).
 
 ---
