@@ -23,7 +23,6 @@ using Kingmaker.UnitLogic.Mechanics.Actions;
 using Kingmaker.UnitLogic.Parts;
 using Kingmaker.UnitLogic.Levelup.Obsolete.Blueprints.Spells;
 using Kingmaker.Utility;
-using Kingmaker.GameCommands;  // ★ v3.9.72: SwitchHandEquipment 확장 메서드
 using Kingmaker.View.Covers;
 using Kingmaker.RuleSystem;
 using Kingmaker.RuleSystem.Rules;
