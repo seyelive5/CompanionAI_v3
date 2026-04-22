@@ -243,7 +243,6 @@ namespace CompanionAI_v3.Planning.Planners
                     if (isPointTarget)
                     {
                         // ★ v3.1.28: 능력 정보 전달하여 범위 내 착지 위치 찾기
-                        // ★ v3.4.02: P1 수정 - situation 전달하여 InfluenceMap 활용
                         var landingPosition = FindGapCloserLandingPosition(situation.Unit, candidateTarget, gapCloser, situation);
                         if (landingPosition.HasValue)
                         {
@@ -364,8 +363,7 @@ namespace CompanionAI_v3.Planning.Planners
                         AIRole role = situation.CharacterSettings?.Role ?? AIRole.Auto;
                         var walkDest = MovementAPI.FindMeleeAttackPositionSync(
                             situation.Unit, candidateTarget, approachRange, 0f,
-                            situation.InfluenceMap, role,
-                            situation.PredictiveThreatMap, null, situation.Enemies);
+                            role, null, situation.Enemies);
 
                         if (walkDest == null) continue;
 
@@ -608,9 +606,7 @@ namespace CompanionAI_v3.Planning.Planners
                 : null;
             var meleePosition = MovementAPI.FindMeleeAttackPositionSync(
                 unit, target, meleeAttackRange, 0f,
-                situation?.InfluenceMap,
                 role,
-                situation?.PredictiveThreatMap,
                 bestMeleeAoE,
                 situation?.Enemies);
 
@@ -753,9 +749,7 @@ namespace CompanionAI_v3.Planning.Planners
                     weaponRange,
                     situation.MinSafeDistance,
                     effectiveMP,
-                    situation.InfluenceMap,
                     role,
-                    situation.PredictiveThreatMap,
                     situation.LastMoveOrigin  // ★ v3.74.2: 진동 방지
                 );
 
@@ -865,9 +859,7 @@ namespace CompanionAI_v3.Planning.Planners
                     target,
                     meleeRange,
                     effectiveMP,
-                    situation.InfluenceMap,
                     role,
-                    situation.PredictiveThreatMap,
                     bestMeleeAoEForMove,
                     situation.Enemies,
                     situation.LastMoveOrigin  // ★ v3.74.2: 진동 방지
@@ -989,9 +981,7 @@ namespace CompanionAI_v3.Planning.Planners
                 situation.MinSafeDistance,
                 maxSafeDistance,
                 0f,
-                situation.InfluenceMap,
                 role,
-                situation.PredictiveThreatMap,
                 familiarPos,
                 maxFamiliarDist
             );
@@ -1257,9 +1247,7 @@ namespace CompanionAI_v3.Planning.Planners
                 situation.MinSafeDistance,
                 maxSafeDistance,
                 0f,
-                situation.InfluenceMap,
                 role,
-                situation.PredictiveThreatMap,
                 familiarPos,
                 maxFamiliarDist
             );
@@ -1342,8 +1330,7 @@ namespace CompanionAI_v3.Planning.Planners
 
             var bestPosition = MovementAPI.FindRetreatPositionSync(
                 unit, situation.Enemies, situation.MinSafeDistance, maxSafeDistance,
-                remainingMP, situation.InfluenceMap, role, situation.PredictiveThreatMap,
-                familiarPos, maxFamiliarDist);
+                remainingMP, role, familiarPos, maxFamiliarDist);
 
             if (bestPosition == null) return null;
 

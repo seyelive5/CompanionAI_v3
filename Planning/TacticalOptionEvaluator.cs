@@ -102,8 +102,6 @@ namespace CompanionAI_v3.Planning
         private const float W_HITTABLE = 40f;
         // 현재 대비 개선분 보너스
         private const float W_HITTABLE_IMPROVEMENT = 25f;
-        // 안전도 가중치 (InfluenceMap 기반)
-        private const float W_SAFETY = 15f;
         // 이동 비용 페널티
         private const float W_MOVE_COST = 5f;
         // 공격 가능 기본 보너스
@@ -232,13 +230,9 @@ namespace CompanionAI_v3.Planning
                 }
             }
 
-            // 안전도 반영
-            if (situation.InfluenceMap != null && situation.InfluenceMap.IsValid)
-            {
-                float threat = situation.InfluenceMap.GetThreatAt(situation.Unit.Position);
-                float control = situation.InfluenceMap.GetControlAt(situation.Unit.Position);
-                score += (control - threat) * W_SAFETY;
-            }
+            // ★ v3.110.16: InfluenceMap threat/ctrl 축 제거 (Y축 좌표 버그로 항상 0이었음)
+            //   MovementAPI.EvaluatePosition이 이미 게임 API 기반 ThreatScore/CoverScore로 정확히 계산.
+            //   여기서는 이동 평가가 아닌 "머무르기" 평가이므로 PositionScore 호출 생략.
 
             // 원거리인데 후퇴 필요하면 페널티 (여기서 공격하면 위험한 위치에 머무름)
             if (needsRetreat && situation.PrefersRanged)
@@ -312,9 +306,7 @@ namespace CompanionAI_v3.Planning
                     situation.NearestEnemy,
                     meleeRange,
                     meleeExtraMP,  // ★ v3.34.0: MP 버프 예상 회복량 반영
-                    situation.InfluenceMap,
                     role,
-                    situation.PredictiveThreatMap,
                     null,  // meleeAoEAbility
                     situation.Enemies
                 );
@@ -374,9 +366,7 @@ namespace CompanionAI_v3.Planning
                     weaponRange,
                     situation.MinSafeDistance,
                     rangedExtraMP,  // ★ v3.34.0: MP 버프 예상 회복량 반영
-                    situation.InfluenceMap,
-                    role,
-                    situation.PredictiveThreatMap
+                    role
                 );
             }
 
@@ -499,19 +489,12 @@ namespace CompanionAI_v3.Planning
 
             option.IsViable = true;
 
-            // 스코어 = 공격 가치 + 후퇴 안전 이득
+            // 스코어 = 공격 가치 + MP 회복 보너스
+            // ★ v3.111.11: InfluenceMap 제거 후 FindRetreatPositionSync가 PositionScore로 직접 평가하므로
+            //   여기서 safety gain 추정 불필요.
             float attackScore = currentHittable * W_HITTABLE + W_ATTACK_BASE;
 
-            // 후퇴 시 안전도 이득 추정
-            float retreatSafetyGain = 0f;
-            if (situation.InfluenceMap != null && situation.InfluenceMap.IsValid)
-            {
-                float currentThreat = situation.InfluenceMap.GetThreatAt(situation.Unit.Position);
-                // 후퇴하면 위협이 줄어들 것으로 추정 (정확한 계산은 비용 높으므로 추정)
-                retreatSafetyGain = currentThreat * W_SAFETY * 0.5f;
-            }
-
-            option.Score = attackScore + retreatSafetyGain + mpRecoveryBonus;
+            option.Score = attackScore + mpRecoveryBonus;
 
             // ★ v3.24.0: Overwatch 구역 내 후퇴 이동 페널티
             if (situation.IsInEnemyOverwatchZone && situation.EnemyOverwatchCount > 0)
@@ -522,7 +505,7 @@ namespace CompanionAI_v3.Planning
                     Main.LogDebug($"[TacticalEval] AttackThenRetreat: -{owPenalty:F0} overwatch ({situation.EnemyOverwatchCount} overwatchers)");
             }
 
-            option.Reason = $"hittable={currentHittable}, safetyGain={retreatSafetyGain:F0}, mpRecov={hasPostActionMPRecovery}";
+            option.Reason = $"hittable={currentHittable}, mpRecov={hasPostActionMPRecovery}";
             return option;
         }
 
