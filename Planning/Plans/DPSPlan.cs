@@ -1053,7 +1053,9 @@ namespace CompanionAI_v3.Planning.Plans
                 $"didPlanAttack={didPlanAttack}, needsMovement={needsMovement}, CanMove={canMove}, MP={remainingMP:F1}, IsInDanger={situation.IsInDanger}");
 
             // ★ v3.111.9: 임시턴에 reposition 스킵 (AP/MP 부족으로 이동 실패 → 엉뚱한 fallback 버그)
-            //   v3.111.8에서 TankPlan/OverseerPlan 가드 추가했으나 DPSPlan 누락 → 파스칼 포지셔닝 버그
+            //   v3.111.13: 유지 이유 — 이 분기는 PlanMoveOrGapCloser(gap-closer 포함)를 호출하는데
+            //   PlanMoveOrGapCloser는 5개 호출부 중 일반 턴 approach에 필수인 경로가 있어
+            //   blanket push-down 금지. 본 분기만 ExtraTurn에서 스킵.
             if (situation.IsExtraTurn && !hasMoveInPlan && needsMovement)
             {
                 Main.Log($"[DPS] Phase 8: Skip reposition — extra turn (AP={situation.CurrentAP:F1}, MP={situation.CurrentMP:F1})");
@@ -1117,8 +1119,8 @@ namespace CompanionAI_v3.Planning.Plans
             // 이전: PrefersRanged + (적 거리 < MinSafe*1.2 || 전선 거리 > -5m)
             //   → 거의 모든 전투 위치에서 후퇴 발동 (전선 -5m 임계값이 너무 관대)
             // 수정: 명시적 PreferRanged만 + 적 거리 < MinSafe만 체크 (전선 체크 제거)
-            // ★ v3.111.9: 임시턴 스킵 (MP=0이면 PlanPostActionSafeRetreat이 엉뚱한 fallback 반환 가능)
-            if (!situation.IsExtraTurn && !hasMoveInPlan && remainingMP > 0 && situation.CanMove
+            // ★ v3.111.13: ExtraTurn 가드 MovementPlanner.PlanPostActionSafeRetreat로 push-down됨.
+            if (!hasMoveInPlan && remainingMP > 0 && situation.CanMove
                 && situation.RangePreference == Settings.RangePreference.PreferRanged)
             {
                 bool needsSafeRetreat = false;
@@ -1145,8 +1147,8 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.8.74: Phase 8.7 - Tactical Reposition (공격 쿨다운 시 다음 턴 최적 위치)
             // 조건: 이동 없음 + 원거리 + 모든 공격 쿨다운 + MP 있음
             // Phase 8 (접근 이동)과 Phase 8.5 (안전 후퇴) 모두 실행되지 않은 경우의 안전망
-            // ★ v3.111.9: 임시턴 스킵 (MP=0 → PlanTacticalReposition이 잘못된 위치로 이동)
-            if (!situation.IsExtraTurn && !hasMoveInPlan && noAttackNoApproach && remainingMP > 0 && situation.HasLivingEnemies)
+            // ★ v3.111.13: ExtraTurn 가드 MovementPlanner.PlanTacticalReposition로 push-down됨.
+            if (!hasMoveInPlan && noAttackNoApproach && remainingMP > 0 && situation.HasLivingEnemies)
             {
                 var tacticalRepos = PlanTacticalReposition(situation, remainingMP);
                 if (tacticalRepos != null)

@@ -481,12 +481,8 @@ namespace CompanionAI_v3.Planning.Plans
                 if (Main.IsDebugEnabled) Main.LogDebug($"[Support] Skip safe retreat - no remaining MP after planned abilities");
             }
 
-            // ★ v3.111.9: 임시턴 스킵 (AP/MP 부족 → 후퇴 실패 → 엉뚱한 fallback 버그)
-            if (situation.IsExtraTurn && !alreadyHasMoveAction && remainingMP > 0 && situation.CanMove && situation.PrefersRanged)
-            {
-                Main.Log($"[Support] Phase 8.5: Skip post-action retreat — extra turn (AP={situation.CurrentAP:F1}, MP={situation.CurrentMP:F1})");
-            }
-            else if (!alreadyHasMoveAction && remainingMP > 0 && situation.CanMove && situation.PrefersRanged)
+            // ★ v3.111.13: ExtraTurn 가드 MovementPlanner.PlanPostActionSafeRetreat로 push-down됨.
+            if (!alreadyHasMoveAction && remainingMP > 0 && situation.CanMove && situation.PrefersRanged)
             {
                 bool needsRetreat = false;
                 string retreatReason = "";
@@ -564,12 +560,8 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
 
-            // ★ v3.111.9: 임시턴 스킵 (AP/MP 부족 → 이동 실패 → 엉뚱한 fallback 버그)
-            if (situation.IsExtraTurn && (needsMoveToAlly || (!hasMoveInPlan && needsMovement)))
-            {
-                Main.Log($"[Support] Phase 9: Skip move — extra turn (AP={situation.CurrentAP:F1}, MP={situation.CurrentMP:F1})");
-            }
-            else if (needsMoveToAlly && remainingMP > 0)
+            // ★ v3.111.13: ExtraTurn 가드 SupportPlan.PlanMoveTowardAllies로 push-down됨.
+            if (needsMoveToAlly && remainingMP > 0)
             {
                 // 아군 밀집 지역 방향으로 이동
                 var moveToAlly = PlanMoveTowardAllies(situation, remainingMP);
@@ -581,7 +573,9 @@ namespace CompanionAI_v3.Planning.Plans
                 }
             }
             // ★ v3.9.22: GapCloser는 MP 없이도 진입 허용 (AP 기반 이동)
-            else if (!hasMoveInPlan && needsMovement && ((canMove && remainingMP > 0) || hasGapClosers))
+            // ★ v3.111.13: ExtraTurn 가드 유지 — PlanMoveOrGapCloser는 push-down 대상 아님
+            //   (5개 호출부 중 일부는 일반 턴 approach에 필수이므로 blanket gate 금지).
+            else if (!situation.IsExtraTurn && !hasMoveInPlan && needsMovement && ((canMove && remainingMP > 0) || hasGapClosers))
             {
                 Main.Log($"[Support] Phase 9: Trying move (attack planned={didPlanAttack}, predictedMP={remainingMP:F1})");
                 // ★ v3.0.90: 공격 실패 시 forceMove=true로 이동 강제
@@ -615,8 +609,8 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // ★ v3.8.74: Phase 8.7 - Tactical Reposition (공격 쿨다운 시 다음 턴 최적 위치)
-            // ★ v3.111.9: 임시턴 스킵 (MP=0 → 잘못된 위치로 이동)
-            if (!situation.IsExtraTurn && !hasMoveInPlan && noAttackNoApproach && remainingMP > 0 && situation.HasLivingEnemies)
+            // ★ v3.111.13: ExtraTurn 가드 MovementPlanner.PlanTacticalReposition로 push-down됨.
+            if (!hasMoveInPlan && noAttackNoApproach && remainingMP > 0 && situation.HasLivingEnemies)
             {
                 var tacticalRepos = PlanTacticalReposition(situation, remainingMP);
                 if (tacticalRepos != null)
@@ -781,6 +775,13 @@ namespace CompanionAI_v3.Planning.Plans
         private PlannedAction PlanMoveTowardAllies(Situation situation, float remainingMP)
         {
             if (remainingMP <= 0) return null;
+            // ★ v3.111.13: 임시턴 스킵 — AP/MP 부족으로 이동 실패 → fallback 버그.
+            //   v3.111.9 sprinkle(Phase 9) push-down.
+            if (situation.IsExtraTurn)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[Support] PlanMoveTowardAllies: skip (extra turn)");
+                return null;
+            }
 
             var unit = situation.Unit;
             if (unit == null) return null;

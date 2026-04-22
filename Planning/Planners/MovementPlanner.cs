@@ -1201,6 +1201,13 @@ namespace CompanionAI_v3.Planning.Planners
         {
             if (!situation.CanMove) return null;
             if (situation.CurrentMP <= 0) return null;
+            // ★ v3.111.13: 임시턴 스킵 — AP/MP 부족으로 fallback이 엉뚱한 위치 반환 가능.
+            //   v3.111.9 sprinkle(DPS:1121, Support:485) push-down.
+            if (situation.IsExtraTurn)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] {situation.Unit?.CharacterName}: PlanPostActionSafeRetreat — skip (extra turn)");
+                return null;
+            }
 
             var unit = situation.Unit;
             var nearestEnemy = situation.NearestEnemy;
@@ -1302,6 +1309,13 @@ namespace CompanionAI_v3.Planning.Planners
         {
             if (!situation.PrefersRanged) return null;
             if (remainingMP <= 0) return null;
+            // ★ v3.111.13: 임시턴 스킵 — MP=0 → 잘못된 위치로 이동하는 버그 방지.
+            //   v3.111.9 sprinkle(DPS:1149, Support:619) push-down.
+            if (situation.IsExtraTurn)
+            {
+                if (Main.IsDebugEnabled) Main.LogDebug($"[MovementPlanner] {situation.Unit?.CharacterName}: PlanTacticalReposition — skip (extra turn)");
+                return null;
+            }
 
             var unit = situation.Unit;
             if (situation.NearestEnemy == null) return null;

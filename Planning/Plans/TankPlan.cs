@@ -146,6 +146,8 @@ namespace CompanionAI_v3.Planning.Plans
 
                 // ★ v3.111.8: 임시턴에 이동 필요한 도발 스킵 (MP=0이라 이동 실패 → 사거리 밖 시전 버그)
                 //   이동 없이 가능한 다음 옵션이 있으면 채택, 없으면 도발 자체 스킵.
+                //   v3.111.13: 유지 이유 — "return null" 패턴 아님 (대체 옵션 선택 로직).
+                //   push-down 불가 — SmartTaunt의 tauntOptions 순회 컨텍스트에서만 의미.
                 if (situation.IsExtraTurn && bestOption != null && bestOption.RequiresMove)
                 {
                     Main.Log($"[Tank] SmartTaunt: Skip best option - extra turn + requires move (AP={situation.CurrentAP:F1}, MP={situation.CurrentMP:F1})");
