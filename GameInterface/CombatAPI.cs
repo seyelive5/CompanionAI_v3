@@ -834,14 +834,32 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
+        /// ★ v3.111.18 Phase C.4: 적별 threat range 턴별 캐시.
+        ///   reflection 호출 (AiCollectedDataStorage + weapon blueprint)이 비싸서
+        ///   EvaluatePosition이 tile × enemies 반복 호출 시 3,200회/scan 핫스팟.
+        ///   threat range는 한 턴 동안 불변(무기/학습 데이터 턴 중 안 바뀜) → 캐시 안전.
+        ///   무효화: CombatCache.ClearAll() (턴 시작).
+        /// </summary>
+        private static readonly Dictionary<BaseUnitEntity, int> _enemyThreatRangeCache
+            = new Dictionary<BaseUnitEntity, int>();
+
+        /// <summary>★ v3.111.18: 턴 시작 시 CombatCache.ClearAll()에서 호출.</summary>
+        public static void ClearEnemyThreatRangeCache() => _enemyThreatRangeCache.Clear();
+
+        /// <summary>
         /// ★ v3.110.20: 적의 위협 사거리 (타일 단위).
         /// 게임 AI 학습 데이터 (GetThreatRange) + 현재 장비 무기 사거리 중 큰 값.
         /// 게임 학습이 없는 신규 유닛은 무기 사거리로 폴백.
         /// 게임 패턴: AttackEffectivenessTileScorer.CalculateEnemyTargetThreatScore
+        /// ★ v3.111.18 Phase C.4: 턴별 캐시 적용.
         /// </summary>
         public static int GetEnemyThreatRangeInTiles(BaseUnitEntity enemy)
         {
             if (enemy == null) return 0;
+
+            // ★ v3.111.18: 턴 내 캐시 체크
+            if (_enemyThreatRangeCache.TryGetValue(enemy, out int cached))
+                return cached;
 
             int learnedRange = 0;
             try
@@ -873,7 +891,9 @@ namespace CompanionAI_v3.GameInterface
                     Main.LogWarning($"[CombatAPI] GetEnemyThreatRange weapon failed for {enemy?.CharacterName}: {ex.Message}");
             }
 
-            return System.Math.Max(learnedRange, weaponRange);
+            int result = System.Math.Max(learnedRange, weaponRange);
+            _enemyThreatRangeCache[enemy] = result;
+            return result;
         }
 
         /// <summary>
