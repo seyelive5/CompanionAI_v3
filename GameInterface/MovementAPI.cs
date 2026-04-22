@@ -1779,6 +1779,20 @@ namespace CompanionAI_v3.GameInterface
                     if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] hide score silent: {ex.Message}");
                 }
 
+                // ★ v3.111.17 Phase C.3: StayingAwayBonus — 적 이동능력 반영 안전거리 점수.
+                //   Phase 4 가중치: Retreat goal → 40f (EvaluatePosition MovementGoal.Retreat 일관).
+                //   기존 설정 누락으로 Phase 4가 실제 후퇴에서 dead weight였음.
+                try
+                {
+                    float stayingAway = TileScorerPort.GetStayingAwayScore(node, unit, enemies);
+                    score.StayingAwayScore = stayingAway;
+                    score.StayingAwayBonus = stayingAway * 40f;
+                }
+                catch (System.Exception ex)
+                {
+                    if (Main.IsDebugEnabled) Main.LogDebug($"[MovementAPI] retreat staying-away silent: {ex.Message}");
+                }
+
                 // ★ v3.8.78: LOS 기반 hittable count (기존 CountHittableEnemiesFromPosition 호출 제거)
                 // 위 enemy 루프에서 GetWarhammerLos로 동시 계산 → CanTargetFromNode 호출 제거
                 score.HittableEnemyCount = hittableFromLos;
