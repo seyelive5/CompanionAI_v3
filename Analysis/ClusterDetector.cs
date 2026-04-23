@@ -3,7 +3,9 @@ using System.Collections.Generic;
 // ★ v3.9.04: LINQ 제거 — 모든 LINQ를 수동 루프로 대체 (GC 0)
 // using System.Linq;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.Pathfinding;
 using Kingmaker.UnitLogic.Abilities;
+using Kingmaker.UnitLogic.Abilities.Components.Patterns;
 using UnityEngine;
 using CompanionAI_v3.GameInterface;
 using CompanionAI_v3.Settings;
@@ -308,8 +310,9 @@ namespace CompanionAI_v3.Analysis
 
                 // 클러스터 중심에서 시작
                 // ★ v3.6.10: ability 전달하여 패턴별 높이 체크
+                // ★ v3.112.0: caster 전달하여 native pattern 경로 지원
                 Vector3 bestPosition = cluster.Center;
-                int bestHits = CountEnemiesInRadius(cluster.Center, cluster.Enemies, aoERadius, ability);
+                int bestHits = CountEnemiesInRadius(cluster.Center, cluster.Enemies, aoERadius, ability, caster);
 
                 // ★ v3.5.20: 중심 주변 그리드 탐색 (설정에서 성능 제한 읽음)
                 float searchStep = aoERadius / 3f;  // 반경당 3단계
@@ -336,7 +339,8 @@ namespace CompanionAI_v3.Analysis
 
                         // 적중 수 계산
                         // ★ v3.6.10: ability 전달하여 패턴별 높이 체크
-                        int hits = CountEnemiesInRadius(testPos, cluster.Enemies, aoERadius, ability);
+                        // ★ v3.112.0: caster 전달하여 native pattern 경로 지원
+                        int hits = CountEnemiesInRadius(testPos, cluster.Enemies, aoERadius, ability, caster);
 
                         // ★ v3.9.04: early exit — bestHits보다 적으면 아군 체크 불필요
                         if (hits < bestHits)
@@ -583,15 +587,45 @@ namespace CompanionAI_v3.Analysis
 
             int playerPartyAlliesInRange = 0;
 
+            // ★ v3.112.0: Phase E.1 — game-native OrientedPatternData 경로
+            OrientedPatternData nativePattern = default;
+            bool nativePatternReady = false;
+            if (SC.UseNativePattern && ability != null && caster != null)
+            {
+                try
+                {
+                    nativePattern = CombatAPI.GetAffectedNodes(ability, cluster.Center, caster.Position);
+                    nativePatternReady = !nativePattern.IsEmpty;
+                    if (nativePatternReady && Main.IsDebugEnabled)
+                        Main.LogDebug($"[AoESafety][Native] ClusterAllyPenalty {ability.Name}: pattern precomputed");
+                }
+                catch (Exception ex)
+                {
+                    Main.LogWarning($"[AoESafety][Native] ClusterAllyPenalty precompute failed for {ability.Name}: {ex.Message}");
+                }
+            }
+
             for (int i = 0; i < allies.Count; i++)
             {
                 var ally = allies[i];
                 if (ally == null || !ally.IsConscious) continue;
                 if (ally == caster) continue;
 
-                // ★ v3.6.10: 2D 거리 + 높이 체크 통합
-                if (!CombatAPI.IsUnitInAoERange(ability, cluster.Center, ally, aoERadius))
-                    continue;
+                bool inRange;
+                if (nativePatternReady)
+                {
+                    inRange = false;
+                    foreach (var occ in ally.GetOccupiedNodes())
+                    {
+                        if (occ != null && nativePattern.Contains(occ)) { inRange = true; break; }
+                    }
+                }
+                else
+                {
+                    // ★ v3.6.10: 2D 거리 + 높이 체크 (legacy 폴백)
+                    inRange = CombatAPI.IsUnitInAoERange(ability, cluster.Center, ally, aoERadius);
+                }
+                if (!inRange) continue;
 
                 // 아군이 AOE 범위 내에 있음
                 try
@@ -630,16 +664,48 @@ namespace CompanionAI_v3.Analysis
         /// ★ v3.5.98: 반경 내 적 수 계산 (radius는 타일 단위)
         /// ★ v3.6.10: 높이 체크 추가 - ability가 있으면 패턴 타입별 임계값 사용
         /// ★ v3.9.04: LINQ Count(predicate) 제거
+        /// ★ v3.112.0: caster 선택 파라미터 추가 — native pattern 경로 지원
         /// </summary>
-        private static int CountEnemiesInRadius(Vector3 center, List<BaseUnitEntity> enemies, float radius, AbilityData ability = null)
+        private static int CountEnemiesInRadius(Vector3 center, List<BaseUnitEntity> enemies, float radius, AbilityData ability = null, BaseUnitEntity caster = null)
         {
+            // ★ v3.112.0: Phase E.1 — game-native OrientedPatternData 경로
+            OrientedPatternData nativePattern = default;
+            bool nativePatternReady = false;
+            if (SC.UseNativePattern && ability != null && caster != null)
+            {
+                try
+                {
+                    nativePattern = CombatAPI.GetAffectedNodes(ability, center, caster.Position);
+                    nativePatternReady = !nativePattern.IsEmpty;
+                    if (nativePatternReady && Main.IsDebugEnabled)
+                        Main.LogDebug($"[AoESafety][Native] ClusterCountEnemies {ability.Name}: pattern precomputed");
+                }
+                catch (Exception ex)
+                {
+                    Main.LogWarning($"[AoESafety][Native] ClusterCountEnemies precompute failed for {ability.Name}: {ex.Message}");
+                }
+            }
+
             int count = 0;
             for (int i = 0; i < enemies.Count; i++)
             {
                 var e = enemies[i];
                 if (e == null || !e.IsConscious) continue;
-                if (CombatAPI.IsUnitInAoERange(ability, center, e, radius))
-                    count++;
+
+                bool inRange;
+                if (nativePatternReady)
+                {
+                    inRange = false;
+                    foreach (var occ in e.GetOccupiedNodes())
+                    {
+                        if (occ != null && nativePattern.Contains(occ)) { inRange = true; break; }
+                    }
+                }
+                else
+                {
+                    inRange = CombatAPI.IsUnitInAoERange(ability, center, e, radius);
+                }
+                if (inRange) count++;
             }
             return count;
         }
@@ -658,14 +724,45 @@ namespace CompanionAI_v3.Analysis
         {
             if (allies == null) return 0;
 
+            // ★ v3.112.0: Phase E.1 — game-native OrientedPatternData 경로
+            OrientedPatternData nativePattern = default;
+            bool nativePatternReady = false;
+            if (SC.UseNativePattern && ability != null && caster != null)
+            {
+                try
+                {
+                    nativePattern = CombatAPI.GetAffectedNodes(ability, center, caster.Position);
+                    nativePatternReady = !nativePattern.IsEmpty;
+                    if (nativePatternReady && Main.IsDebugEnabled)
+                        Main.LogDebug($"[AoESafety][Native] ClusterCountAllies {ability.Name}: pattern precomputed");
+                }
+                catch (Exception ex)
+                {
+                    Main.LogWarning($"[AoESafety][Native] ClusterCountAllies precompute failed for {ability.Name}: {ex.Message}");
+                }
+            }
+
             int count = 0;
             for (int i = 0; i < allies.Count; i++)
             {
                 var a = allies[i];
                 if (a == null || !a.IsConscious || a == caster) continue;
                 if (caster.IsPlayerEnemy || !a.IsInPlayerParty) continue;
-                if (CombatAPI.IsUnitInAoERange(ability, center, a, radius))
-                    count++;
+
+                bool inRange;
+                if (nativePatternReady)
+                {
+                    inRange = false;
+                    foreach (var occ in a.GetOccupiedNodes())
+                    {
+                        if (occ != null && nativePattern.Contains(occ)) { inRange = true; break; }
+                    }
+                }
+                else
+                {
+                    inRange = CombatAPI.IsUnitInAoERange(ability, center, a, radius);
+                }
+                if (inRange) count++;
             }
             return count;
         }

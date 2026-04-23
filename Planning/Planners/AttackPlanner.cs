@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using Kingmaker.Blueprints;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.Pathfinding;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.UnitLogic.Abilities.Components;
+using Kingmaker.UnitLogic.Abilities.Components.Patterns;
 using Kingmaker.Utility;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
@@ -281,6 +283,25 @@ namespace CompanionAI_v3.Planning.Planners
                     {
                         UnityEngine.Vector3 direction = (target.Position - situation.Unit.Position).normalized;
                         int alliesInAoE = 0;
+
+                        // ★ v3.112.0: Phase E.1 — game-native OrientedPatternData 경로
+                        OrientedPatternData nativePattern = default;
+                        bool nativePatternReady = false;
+                        if (SC.UseNativePattern && attack != null && target != null)
+                        {
+                            try
+                            {
+                                nativePattern = CombatAPI.GetAffectedNodes(attack, target.Position, situation.Unit.Position);
+                                nativePatternReady = !nativePattern.IsEmpty;
+                                if (nativePatternReady && Main.IsDebugEnabled)
+                                    Main.LogDebug($"[AoESafety][Native] DangerousAoE {attack.Name}: pattern precomputed");
+                            }
+                            catch (Exception ex)
+                            {
+                                Main.LogWarning($"[AoESafety][Native] DangerousAoE precompute failed for {attack.Name}: {ex.Message}");
+                            }
+                        }
+
                         for (int a = 0; a < situation.Allies.Count; a++)
                         {
                             var ally = situation.Allies[a];
@@ -288,8 +309,18 @@ namespace CompanionAI_v3.Planning.Planners
                             if (!ally.IsInPlayerParty) continue;
 
                             bool inRange;
-                            if (patternInfo != null && patternInfo.IsValid && patternInfo.CanBeDirectional)
+                            if (nativePatternReady)
                             {
+                                // Native 단일 경로: directional/circle 자동 처리
+                                inRange = false;
+                                foreach (var occ in ally.GetOccupiedNodes())
+                                {
+                                    if (occ != null && nativePattern.Contains(occ)) { inRange = true; break; }
+                                }
+                            }
+                            else if (patternInfo != null && patternInfo.IsValid && patternInfo.CanBeDirectional)
+                            {
+                                // Legacy directional
                                 inRange = CombatAPI.IsUnitInDirectionalAoERange(
                                     situation.Unit.Position, direction, ally, dangerAoERadius,
                                     patternInfo.Angle > 0 ? patternInfo.Angle : 90f,
@@ -297,6 +328,7 @@ namespace CompanionAI_v3.Planning.Planners
                             }
                             else
                             {
+                                // Legacy circle
                                 inRange = CombatAPI.IsUnitInAoERange(attack, target.Position, ally, dangerAoERadius);
                             }
 
