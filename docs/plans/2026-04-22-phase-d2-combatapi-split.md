@@ -494,3 +494,81 @@ git commit -m "refactor(v3.111.22): Weapon (Ammo/Set/Range) region → CombatAPI
 - region 내용 재편성 (메서드 순서 변경 등) — 별도 작업.
 - using 한꺼번에 정리 — 추출 중 발견된 불필요 using 만 제거.
 - 공유 private static 필드를 추출 파일로 이동 — cross-partial reference 로 복잡도 증가.
+
+---
+
+## ✅ Phase D.2 완료 (2026-04-24, v3.111.30, HEAD 9db8793)
+
+**결과**: `GameInterface/CombatAPI.cs` 6,765줄 단일 god-file → **10 파일 (9 partial + 1 residual)** 분할 완료.
+
+### 최종 파일 목록
+
+| # | 파일 | 줄수 | 세션 | region 수 |
+|:--:|---|---:|:--:|:--:|
+| — | `CombatAPI.cs` (residual, Unit Conversion only) | 209 | — | 1 |
+| 1 | `CombatAPI.VeilPsychic.cs` | 224 | 1 | 1 |
+| 2 | `CombatAPI.WeaponSystem.cs` | 518 | 1 | 3 |
+| 3 | `CombatAPI.TacticalQueries.cs` | 631 | 2 | 6 |
+| 4 | `CombatAPI.UnitQueries.cs` | 686 | 3 | 5 |
+| 5 | `CombatAPI.AbilityChecks.cs` | 774 | 4 | 2 |
+| 6 | `CombatAPI.AbilityDetection.cs` | 734 | 5 | 4 |
+| 7 | `CombatAPI.TargetingAPI.cs` | 792 | 6 | 4 (nested 포함) |
+| 8 | `CombatAPI.AoESupport.cs` | 997 | 7 | 4 |
+| 9 | `CombatAPI.Abilities.cs` | 1341 | 8 | 1 |
+| **Total** | **10 files** | **6,906** | — | **31** |
+
+Scaffold overhead: **+141줄 / 2.08%** (원본 6,765 기준, 10 파일 평균 +15.7줄/file).
+
+### 커밋 체인 (16 commits)
+
+```
+07f3eb2 v3.111.20  partial class 선언 전환
+  → b0dda8e v3.111.21  Session 1: VeilPsychic (213줄)
+  → db044b5 v3.111.22  Session 1: WeaponSystem (503줄, 3 연속 region)
+  → 69c1a4b v3.111.23  Session 1: 고아 using 정리
+bdc572c          Session 2 pre-flight
+  → 4484714 v3.111.24  Session 2: TacticalQueries (605줄, 6 region / 4 청크)
+be51125          Session 3 pre-flight
+  → 647ecab v3.111.25  Session 3: UnitQueries (663줄 + 7 using cleanup)
+26ab76b          Session 4 pre-flight
+  → e7ab87a v3.111.26  Session 4: AbilityChecks (754줄)
+a665d14          Session 5 pre-flight
+  → 74d9ff7 v3.111.27  Session 5: AbilityDetection (709줄 + 5 using + L32 주석)
+8f96ad8          Session 6 pre-flight
+  → 936710d v3.111.28  Session 6: TargetingAPI (758줄 + nested + 2 marker + 4 using)
+8903f05          Session 7 pre-flight
+  → 05f9a7f v3.111.29  Session 7: AoESupport (967줄 + 2 header fields + 1 using)
+d4d255f          Session 8 pre-flight
+  → 9db8793 v3.111.30  Session 8: Abilities (1,309줄 + 3 header fields + 17 using) — FINAL
+```
+
+### 검증 결과
+
+- **All 8 extractions byte-identical** (diff 0 per region, 2 intentional marker exceptions in Session 6 only)
+- **MSBuild Release Rebuild 0 Warning / 0 Error** across all 8 sessions
+- **0 behavior changes** — 기계적 이동만
+- **0 API surface changes** — 외부 caller (20+ 사이트) 모두 partial class 로 투명
+- **Cross-partial dependency graph acyclic**:
+  - UnitQueries (leaf): Dodge/Parry helpers ← TargetingAPI, public Estimate methods ← 다수
+  - AbilityDetection (leaf): HasPsychicAbilities etc ← Analysis/BasePlan (public)
+  - CombatAPI.cs (root): Unit Conversion primitive ← 모든 partial
+
+### 검증된 방법론 (8 세션 경험)
+
+1. **Byte-identity 우선** — `diff <(git show <parent>:file | sed -n '<range>p') <new file's region>` → 기대값 0 (또는 명시적 marker 증분)
+2. **Pre-flight commit + extraction commit** 2-commit-per-session 패턴 — 각 세션 시작 시 `#region` line 재측정 후 플랜 업데이트 커밋 후 추출
+3. **Region-local `private static` 동반 이동** — 필드/메서드 모두 region 내부면 함께 이동
+4. **Residual header 필드 동반 이동** (Session 7 정립) — 필드 사용이 단일 region 에 100% 국한되면 새 partial 로 이동
+5. **Cross-partial `private static` 호출 허용** — C# `partial class` 는 단일 클래스. 호출 사이트에 `// Helper: CombatAPI.<file>.cs` marker 주석 추가 (Session 3 정립, Session 6 확장)
+6. **Fully-qualified names > 새 `using`** — one-off Reflection/generic 참조
+7. **MSBuild catch-and-fix cheap** — using 과잉 제거는 rebuild 로 즉시 발견, 1-2 iteration 정상
+8. **Nested region 단위 이동** — outer 추출 시 inner region 자동 동반 (Session 6 Target Scoring / Accurate Damage Prediction)
+9. **연속 region = 단일 chunk** — `#endregion` + blank + `#region` 인접 시 한 번에 삭제 (Session 2/6/7)
+10. **Deletion order high-to-low** — 비연속 region 삭제 시 line 번호 시프트 방지
+
+### 후속 작업 권장
+
+- [ ] **In-game smoke test** (사용자) — 5분 전투 세션, UMM 로그 0 error 확인
+- [ ] **LESSONS_LEARNED.md** 에 Phase D.2 방법론 항목 추가 (재사용 가능한 패턴)
+- [ ] Session 7 reviewer 제안 — Abilities 가 여전히 1,341줄 → 내부 하위 분할 가능성 검토 (별도 Phase)
+- [ ] 이 플랜 문서는 **완료 — 아카이브**. 미래 참조용 보존.

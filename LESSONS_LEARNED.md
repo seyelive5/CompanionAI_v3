@@ -821,3 +821,46 @@ WORK_TRACKER.md의 "작업 완료 판정 기준"에 6번 항목 추가:
 1. **로그 = 증명**: 기능이 "실제로 실행됨"을 로그로 증명. 예상 메시지 미리 정의 후 확인.
 2. **배포 ≠ 완료**: 최소 한 번 인게임 세션으로 돌려보고 로그 확인.
 3. **선언-현실 gap 방지**: 완료 선언 전 검증 체크리스트 필수.
+---
+
+## 18. god-file partial class 분할 방법론 (v3.111.20-30 Phase D.2)
+
+### 배경
+
+`GameInterface/CombatAPI.cs` 6,765줄 / 31 region god-file 을 9개 partial class 파일 + 1 residual 로 분할. 기계적 refactor (행동 변화 0, 코드 로직 유지). 8 세션 / 16 commit 로 완료. 재사용 가능한 방법론.
+
+### 검증된 10대 원칙
+
+1. **Byte-identity 우선 검증** — `diff <(git show <parent>:file | sed -n '<range>p') <new file's region>` → 기대값 0. 대규모 diff 리뷰 scalability 의 유일한 해법.
+2. **2-commit-per-session 패턴** — 매 세션: (a) Pre-flight commit — `#region` line 재측정 후 플랜 업데이트, (b) Extraction commit — 실제 이동. 세션 간 line 시프트를 line 측정 스냅샷으로 추적.
+3. **Region-local `private static` 동반 이동** — 필드/메서드 모두 region 내부면 함께. 원칙 2 `private static` 필드는 한 파일에만.
+4. **Residual header 필드 동반 이동** (Session 7 정립) — 필드 사용이 단일 region 에 100% 국한되면 (grep 선행 확인) 새 partial header 로 이동. 원본 주석 보존 + 이동 annotation 추가.
+5. **Cross-partial `private static` 호출 허용** — `partial class` 는 컴파일러에게 단일 클래스. 응집도가 cross-partial "미관 의식" 보다 우선. 호출 사이트에 `// Helper: CombatAPI.<file>.cs` marker 주석 추가 (가독성).
+6. **Fully-qualified names > 새 `using`** — one-off Reflection/generic 참조 (e.g. `System.Reflection.FieldInfo`). using 막대하게 늘리지 않음.
+7. **MSBuild catch-and-fix cheap** — using 과잉 제거는 rebuild 로 즉시 CS0246 발견. 1-2 iteration 정상 예산. 사전 grep 으로 prevention 가능하나 추론 불필요.
+8. **Nested `#region` 단위 이동** — outer 추출 시 inner region 자동 동반 (Session 6 Target Scoring / Accurate Damage Prediction). C# + VS IDE 모두 지원.
+9. **연속 region = 단일 chunk** — `#endregion` + blank + `#region` 인접 시 한 sed 범위로 삭제 (Session 2/6/7).
+10. **Deletion order high-to-low** — 비연속 region 삭제 시 low line 먼저 삭제하면 high line 번호가 시프트 되어 두 번째 삭제 위치 계산이 깨짐. 항상 뒤에서부터.
+
+### 부차 원칙
+
+- **Orphan using 은 같은 커밋에서 정리** — 별도 cleanup commit 회피 (Session 1 예외는 학습 전).
+- **Pre-existing deadwood 발견 시 opportunistic 정리** — 커밋 body 에 audit scope 명시.
+- **Marker 규율**: `private static` cross-partial 호출에만 marker. `public static` 호출은 정상 class API — marker 불필요.
+- **Byte-identity 기대 delta = marker count** — 의도적 marker 추가 시 정확히 해당 줄수만 +, 나머지 0-diff.
+
+### 통계 (8 세션 결과)
+
+- 원본 6,765줄 → 최종 6,906줄 (9 partial + residual)
+- Scaffold overhead: **+141줄 / 2.08%** (~15.7줄/partial 평균)
+- 16 commits, 0 MSBuild warning/error, 0 behavior change
+- External caller (~25+ 사이트) 0 수정 필요 (partial class 투명)
+
+### 재사용 조건
+
+이 방법론은 다음 경우에 재사용 가능:
+- 단일 static class 가 region 으로 구획된 god-file
+- 기계적 이동만 원하는 경우 (logic 변경 없이)
+- `partial class` 지원 언어 (C#, VB.NET)
+
+전체 검증 기록: [docs/plans/2026-04-22-phase-d2-combatapi-split.md](docs/plans/2026-04-22-phase-d2-combatapi-split.md)
