@@ -126,5 +126,11 @@ namespace CompanionAI_v3.Settings
         // ★ v3.22.0: 게임 API 조회 실패 시 사용되는 안전 폴백 값 중앙화
         public const float FallbackWeaponRange   = 15f;  // 무기 사거리 폴백 (타일) — 원거리 무기 보수적 추정
         public const float FallbackEstimateDamage = 15f;  // 데미지 예측 폴백 — GetDamagePrediction 실패 시
+
+        // ─── Phase E: 게임 내장 API 전환 feature flag ───────────────────
+        // ★ v3.112.0: Phase E.1 — OrientedPatternData 전환
+        // true: 게임 내장 AoEPattern.GetOriented() 로 정확한 영향 타일 계산
+        // false: 기존 반경 기반 추정 (롤백용)
+        public const bool UseNativePattern = false;  // 초기 false, Session E.1.2 에서 true 전환
     }
 }
