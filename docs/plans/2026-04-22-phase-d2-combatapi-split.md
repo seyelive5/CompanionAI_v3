@@ -331,10 +331,34 @@ git commit -m "refactor(v3.111.22): Weapon (Ammo/Set/Range) region → CombatAPI
 
 ---
 
-## Session 5+ 개요 (후속 세션)
+## Session 5 — AbilityDetection 추출 (실측 line 기반, HEAD e7ab87a)
 
-**Session 5**:
-- `CombatAPI.AbilityDetection.cs` (Type Detection + Detection API + Classification + Damaging AoE, 4 비연속; `_damagingAoECache/_lastHazardCheck*` + `HasDamagingComponents`/`ContainsDamageAction` 이동)
+**목표**: `CombatAPI.AbilityDetection.cs` 신설 + 4 region 이동. 3 청크, 총 ~709 줄.
+
+**현재 line 번호** (Session 4 이후 재조회 완료):
+
+| # | region | 현재 line | 줄수 | 청크 | 이동할 private static |
+|:--:|---|---|:--:|:--:|---|
+| 1 | Ability Type Detection | L1782-1951 | 170 | A (단독) | — |
+| 2 | Ability Type Detection API (v3.5.73) | L2924-3051 | 128 | B (연속 ②③) | `AbilityTypeCache` L2965 |
+| 3 | Ability Classification Data (v3.7.73) | L3053-3182 | 130 | B (연속 ②③) | `ClassificationCache` L3056 |
+| 4 | Damaging AoE Detection (v3.9.70) | L3270-3550 | 281 | C (단독) | `_damagingAoECache` L3273, `_lastHazardCheckUnit` L3452, `_lastHazardCheckIsPsychic` L3453, `HasDamagingComponents` L3365 method, `ContainsDamageAction` L3428 method |
+
+**삭제 순서 (high-to-low)**: 청크 C → B → A.
+
+**주의**:
+- **청크 A 와 청크 B 사이**에 AOE Support/Self-Targeted AOE/Pattern Info Cache/Game Pattern API (L1953-2922) 잔존 (Session 7 예정) — 삭제 순서 엄수
+- **청크 B 와 청크 C 사이**에 Targeting Detection (L3184-3268) 잔존 (Session 6 예정) — boundary 보존
+- **Chunk B 청크 내부**: Type Detection API (L2924-3051) + Classification Data (L3053-3182) 사이 blank (L3052) — 인접 region. 추출 후 new file 에서 단일 blank 구분자 예상 (Session 3 Unit Stat/Dodge 정밀 패턴)
+- **외부 public caller**: `HasPsychicAbilities` → `Analysis/SituationAnalyzer.cs:733` 에서 호출. partial class 유지로 투명. **선행 grep 권장**
+
+**추출 후 예상**: `CombatAPI.cs`: 4006 → ~3297 (−709), `AbilityDetection.cs` ~730 줄.
+
+**난이도**: ★★ (4 region / 3 청크 / 2 캐시 + 2 hazard 필드 + 2 메서드). Session 2 수준.
+
+---
+
+## Session 6+ 개요 (후속 세션)
 
 **Session 6**:
 - `CombatAPI.TargetingAPI.cs` (Target Scoring + Damage Prediction + Hit Chance + Flanking + Targeting Detection; 2× `CalculateTargetScore` 메서드 이동)
@@ -343,8 +367,8 @@ git commit -m "refactor(v3.111.22): Weapon (Ammo/Set/Range) region → CombatAPI
 - `CombatAPI.AoESupport.cs` (AOE Support + Self-Targeted AOE + Pattern Info Cache + Game Pattern API; `PatternCache` 이동)
 
 **Session 8 (최종)**:
-- `CombatAPI.Abilities.cs` (1,308 줄 단일 region — `PreyAbilityGuids` + 2× 헬퍼 메서드 포함). 내용 스캔 후 추가 분할 가능성 평가.
-- 잔존 `CombatAPI.cs` 는 Unit Conversion + shared cache 필드만 남음 (~200 줄).
+- `CombatAPI.Abilities.cs` (1,308 줄 단일 region — `PreyAbilityGuids` + 2× 헬퍼 메서드 포함) + **shared frame cache 필드 (`_cachedAbilitiesUnitId/Frame/List`, L51-53) 동반 이동 검토**. 내용 스캔 후 추가 분할 가능성 평가.
+- 잔존 `CombatAPI.cs` 는 Unit Conversion + `_sharedUnitSet/AllySet` (Pattern counting 전용) 만 남음 (~200 줄).
 
 ---
 
