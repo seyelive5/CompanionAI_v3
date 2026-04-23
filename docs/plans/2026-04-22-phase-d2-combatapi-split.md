@@ -427,11 +427,55 @@ git commit -m "refactor(v3.111.22): Weapon (Ammo/Set/Range) region → CombatAPI
 
 ---
 
-## Session 8 (최종) 개요
+## Session 8 — Abilities 추출 (최종 세션, 실측 line 기반, HEAD 05f9a7f)
 
-**Session 8**:
-- `CombatAPI.Abilities.cs` (1,308줄 단일 region — `PreyAbilityGuids` + 2× 헬퍼 메서드 포함) + **shared frame cache 필드 (`_cachedAbilitiesUnitId/Frame/List`, L46-48 기준 **Session 7 후 L42-44**) 동반 이동 검토**. 내용 스캔 후 추가 분할 가능성 평가.
-- 잔존 `CombatAPI.cs` 는 **Unit Conversion 만** 남음 (~200 줄). Session 7 이 `_sharedUnitSet/AllySet` 동반 이동하면 residual 은 frame cache (Session 8 대기) + Unit Conversion 만 잔존
+**목표**: `CombatAPI.Abilities.cs` 신설 + 1 region 이동 + 3 header field 동반 이동. 1 청크, 총 ~1309 줄 + 3 필드.
+
+**현재 line 번호** (Session 7 이후 재조회 완료):
+
+| # | region | 현재 line | 줄수 | 청크 | 이동할 private static |
+|:--:|---|---|:--:|:--:|---|
+| 1 | `#region Abilities` (단일) | L45-1353 | 1309 | A (단독, Phase 최대 region) | `PreyAbilityGuids` (L824, HashSet), `EvaluateContextValue` (L1109, method), `IsUnconditionalModifier` (L1135, method) |
+
+**추가 이동 대상** — residual header 에서 동반 이동 (Session 7 precedent):
+- L41: `_cachedAbilitiesUnitId` (string) — Abilities region 에서만 사용 (10 refs 전부 Abilities 내부)
+- L42: `_cachedAbilitiesFrame` (int)
+- L43: `_cachedAbilitiesList` (List<AbilityData>)
+
+**최종 residual**:
+- Unit Conversion (Session 8 후 L~45 시작, ~191 줄)
+- 최상단 최소 header (사용 중인 using + namespace + `public static partial class CombatAPI` + 닫는 괄호) ~40-50줄
+- **최종 `CombatAPI.cs` 예상 크기: ~230-240줄**
+
+**예상 orphan using cleanup (~8-10 개)** — Abilities region 전용 namespace:
+- `Kingmaker.UnitLogic.Buffs.Components` (WarhammerFreeUltimateBuff, 주석도 갱신)
+- `Kingmaker.Designers.Mechanics.Facts` (WeaponSetChangedTrigger)
+- `Kingmaker.Designers.Mechanics.Facts.Damage` (WarhammerDamageModifier)
+- `Kingmaker.UnitLogic.FactLogic` (ForceMoveTriggerInitiator)
+- `Kingmaker.UnitLogic.Mechanics` (ContextValueType)
+- `Kingmaker.UnitLogic.Mechanics.Damage` (DamageTypeMask)
+- `Kingmaker.Mechanics.Damage` (DamageExtension)
+- `Kingmaker.Enums` (WeaponFamily.Plasma)
+- `Kingmaker.Items` (ItemEntityWeapon 등)
+- 추가 — grep 으로 확정
+
+**삭제 순서**:
+1. Abilities region (L45-1353, 단일 chunk) 먼저
+2. Header 필드 3개 (L41-43) 삭제 — L44 의 블록 구분 빈 줄 여부 확인
+3. orphan 되는 using 정리
+
+**난이도**: ★★ (1 region 단순 / 1309줄 최대 규모 / 3 header field 이동 / 8-10 using cleanup / 최종 rollup 문서).
+
+**최종 검증 권장** (post-commit):
+1. 빌드 Release Rebuild 재확인
+2. DLL 로드 확인 (UMM 경로)
+3. (선택) 5분 인게임 smoke test
+
+**최종 Phase D.2 rollup** — Session 8 commit body 에 포함:
+- 9 partial 파일 각 최종 줄수
+- 전체 commit SHA 체인 (`07f3eb2` → Session 8 최종)
+- Original 6,765 → Final 9 files total 줄수
+- Scaffold overhead 누적
 
 ---
 
