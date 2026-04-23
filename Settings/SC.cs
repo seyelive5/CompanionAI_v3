@@ -128,11 +128,15 @@ namespace CompanionAI_v3.Settings
         public const float FallbackEstimateDamage = 15f;  // 데미지 예측 폴백 — GetDamagePrediction 실패 시
 
         // ─── Phase E: 게임 내장 API 전환 feature flag ───────────────────
-        // ★ v3.112.0: Phase E.1 Pilot — AoESafetyChecker.EvaluateDirectionalAoE 에서
-        //             game-native OrientedPatternData 경로 활성화.
+        // ★ v3.112.0: Phase E.1 — 14 callsites 전체 native 경로 활성화.
         // true: GetAffectedNodes + pattern.Contains(node) — LOS/unwalkable/level-diff 정확 반영
-        // false: IsUnitInDirectionalAoERange 2D 근사 (롤백용)
-        // 현재 활성 callsite: AoESafetyChecker.EvaluateDirectionalAoE (15건 중 1건 pilot)
+        // false: IsUnit(Directional)AoERange 2D 근사 (롤백용)
+        // 활성 파일: AoESafetyChecker, ClusterDetector, AttackPlanner, TauntScorer, UtilityScorer
         public const bool UseNativePattern = true;
+
+        // ★ v3.112.1: Phase E.2 — AttackDataCollection.GetThreatRange 는 이미 GetEnemyThreatRangeInTiles
+        //             (UnitQueries.cs:106, v3.110.20+) 에서 canonical 사용 중. Phase E.2 는 별도 flag 불필요 —
+        //             기존 구현이 플랜의 "native only" 접근보다 우월 (native + weaponRange MAX 폴백).
+        //             플래그 추가 철회 (commit 이력에서 유지): 2026-04-24
     }
 }
