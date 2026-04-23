@@ -67,12 +67,41 @@ namespace CompanionAI_v3.GameInterface
             float totalScore = 0f;
             int playerPartyAlliesHit = 0;
 
+            // ★ v3.112.0: Phase E.1 — game-native OrientedPatternData 경로
+            OrientedPatternData nativePattern = default;
+            bool nativePatternReady = false;
+            if (SC.UseNativePattern && ability != null)
+            {
+                try
+                {
+                    nativePattern = CombatAPI.GetAffectedNodes(ability, targetPosition, caster.Position);
+                    nativePatternReady = !nativePattern.IsEmpty;
+                }
+                catch (Exception ex)
+                {
+                    Main.LogWarning($"[AoESafety][Native] EvalAoE precompute failed for {ability.Name}: {ex.Message}");
+                }
+            }
+
             foreach (var unit in allUnits)
             {
                 if (unit == null || !unit.IsConscious) continue;
 
-                // ★ v3.6.10: 2D 거리 + 높이 체크 통합 (Circle/Directional 패턴별 높이 임계값 적용)
-                if (!CombatAPI.IsUnitInAoERange(ability, targetPosition, unit, aoERadius)) continue;
+                bool inRange;
+                if (nativePatternReady)
+                {
+                    inRange = false;
+                    foreach (var occ in unit.GetOccupiedNodes())
+                    {
+                        if (occ != null && nativePattern.Contains(occ)) { inRange = true; break; }
+                    }
+                }
+                else
+                {
+                    // ★ v3.6.10: 2D 거리 + 높이 체크 (Circle/Directional 패턴별 높이 임계값 적용)
+                    inRange = CombatAPI.IsUnitInAoERange(ability, targetPosition, unit, aoERadius);
+                }
+                if (!inRange) continue;
 
                 // 거리 보너스 계산용 2D 거리
                 float dist = CombatAPI.MetersToTiles(Vector3.Distance(targetPosition, unit.Position));
@@ -321,12 +350,41 @@ namespace CompanionAI_v3.GameInterface
             var aoeConfig = AIConfig.GetAoEConfig();
             int playerPartyAlliesInRange = 0;
 
+            // ★ v3.112.0: Phase E.1 — game-native OrientedPatternData 경로
+            OrientedPatternData nativePattern = default;
+            bool nativePatternReady = false;
+            if (SC.UseNativePattern && ability != null)
+            {
+                try
+                {
+                    nativePattern = CombatAPI.GetAffectedNodes(ability, targetPosition, caster.Position);
+                    nativePatternReady = !nativePattern.IsEmpty;
+                }
+                catch (Exception ex)
+                {
+                    Main.LogWarning($"[AoESafety][Native] IsAoESafe precompute failed for {ability.Name}: {ex.Message}");
+                }
+            }
+
             foreach (var ally in allies)
             {
                 if (ally == null || !ally.IsConscious) continue;
 
-                // ★ v3.6.10: 2D 거리 + 높이 체크 통합
-                if (!CombatAPI.IsUnitInAoERange(ability, targetPosition, ally, aoERadius)) continue;
+                bool inRange;
+                if (nativePatternReady)
+                {
+                    inRange = false;
+                    foreach (var occ in ally.GetOccupiedNodes())
+                    {
+                        if (occ != null && nativePattern.Contains(occ)) { inRange = true; break; }
+                    }
+                }
+                else
+                {
+                    // ★ v3.6.10: 2D 거리 + 높이 체크 (legacy 폴백)
+                    inRange = CombatAPI.IsUnitInAoERange(ability, targetPosition, ally, aoERadius);
+                }
+                if (!inRange) continue;
 
                 try
                 {
@@ -412,6 +470,22 @@ namespace CompanionAI_v3.GameInterface
             var aoeConfig = AIConfig.GetAoEConfig();
             int playerPartyAlliesInRange = 0;
 
+            // ★ v3.112.0: Phase E.1 — game-native OrientedPatternData 경로 (fromPosition 기반)
+            OrientedPatternData nativePattern = default;
+            bool nativePatternReady = false;
+            if (SC.UseNativePattern && ability != null && target != null && aoERadius > 0)
+            {
+                try
+                {
+                    nativePattern = CombatAPI.GetAffectedNodes(ability, target.Position, fromPosition);
+                    nativePatternReady = !nativePattern.IsEmpty;
+                }
+                catch (Exception ex)
+                {
+                    Main.LogWarning($"[AoESafety][Native] SafeFromPos precompute failed for {ability.Name}: {ex.Message}");
+                }
+            }
+
             foreach (var ally in allies)
             {
                 if (ally == null || !ally.IsConscious) continue;
@@ -422,24 +496,33 @@ namespace CompanionAI_v3.GameInterface
 
                 if (aoERadius > 0)
                 {
-                    // ★ v3.9.24: 방향성 AoE(Cone/Ray/Sector)는 방향+각도 체크 사용
-                    // 기존: 원형 반경 체크 → Cone도 6타일 원 전체를 위험으로 판정 (과잉 차단)
-                    // 수정: 시전자→타겟 방향의 Cone 내에 아군이 있는지 정확히 체크
-                    var patternInfo = CombatAPI.GetPatternInfo(ability);
-                    if (patternInfo != null && patternInfo.IsValid && patternInfo.CanBeDirectional)
+                    if (nativePatternReady)
                     {
-                        Vector3 direction = (target.Position - fromPosition).normalized;
-                        if (CombatAPI.IsUnitInDirectionalAoERange(
-                            fromPosition, direction, ally, aoERadius,
-                            patternInfo.Angle > 0 ? patternInfo.Angle : 90f,
-                            patternInfo.Type ?? Kingmaker.Blueprints.PatternType.Cone))
-                            isInDanger = true;
+                        // Native 단일 경로: directional/circle 구분 없이 게임 내장 패턴으로 판정
+                        foreach (var occ in ally.GetOccupiedNodes())
+                        {
+                            if (occ != null && nativePattern.Contains(occ)) { isInDanger = true; break; }
+                        }
                     }
                     else
                     {
-                        // Circle/비방향성: 기존 원형 반경 체크
-                        if (CombatAPI.IsUnitInAoERange(ability, target.Position, ally, aoERadius))
-                            isInDanger = true;
+                        // ★ v3.9.24 (legacy): directional/circle 분기
+                        var patternInfo = CombatAPI.GetPatternInfo(ability);
+                        if (patternInfo != null && patternInfo.IsValid && patternInfo.CanBeDirectional)
+                        {
+                            Vector3 direction = (target.Position - fromPosition).normalized;
+                            if (CombatAPI.IsUnitInDirectionalAoERange(
+                                fromPosition, direction, ally, aoERadius,
+                                patternInfo.Angle > 0 ? patternInfo.Angle : 90f,
+                                patternInfo.Type ?? Kingmaker.Blueprints.PatternType.Cone))
+                                isInDanger = true;
+                        }
+                        else
+                        {
+                            // Circle/비방향성: 원형 반경 체크
+                            if (CombatAPI.IsUnitInAoERange(ability, target.Position, ally, aoERadius))
+                                isInDanger = true;
+                        }
                     }
                 }
                 else if (hasScatterDanger)
@@ -585,6 +668,22 @@ namespace CompanionAI_v3.GameInterface
             const float HIT_SCORE = 10000f;
             float totalScore = 0f;
 
+            // ★ v3.112.0: Phase E.1 — game-native OrientedPatternData 경로
+            OrientedPatternData nativePattern = default;
+            bool nativePatternReady = false;
+            if (SC.UseNativePattern && ability != null)
+            {
+                try
+                {
+                    nativePattern = CombatAPI.GetAffectedNodes(ability, targetPosition, caster.Position);
+                    nativePatternReady = !nativePattern.IsEmpty;
+                }
+                catch (Exception ex)
+                {
+                    Main.LogWarning($"[AoESafety][Native] EvalAlly precompute failed for {ability.Name}: {ex.Message}");
+                }
+            }
+
             foreach (var unit in allies)
             {
                 if (unit == null || !unit.IsConscious) continue;
@@ -596,8 +695,21 @@ namespace CompanionAI_v3.GameInterface
                     if (hpPercent >= 90f) continue;  // 거의 풀피면 스킵
                 }
 
-                // ★ v3.6.10: 2D 거리 + 높이 체크 통합
-                if (!CombatAPI.IsUnitInAoERange(ability, targetPosition, unit, aoERadius)) continue;
+                bool inRange;
+                if (nativePatternReady)
+                {
+                    inRange = false;
+                    foreach (var occ in unit.GetOccupiedNodes())
+                    {
+                        if (occ != null && nativePattern.Contains(occ)) { inRange = true; break; }
+                    }
+                }
+                else
+                {
+                    // ★ v3.6.10: 2D 거리 + 높이 체크 (legacy 폴백)
+                    inRange = CombatAPI.IsUnitInAoERange(ability, targetPosition, unit, aoERadius);
+                }
+                if (!inRange) continue;
 
                 // 거리 보너스 계산용 2D 거리
                 float dist = CombatAPI.MetersToTiles(Vector3.Distance(targetPosition, unit.Position));
@@ -983,13 +1095,41 @@ namespace CompanionAI_v3.GameInterface
             allUnits.AddRange(enemies.Where(e => e != null));
             if (allies != null) allUnits.AddRange(allies.Where(a => a != null));
 
+            // ★ v3.112.0: Phase E.1 — game-native OrientedPatternData 경로 (fromPosition 기반)
+            OrientedPatternData nativePattern = default;
+            bool nativePatternReady = false;
+            if (SC.UseNativePattern && ability != null && primaryTarget != null)
+            {
+                try
+                {
+                    nativePattern = CombatAPI.GetAffectedNodes(ability, primaryTarget.Position, fromPosition);
+                    nativePatternReady = !nativePattern.IsEmpty;
+                }
+                catch (Exception ex)
+                {
+                    Main.LogWarning($"[AoESafety][Native] EvalDirFromPos precompute failed for {ability.Name}: {ex.Message}");
+                }
+            }
+
             foreach (var unit in allUnits)
             {
                 if (unit == null || !unit.IsConscious) continue;
 
-                // ★ v3.9.08: fromPosition에서 패턴 범위 체크
-                if (!CombatAPI.IsUnitInDirectionalAoERange(fromPosition, direction, unit, radius, angle, patternType))
-                    continue;
+                bool inRange;
+                if (nativePatternReady)
+                {
+                    inRange = false;
+                    foreach (var occ in unit.GetOccupiedNodes())
+                    {
+                        if (occ != null && nativePattern.Contains(occ)) { inRange = true; break; }
+                    }
+                }
+                else
+                {
+                    // ★ v3.9.08 (legacy): 2D fromPosition 에서 패턴 범위 체크
+                    inRange = CombatAPI.IsUnitInDirectionalAoERange(fromPosition, direction, unit, radius, angle, patternType);
+                }
+                if (!inRange) continue;
 
                 // ★ v3.9.08: fromPosition에서 거리 보너스 계산
                 Vector3 toUnit = unit.Position - fromPosition;
