@@ -358,16 +358,47 @@ git commit -m "refactor(v3.111.22): Weapon (Ammo/Set/Range) region → CombatAPI
 
 ---
 
-## Session 6+ 개요 (후속 세션)
+## Session 6 — TargetingAPI 추출 (실측 line 기반, HEAD 74d9ff7)
 
-**Session 6**:
-- `CombatAPI.TargetingAPI.cs` (Target Scoring + Damage Prediction + Hit Chance + Flanking + Targeting Detection; 2× `CalculateTargetScore` 메서드 이동)
+**목표**: `CombatAPI.TargetingAPI.cs` 신설 + 4 region 이동 (+ nested Accurate Damage Prediction 자동 동반). 3 청크, 총 ~758 줄.
+
+**현재 line 번호** (Session 5 이후 재조회 완료):
+
+| # | region | 현재 line | 줄수 | 청크 | 이동할 private static |
+|:--:|---|---|:--:|:--:|---|
+| 1 | Target Scoring System (nested: Accurate Damage Prediction L1386-1584) | L1364-1775 | 412 | A (단독, nested sub-region 포함) | 2× `CalculateTargetScore` overloads (L1675, L1747) |
+| 2 | Targeting Detection (v3.1.25) | L2748-2832 | 85 | B (단독) | — |
+| 3 | Hit Chance API (v3.6.7) | L3026-3249 | 224 | C (연속 ③④) | — |
+| 4 | Flanking API (v3.28.0) | L3251-3286 | 36 | C (연속 ③④) | — |
+
+**삭제 순서 (high-to-low)**: 청크 C → B → A.
+
+**주의**:
+- **Target Scoring System 은 nested region 구조** — `#region Accurate Damage Prediction` (L1386) 이 `#region Target Scoring System` 내부에 nested. byte-identical 복사 시 자동 동반. new file 내 nested 구조 보존
+- **청크 A 와 청크 B 사이**: AOE Support/Self-Targeted AOE/Pattern Info Cache/Game Pattern API (L1777-2746) 잔존 — Session 7 예정
+- **청크 B 와 청크 C 사이**: Unit Conversion (L2834-3024) 잔존 — 최종 residual
+- **청크 A 앞**: Abilities region (L54-1362) 잔존 — Session 8 예정
+- **청크 C 내부**: Hit Chance (L3026-3249) endregion 후 L3250 blank, L3251 Flanking region — 인접. 추출 후 new file 내 단일 blank 구분자 예상 (Session 3 precedent)
+
+**Cross-partial 주의**:
+- `CalculateEffectiveHitChance` 는 `UnitQueries.cs` 에 있으나 Hit Chance region 에서 호출 (`CombatAPI.cs:3174/3189` 현재 line). Session 6 후 TargetingAPI 로 이동 → **UnitQueries ↔ TargetingAPI cross-partial** 변경. Session 3 precedent 에 따라 TargetingAPI 내 호출 사이트에 `// Helper: CombatAPI.UnitQueries.cs` 마커 주석 추가 권장
+
+**외부 caller 주의**:
+- Target Scoring region 내 public method (예: `CalculateTargetScoreForXxx`) 가 외부에서 호출되는지 전체 트리 grep 필요 (Session 5 의 Hazard Zone 교훈 — public API ~25 사이트 존재 가능성)
+
+**추출 후 예상**: `CombatAPI.cs`: 3288 → ~2530 (−758), `TargetingAPI.cs` ~775 줄.
+
+**난이도**: ★★★ (4 region / 3 청크 / nested region / 2 메서드 이동 / cross-partial marker 주석). Session 5 수준 + nested 구조.
+
+---
+
+## Session 7+ 개요 (후속 세션)
 
 **Session 7**:
 - `CombatAPI.AoESupport.cs` (AOE Support + Self-Targeted AOE + Pattern Info Cache + Game Pattern API; `PatternCache` 이동)
 
 **Session 8 (최종)**:
-- `CombatAPI.Abilities.cs` (1,308 줄 단일 region — `PreyAbilityGuids` + 2× 헬퍼 메서드 포함) + **shared frame cache 필드 (`_cachedAbilitiesUnitId/Frame/List`, L51-53) 동반 이동 검토**. 내용 스캔 후 추가 분할 가능성 평가.
+- `CombatAPI.Abilities.cs` (1,308 줄 단일 region — `PreyAbilityGuids` + 2× 헬퍼 메서드 포함) + **shared frame cache 필드 (`_cachedAbilitiesUnitId/Frame/List`, L46-48) 동반 이동 검토**. 내용 스캔 후 추가 분할 가능성 평가.
 - 잔존 `CombatAPI.cs` 는 Unit Conversion + `_sharedUnitSet/AllySet` (Pattern counting 전용) 만 남음 (~200 줄).
 
 ---
