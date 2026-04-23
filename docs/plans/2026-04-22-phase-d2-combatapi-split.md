@@ -392,14 +392,46 @@ git commit -m "refactor(v3.111.22): Weapon (Ammo/Set/Range) region → CombatAPI
 
 ---
 
-## Session 7+ 개요 (후속 세션)
+## Session 7 — AoESupport 추출 (실측 line 기반, HEAD 936710d)
 
-**Session 7**:
-- `CombatAPI.AoESupport.cs` (AOE Support + Self-Targeted AOE + Pattern Info Cache + Game Pattern API; `PatternCache` 이동)
+**목표**: `CombatAPI.AoESupport.cs` 신설 + 4 region 이동. **2 청크** (3 연속 + 1 단독). 총 ~969 줄 + 2 추가 필드 (`_sharedUnitSet/AllySet`).
 
-**Session 8 (최종)**:
-- `CombatAPI.Abilities.cs` (1,308 줄 단일 region — `PreyAbilityGuids` + 2× 헬퍼 메서드 포함) + **shared frame cache 필드 (`_cachedAbilitiesUnitId/Frame/List`, L46-48) 동반 이동 검토**. 내용 스캔 후 추가 분할 가능성 평가.
-- 잔존 `CombatAPI.cs` 는 Unit Conversion + `_sharedUnitSet/AllySet` (Pattern counting 전용) 만 남음 (~200 줄).
+**현재 line 번호** (Session 6 이후 재조회 완료):
+
+| # | region | 현재 line | 줄수 | 청크 | 이동할 private static |
+|:--:|---|---|:--:|:--:|---|
+| 1 | AOE Support (v3.1.16) | L1360-1645 | 286 | A (연속 ①②③) | — |
+| 2 | Self-Targeted AOE (v3.1.23) | L1647-1784 | 138 | A (연속 ①②③) | — |
+| 3 | Pattern Info Cache (v3.1.19) | L1786-1867 | 82 | A (연속 ①②③) | `PatternCache` (L1805) |
+| 4 | Game Pattern API (v3.5.39) | L1869-2329 | 461 | B (단독) | — |
+
+**추가 이동 대상** — residual header 에서 동반 이동:
+- L47: `_sharedUnitSet` (HashSet<BaseUnitEntity>) — Game Pattern API 에서만 사용 (12 사이트 L1913-2024)
+- L48: `_sharedAllySet` (HashSet<BaseUnitEntity>) — Game Pattern API 에서만 사용
+
+**외부 caller** (partial class 로 투명):
+- `TurnEventHandler.cs:171` — `CombatAPI.ClearPatternCache()` 호출
+
+**삭제 순서 (high-to-low)**: 청크 B → A → (residual header L47-48 shared fields).
+
+**주의**:
+- **청크 A 는 3 연속 region** — `#endregion` + blank + `#region` 인접 3회. 단일 sed 범위로 삭제 (Session 6 Hit Chance+Flanking precedent)
+- **청크 A 앞**: Abilities region (L50-1358, Session 8 target) 잔존
+- **청크 B 뒤**: Unit Conversion (L2331-2521, 최종 residual) 잔존
+- **청크 A 내 `PatternCache` 필드** (L1805) + Pattern Info Cache region 동반 — 자동 이동
+- **Residual header shared fields 이동**: Session 7 은 이동한 region 외에 L47-48 도 삭제해야 — 추가 삭제 범위
+
+**추출 후 예상**: `CombatAPI.cs`: 2523 → ~1551 (−972), `AoESupport.cs` ~990 줄.
+
+**난이도**: ★★ (4 region / 2 청크 / 1 region-local 필드 + 2 header shared 필드 / 외부 caller 1). Session 4 (AbilityChecks) 대비 약간 복잡.
+
+---
+
+## Session 8 (최종) 개요
+
+**Session 8**:
+- `CombatAPI.Abilities.cs` (1,308줄 단일 region — `PreyAbilityGuids` + 2× 헬퍼 메서드 포함) + **shared frame cache 필드 (`_cachedAbilitiesUnitId/Frame/List`, L46-48 기준 **Session 7 후 L42-44**) 동반 이동 검토**. 내용 스캔 후 추가 분할 가능성 평가.
+- 잔존 `CombatAPI.cs` 는 **Unit Conversion 만** 남음 (~200 줄). Session 7 이 `_sharedUnitSet/AllySet` 동반 이동하면 residual 은 frame cache (Session 8 대기) + Unit Conversion 만 잔존
 
 ---
 
