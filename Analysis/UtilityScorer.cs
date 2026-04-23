@@ -4,9 +4,11 @@ using System.Linq;
 using Kingmaker.Blueprints;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.RuleSystem;
+using Kingmaker.Pathfinding;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.UnitLogic.Abilities.Blueprints;  // ★ v3.8.90: UsingInOverwatchAreaType
 using Kingmaker.UnitLogic.Abilities.Components;
+using Kingmaker.UnitLogic.Abilities.Components.Patterns;
 using Kingmaker.UnitLogic.Mechanics.Actions;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Data;
@@ -870,13 +872,45 @@ namespace CompanionAI_v3.Analysis
                     Vector3 direction = (target.Position - situation.Unit.Position).normalized;
                     float angle = patternInfo.Angle;
 
+                    // ★ v3.112.0: Phase E.1 — game-native OrientedPatternData 경로
+                    OrientedPatternData nativePattern = default;
+                    bool nativePatternReady = false;
+                    if (SC.UseNativePattern && attack != null && target != null)
+                    {
+                        try
+                        {
+                            nativePattern = CombatAPI.GetAffectedNodes(attack, target.Position, situation.Unit.Position);
+                            nativePatternReady = !nativePattern.IsEmpty;
+                            if (nativePatternReady && Main.IsDebugEnabled)
+                                Main.LogDebug($"[AoESafety][Native] UtilityAllyDanger {attack.Name}: pattern precomputed");
+                        }
+                        catch (Exception ex)
+                        {
+                            Main.LogWarning($"[AoESafety][Native] UtilityAllyDanger precompute failed for {attack.Name}: {ex.Message}");
+                        }
+                    }
+
                     foreach (var ally in situation.Allies)
                     {
                         if (ally == null || ally.LifeState.IsDead) continue;
                         if (ally == situation.Unit) continue;
 
-                        if (CombatAPI.IsUnitInDirectionalAoERange(
-                            situation.Unit.Position, direction, ally, checkRadius, angle, patternType.Value))
+                        bool inRange;
+                        if (nativePatternReady)
+                        {
+                            inRange = false;
+                            foreach (var occ in ally.GetOccupiedNodes())
+                            {
+                                if (occ != null && nativePattern.Contains(occ)) { inRange = true; break; }
+                            }
+                        }
+                        else
+                        {
+                            inRange = CombatAPI.IsUnitInDirectionalAoERange(
+                                situation.Unit.Position, direction, ally, checkRadius, angle, patternType.Value);
+                        }
+
+                        if (inRange)
                         {
                             alliesInDanger++;
                         }

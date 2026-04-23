@@ -4,12 +4,14 @@ using System.Linq;
 using Kingmaker.Blueprints;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.UnitLogic.Abilities;
+using Kingmaker.UnitLogic.Abilities.Components.Patterns;
 using Kingmaker.Utility;
 using Kingmaker.Pathfinding;
 using Kingmaker.View.Covers;
 using UnityEngine;
 using CompanionAI_v3.GameInterface;
 using CompanionAI_v3.Data;
+using CompanionAI_v3.Settings;
 
 namespace CompanionAI_v3.Analysis
 {
@@ -285,6 +287,30 @@ namespace CompanionAI_v3.Analysis
                     float dirAoERadius = tauntPatternInfo.Radius;
                     if (dirAoERadius <= 0) dirAoERadius = CombatAPI.GetAoERadius(taunt);
                     if (dirAoERadius <= 0) return true;  // 반경 없으면 통과
+
+                    // ★ v3.112.0: Phase E.1 — game-native per-enemy 패턴 조회 (target 이 enemy 별 가변이라 루프 밖 precompute 불가)
+                    if (SC.UseNativePattern && taunt != null)
+                    {
+                        try
+                        {
+                            var nativePattern = CombatAPI.GetAffectedNodes(taunt, e.Position, position);
+                            if (!nativePattern.IsEmpty)
+                            {
+                                if (Main.IsDebugEnabled)
+                                    Main.LogDebug($"[AoESafety][Native] TauntDirRange {taunt.Name}: pattern precomputed (per-enemy)");
+                                foreach (var occ in e.GetOccupiedNodes())
+                                {
+                                    if (occ != null && nativePattern.Contains(occ)) return true;
+                                }
+                                return false;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Main.LogWarning($"[AoESafety][Native] TauntDirRange precompute failed for {taunt.Name}: {ex.Message}");
+                            // legacy 폴백
+                        }
+                    }
 
                     Vector3 direction = (e.Position - position).normalized;
                     return CombatAPI.IsUnitInDirectionalAoERange(
