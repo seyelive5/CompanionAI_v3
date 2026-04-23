@@ -128,9 +128,11 @@ namespace CompanionAI_v3.Settings
         public const float FallbackEstimateDamage = 15f;  // 데미지 예측 폴백 — GetDamagePrediction 실패 시
 
         // ─── Phase E: 게임 내장 API 전환 feature flag ───────────────────
-        // ★ v3.112.0: Phase E.1 — OrientedPatternData 전환
-        // true: 게임 내장 AoEPattern.GetOriented() 로 정확한 영향 타일 계산
-        // false: 기존 반경 기반 추정 (롤백용)
-        public const bool UseNativePattern = false;  // 초기 false, Session E.1.2 에서 true 전환
+        // ★ v3.112.0: Phase E.1 Pilot — AoESafetyChecker.EvaluateDirectionalAoE 에서
+        //             game-native OrientedPatternData 경로 활성화.
+        // true: GetAffectedNodes + pattern.Contains(node) — LOS/unwalkable/level-diff 정확 반영
+        // false: IsUnitInDirectionalAoERange 2D 근사 (롤백용)
+        // 현재 활성 callsite: AoESafetyChecker.EvaluateDirectionalAoE (15건 중 1건 pilot)
+        public const bool UseNativePattern = true;
     }
 }
