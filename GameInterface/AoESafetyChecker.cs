@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using Kingmaker.Blueprints;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.Pathfinding;
 using Kingmaker.UnitLogic.Abilities;
 using Kingmaker.UnitLogic.Abilities.Components;
+using Kingmaker.UnitLogic.Abilities.Components.Patterns;
 using UnityEngine;
 using CompanionAI_v3.Data;
 using CompanionAI_v3.Settings;
@@ -830,13 +832,51 @@ namespace CompanionAI_v3.GameInterface
             allUnits.AddRange(enemies.Where(e => e != null));
             if (allies != null) allUnits.AddRange(allies.Where(a => a != null));
 
+            // ★ v3.112.0: Phase E.1 Pilot — SC.UseNativePattern=true 시 game-native OrientedPatternData 사용
+            // 루프 진입 전 1회 패턴 계산 → per-unit node containment 체크 (LOS/unwalkable/level-diff 정확 반영)
+            // primaryTarget 필수 — GetAffectedNodes 는 targetPosition 을 요구
+            OrientedPatternData nativePattern = default;
+            bool nativePatternReady = false;
+            if (SC.UseNativePattern && ability != null && primaryTarget != null)
+            {
+                try
+                {
+                    nativePattern = CombatAPI.GetAffectedNodes(ability, primaryTarget.Position, caster.Position);
+                    nativePatternReady = !nativePattern.IsEmpty;
+                    if (nativePatternReady && Main.IsDebugEnabled)
+                        Main.LogDebug($"[AoESafety][Native] {ability.Name}: pattern precomputed");
+                }
+                catch (Exception ex)
+                {
+                    Main.LogWarning($"[AoESafety][Native] pattern precompute failed for {ability.Name}: {ex.Message}");
+                }
+            }
+
             foreach (var unit in allUnits)
             {
                 if (unit == null || !unit.IsConscious) continue;
 
-                // ★ v3.6.10: 2D 거리 + 높이 + 각도 체크 통합 (Directional은 0.3m 높이 제한)
-                if (!CombatAPI.IsUnitInDirectionalAoERange(caster.Position, direction, unit, radius, angle, patternType))
-                    continue;
+                bool inRange;
+                if (nativePatternReady)
+                {
+                    // Native: 유닛 점유 노드 중 하나라도 pattern.Nodes 에 포함되면 in-range
+                    inRange = false;
+                    foreach (var occ in unit.GetOccupiedNodes())
+                    {
+                        if (occ != null && nativePattern.Contains(occ))
+                        {
+                            inRange = true;
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    // ★ v3.6.10: 2D 거리 + 높이 + 각도 체크 통합 (Directional은 0.3m 높이 제한)
+                    inRange = CombatAPI.IsUnitInDirectionalAoERange(caster.Position, direction, unit, radius, angle, patternType);
+                }
+
+                if (!inRange) continue;
 
                 // 거리 보너스 계산용 2D 거리
                 Vector3 toUnit = unit.Position - caster.Position;
