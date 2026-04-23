@@ -1050,20 +1050,11 @@ namespace CompanionAI_v3.GameInterface
         }
 
         // ★ v3.112.0: Phase E.1 — AbilityData 에서 AoEPattern 추출.
-        // 경로: ability.GetPatternSettings() (IAbilityAoEPatternProvider).Pattern
-        // 동일 경로를 GetPatternType (line 72) / GetAoERadius (line 51) 가 이미 사용 — 검증된 canonical API.
-        // Pattern 속성은 [CanBeNull] (인터페이스 정의) — null 폴백 정상 동작.
+        // Session E.1.1 scaffold: null 반환 → GetAffectedUnitsNative 호출해도 폴백.
+        // Task 3 (Session E.1.1 계속) 에서 실측 경로로 구현 예정.
         private static AoEPattern TryExtractAoEPattern(AbilityData ability)
         {
-            try
-            {
-                return ability?.GetPatternSettings()?.Pattern;
-            }
-            catch (Exception ex)
-            {
-                Main.LogWarning($"[CombatAPI][Native] TryExtractAoEPattern failed for {ability?.Name}: {ex.Message}");
-                return null;
-            }
+            return null;
         }
 
         #endregion
