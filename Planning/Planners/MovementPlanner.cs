@@ -46,13 +46,18 @@ namespace CompanionAI_v3.Planning.Planners
                 // 원거리가 위험하면 이동 허용 (공격 가능해도 후퇴 필요)
                 bool isRangedInDanger = situation.PrefersRanged && situation.IsInDanger;
                 bool llmBypass = ShouldBypassHittableGate(situation);
-                if (!isRangedInDanger && !llmBypass)
+                // ★ v3.112.2: 비-LLM 경로에서도 고가치 비-Hittable 적 존재 시 우회 허용.
+                // 2026-04-15 audit 이동 취약점 3: LLM 없이도 "약적 편향" 방지.
+                bool heuristicBypass = !llmBypass && ShouldBypassForHighValueNonHittable(situation, roleName);
+                if (!isRangedInDanger && !llmBypass && !heuristicBypass)
                 {
                     MoveDecisionTracker.Set(MoveDecisionReason.NoMoveNeeded_Hittable);
                     return null;
                 }
                 if (llmBypass)
                     Main.Log($"[{roleName}] LLM PriorityTarget is non-hittable — bypassing hittable gate for approach");
+                else if (heuristicBypass)
+                    Main.Log($"[{roleName}] Heuristic: high-value non-hittable enemy exists — bypassing hittable gate");
                 else if (Main.IsDebugEnabled)
                     Main.LogDebug($"[{roleName}] Ranged in danger - allowing movement despite hittable enemies");
             }
@@ -124,6 +129,54 @@ namespace CompanionAI_v3.Planning.Planners
             bool isPriorityHittable = situation.HittableEnemies != null
                 && situation.HittableEnemies.Contains(priorityEnemy);
             return !isPriorityHittable;
+        }
+
+        /// <summary>
+        /// ★ v3.112.2: 비-LLM 경로에서 고가치 비-Hittable 적이 있으면 우회 허용.
+        /// 2026-04-15 audit 취약점 3: "약적 편향으로 벽 뒤 강적 무시" 해결 (LLM 없이도).
+        /// 판단: Hittable 최고 score 대비 비-Hittable 최고 score 가 SC.NonHittableBypassRatio 초과 시 bypass.
+        /// 기본 임계값 1.2 (20% 더 가치) — 보수적. 약적 여럿 있는 맵에서도 진짜 강적만 우회 추적.
+        /// </summary>
+        private static bool ShouldBypassForHighValueNonHittable(Situation situation, string roleName)
+        {
+            if (situation?.Enemies == null || situation.HittableEnemies == null) return false;
+            if (situation.HittableEnemies.Count == 0) return false;
+            if (situation.Enemies.Count == situation.HittableEnemies.Count) return false; // 전부 Hittable
+
+            var role = situation.CharacterSettings?.Role ?? AIRole.Auto;
+            var effectiveRole = role == AIRole.Auto ? AIRole.DPS : role;
+
+            float bestHittableScore = float.MinValue;
+            foreach (var e in situation.HittableEnemies)
+            {
+                if (e == null || e.LifeState.IsDead) continue;
+                float s = TargetScorer.ScoreEnemy(e, situation, effectiveRole);
+                if (s > bestHittableScore) bestHittableScore = s;
+            }
+
+            float bestNonHittableScore = float.MinValue;
+            BaseUnitEntity bestNonHittable = null;
+            foreach (var e in situation.Enemies)
+            {
+                if (e == null || e.LifeState.IsDead) continue;
+                if (situation.HittableEnemies.Contains(e)) continue;
+                float s = TargetScorer.ScoreEnemy(e, situation, effectiveRole);
+                if (s > bestNonHittableScore)
+                {
+                    bestNonHittableScore = s;
+                    bestNonHittable = e;
+                }
+            }
+
+            if (bestNonHittable == null || bestHittableScore == float.MinValue) return false;
+
+            bool bypass = bestNonHittableScore > bestHittableScore * SC.NonHittableBypassRatio;
+            if (bypass && Main.IsDebugEnabled)
+            {
+                Main.LogDebug($"[{roleName}] HeuristicBypass: non-hittable {bestNonHittable.CharacterName} " +
+                              $"score={bestNonHittableScore:F1} > best-hittable={bestHittableScore:F1} × {SC.NonHittableBypassRatio:F2}");
+            }
+            return bypass;
         }
 
         /// <summary>

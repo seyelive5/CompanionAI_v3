@@ -138,5 +138,12 @@ namespace CompanionAI_v3.Settings
         //             (UnitQueries.cs:106, v3.110.20+) 에서 canonical 사용 중. Phase E.2 는 별도 flag 불필요 —
         //             기존 구현이 플랜의 "native only" 접근보다 우월 (native + weaponRange MAX 폴백).
         //             플래그 추가 철회 (commit 이력에서 유지): 2026-04-24
+
+        // ─── 이동 휴리스틱 ────────────────────────────────────────────────
+        // ★ v3.112.2: 비-Hittable 고가치 적 우회 이동 임계값.
+        // 2026-04-15 audit 이동 취약점 3 해결: LLM 비활성/실패 시 "약적 편향" 완화.
+        // 의미: 비-Hittable 적 최고 score 가 Hittable 최고 score × (이 값) 초과면 우회 이동 허용.
+        // 1.2 = 20% 더 가치 있어야 우회. 보수적 기본값.
+        public const float NonHittableBypassRatio = 1.2f;
     }
 }

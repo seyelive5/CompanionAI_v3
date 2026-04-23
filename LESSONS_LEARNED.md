@@ -864,3 +864,60 @@ WORK_TRACKER.md의 "작업 완료 판정 기준"에 6번 항목 추가:
 - `partial class` 지원 언어 (C#, VB.NET)
 
 전체 검증 기록: [docs/plans/2026-04-22-phase-d2-combatapi-split.md](docs/plans/2026-04-22-phase-d2-combatapi-split.md)
+
+---
+
+## 19. 플랜 premise 실증 원칙 (v3.112.0 Phase E)
+
+### 문제
+
+Phase E 플랜(2026-04-24) 이 "게임 내장 3대 API 미활용 — 전면 채택하자" 를 전제로 3 서브 페이즈(E.1 AOE / E.2 위협범위 / E.3 AI 경로) 10 Task 를 설계. 하지만 실행 중 확인:
+
+- `GetAffectedNodes` (v3.5.39, commit `4ee6995`) — `OrientedPatternData` 이미 반환, 6+ callsite 에서 활용 중
+- `GetEnemyThreatRangeInTiles` (v3.110.20, commit `079865b`) — `AiCollectedDataStorage[unit].AttackDataCollection.GetThreatRange()` 이미 호출
+- `FindAllReachableTilesWithThreatsSync` (v3.8.42, commit `8747255`) — `WarhammerPathAiCell` 이미 반환, 2-슬롯 LRU 캐시까지 완비
+
+**결과**: E.2 전체 + E.3 전체 = 100% 중복 구현. E.1 도 Task 2-3 `GetAffectedUnitsNative` 헬퍼가 중복 → revert 2건 (`2a634b0`, `bd9a16a`). **플랜 10 Task 중 실제 가치 4 Task** (Pilot + Session 3ra/3rb/3rc: 14 callsite 를 이미 있는 `GetAffectedNodes` 로 통합).
+
+### 원인
+
+- **플랜 연구 단계의 문서/에이전트 의존**: Explore 에이전트의 gap_analysis 결과 ("미활용 API") 를 실증 없이 플랜 전제로 채택
+- **git 히스토리 미검토**: v3.5.39, v3.8.42, v3.110.20 등 장기간에 걸친 선행 구현을 확인 안 함
+- **`SC.UseNativeX` flag 의 함정**: flag 로 A/B 비교는 기존 구현이 없을 때만 의미. 있는데 flag 를 도입하면 순수 중복
+
+### 해결 (Phase E 조기 발견)
+
+1. Task 2-3 혁 실행 후 `GetAffectedNodes` 와 중복 발견 → 즉시 revert
+2. E.2 착수 전 `GetEnemyThreatRangeInTiles` 코드 grep → 이미 native 사용 확인 → 메모만 남기고 스킵(`227ff1b`)
+3. E.3 착수 전 `FindAllReachableTilesWithThreatsSync` grep → 이미 완성 확인 → 전체 스킵
+4. 실제 가치 있는 부분만 추출: 14 callsite 를 `GetAffectedNodes` 로 일관 통합 (Session 3ra/3rb/3rc)
+
+### 30초 실증 체크리스트
+
+플랜 작성/실행 전 **모든 "미활용/미구현" 주장**에 적용:
+
+```
+1. 대상 심볼 3-5개 선정 (예: GetAffectedNodes, AiCollectedDataStorage, WarhammerPathAiCell)
+2. Grep pattern="<심볼>" output_mode="files_with_matches" 실행
+3. 발견 시 Read 로 주석 확인 — "★ vX.Y.Z:" 버전 태그가 프로젝트 관례
+4. git log --all -S "<심볼>" --reverse | head -3  — 도입 커밋/시점 확인
+5. 이미 있으면 플랜에서 해당 항목 제거 또는 "callsite 통합" 으로 재정의
+```
+
+### 교훈
+
+1. **"미활용 API" 는 검증 대상** — 에이전트 gap_analysis 는 참고, 권위 아님
+2. **`SC.UseNativeX` flag 제안 = 의심 신호** — 기존 구현 가능성 의심, grep 선행 필수
+3. **플랜 실행 시 각 Task 첫 step 에서 재검증** — 플랜 자체가 premise 를 놓쳤을 수 있음
+4. **조기 발견 > 플랜 맹신** — Phase E 는 Task 2-3 revert 로 E.2/E.3 까지 선제 스킵, 수십 커밋의 중복 작업 회피
+5. **실제 가치는 "신규 구현" 아닌 "callsite 통합"** 일 수도 — 기존 베스트 API 로 일관화는 플랜보다 작지만 진짜 개선
+
+### 재사용 조건
+
+이 원칙은 다음 상황에 반드시 적용:
+- 플랜이 "게임 API 채택" / "미활용 전환" / "네이티브 전환" 프레임 사용
+- Explore/general-purpose 에이전트의 gap_analysis 기반 플랜
+- 프로젝트가 장기 반복 리팩토링 상태 (CompanionAI v3 처럼 200+ 버전)
+- flag-based A/B 전환 제안이 포함된 플랜
+
+전체 검증 기록: [docs/plans/2026-04-24-phase-e-game-api-battlefield.md](docs/plans/2026-04-24-phase-e-game-api-battlefield.md)
