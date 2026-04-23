@@ -76,6 +76,8 @@ namespace CompanionAI_v3.GameInterface
                 {
                     nativePattern = CombatAPI.GetAffectedNodes(ability, targetPosition, caster.Position);
                     nativePatternReady = !nativePattern.IsEmpty;
+                    if (nativePatternReady && Main.IsDebugEnabled)
+                        Main.LogDebug($"[AoESafety][Native] EvalAoE {ability.Name}: pattern precomputed");
                 }
                 catch (Exception ex)
                 {
@@ -359,6 +361,8 @@ namespace CompanionAI_v3.GameInterface
                 {
                     nativePattern = CombatAPI.GetAffectedNodes(ability, targetPosition, caster.Position);
                     nativePatternReady = !nativePattern.IsEmpty;
+                    if (nativePatternReady && Main.IsDebugEnabled)
+                        Main.LogDebug($"[AoESafety][Native] IsAoESafe {ability.Name}: pattern precomputed");
                 }
                 catch (Exception ex)
                 {
@@ -479,6 +483,8 @@ namespace CompanionAI_v3.GameInterface
                 {
                     nativePattern = CombatAPI.GetAffectedNodes(ability, target.Position, fromPosition);
                     nativePatternReady = !nativePattern.IsEmpty;
+                    if (nativePatternReady && Main.IsDebugEnabled)
+                        Main.LogDebug($"[AoESafety][Native] SafeFromPos {ability.Name}: pattern precomputed");
                 }
                 catch (Exception ex)
                 {
@@ -677,6 +683,8 @@ namespace CompanionAI_v3.GameInterface
                 {
                     nativePattern = CombatAPI.GetAffectedNodes(ability, targetPosition, caster.Position);
                     nativePatternReady = !nativePattern.IsEmpty;
+                    if (nativePatternReady && Main.IsDebugEnabled)
+                        Main.LogDebug($"[AoESafety][Native] EvalAlly {ability.Name}: pattern precomputed");
                 }
                 catch (Exception ex)
                 {
@@ -956,7 +964,7 @@ namespace CompanionAI_v3.GameInterface
                     nativePattern = CombatAPI.GetAffectedNodes(ability, primaryTarget.Position, caster.Position);
                     nativePatternReady = !nativePattern.IsEmpty;
                     if (nativePatternReady && Main.IsDebugEnabled)
-                        Main.LogDebug($"[AoESafety][Native] {ability.Name}: pattern precomputed");
+                        Main.LogDebug($"[AoESafety][Native] EvalDir {ability.Name}: pattern precomputed");
                 }
                 catch (Exception ex)
                 {
@@ -1104,6 +1112,8 @@ namespace CompanionAI_v3.GameInterface
                 {
                     nativePattern = CombatAPI.GetAffectedNodes(ability, primaryTarget.Position, fromPosition);
                     nativePatternReady = !nativePattern.IsEmpty;
+                    if (nativePatternReady && Main.IsDebugEnabled)
+                        Main.LogDebug($"[AoESafety][Native] EvalDirFromPos {ability.Name}: pattern precomputed");
                 }
                 catch (Exception ex)
                 {
