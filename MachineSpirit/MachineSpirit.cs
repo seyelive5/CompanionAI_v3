@@ -124,6 +124,18 @@ namespace CompanionAI_v3.MachineSpirit
             _isSummarizing = false;
             _summarizedUpToIndex = 0;
             LLMClient.Reset();
+
+            // ★ v3.112.3: Ollama 모델 VRAM 해제 (keep_alive=-1 로 영구 유지 중인 모델 언로드).
+            try
+            {
+                string apiUrl = Main.Settings?.MachineSpirit?.ApiUrl;
+                if (string.IsNullOrEmpty(apiUrl)) apiUrl = "http://localhost:11434";
+                Planning.LLM.LLMWarmup.UnloadAllModels(apiUrl);
+            }
+            catch (System.Exception ex)
+            {
+                Main.LogDebug($"[MachineSpirit] Ollama unload request failed: {ex.Message}");
+            }
         }
 
         // ════════════════════════════════════════════════════════════

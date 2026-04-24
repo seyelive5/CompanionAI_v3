@@ -66,8 +66,29 @@ namespace CompanionAI_v3
             // ★ v3.52.0: Machine Spirit 초기화
             MSController.Initialize();
 
+            // ★ v3.112.3: 게임 종료 시 Ollama 모델 VRAM 해제 보장.
+            // UMM OnToggle 은 mod 비활성 시에만 호출됨 — 실제 게임 종료 경로는 별도 훅 필요.
+            UnityEngine.Application.quitting += OnGameQuitting;
+
             Log("CompanionAI v3.0 loaded successfully");
             return true;
+        }
+
+        /// <summary>
+        /// ★ v3.112.3: Unity 게임 종료 직전 호출 — Ollama 모델 언로드 요청.
+        /// MSController.Shutdown() 은 idempotent (Warmup._warmedModels.Clear 내부) → 이중 호출 안전.
+        /// </summary>
+        private static void OnGameQuitting()
+        {
+            try
+            {
+                Log("[Application.quitting] Shutting down Machine Spirit + unloading Ollama models");
+                MSController.Shutdown();
+            }
+            catch (Exception ex)
+            {
+                LogError($"OnGameQuitting failed: {ex.Message}");
+            }
         }
 
         /// <summary>

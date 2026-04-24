@@ -150,5 +150,47 @@ namespace CompanionAI_v3.Planning.LLM
                 url = url.Substring(0, url.Length - 3);
             return url;
         }
+
+        /// <summary>
+        /// ★ v3.112.3: 게임/모드 종료 시 Ollama 에 모델 VRAM 해제 요청.
+        /// keep_alive=-1 로 영구 유지 중인 모델을 즉시 언로드.
+        /// Sync HTTP (HttpWebRequest) — 셧다운 중 코루틴 불안정하므로 blocking 방식.
+        /// 호출 경로: MachineSpirit.Shutdown() (UMM 토글) + Application.quitting (게임 종료).
+        /// </summary>
+        public static void UnloadAllModels(string baseUrl)
+        {
+            if (_warmedModels.Count == 0) return;
+
+            string url = NormalizeBaseUrl(baseUrl) + "/api/generate";
+            var models = new List<string>(_warmedModels);
+            _warmedModels.Clear();  // 재진입 시 웜업 다시 트리거되도록
+
+            foreach (var model in models)
+            {
+                try
+                {
+                    string body = "{\"model\":\"" + model + "\",\"keep_alive\":0}";
+                    var request = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
+                    request.Method = "POST";
+                    request.ContentType = "application/json";
+                    request.Timeout = 2000;  // 2s — 종료 중이니 짧게
+
+                    var data = System.Text.Encoding.UTF8.GetBytes(body);
+                    request.ContentLength = data.Length;
+                    using (var stream = request.GetRequestStream())
+                    {
+                        stream.Write(data, 0, data.Length);
+                    }
+                    using (var response = (System.Net.HttpWebResponse)request.GetResponse())
+                    {
+                        Main.Log($"[LLMWarmup] Unloaded model '{model}' (HTTP {(int)response.StatusCode})");
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    Main.LogDebug($"[LLMWarmup] Unload failed for '{model}': {ex.Message}");
+                }
+            }
+        }
     }
 }
