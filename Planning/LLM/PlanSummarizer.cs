@@ -3,6 +3,7 @@ using System.Text;
 using Kingmaker.EntitySystem.Entities;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
+using CompanionAI_v3.GameInterface;
 
 namespace CompanionAI_v3.Planning.LLM
 {
@@ -89,7 +90,9 @@ namespace CompanionAI_v3.Planning.LLM
                 bool isWeaponAttack = action.Ability?.Weapon != null;
                 if (!allowDuplicates && action.Ability != null && !isWeaponAttack)
                 {
-                    string abilityName = action.Ability.Name;
+                    // ★ v3.113.0 (I2): Phase B.3 (v3.111.14) 의 LocalizedString 안전 래퍼를 PlanSummarizer 에 적용.
+                    // 매 턴 LLMJudge 프롬프트 빌드 시 Psyker 등의 AbilityData.Name 예외가 프롬프트 오염 가능.
+                    string abilityName = CombatAPI.GetAbilityDisplayName(action.Ability);
                     string dedupKey = BuildDedupKey(abilityName, action);
                     if (!string.IsNullOrEmpty(abilityName) && !_tempUsedAbilities.Add(dedupKey))
                     {
@@ -125,7 +128,8 @@ namespace CompanionAI_v3.Planning.LLM
         private static string DescribeAction(PlannedAction action, TurnStrategy strategy, Situation situation)
         {
             string targetName = GetTargetName(action);
-            string abilityName = action.Ability?.Name ?? "?";
+            // ★ v3.113.0 (I2): Phase B.3 안전 래퍼 — null/예외 모두 helper 가 처리.
+            string abilityName = CombatAPI.GetAbilityDisplayName(action.Ability);
 
             switch (action.Type)
             {
