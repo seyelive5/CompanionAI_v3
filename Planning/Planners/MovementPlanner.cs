@@ -134,8 +134,8 @@ namespace CompanionAI_v3.Planning.Planners
         /// <summary>
         /// ★ v3.112.2: 비-LLM 경로에서 고가치 비-Hittable 적이 있으면 우회 허용.
         /// 2026-04-15 audit 취약점 3: "약적 편향으로 벽 뒤 강적 무시" 해결 (LLM 없이도).
-        /// 판단: Hittable 최고 score 대비 비-Hittable 최고 score 가 SC.NonHittableBypassRatio 초과 시 bypass.
-        /// 기본 임계값 1.2 (20% 더 가치) — 보수적. 약적 여럿 있는 맵에서도 진짜 강적만 우회 추적.
+        /// ★ v3.113.0 (I1): SituationAnalyzer.ComputeBypassGateScores 가 선계산 → cache read-only 사용.
+        ///                   기존 ScoreEnemy 반복 (~50/턴) 제거.
         /// </summary>
         private static bool ShouldBypassForHighValueNonHittable(Situation situation, string roleName)
         {
@@ -143,38 +143,15 @@ namespace CompanionAI_v3.Planning.Planners
             if (situation.HittableEnemies.Count == 0) return false;
             if (situation.Enemies.Count == situation.HittableEnemies.Count) return false; // 전부 Hittable
 
-            var role = situation.CharacterSettings?.Role ?? AIRole.Auto;
-            var effectiveRole = role == AIRole.Auto ? AIRole.DPS : role;
+            // ★ v3.113.0 (I1): SituationAnalyzer 가 선계산 — 재계산 제거.
+            if (situation.BestNonHittableEnemy == null) return false;
+            if (situation.BestHittableScore == float.MinValue) return false;
 
-            float bestHittableScore = float.MinValue;
-            foreach (var e in situation.HittableEnemies)
-            {
-                if (e == null || e.LifeState.IsDead) continue;
-                float s = TargetScorer.ScoreEnemy(e, situation, effectiveRole);
-                if (s > bestHittableScore) bestHittableScore = s;
-            }
-
-            float bestNonHittableScore = float.MinValue;
-            BaseUnitEntity bestNonHittable = null;
-            foreach (var e in situation.Enemies)
-            {
-                if (e == null || e.LifeState.IsDead) continue;
-                if (situation.HittableEnemies.Contains(e)) continue;
-                float s = TargetScorer.ScoreEnemy(e, situation, effectiveRole);
-                if (s > bestNonHittableScore)
-                {
-                    bestNonHittableScore = s;
-                    bestNonHittable = e;
-                }
-            }
-
-            if (bestNonHittable == null || bestHittableScore == float.MinValue) return false;
-
-            bool bypass = bestNonHittableScore > bestHittableScore * SC.NonHittableBypassRatio;
+            bool bypass = situation.BestNonHittableScore > situation.BestHittableScore * SC.NonHittableBypassRatio;
             if (bypass && Main.IsDebugEnabled)
             {
-                Main.LogDebug($"[{roleName}] HeuristicBypass: non-hittable {bestNonHittable.CharacterName} " +
-                              $"score={bestNonHittableScore:F1} > best-hittable={bestHittableScore:F1} × {SC.NonHittableBypassRatio:F2}");
+                Main.LogDebug($"[{roleName}] HeuristicBypass: non-hittable {situation.BestNonHittableEnemy.CharacterName} " +
+                              $"score={situation.BestNonHittableScore:F1} > best-hittable={situation.BestHittableScore:F1} × {SC.NonHittableBypassRatio:F2}");
             }
             return bypass;
         }

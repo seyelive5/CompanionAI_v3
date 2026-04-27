@@ -633,6 +633,44 @@ namespace CompanionAI_v3.Analysis
             {
                 situation.CanKillBestTarget = CombatAPI.CanKillInOneHit(situation.PrimaryAttack, situation.BestTarget);
             }
+
+            // ★ v3.113.0 (I1): MovementPlanner 우회 게이트 핫패스 캐시 선계산.
+            ComputeBypassGateScores(situation, effectiveRole);
+        }
+
+        /// <summary>
+        /// ★ v3.113.0 (I1): MovementPlanner 우회 게이트용 최고 점수 선계산.
+        /// 기존: MovementPlanner 가 매 호출 시 ScoreEnemy 를 enemies × 2 만큼 반복.
+        /// 현재: AnalyzeTargets 에서 1회 계산 → 캐시.
+        /// 행동 변화 없음 — bypass 조건 동일, 결과 동일.
+        /// </summary>
+        private static void ComputeBypassGateScores(Situation situation, AIRole effectiveRole)
+        {
+            if (situation.Enemies == null || situation.HittableEnemies == null) return;
+            if (situation.HittableEnemies.Count == 0) return;
+            if (situation.Enemies.Count == situation.HittableEnemies.Count) return; // 전부 Hittable
+
+            float bestH = float.MinValue;
+            foreach (var e in situation.HittableEnemies)
+            {
+                if (e == null || e.LifeState.IsDead) continue;
+                float s = TargetScorer.ScoreEnemy(e, situation, effectiveRole);
+                if (s > bestH) bestH = s;
+            }
+
+            float bestN = float.MinValue;
+            BaseUnitEntity bestNu = null;
+            foreach (var e in situation.Enemies)
+            {
+                if (e == null || e.LifeState.IsDead) continue;
+                if (situation.HittableEnemies.Contains(e)) continue;
+                float s = TargetScorer.ScoreEnemy(e, situation, effectiveRole);
+                if (s > bestN) { bestN = s; bestNu = e; }
+            }
+
+            situation.BestHittableScore = bestH;
+            situation.BestNonHittableScore = bestN;
+            situation.BestNonHittableEnemy = bestNu;
         }
 
         /// <summary>

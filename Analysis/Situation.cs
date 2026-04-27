@@ -148,6 +148,13 @@ namespace CompanionAI_v3.Analysis
         /// <summary>최적 타겟 처치 가능 여부</summary>
         public bool CanKillBestTarget { get; set; }
 
+        // ★ v3.113.0 (I1): MovementPlanner 우회 게이트 핫패스 캐시.
+        //   ShouldBypassForHighValueNonHittable 의 ScoreEnemy 반복(50/턴) 제거.
+        //   AnalyzeTargets 에서 1회 선계산 → MovementPlanner read-only 사용.
+        public float BestHittableScore { get; set; }
+        public float BestNonHittableScore { get; set; }
+        public BaseUnitEntity BestNonHittableEnemy { get; set; }
+
         #endregion
 
         #region Threat Analysis (v3.1.25)
@@ -451,6 +458,10 @@ namespace CompanionAI_v3.Analysis
             NormalHittableCount = 0; // ★ v3.95.0: 풀링 재사용 시 이전 턴 값 유출 방지
             BestTarget = null;
             CanKillBestTarget = false;
+            // ★ v3.113.0 (I1): bypass gate cache reset
+            BestHittableScore = float.MinValue;
+            BestNonHittableScore = float.MinValue;
+            BestNonHittableEnemy = null;
 
             // Threat Analysis
             AlliesUnderThreat = 0;
