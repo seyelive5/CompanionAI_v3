@@ -1,13 +1,11 @@
 // Planning/LLM/LLMJudge.cs
 // ★ Phase 3: LLM-as-Judge — 후보 플랜 중 최선을 Ollama Structured Output으로 선택.
+// ★ v3.114.0 (Phase F.2): UnityWebRequest → LLMHttpClient 마이그레이션 (Score + Confidence 양 variant).
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
-using UnityEngine;
-using UnityEngine.Networking;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using CompanionAI_v3.Analysis;
 using CompanionAI_v3.MachineSpirit;
@@ -184,88 +182,36 @@ namespace CompanionAI_v3.Planning.LLM
                     yield break;
                 }
 
-                // 2. 모델 결정
-                string model = ResolveModel();
-
-                // 3. Ollama 요청 구성 (Structured Output)
+                // 2. 요청 구성 (LLMHttpClient.BuildChatRequest 위임)
+                string model = LLMHttpClient.ResolveModel();
                 int candidateCount = System.Math.Min(candidates.Count, ChoiceLabels.Length);
-                var enumArray = new JArray();
-                for (int i = 0; i < candidateCount; i++)
-                    enumArray.Add(ChoiceLabels[i].ToString());
+                var requestBody = LLMHttpClient.BuildChatRequest(
+                    model: model,
+                    systemMsg: systemMsg,
+                    userMsg: userMsg,
+                    numPredict: 50,    // thinking 토큰 소진 방지 여유
+                    temperature: 0f,
+                    think: false,      // ★ Gemma4/Qwen3 thinking 모드 비활성화 — Judge는 즉답만 필요
+                    keepAlive: -1);
 
-                var requestBody = new JObject
-                {
-                    ["model"] = model,
-                    ["messages"] = new JArray
-                    {
-                        new JObject { ["role"] = "system", ["content"] = systemMsg },
-                        new JObject { ["role"] = "user", ["content"] = userMsg }
-                    },
-                    ["stream"] = false,
-                    ["keep_alive"] = -1,
-                    // ★ format 파라미터 제거 — gemma4:e4b에서 빈 응답 반환 문제
-                    // 시스템 프롬프트 + ParseResponse 폴백으로 충분히 처리
-                    ["options"] = new JObject
-                    {
-                        ["temperature"] = 0,
-                        ["num_predict"] = 50    // thinking 토큰 소진 방지 여유
-                    },
-                    ["think"] = false  // ★ Gemma4/Qwen3 thinking 모드 비활성화 — Judge는 즉답만 필요
-                };
+                // 3. baseUrl + 로그
+                string baseUrl = Main.Settings?.MachineSpirit?.ApiUrl;
+                if (string.IsNullOrEmpty(baseUrl)) baseUrl = "http://localhost:11434";
+                Main.LogDebug($"[LLMJudge] → {LLMHttpClient.NormalizeBaseUrl(baseUrl)}/api/chat, model={model}, candidates={candidateCount}");
 
-                // 4. Ollama URL 결정
-                string baseUrl = GetOllamaBaseUrl();
-                string url = baseUrl + "/api/chat";
+                // 4. HTTP 요청 (LLMHttpClient.PostChatAsync 위임)
+                LLMHttpClient.Response response = default(LLMHttpClient.Response);
+                yield return LLMHttpClient.PostChatAsync(
+                    baseUrl, requestBody, JUDGE_TIMEOUT_SECONDS,
+                    r => response = r);
 
-                Main.LogDebug($"[LLMJudge] → {url}, model={model}, candidates={candidateCount}");
-
-                // 5. HTTP 요청
-                string responseText = null;
-                string errorText = null;
-
-                var request = new UnityWebRequest(url, "POST");
-                request.uploadHandler = new UploadHandlerRaw(
-                    Encoding.UTF8.GetBytes(requestBody.ToString(Formatting.None)));
-                request.downloadHandler = new DownloadHandlerBuffer();
-                request.SetRequestHeader("Content-Type", "application/json");
-                request.timeout = JUDGE_TIMEOUT_SECONDS;
-
-                var op = request.SendWebRequest();
-
-                // 타임아웃 대기 (UnityWebRequest.timeout이 있지만 추가 안전장치)
-                float deadline = Time.realtimeSinceStartup + JUDGE_TIMEOUT_SECONDS + 1f;
-                while (!op.isDone)
-                {
-                    if (Time.realtimeSinceStartup > deadline)
-                    {
-                        errorText = "Judge timeout exceeded";
-                        request.Abort();
-                        break;
-                    }
-                    yield return null;
-                }
-
-                if (errorText == null)
-                {
-                    if (request.result == UnityWebRequest.Result.Success)
-                    {
-                        responseText = request.downloadHandler.text;
-                    }
-                    else
-                    {
-                        errorText = $"HTTP {request.responseCode}: {request.error}";
-                    }
-                }
-
-                request.Dispose();
-
-                // 6. 응답 파싱
+                // 5. 응답 파싱
                 int selectedIndex = 0;
-
-                if (responseText != null)
+                if (response.Success)
                 {
-                    Main.LogDebug($"[LLMJudge] Raw response ({responseText.Length} chars): {Truncate(responseText, 300)}");
-                    int shuffledIndex = ParseResponse(responseText, candidateCount);
+                    string raw = response.RawJson ?? "";
+                    Main.LogDebug($"[LLMJudge] Raw response ({raw.Length} chars): {Truncate(raw, 300)}");
+                    int shuffledIndex = ParseResponse(raw, candidateCount);
                     // ★ v3.105.0: shuffled idx → 원본 idx 역매핑
                     selectedIndex = (shuffledIndex >= 0 && shuffledIndex < candidateCount) ? _shuffleMap[shuffledIndex] : 0;
                     stopwatch.Stop();
@@ -280,10 +226,12 @@ namespace CompanionAI_v3.Planning.LLM
                 {
                     stopwatch.Stop();
                     LastJudgeTimeMs = stopwatch.ElapsedMilliseconds;
+                    string errorText = response.WasTimeout
+                        ? "Judge timeout exceeded"
+                        : $"HTTP {response.HttpStatusCode}: {response.ErrorMessage}";
                     Main.Log($"[LLMJudge] Failed: {errorText} — fallback to index 0 ({LastJudgeTimeMs}ms)");
                 }
 
-                _isJudging = false;
                 onResult?.Invoke(selectedIndex);
             }
             finally
@@ -353,72 +301,36 @@ namespace CompanionAI_v3.Planning.LLM
                     yield break;
                 }
 
-                string model = ResolveModel();
+                // 2. 요청 구성 (LLMHttpClient.BuildChatRequest 위임)
+                string model = LLMHttpClient.ResolveModel();
                 int candidateCount = System.Math.Min(candidates.Count, ChoiceLabels.Length);
+                var requestBody = LLMHttpClient.BuildChatRequest(
+                    model: model,
+                    systemMsg: systemMsg,
+                    userMsg: userMsg,
+                    numPredict: 100,  // confidence + narration (~50 토큰 추가)
+                    temperature: 0f,
+                    think: false,
+                    keepAlive: -1);
 
-                var requestBody = new JObject
-                {
-                    ["model"] = model,
-                    ["messages"] = new JArray
-                    {
-                        new JObject { ["role"] = "system", ["content"] = systemMsg },
-                        new JObject { ["role"] = "user", ["content"] = userMsg }
-                    },
-                    ["stream"] = false,
-                    ["keep_alive"] = -1,
-                    ["options"] = new JObject
-                    {
-                        ["temperature"] = 0,
-                        ["num_predict"] = 100  // confidence + narration (~50 토큰 추가)
-                    },
-                    ["think"] = false
-                };
+                // 3. baseUrl + 로그
+                string baseUrl = Main.Settings?.MachineSpirit?.ApiUrl;
+                if (string.IsNullOrEmpty(baseUrl)) baseUrl = "http://localhost:11434";
+                Main.LogDebug($"[LLMJudge] Confidence → {LLMHttpClient.NormalizeBaseUrl(baseUrl)}/api/chat, model={model}, candidates={candidateCount}");
 
-                string baseUrl = GetOllamaBaseUrl();
-                string url = baseUrl + "/api/chat";
+                // 4. HTTP 요청 (LLMHttpClient.PostChatAsync 위임)
+                LLMHttpClient.Response response = default(LLMHttpClient.Response);
+                yield return LLMHttpClient.PostChatAsync(
+                    baseUrl, requestBody, JUDGE_TIMEOUT_SECONDS,
+                    r => response = r);
 
-                Main.LogDebug($"[LLMJudge] Confidence → {url}, model={model}, candidates={candidateCount}");
-
-                string responseText = null;
-                string errorText = null;
-
-                var request = new UnityWebRequest(url, "POST");
-                request.uploadHandler = new UploadHandlerRaw(
-                    Encoding.UTF8.GetBytes(requestBody.ToString(Formatting.None)));
-                request.downloadHandler = new DownloadHandlerBuffer();
-                request.SetRequestHeader("Content-Type", "application/json");
-                request.timeout = JUDGE_TIMEOUT_SECONDS;
-
-                var op = request.SendWebRequest();
-
-                float deadline = Time.realtimeSinceStartup + JUDGE_TIMEOUT_SECONDS + 1f;
-                while (!op.isDone)
-                {
-                    if (Time.realtimeSinceStartup > deadline)
-                    {
-                        errorText = "Judge confidence timeout exceeded";
-                        request.Abort();
-                        break;
-                    }
-                    yield return null;
-                }
-
-                if (errorText == null)
-                {
-                    if (request.result == UnityWebRequest.Result.Success)
-                        responseText = request.downloadHandler.text;
-                    else
-                        errorText = $"HTTP {request.responseCode}: {request.error}";
-                }
-
-                request.Dispose();
-
+                // 5. 응답 파싱
                 JudgeConfidence confidence;
-
-                if (responseText != null)
+                if (response.Success)
                 {
-                    Main.LogDebug($"[LLMJudge] Confidence raw ({responseText.Length} chars): {Truncate(responseText, 300)}");
-                    confidence = ParseConfidenceResponse(responseText, candidateCount);
+                    string raw = response.RawJson ?? "";
+                    Main.LogDebug($"[LLMJudge] Confidence raw ({raw.Length} chars): {Truncate(raw, 300)}");
+                    confidence = ParseConfidenceResponse(raw, candidateCount);
                     stopwatch.Stop();
                     LastJudgeTimeMs = stopwatch.ElapsedMilliseconds;
 
@@ -464,10 +376,12 @@ namespace CompanionAI_v3.Planning.LLM
                     stopwatch.Stop();
                     LastJudgeTimeMs = stopwatch.ElapsedMilliseconds;
                     confidence = new JudgeConfidence { PreferredIndex = 0, IsValid = false };
+                    string errorText = response.WasTimeout
+                        ? "Judge confidence timeout exceeded"
+                        : $"HTTP {response.HttpStatusCode}: {response.ErrorMessage}";
                     Main.Log($"[LLMJudge] Confidence failed: {errorText} ({LastJudgeTimeMs}ms)");
                 }
 
-                _isJudging = false;
                 onResult?.Invoke(confidence);
             }
             finally
@@ -819,34 +733,10 @@ namespace CompanionAI_v3.Planning.LLM
         }
 
         // ═══════════════════════════════════════════════════════════
-        // 헬퍼
+        // 헬퍼 (caller-specific only)
         // ═══════════════════════════════════════════════════════════
-
-        /// <summary>Judge에 사용할 모델 결정. 전용 설정 → MachineSpirit 폴백.</summary>
-        private static string ResolveModel()
-        {
-            // 1. LLM Judge 전용 모델 설정 확인
-            var judgeModel = Main.Settings?.LLMJudgeModel;
-            if (!string.IsNullOrEmpty(judgeModel))
-                return judgeModel;
-
-            // 2. MachineSpirit 폴백
-            var msConfig = Main.Settings?.MachineSpirit;
-            if (msConfig != null && !string.IsNullOrEmpty(msConfig.Model))
-                return msConfig.Model;
-
-            return DEFAULT_JUDGE_MODEL;
-        }
-
-        /// <summary>Ollama base URL 결정 (v1 suffix 제거).</summary>
-        private static string GetOllamaBaseUrl()
-        {
-            string url = Main.Settings?.MachineSpirit?.ApiUrl ?? "http://localhost:11434/v1";
-            url = url.TrimEnd('/');
-            if (url.EndsWith("/v1"))
-                url = url.Substring(0, url.Length - 3);
-            return url;
-        }
+        // ResolveModel / GetOllamaBaseUrl → LLMHttpClient 통합 (v3.114.0 Phase F.2)
+        // DEFAULT_JUDGE_MODEL = "gemma4:e4b" — LLMHttpClient.ResolveModel 폴백과 동일
 
         private static string Truncate(string s, int maxLen)
         {
