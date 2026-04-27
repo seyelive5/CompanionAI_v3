@@ -22,6 +22,12 @@ namespace CompanionAI_v3.Planning.LLM
         private static bool _isScoring;
         private static ScorerWeights _pendingWeights;
 
+        // ★ v3.112.4 (C3): 코루틴 비정상 dispose 시 _isScoring latch 영구 유지 방지.
+        //   finally 블록이 실행 안 되면 다음 Score() 호출이 모두 fallback 됨.
+        //   timeout + 5초 초과한 _isScoring=true 는 강제 reset.
+        private static float _scoringStartTime;
+        private const float WATCHDOG_GRACE_SECONDS = 5f;
+
         /// <summary>Scorer 요청 진행 중 여부</summary>
         public static bool IsScoring => _isScoring;
 
@@ -52,6 +58,23 @@ namespace CompanionAI_v3.Planning.LLM
         {
             _isScoring = false;
             _pendingWeights = null;
+            _scoringStartTime = 0f;  // ★ v3.112.4 (C3): watchdog 기준 시각도 reset
+        }
+
+        /// <summary>
+        /// ★ v3.112.4 (C3): 워치독 — _isScoring latch 가 SCORER_TIMEOUT + grace 초과 시 강제 reset.
+        /// Score() 진입 시 호출. 정상 코루틴은 SCORER_TIMEOUT 내 finally 블록이 reset 함.
+        /// </summary>
+        private static void TickWatchdog()
+        {
+            if (!_isScoring) return;
+            float elapsed = UnityEngine.Time.realtimeSinceStartup - _scoringStartTime;
+            float threshold = SCORER_TIMEOUT_SECONDS + WATCHDOG_GRACE_SECONDS;
+            if (elapsed > threshold)
+            {
+                Main.LogDebug($"[LLMScorer] Watchdog: stale _isScoring latch ({elapsed:F1}s > {threshold:F1}s) — force reset");
+                _isScoring = false;
+            }
         }
 
         // ═══════════════════════════════════════════════════════════
@@ -71,6 +94,7 @@ namespace CompanionAI_v3.Planning.LLM
             int enemyCount,
             Action<ScorerWeights> onResult)
         {
+            TickWatchdog();  // ★ v3.112.4 (C3): stale latch 검증 후
             if (_isScoring)
             {
                 Main.Log("[LLMScorer] Already scoring -- fallback to defaults");
@@ -90,6 +114,7 @@ namespace CompanionAI_v3.Planning.LLM
                 yield break;
             }
 
+            _scoringStartTime = UnityEngine.Time.realtimeSinceStartup;  // ★ v3.112.4 (C3): watchdog 기준 시각
             _isScoring = true;
             _pendingWeights = null;
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
