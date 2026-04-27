@@ -2327,9 +2327,9 @@ namespace CompanionAI_v3.GameInterface
             {
                 // ★ v3.111.2 Phase 6 follow-up: CoverScore 스케일 변경 (15-40 → 0.01-30, 공격자 semantics).
                 // 방어적 상황의 "엄폐 중시"는 HideScore (방어자 관점)로 재타겟팅.
-                // ★ v3.111.15 Phase C.1: HideValue 정규화로 HideScore max 180 → 110.
-                //   계수 0.05는 미조정(튜닝 대상). 만약 방어 모드 엄폐 선호가 약해지면 0.08로 상향.
-                score.TacticalAdjustment += score.HideScore * (defenseMod - 1f) * 0.05f;
+                // ★ v3.111.15 Phase C.1: HideValue 정규화로 HideScore max 180 → 110 (×1.636 감소).
+                // ★ v3.113.0 (I3): 정규화 보정 0.05 → 0.082 (= 0.05×1.636). pre-v3.111.15 effective weight 와 동등 유지.
+                score.TacticalAdjustment += score.HideScore * (defenseMod - 1f) * 0.082f;
             }
 
             // 3. CurrentTactic에 따른 조정
@@ -2349,8 +2349,9 @@ namespace CompanionAI_v3.GameInterface
                 case TacticalSignal.Defend:
                     // ★ v3.111.2 Phase 6 follow-up: CoverScore → HideScore로 재타겟팅 (Phase 6 semantics 변경 대응).
                     // 방어 모드의 "엄폐 중시"는 방어자 관점 HideScore가 적합.
-                    // ★ v3.111.15 Phase C.1: HideValue 정규화로 HideScore max 180 → 110. 계수 미조정(튜닝 대상).
-                    score.TacticalAdjustment += score.HideScore * 0.03f;
+                    // ★ v3.111.15 Phase C.1: HideValue 정규화로 HideScore max 180 → 110 (×1.636 감소).
+                    // ★ v3.113.0 (I3): 정규화 보정 0.03 → 0.049 (= 0.03×1.636). pre-v3.111.15 effective weight 와 동등 유지.
+                    score.TacticalAdjustment += score.HideScore * 0.049f;
                     break;
             }
 
