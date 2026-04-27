@@ -165,15 +165,30 @@ namespace CompanionAI_v3.Planning.LLM
             var models = new List<string>(_warmedModels);
             _warmedModels.Clear();  // 재진입 시 웜업 다시 트리거되도록
 
+            // ★ v3.112.4 (C1): 총 셧다운 지연 budget cap.
+            //   기존: 2000ms × N — Ollama 응답 없으면 사용자 체감 hang.
+            //   현재: per-request 500ms + 누적 1500ms cap.
+            //   keep_alive=0 payload 는 TCP send 에 실리면 충분 — 응답 대기 가치 낮음.
+            const int PerRequestTimeoutMs = 500;
+            const int TotalBudgetMs = 1500;
+            var totalSw = System.Diagnostics.Stopwatch.StartNew();
+
             foreach (var model in models)
             {
+                if (totalSw.ElapsedMilliseconds > TotalBudgetMs)
+                {
+                    Main.LogDebug($"[LLMWarmup] Unload budget ({TotalBudgetMs}ms) exceeded — skipping remaining models");
+                    break;
+                }
+
                 try
                 {
                     string body = "{\"model\":\"" + model + "\",\"keep_alive\":0}";
                     var request = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
                     request.Method = "POST";
                     request.ContentType = "application/json";
-                    request.Timeout = 2000;  // 2s — 종료 중이니 짧게
+                    request.Timeout = PerRequestTimeoutMs;
+                    request.ReadWriteTimeout = PerRequestTimeoutMs;
 
                     var data = System.Text.Encoding.UTF8.GetBytes(body);
                     request.ContentLength = data.Length;
@@ -183,12 +198,13 @@ namespace CompanionAI_v3.Planning.LLM
                     }
                     using (var response = (System.Net.HttpWebResponse)request.GetResponse())
                     {
-                        Main.Log($"[LLMWarmup] Unloaded model '{model}' (HTTP {(int)response.StatusCode})");
+                        Main.Log($"[LLMWarmup] Unloaded model '{model}' (HTTP {(int)response.StatusCode}, {totalSw.ElapsedMilliseconds}ms)");
                     }
                 }
                 catch (System.Exception ex)
                 {
-                    Main.LogDebug($"[LLMWarmup] Unload failed for '{model}': {ex.Message}");
+                    Main.LogDebug($"[LLMWarmup] Unload failed for '{model}' ({totalSw.ElapsedMilliseconds}ms): {ex.Message}");
+                    // budget 내에서 다음 모델 시도 — keep_alive=0 payload 는 TCP 송신만 되면 됨
                 }
             }
         }
