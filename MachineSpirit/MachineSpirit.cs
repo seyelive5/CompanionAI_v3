@@ -27,6 +27,11 @@ namespace CompanionAI_v3.MachineSpirit
         private static bool _hasGreeted;
         private static bool _isTemplateChecking; // ★ v3.72.0: Block LLM calls during template check
 
+        // ★ v3.112.4 (C2): Shutdown 이중 호출 방어.
+        //   UMM OnToggle(false) + Application.quitting 양쪽 모두 발화 가능.
+        //   Initialize 에서 reset, Shutdown 에서 set.
+        private static bool _hasShutdown;
+
         // ★ v3.60.0: Idle commentary
         private static float _lastActivityTime;
         private static float _nextIdleTextTime;
@@ -64,6 +69,7 @@ namespace CompanionAI_v3.MachineSpirit
 
         public static void Initialize()
         {
+            _hasShutdown = false;
             GameEventCollector.Subscribe();
             CoroutineRunner.EnsureInstance(); // OnGUI 렌더링을 위해 즉시 생성
             LoadChatHistory();
@@ -116,6 +122,14 @@ namespace CompanionAI_v3.MachineSpirit
 
         public static void Shutdown()
         {
+            // ★ v3.112.4 (C2): 이중 호출 방지 (UMM 토글 + Application.quitting 양쪽 fire).
+            if (_hasShutdown)
+            {
+                Main.LogDebug("[MachineSpirit] Shutdown already executed — skipping");
+                return;
+            }
+            _hasShutdown = true;
+
             SaveChatHistory();
             GameEventCollector.Unsubscribe();
             GameEventCollector.Clear();
