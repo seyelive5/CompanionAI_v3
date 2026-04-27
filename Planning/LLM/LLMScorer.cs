@@ -72,7 +72,7 @@ namespace CompanionAI_v3.Planning.LLM
             float threshold = SCORER_TIMEOUT_SECONDS + WATCHDOG_GRACE_SECONDS;
             if (elapsed > threshold)
             {
-                Main.LogDebug($"[LLMScorer] Watchdog: stale _isScoring latch ({elapsed:F1}s > {threshold:F1}s) — force reset");
+                Main.Log($"[LLMScorer] Watchdog: stale _isScoring latch ({elapsed:F1}s > {threshold:F1}s) — force reset");
                 _isScoring = false;
             }
         }

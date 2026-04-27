@@ -175,6 +175,9 @@ namespace CompanionAI_v3.GameInterface
 
                 // ★ v3.9.42: 접근 경로 캐시 클리어
                 MovementAPI.ClearApproachPathCache();
+
+                // ★ v3.112.4 (C3): 전투 종료 시 stale latch 정리 (mid-scoring 중 reload/death 케이스 대비)
+                Planning.LLM.LLMScorer.Reset();
             }
             else
             {

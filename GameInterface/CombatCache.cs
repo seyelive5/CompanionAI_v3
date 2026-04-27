@@ -309,9 +309,6 @@ namespace CompanionAI_v3.GameInterface
             }
 
             ResetStats();
-
-            // ★ v3.112.4 (C3): defense-in-depth — LLM latch reset 새 턴/전투 진입 시
-            CompanionAI_v3.Planning.LLM.LLMScorer.Reset();
         }
 
         /// <summary>
