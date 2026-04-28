@@ -263,6 +263,7 @@ PatternType.Circle → 1.6m | PatternType.Ray/Cone/Sector → 0.3m (Directional)
 
 > 근거: [CompanionAI_v3_분석_및_개선안.md](CompanionAI_v3_분석_및_개선안.md) (2026-04-28).
 > 메트릭 측정: `bash scripts/code-metrics.sh` (Phase 6 산출물).
+> 본 섹션의 정량 수치(205, 3,501, 4,054, 1,721 등)는 v3.114.0 (2026-04-28) 기준 스냅샷.
 
 ### 예외 처리
 
@@ -276,7 +277,7 @@ PatternType.Circle → 1.6m | PatternType.Ray/Cone/Sector → 0.3m (Directional)
 
 - **신규 `.cs` 파일이 800 LOC 넘으면 작업 중단하고 분해 제안**.
 - 기존 파일에 새 기능 append 전에 **새 파일로 분리 가능한지 먼저 검토**.
-- `partial class`는 분해 부담을 줄이는 가교로만 사용 (영구 해법 아님 — Lesson 18 참조).
+- 신규 godfile을 만들고 `partial class`로 가리는 것 금지. 기존 godfile을 Lesson 18 방법론으로 분할하는 것은 OK (이 경우 partial이 *결과물*이지 *시작점*이 아님).
 - 1500 LOC 초과 신규 파일 작성 금지 (예외: 자동 생성 / 다국어 테이블).
 
 ### 버전 주석
@@ -298,7 +299,7 @@ PatternType.Circle → 1.6m | PatternType.Ray/Cone/Sector → 0.3m (Directional)
   - `UI` (UI/)
   - `Persistence` (Settings/, Data/)
   - `MachineSpirit` (MachineSpirit/, Dialogue/)
-- **Phase 2 완료까지의 신규 코드는** `Main.Log*` 사용 OK (전환 비용 폭증 방지). 단, 새 모듈/큰 신규 기능은 Phase 2 진행 후 작업.
+- **Phase 2 완료까지의 신규 코드는** `Main.Log*` 사용 OK (전환 비용 폭증 방지). 단, 새 모듈/큰 신규 기능은 Phase 2 진행 후 작업. **이 carve-out은 `Log.<Category>.<Level>` 도입 커밋과 함께 본 항목에서 삭제할 것.**
 
 ### 중첩 깊이
 
@@ -323,7 +324,7 @@ PatternType.Circle → 1.6m | PatternType.Ray/Cone/Sector → 0.3m (Directional)
 ### 메트릭 회귀 가드
 
 - 작업 완료 전 `bash scripts/code-metrics.sh` 실행하여 **베이스라인 대비 악화가 없는지 확인**.
-- 베이스라인은 [docs/metrics/baseline.md](docs/metrics/baseline.md) (Phase 6 산출물).
+- 베이스라인은 `docs/metrics/baseline.md` (Phase 6 완료 후 생성 — 그 전까지는 N/A).
 - 의도적 악화(예: 신규 모듈 추가로 LOC 증가)는 commit 메시지에 명시.
 
 ---
