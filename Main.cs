@@ -189,6 +189,31 @@ namespace CompanionAI_v3
             ModEntry?.Logger?.Error($"[CompanionAI][ERROR] {message}");
         }
 
+        public static void LogError(Exception ex, string message)
+        {
+            if (ex == null)
+            {
+                ModEntry?.Logger?.Error($"[CompanionAI][ERROR] {message}");
+                return;
+            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"[CompanionAI][ERROR] {message}");
+            sb.Append($" | {ex.GetType().Name}: {ex.Message}");
+            if (!string.IsNullOrEmpty(ex.StackTrace))
+            {
+                sb.AppendLine();
+                sb.Append("  Stack: ");
+                sb.Append(ex.StackTrace);
+            }
+            if (ex.InnerException != null)
+            {
+                sb.AppendLine();
+                sb.Append($"  Inner: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+            }
+            ModEntry?.Logger?.Error(sb.ToString());
+        }
+
         public static void LogWarning(string message)
         {
             ModEntry?.Logger?.Warning($"[CompanionAI][WARN] {message}");
