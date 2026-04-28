@@ -198,6 +198,27 @@ namespace CompanionAI_v3.Planning
 
             option.IsViable = true;
 
+            // ★ 대칭화: Option 1 (MoveToAttack) 과 동일 13-axis 점수 시스템 사용.
+            // 이전: coverQuality (Cover 축만) → Option 0 만 Hide/Distance/TurnThreat 누락 →
+            // AI 가 항상 이동 선호하는 비대칭 결함 발생.
+            // 수정: MovementAPI.EvaluateCurrentPosition 으로 현재 위치 전체 점수 평가 →
+            // positionQuality = TotalScore × 0.8 (Option 1 과 동일 가중치).
+            var unit = situation.Unit;
+            float weaponRange = situation.BlendedAttackRange > 0
+                ? situation.BlendedAttackRange
+                : situation.WeaponRange.EffectiveRange;
+            if (weaponRange <= 0f) weaponRange = Settings.SC.FallbackWeaponRange;
+            AIRole role = situation.CharacterSettings?.Role ?? AIRole.Auto;
+
+            var currentPosition = MovementAPI.EvaluateCurrentPosition(
+                unit,
+                situation.Enemies,
+                weaponRange,
+                situation.MinSafeDistance,
+                role);
+
+            float currentPositionQuality = currentPosition != null ? currentPosition.TotalScore * 0.8f : 0f;
+
             // 스코어 = 공격 가능 적 × 가중치 + 기본 공격 보너스
             float score = currentHittable * W_HITTABLE + W_ATTACK_BASE;
 
@@ -230,23 +251,18 @@ namespace CompanionAI_v3.Planning
                 }
             }
 
-            // ★ v3.110.16: InfluenceMap threat/ctrl 축 제거 (Y축 좌표 버그로 항상 0이었음)
-            //   MovementAPI.EvaluatePosition이 이미 게임 API 기반 ThreatScore/CoverScore로 정확히 계산.
-            //   여기서는 이동 평가가 아닌 "머무르기" 평가이므로 PositionScore 호출 생략.
-
             // 원거리인데 후퇴 필요하면 페널티 (여기서 공격하면 위험한 위치에 머무름)
             if (needsRetreat && situation.PrefersRanged)
             {
                 score -= 20f;
             }
 
-            // ★ v3.9.26: 현재 위치의 엄폐 품질 평가
-            // 엄폐 없이 노출되면 이동 동기 생성 (MoveToAttack이 더 매력적)
-            float coverQuality = EvaluateCoverQualityAtPosition(situation);
-            score += coverQuality;
+            // ★ 대칭화: 현재 위치의 전체 13-axis TotalScore × 0.8 추가 (Option 1 과 동일).
+            // 기존 coverQuality (Cover 만) 는 이 안에 흡수됨.
+            score += currentPositionQuality;
 
             option.Score = score;
-            option.Reason = $"hittable={currentHittable}, hitQ={hitQualityFactor:F2}, cover={coverQuality:F0}";
+            option.Reason = $"hittable={currentHittable}, hitQ={hitQualityFactor:F2}, posScore={(currentPosition?.TotalScore ?? 0):F0}";
             return option;
         }
 
@@ -402,7 +418,8 @@ namespace CompanionAI_v3.Planning
                 improvementBonus = 0f;  // 중립 (위치 품질로 판단)
             }
 
-            option.Score = hittableScore + improvementBonus + positionQuality + moveCost;
+            // ★ 대칭화: W_ATTACK_BASE 를 양쪽 옵션에 적용 (이전: Option 0 만 적용 → 비대칭).
+            option.Score = hittableScore + W_ATTACK_BASE + improvementBonus + positionQuality + moveCost;
 
             // ★ v3.24.0: Overwatch 구역 내 이동 페널티
             // 현재 Overwatch 구역 안에 있으면 이동 시 Overwatch 공격 트리거

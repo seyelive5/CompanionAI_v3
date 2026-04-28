@@ -1147,6 +1147,74 @@ namespace CompanionAI_v3.GameInterface
 
         #endregion
 
+        #region Current Position Evaluation
+
+        /// <summary>
+        /// 현재 위치를 (이동 후보들과 동일한 13축 기준으로) 평가.
+        /// EvaluateAttackFromCurrent 등 "이동 안 함" 옵션이 이동 옵션과 *대칭적으로*
+        /// 위치 품질을 비교할 수 있도록 동일 점수 시스템 사용.
+        ///
+        /// 경로 관련 축 (PathRiskScore, OscillationPenalty 등) 은 이동 없으므로 0.
+        /// 그 외 13축 (Cover, Hide, Distance, Threat, TurnThreat, StayAway, Attack, Hit,
+        /// AllyC, Flank, Exposure 등) 은 EvaluatePosition + 후처리 enrichment 그대로 적용.
+        /// </summary>
+        public static PositionScore EvaluateCurrentPosition(
+            BaseUnitEntity unit,
+            List<BaseUnitEntity> enemies,
+            float weaponRange = Settings.SC.FallbackWeaponRange,
+            float minSafeDistance = 5f,
+            AIRole role = AIRole.Auto)
+        {
+            if (unit == null || enemies == null) return null;
+
+            var node = unit.Position.GetNearestNodeXZ() as Kingmaker.Pathfinding.CustomGridNodeBase;
+            if (node == null) return null;
+
+            // 이동 안 함 → 경로 비용 0 인 stub cell.
+            var stubCell = new WarhammerPathAiCell(
+                node.Vector3Position,
+                diagonalsCount: 0,
+                length: 0f,
+                node: node,
+                parentNode: null,
+                isCanStand: true,
+                enteredAoE: 0,
+                stepsInsideDamagingAoE: 0,
+                provokedAttacks: 0);
+
+            float targetDistance = weaponRange;
+            var score = EvaluatePosition(unit, node, stubCell, enemies, MovementGoal.RangedAttackPosition, targetDistance, minSafeDistance);
+            if (score == null) return null;
+
+            // 후처리 enrichment — FindRangedAttackPositionSync 의 score loop 와 동일.
+            // 경로 관련 (PathRiskScore, OscillationPenalty) 은 이동 없으므로 0 유지.
+            score.ThreatScore += CalculateThreatScore(unit, score.Node);
+            score.AllyClusterPenalty = CalculateAllyClusterPenalty(score.Position, unit);
+            ApplyBlackboardScores(score, score.Position, role);
+
+            // 명중률 보너스 — 같은 함수 사용 (현재 위치에서 적들 향한 hit chance).
+            var primaryAttack = CombatAPI.FindAnyAttackAbility(unit, Settings.RangePreference.PreferRanged);
+            if (primaryAttack == null)
+                primaryAttack = CombatAPI.FindAnyAttackAbility(unit, Settings.RangePreference.PreferRanged, includeDangerousAoE: true);
+            bool isScatter = CombatAPI.IsScatterAttack(primaryAttack);
+            bool isMelee = primaryAttack?.IsMelee ?? false;
+            score.HitChanceBonus = CalculateHitChanceBonus(score.Position, enemies, weaponRange, isScatter, isMelee, unit, primaryAttack);
+
+            // 플랭킹 스코어 (현재 위치에서 적 후방/측면 가능성).
+            float flankSum = 0f;
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                var enemy = enemies[i];
+                if (enemy == null || enemy.LifeState.IsDead) continue;
+                flankSum += CombatAPI.GetFlankingBonus(enemy, score.Position);
+            }
+            score.FlankingScore = flankSum * SC.FlankingPositionBonus;
+
+            return score;
+        }
+
+        #endregion
+
         #region Best Position Finding
 
         /// <summary>
