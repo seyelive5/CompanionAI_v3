@@ -33,7 +33,10 @@ count_files_over() {
 }
 
 count_silent_catches() {
-    grep -rE "LogDebug.*ex\.Message" --include="*.cs" \
+    # Phase 2 후: 'LogDebug.*ex.Message' (legacy Main.LogDebug) 또는
+    # 'Log.<Cat>.Debug(...ex.Message)' (post-Phase-2 카테고리 형식) 둘 다 매칭.
+    # 의도된 silent catch 7건은 후자 형식 — // intentional: 주석 동반.
+    grep -rE "(LogDebug|Log\.[A-Za-z]+\.Debug).*ex\.Message" --include="*.cs" \
         --exclude-dir=bin --exclude-dir=obj --exclude-dir=.git . 2>/dev/null \
         | wc -l | tr -d ' '
 }

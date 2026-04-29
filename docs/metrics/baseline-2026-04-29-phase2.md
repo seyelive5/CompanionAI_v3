@@ -9,7 +9,7 @@
 | Field | Value |
 |---|---|
 | Date | 2026-04-30 |
-| Git rev | cd24ea5 |
+| Git rev | 63210fa |
 
 | Metric | Count | Notes |
 |---|---|---|
@@ -19,7 +19,7 @@
 | Files > 2,000 LOC | 4 | |
 | Files > 4,000 LOC | 2 | 분해 최우선 |
 | catch (Exception) total | 289 | |
-| Silent catch (LogDebug+ex.Message) | 0 | Phase 1 타깃 |
+| Silent catch (LogDebug+ex.Message) | 7 | Phase 1 타깃 |
 | ★ vX.Y inline markers | 3497 | Phase 4 자연 소멸 |
 | Indented if (16+ spaces) | 4059 | Phase 5 점진 — 향후 20+ 임계값 검토 |
 | Main.Log* flat calls | 0 | Phase 2 카테고리화 타깃 |
