@@ -148,6 +148,11 @@ namespace CompanionAI_v3.GameInterface
             public int ProvokedAttacks { get; set; }
             public LosCalculations.CoverType BestCover { get; set; }
 
+            /// <summary>★ v3.116.10 진단: Best 위치에서 가장 좋은 splash 를 낸 AoE 능력 (디버그 로그용, score 영향 없음)</summary>
+            public Kingmaker.UnitLogic.Abilities.AbilityData BestAoeAbility { get; set; }
+            /// <summary>★ v3.116.10 진단: Best 위치에서 측정된 splash 카운트</summary>
+            public int BestAoeSplash { get; set; }
+
             public override string ToString() =>
                 $"Pos({Position.x:F1},{Position.z:F1}) Score={TotalScore:F1}" +
                 (SharedTargetBonus > 0 ? $" [ST:{SharedTargetBonus:F1}]" : "") +

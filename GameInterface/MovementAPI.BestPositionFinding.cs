@@ -86,12 +86,11 @@ namespace CompanionAI_v3.GameInterface
             bool isMelee = primaryAttack?.IsMelee ?? false;
 
             // ★ v3.116.9 옵션 B 수정: primaryAttack 이 단일 타겟이어도 unit 이 Cone/Burst/Ray 능력을
-            //   별도로 보유하면 그 능력으로 위치별 AoE 커버리지 평가. 카시아처럼 primary="타격"인 경우에도
-            //   진짜 ranged AoE (볼터 burst Cone, 사이커 Cone 주문, 화염방사기 Ray 등) 가 있으면 위치 점수에 반영.
-            //   GetAvailableAbilities 는 unit.Abilities.RawFacts 기반 — 무기 공격 + 스킬 + 주문 모두 포함.
-            //   다중 AoE 능력 보유 시 모두 평가 후 MAX coverage 사용 (최적 무기/스킬 선택 가정).
-            //   meleeAoEAbility (FindMeleeAttackPositionSync) 패턴 모방 + 다중 능력 지원으로 확장.
+            //   별도로 보유하면 그 능력으로 위치별 AoE 커버리지 평가.
+            //   v3.116.10: PatternInfo 기반 (CanBeDirectional + IsValid Radius>0) — WeaponRangeProfile 와 동일 기준.
+            //   진단 로그 강화: 패턴 타입/반경/각도 + RawFacts 비교 (필터링 케이스 가시화).
             List<AbilityData> rangedAoEAbilities = null;
+            List<CombatAPI.PatternInfo> rangedAoEPatternInfos = null;
             {
                 var availableAbilities = CombatAPI.GetAvailableAbilities(unit);
                 if (availableAbilities != null)
@@ -99,18 +98,43 @@ namespace CompanionAI_v3.GameInterface
                     foreach (var ab in availableAbilities)
                     {
                         if (ab == null || ab.IsMelee) continue;
-                        if (CombatAPI.IsDirectionalPattern(CombatAPI.GetPatternType(ab)))
+                        var patternInfo = CombatAPI.GetPatternInfo(ab);
+                        if (patternInfo != null && patternInfo.IsValid && patternInfo.CanBeDirectional)
                         {
-                            if (rangedAoEAbilities == null) rangedAoEAbilities = new List<AbilityData>();
+                            if (rangedAoEAbilities == null)
+                            {
+                                rangedAoEAbilities = new List<AbilityData>();
+                                rangedAoEPatternInfos = new List<CombatAPI.PatternInfo>();
+                            }
                             rangedAoEAbilities.Add(ab);
+                            rangedAoEPatternInfos.Add(patternInfo);
                         }
                     }
                 }
             }
-            if (rangedAoEAbilities != null && Main.IsDebugEnabled)
+            if (Main.IsDebugEnabled)
             {
-                var names = string.Join(", ", rangedAoEAbilities.ConvertAll(a => a.Name));
-                Log.Engine.Debug($"[MovementAPI] {unit.CharacterName}: Ranged AoE abilities for coverage scoring ({rangedAoEAbilities.Count}): {names}");
+                if (rangedAoEAbilities != null)
+                {
+                    var details = new System.Text.StringBuilder();
+                    for (int i = 0; i < rangedAoEAbilities.Count; i++)
+                    {
+                        var pi = rangedAoEPatternInfos[i];
+                        if (i > 0) details.Append(", ");
+                        details.Append($"{rangedAoEAbilities[i].Name}(Type={pi.Type},R={pi.Radius:F1},A={pi.Angle:F0})");
+                    }
+                    Log.Engine.Debug($"[MovementAPI] {unit.CharacterName}: Ranged AoE abilities for coverage scoring ({rangedAoEAbilities.Count}): {details}");
+                }
+                else
+                {
+                    // ★ v3.116.10 진단: WeaponRangeProfile 은 directional 인데 GetAvailableAbilities 에선 누락된 케이스 catch
+                    var weaponProfile = CombatAPI.GetWeaponRangeProfile(unit);
+                    if (weaponProfile.HasDirectionalPattern)
+                    {
+                        Log.Engine.Debug($"[MovementAPI] {unit.CharacterName}: WeaponRangeProfile.HasDirectional=True (radius={weaponProfile.PatternRadius:F1}) " +
+                            "but no AoE in GetAvailableAbilities — likely cooldown/restricted at eval time");
+                    }
+                }
             }
 
             // ★ v3.8.70: 안전 체크용 아군 목록
@@ -220,14 +244,22 @@ namespace CompanionAI_v3.GameInterface
                     if (coneTarget != null)
                     {
                         int maxAoeCount = 0;
+                        AbilityData bestAoeAbility = null;
                         for (int ai = 0; ai < rangedAoEAbilities.Count; ai++)
                         {
                             int aoeCount = CombatAPI.CountEnemiesInPattern(
                                 rangedAoEAbilities[ai], coneTarget.Position, score.Position, enemies);
-                            if (aoeCount > maxAoeCount) maxAoeCount = aoeCount;
+                            if (aoeCount > maxAoeCount)
+                            {
+                                maxAoeCount = aoeCount;
+                                bestAoeAbility = rangedAoEAbilities[ai];
+                            }
                         }
                         if (maxAoeCount >= 2)
                             score.AoeHitCountBonus = (maxAoeCount - 1) * 12f;
+                        // ★ v3.116.10 진단: best ability + splash 카운트 score 에 임시 저장 (best 위치 로그용)
+                        score.BestAoeAbility = bestAoeAbility;
+                        score.BestAoeSplash = maxAoeCount;
                     }
                 }
 
@@ -329,6 +361,14 @@ namespace CompanionAI_v3.GameInterface
                         $"AllyC=-{best.AllyClusterPenalty:F1}, Flank={best.FlankingScore:F1}, " +
                         $"Osc=-{best.OscillationPenalty:F1}, " +
                         $"Exposure=-{best.ExposureScore:F1}");
+
+                    // ★ v3.116.10 진단: AoE 측정 결과 — splash<2 인 케이스 가시화
+                    if (best.BestAoeAbility != null)
+                    {
+                        Log.Engine.Debug($"[MovementAPI] Best AoE diagnostic: ability={best.BestAoeAbility.Name}, " +
+                            $"splash={best.BestAoeSplash}, bonus={best.AoeHitCountBonus:F1} " +
+                            $"(splash<2 = no bonus by design — narrow pattern or single target alone in cone)");
+                    }
 
                     // ★ v3.110.16: InfluenceMap@Best 진단 로그 제거 — InfT/InfC 축 자체가 사라짐.
                 }
