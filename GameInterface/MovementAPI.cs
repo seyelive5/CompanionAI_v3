@@ -22,7 +22,7 @@ namespace CompanionAI_v3.GameInterface
     /// <summary>
     /// 이동 API - 위치 평가 및 최적 위치 찾기
     /// </summary>
-    public static class MovementAPI
+    public static partial class MovementAPI
     {
         #region Path Threat Weights
 
