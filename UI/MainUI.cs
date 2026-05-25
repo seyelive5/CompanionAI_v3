@@ -450,9 +450,11 @@ namespace CompanionAI_v3.UI
 
         private static void DrawLLMCombatAITab()
         {
-            // ★ v3.84.0: Experimental warning
-            GUILayout.Label($"<color=#FF9900><b>\u26A0 {L("LLMCombatAIExperimental")}</b></color>", UIStyles.BoldLabel);
-            GUILayout.Label($"<color=#AAAAAA>{L("LLMCombatAIExperimentalDesc")}</color>", UIStyles.Description);
+            // v3.117.61: \uACBD\uACE0 \uAC15\uC870 \u2014 \uAC1C\uBC1C \uC7A0\uC815 \uC911\uB2E8 \uBA85\uC2DC. orange \u2192 Danger (tomato red) + \uBC15\uC2A4 \uB798\uD551.
+            GUILayout.BeginVertical(GUI.skin.box);
+            GUILayout.Label($"<color={UIStyles.Danger}><b>\u26A0 {L("LLMCombatAIExperimental")} \u26A0</b></color>", UIStyles.BoldLabel);
+            GUILayout.Label($"<color={UIStyles.TextLight}>{L("LLMCombatAIExperimentalDesc")}</color>", UIStyles.Description);
+            GUILayout.EndVertical();
             GUILayout.Space(10);
 
             UIStyles.SectionTitle(L("LLMCombatAITitle"));

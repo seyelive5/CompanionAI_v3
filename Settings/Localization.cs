@@ -1642,12 +1642,12 @@ namespace CompanionAI_v3.Settings
                 { Language.Korean, "Ollama가 감지되지 않았습니다. ollama.com/download 에서 설치 후 서버를 시작하세요." }
             },
             ["LLMCombatAIExperimental"] = new() {
-                { Language.English, "EXPERIMENTAL FEATURE" },
-                { Language.Korean, "실험적 기능" }
+                { Language.English, "EXPERIMENTAL — DEVELOPMENT PAUSED" },
+                { Language.Korean, "실험적 기능 — 개발 잠정 중단" }
             },
             ["LLMCombatAIExperimentalDesc"] = new() {
-                { Language.English, "This feature uses a local AI model (Ollama) to enhance combat decisions. It requires additional GPU memory and may increase turn processing time." },
-                { Language.Korean, "이 기능은 로컬 AI 모델(Ollama)을 사용하여 전투 결정을 강화합니다. 추가 GPU 메모리가 필요하며 턴 처리 시간이 증가할 수 있습니다." }
+                { Language.English, "Development is currently paused. This feature is kept available in case it becomes useful in the future, but is NOT actively maintained. Stability, accuracy, and compatibility with new game versions are not guaranteed. Uses a local AI model (Ollama) — requires additional GPU memory and increases turn processing time. Disable if you encounter issues." },
+                { Language.Korean, "현재 개발이 잠정 중단된 상태입니다. 향후 다시 사용될 가능성을 위해 기능은 남겨두지만 활발하게 유지보수되지 않습니다. 안정성·정확성·신규 게임 버전 호환성을 보장할 수 없습니다. 로컬 AI 모델(Ollama)을 사용하며 추가 GPU 메모리가 필요하고 턴 처리 시간이 증가합니다. 문제 발생 시 비활성화를 권장합니다." }
             },
             ["LLMDevTools"] = new() {
                 { Language.English, "LLM Developer Tools" },
