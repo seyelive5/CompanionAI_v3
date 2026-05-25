@@ -206,6 +206,10 @@ namespace CompanionAI_v3.GameInterface
                 (HideScore > 0 ? $" [Hide:+{HideScore:F1}]" : "") +
                 (EnemyTurnThreatSum > 0 ? $" [TurnThreat:-{EnemyTurnThreatSum:F1}]" : "") +
                 (StayingAwayBonus > 0 ? $" [StayAway:+{StayingAwayBonus:F1}]" : "");
+
+            // Shallow copy — 모든 score field 는 value type. Node/BestAoeAbility 는 게임 객체로 공유 OK.
+            // dedup cache 가 caller 의 score mutation (예: TacticalOptionEvaluator.cs:335) 으로부터 snapshot 격리.
+            public PositionScore Clone() => (PositionScore)MemberwiseClone();
         }
 
         public enum MovementGoal

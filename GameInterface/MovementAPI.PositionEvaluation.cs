@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using CompanionAI_v3.Logging;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Pathfinding;
 using Kingmaker.View.Covers;
@@ -11,6 +13,249 @@ namespace CompanionAI_v3.GameInterface
     public static partial class MovementAPI
     {
         #region Position Evaluation
+
+        // Perf 진단. Stopwatch.GetTimestamp ~30ns/call → 500 LOS call 측정 오버헤드 ≈ 30μs (전체 50ms 의 0.06%).
+        // Main thread 단일 호출 가정 — Unity coroutine 안 sequential 호출이므로 thread-safety 불요.
+        private static long _perfLosTicks;
+        private static int _perfLosCount;
+
+        // Plan-scope dedup cache.
+        // 진단 (v3.117.37-38) 결과: 한 plan 안에서 TacticalOptionEvaluator + MovementPlanner 가
+        // 동일 인자 (key, unit, enemies, MP, ranges, goal) 로 EvaluateAllPositions 를 2-4회 호출.
+        // 실측: 카시아 turn 1×335ms × 4회 = 1.4초 / turn. dedup 시 ~1초 절감.
+        //
+        // 안전 마진:
+        //   1) hash 만으로는 충돌 risk → unit+enemies reference + value 비교로 false hit 차단
+        //   2) caller mutation (TacticalOptionEvaluator.cs:335 `score.HittableEnemyCount=1`) 격리:
+        //      cache 저장 시 deep clone snapshot, cache hit 시도 deep clone return
+        //   3) invalidation: turn 시작 (TurnOrchestrator.ClearAll), caster 이동 (ActionExecutor.InvalidateCaster)
+        private sealed class EvalSnapshot
+        {
+            public BaseUnitEntity Unit;
+            // v3.117.42: List reference 대신 count 만 저장. SituationAnalyzer 가 같은 list 를
+            //   재사용하며 Clear → Add 패턴이라 reference 보유 시 외부 mutation 노출 (Count=0 reject).
+            //   적 set 동일성은 argKey 의 enemies content hash 가 보장.
+            public int EnemiesCount;
+            public MovementGoal Goal;
+            public float TargetDistance;
+            public float MinSafeDistance;
+            public int ReachableTileCount;
+            public List<PositionScore> Snapshot;
+            public int Frame;
+        }
+        private static readonly Dictionary<long, EvalSnapshot> _evalCache = new Dictionary<long, EvalSnapshot>();
+
+        // v3.117.52 진단: dedup cache plan 단위 hit/miss 카운터.
+        public static int EvalCacheHits;
+        public static int EvalCacheMisses;
+
+        // FindRanged call counter (FindRangedAttackPositionSync cache HIT/MISS 모니터링용 동반 카운터).
+        public static int FindRangedCalls;
+
+        // v3.117.54: FindRangedAttackPositionSync 전체 결과 plan-scope 캐시 (후처리 포함).
+        // 측정 (v3.117.53): 한 호출당 1.5초, 후처리 80% 차지. dedup cache 가 EvaluateAllPositions 만 잡고
+        // 후처리 (LowHPTargetBonus / AoE coverage / HitChance 등) 는 매번 재계산. 결과 전체 캐싱으로 호출 2번 → 1번.
+        // Key: 모든 인자 포함 (unit, enemies content, weaponRange, minSafeDistance, predictedMP, role, lastMoveOrigin, situation ref).
+        // Cache hit 시 best PositionScore Clone 반환 — null 도 캐싱.
+        // Invalidation: ClearEvaluationCache 와 동일 (turn 시작 + caster move 등).
+        public struct BestPositionKey : System.IEquatable<BestPositionKey>
+        {
+            public int UnitId;
+            public long EnemiesHash;
+            public int WeaponRangeQ;
+            public int MinSafeDistQ;
+            public int PredictedMPQ;
+            public int Role;
+            public int LastMoveOriginQ;
+            public int SituationId;
+
+            public bool Equals(BestPositionKey other) =>
+                UnitId == other.UnitId
+                && EnemiesHash == other.EnemiesHash
+                && WeaponRangeQ == other.WeaponRangeQ
+                && MinSafeDistQ == other.MinSafeDistQ
+                && PredictedMPQ == other.PredictedMPQ
+                && Role == other.Role
+                && LastMoveOriginQ == other.LastMoveOriginQ
+                && SituationId == other.SituationId;
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    int h = UnitId;
+                    h = h * 31 + (int)EnemiesHash;
+                    h = h * 31 + (int)(EnemiesHash >> 32);
+                    h = h * 31 + WeaponRangeQ;
+                    h = h * 31 + MinSafeDistQ;
+                    h = h * 31 + PredictedMPQ;
+                    h = h * 31 + Role;
+                    h = h * 31 + LastMoveOriginQ;
+                    h = h * 31 + SituationId;
+                    return h;
+                }
+            }
+
+            public override bool Equals(object obj) => obj is BestPositionKey k && Equals(k);
+        }
+
+        // CacheEntry — null 결과도 명시적으로 캐싱하기 위해 wrapper (Dictionary 가 null value 허용하지만 명시).
+        public sealed class BestPositionCacheEntry { public PositionScore Result; }
+        public static readonly Dictionary<BestPositionKey, BestPositionCacheEntry> FindRangedCache = new Dictionary<BestPositionKey, BestPositionCacheEntry>();
+        public static int FindRangedCacheHits;
+        public static int FindRangedCacheMisses;
+
+        // v3.117.56: FindMeleeAttackPositionSync 전체 결과 plan-scope 캐시.
+        // FindRanged 와 동일 패턴 — 같은 plan 안에서 TacticalOpt (Option B 평가) + MovementPlanner (PlanMoveToEnemy 근접 경로)
+        // + MovementPlanner (gap closer approach/landing) 가 자주 같은 인자로 호출. 단일 target 기반이라
+        // EnemiesHash 외에 TargetId 별도 키 필드.
+        public struct MeleePositionKey : System.IEquatable<MeleePositionKey>
+        {
+            public int UnitId;
+            public int TargetId;
+            public int MeleeRangeQ;
+            public int PredictedMPQ;
+            public int Role;
+            public int MeleeAoEAbilityId;
+            public long EnemiesHash;
+            public int LastMoveOriginQ;
+
+            public bool Equals(MeleePositionKey other) =>
+                UnitId == other.UnitId
+                && TargetId == other.TargetId
+                && MeleeRangeQ == other.MeleeRangeQ
+                && PredictedMPQ == other.PredictedMPQ
+                && Role == other.Role
+                && MeleeAoEAbilityId == other.MeleeAoEAbilityId
+                && EnemiesHash == other.EnemiesHash
+                && LastMoveOriginQ == other.LastMoveOriginQ;
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    int h = UnitId;
+                    h = h * 31 + TargetId;
+                    h = h * 31 + MeleeRangeQ;
+                    h = h * 31 + PredictedMPQ;
+                    h = h * 31 + Role;
+                    h = h * 31 + MeleeAoEAbilityId;
+                    h = h * 31 + (int)EnemiesHash;
+                    h = h * 31 + (int)(EnemiesHash >> 32);
+                    h = h * 31 + LastMoveOriginQ;
+                    return h;
+                }
+            }
+
+            public override bool Equals(object obj) => obj is MeleePositionKey k && Equals(k);
+        }
+
+        public static readonly Dictionary<MeleePositionKey, BestPositionCacheEntry> FindMeleeCache = new Dictionary<MeleePositionKey, BestPositionCacheEntry>();
+        public static int FindMeleeCalls;
+        public static int FindMeleeCacheHits;
+        public static int FindMeleeCacheMisses;
+
+        // v3.117.56: FindRetreatPositionSync (8-arg overload) 전체 결과 plan-scope 캐시.
+        // 5-arg overload 는 8-arg 를 default arg 로 호출하므로 동일 캐시 적용. lastMoveOrigin 파라미터 없음 (의도된 설계).
+        public struct RetreatPositionKey : System.IEquatable<RetreatPositionKey>
+        {
+            public int UnitId;
+            public long EnemiesHash;
+            public int MinSafeDistQ;
+            public int MaxSafeDistQ;
+            public int PredictedMPQ;
+            public int Role;
+            public int FamiliarPositionQ;
+            public int MaxFamiliarDistQ;
+
+            public bool Equals(RetreatPositionKey other) =>
+                UnitId == other.UnitId
+                && EnemiesHash == other.EnemiesHash
+                && MinSafeDistQ == other.MinSafeDistQ
+                && MaxSafeDistQ == other.MaxSafeDistQ
+                && PredictedMPQ == other.PredictedMPQ
+                && Role == other.Role
+                && FamiliarPositionQ == other.FamiliarPositionQ
+                && MaxFamiliarDistQ == other.MaxFamiliarDistQ;
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    int h = UnitId;
+                    h = h * 31 + (int)EnemiesHash;
+                    h = h * 31 + (int)(EnemiesHash >> 32);
+                    h = h * 31 + MinSafeDistQ;
+                    h = h * 31 + MaxSafeDistQ;
+                    h = h * 31 + PredictedMPQ;
+                    h = h * 31 + Role;
+                    h = h * 31 + FamiliarPositionQ;
+                    h = h * 31 + MaxFamiliarDistQ;
+                    return h;
+                }
+            }
+
+            public override bool Equals(object obj) => obj is RetreatPositionKey k && Equals(k);
+        }
+
+        public static readonly Dictionary<RetreatPositionKey, BestPositionCacheEntry> FindRetreatCache = new Dictionary<RetreatPositionKey, BestPositionCacheEntry>();
+        public static int FindRetreatCalls;
+        public static int FindRetreatCacheHits;
+        public static int FindRetreatCacheMisses;
+
+        /// <summary>
+        /// enemies 의 content hash — list reference 가 변해도 같은 적 set 이면 같은 hash.
+        /// dedup cache 의 hash 함수와 동일 (재사용 패턴).
+        /// </summary>
+        public static long ComputeEnemiesContentHash(System.Collections.Generic.List<BaseUnitEntity> enemies)
+        {
+            unchecked
+            {
+                long h = 17;
+                if (enemies != null)
+                {
+                    h = h * 31 + enemies.Count;
+                    for (int i = 0; i < enemies.Count; i++)
+                        h = h * 31 + (enemies[i]?.GetHashCode() ?? 0);
+                }
+                return h;
+            }
+        }
+
+        /// <summary>Plan-scope dedup cache 무효화. 턴 시작 + caster 이동 후 호출.</summary>
+        public static void ClearEvaluationCache()
+        {
+            int beforeSize = _evalCache.Count;
+            if (beforeSize == 0) { _evalCache.Clear(); return; }  // 빈 cache clear 는 로그 skip
+            int frame = UnityEngine.Time.frameCount;
+            string callers;
+            try
+            {
+                var st = new StackTrace(1, false);
+                var sb = new System.Text.StringBuilder(64);
+                int n = Math.Min(3, st.FrameCount);
+                for (int i = 0; i < n; i++)
+                {
+                    if (i > 0) sb.Append(" ← ");
+                    var m = st.GetFrame(i).GetMethod();
+                    sb.Append(m?.DeclaringType?.Name ?? "?").Append('.').Append(m?.Name ?? "?");
+                }
+                callers = sb.ToString();
+            }
+            catch { callers = "?"; }
+            Log.Engine.Debug($"[Perf] ClearEvaluationCache: cleared {beforeSize} eval + {FindRangedCache.Count} ranged + {FindMeleeCache.Count} melee + {FindRetreatCache.Count} retreat entries " +
+                $"(rangedH={FindRangedCacheHits} rangedM={FindRangedCacheMisses} meleeH={FindMeleeCacheHits} meleeM={FindMeleeCacheMisses} retreatH={FindRetreatCacheHits} retreatM={FindRetreatCacheMisses}), frame={frame}, callers={callers}");
+            _evalCache.Clear();
+            FindRangedCache.Clear();
+            FindRangedCacheHits = 0;
+            FindRangedCacheMisses = 0;
+            FindMeleeCache.Clear();
+            FindMeleeCacheHits = 0;
+            FindMeleeCacheMisses = 0;
+            FindRetreatCache.Clear();
+            FindRetreatCacheHits = 0;
+            FindRetreatCacheMisses = 0;
+        }
 
         public static List<PositionScore> EvaluateAllPositions(
             BaseUnitEntity unit,
@@ -24,6 +269,100 @@ namespace CompanionAI_v3.GameInterface
             if (unit == null || reachableTiles == null || reachableTiles.Count == 0)
                 return scores;
 
+            long totalStartTicks = Stopwatch.GetTimestamp();
+            _perfLosTicks = 0;
+            _perfLosCount = 0;
+            int tileCount = 0;
+            int enemyCount = enemies?.Count ?? 0;
+
+            // 인자 hash — 같은 key 면 같은 인자, 다른 key 면 인자 변동.
+            // v3.117.40: enemies 전체 hashCode 포함 (이전엔 첫 3개만 — SituationAnalyzer 가 매
+            //   Analyze 마다 새 list 를 만들어 ReferenceEquals false reject 발생, 실측 cache hit rate 50%).
+            //   content hash 로 같은 적 set 이면 같은 key → ReferenceEquals 없이 안전한 매칭.
+            long argKey;
+            unchecked
+            {
+                long h = 17;
+                h = h * 31 + (unit?.GetHashCode() ?? 0);
+                h = h * 31 + reachableTiles.Count;
+                h = h * 31 + enemyCount;
+                h = h * 31 + (int)goal;
+                h = h * 31 + (int)(targetDistance * 100);
+                h = h * 31 + (int)(minSafeDistance * 100);
+                if (enemies != null)
+                {
+                    for (int i = 0; i < enemies.Count; i++)
+                        h = h * 31 + (enemies[i]?.GetHashCode() ?? 0);
+                }
+                argKey = h;
+            }
+
+            // 진단: caller stack (3 depth) — replan/dedup 식별
+            string callers;
+            try
+            {
+                var st = new StackTrace(1, false);
+                var sb = new System.Text.StringBuilder(64);
+                int n = Math.Min(3, st.FrameCount);
+                for (int i = 0; i < n; i++)
+                {
+                    if (i > 0) sb.Append(" ← ");
+                    var m = st.GetFrame(i).GetMethod();
+                    sb.Append(m?.DeclaringType?.Name ?? "?").Append('.').Append(m?.Name ?? "?");
+                }
+                callers = sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                Log.Engine.Debug($"[Perf] caller stack parse failed: {ex.Message}");
+                callers = "?";
+            }
+            int frame = UnityEngine.Time.frameCount;
+
+            // Cache lookup — hash + value verification (false hit 차단).
+            // v3.117.40: ReferenceEquals(EnemiesRef) 제거 — SituationAnalyzer 가 매 Analyze 마다
+            //   새 list reference 를 생성하여 같은 적 set 인데도 false reject 되던 문제.
+            //   argKey 가 모든 enemies content hash 포함하므로 length + Unit reference + scalar 값으로 충분.
+            // v3.117.41 진단: cache miss/reject 사유 출력 — 진짜 invalidation 원인 추적.
+            if (_evalCache.TryGetValue(argKey, out var snap))
+            {
+                string rejectReason = null;
+                if (!ReferenceEquals(snap.Unit, unit))
+                    rejectReason = $"unit-ref ({snap.Unit?.CharacterName}→{unit?.CharacterName})";
+                else if (snap.Goal != goal)
+                    rejectReason = $"goal ({snap.Goal}→{goal})";
+                else if (snap.TargetDistance != targetDistance)
+                    rejectReason = $"targetDist ({snap.TargetDistance}→{targetDistance})";
+                else if (snap.MinSafeDistance != minSafeDistance)
+                    rejectReason = $"minSafe ({snap.MinSafeDistance}→{minSafeDistance})";
+                else if (snap.ReachableTileCount != reachableTiles.Count)
+                    rejectReason = $"tileCount ({snap.ReachableTileCount}→{reachableTiles.Count})";
+                else if (snap.EnemiesCount != enemyCount)
+                    rejectReason = $"enemyCount ({snap.EnemiesCount}→{enemyCount})";
+
+                if (rejectReason == null)
+                {
+                    EvalCacheHits++;
+                    // Deep clone snapshot → caller mutation 격리
+                    var copy = new List<PositionScore>(snap.Snapshot.Count);
+                    foreach (var s in snap.Snapshot) copy.Add(s.Clone());
+                    long hitTicks = Stopwatch.GetTimestamp() - totalStartTicks;
+                    double hitMs = hitTicks * 1000.0 / Stopwatch.Frequency;
+                    Log.Engine.Info($"[Perf] EvaluateAllPositions: CACHE HIT key=0x{argKey:X}, {copy.Count} scores cloned in {hitMs:F2}ms, frame={frame}, callers={callers}");
+                    return copy;
+                }
+                else
+                {
+                    EvalCacheMisses++;
+                    Log.Engine.Debug($"[Perf] EvaluateAllPositions: cache REJECT key=0x{argKey:X} reason={rejectReason}, frame={frame}, callers={callers}");
+                }
+            }
+            else
+            {
+                EvalCacheMisses++;
+                Log.Engine.Debug($"[Perf] EvaluateAllPositions: cache MISS key=0x{argKey:X} (cache size={_evalCache.Count}), frame={frame}, callers={callers}");
+            }
+
             foreach (var kvp in reachableTiles)
             {
                 var node = kvp.Key as CustomGridNodeBase;
@@ -34,6 +373,29 @@ namespace CompanionAI_v3.GameInterface
 
                 var score = EvaluatePosition(unit, node, cell, enemies, goal, targetDistance, minSafeDistance);
                 scores.Add(score);
+                tileCount++;
+            }
+
+            long totalTicks = Stopwatch.GetTimestamp() - totalStartTicks;
+            double totalMs = totalTicks * 1000.0 / Stopwatch.Frequency;
+            double losMs = _perfLosTicks * 1000.0 / Stopwatch.Frequency;
+            Log.Engine.Debug($"[Perf] EvaluateAllPositions: {tileCount}t × {enemyCount}e, LOS {_perfLosCount}×{losMs:F1}ms, other {totalMs - losMs:F1}ms, total {totalMs:F1}ms, goal={goal}, unit={unit?.CharacterName}, key=0x{argKey:X}, frame={frame}, callers={callers}");
+
+            // Cache 저장 — immutable snapshot (deep clone)
+            {
+                var snapshot = new List<PositionScore>(scores.Count);
+                foreach (var s in scores) snapshot.Add(s.Clone());
+                _evalCache[argKey] = new EvalSnapshot
+                {
+                    Unit = unit,
+                    EnemiesCount = enemyCount,
+                    Goal = goal,
+                    TargetDistance = targetDistance,
+                    MinSafeDistance = minSafeDistance,
+                    ReachableTileCount = reachableTiles.Count,
+                    Snapshot = snapshot,
+                    Frame = frame
+                };
             }
 
             // ★ v3.8.48: 정렬 제거 (호출자가 필요 시 직접 정렬)
@@ -86,7 +448,10 @@ namespace CompanionAI_v3.GameInterface
 
                 try
                 {
+                    long losStart = Stopwatch.GetTimestamp();
                     var los = LosCalculations.GetWarhammerLos(enemyNode, enemy.SizeRect, node, unit.SizeRect);
+                    _perfLosTicks += Stopwatch.GetTimestamp() - losStart;
+                    _perfLosCount++;
                     var coverType = los.CoverType;
 
                     if (coverType != LosCalculations.CoverType.Invisible)

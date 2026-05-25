@@ -109,9 +109,6 @@ namespace CompanionAI_v3.Planning.LLM
         private static string _cachedSystemRole;
         private static string _cachedSystemMsg;
 
-        /// <summary>기본 Judge 모델 (ModSettings에 JudgeModel이 없으면 MachineSpirit 모델 사용)</summary>
-        private const string DEFAULT_JUDGE_MODEL = "gemma4:e4b";
-
         /// <summary>Judge 타임아웃 (초). 응답이 ~5 토큰이므로 매우 빠름.</summary>
         private const int JUDGE_TIMEOUT_SECONDS = 30; // 첫 모델 로드 시 시간 필요
 
@@ -737,7 +734,6 @@ namespace CompanionAI_v3.Planning.LLM
         // 헬퍼 (caller-specific only)
         // ═══════════════════════════════════════════════════════════
         // ResolveModel / GetOllamaBaseUrl → LLMHttpClient 통합 (v3.114.0 Phase F.2)
-        // DEFAULT_JUDGE_MODEL = "gemma4:e4b" — LLMHttpClient.ResolveModel 폴백과 동일
 
         private static string Truncate(string s, int maxLen)
         {

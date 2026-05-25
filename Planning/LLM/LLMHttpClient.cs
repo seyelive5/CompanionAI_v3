@@ -13,7 +13,7 @@
 //   - UnityWebRequest 라이프사이클 (PostChatAsync)
 //   - HttpWebRequest sync POST (PostGenerateSync — Warmup unload 전용)
 //   - URL 정규화 (NormalizeBaseUrl)
-//   - 모델 결정 체인 (ResolveModel: LLMJudgeModel → MachineSpirit.Model → "gemma4:e4b")
+//   - 모델 결정 체인 (ResolveModel: LLMJudgeModel → "gemma4:e4b")
 //   - message.content 추출 (ExtractContent)
 
 using System;
@@ -75,19 +75,15 @@ namespace CompanionAI_v3.Planning.LLM
         // ═══════════════════════════════════════════════════════════
 
         /// <summary>
-        /// 모델 결정 체인: LLMJudgeModel → MachineSpirit.Model → "gemma4:e4b" 폴백.
-        /// 4 caller 가 모두 동일한 로직을 중복 보유 → 통합.
+        /// 모델 결정 체인: LLMJudgeModel (사용자 명시) → "gemma4:e4b" 폴백.
+        /// MachineSpirit.Model 은 narrative/dialogue 전용 — 전투 LLM 과 분리.
+        /// (UI 의 RECOMMENDED_JUDGE_MODEL 과 동일 폴백, 사용자 미설정 시 표시/동작 일치.)
         /// </summary>
         public static string ResolveModel()
         {
-            var settings = Main.Settings;
-            var judgeModel = settings?.LLMJudgeModel;
+            var judgeModel = Main.Settings?.LLMJudgeModel;
             if (!string.IsNullOrEmpty(judgeModel))
                 return judgeModel;
-
-            var msConfig = settings?.MachineSpirit;
-            if (msConfig != null && !string.IsNullOrEmpty(msConfig.Model))
-                return msConfig.Model;
 
             return "gemma4:e4b";
         }

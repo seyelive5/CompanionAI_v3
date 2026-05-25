@@ -51,10 +51,8 @@ namespace CompanionAI_v3.Planning.LLM
             if (settings == null || !settings.EnableLLMCombatAI) return;
             if (_isWarming) return;
 
-            // 모델 결정 (LLMScorer.ResolveModel과 동일 경로)
-            string model = settings.LLMJudgeModel;
-            if (string.IsNullOrEmpty(model))
-                model = settings.MachineSpirit?.Model;
+            // 모델 결정 — 전투 LLM 과 동일 체인 (LLMHttpClient.ResolveModel 위임)
+            string model = LLMHttpClient.ResolveModel();
             if (string.IsNullOrEmpty(model)) return;
 
             // 모델이 바뀌었으면 이전 것 무효화

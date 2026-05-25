@@ -149,7 +149,7 @@ namespace CompanionAI_v3.Planning.LLM
                     yield break;
                 }
 
-                // 2. 모델 결정 (LLMHttpClient 통합 — LLMJudgeModel → MachineSpirit → fallback)
+                // 2. 모델 결정 (LLMHttpClient 통합 — LLMJudgeModel → "gemma4:e4b" 폴백)
                 string model = LLMHttpClient.ResolveModel();
 
                 // 3. Ollama 요청 구성 (LLMHttpClient.BuildChatRequest 위임)

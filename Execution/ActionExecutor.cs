@@ -65,6 +65,7 @@ namespace CompanionAI_v3.Execution
                         if (situation?.Unit != null)
                         {
                             CombatCache.InvalidateCaster(situation.Unit);
+                            MovementAPI.ClearEvaluationCache();
                         }
                         return moveResult;
 
@@ -112,6 +113,7 @@ namespace CompanionAI_v3.Execution
 
             // 캐시 전체 무효화 — 무기 변경 시 사거리/능력/타겟팅 모두 변함
             CombatCache.ClearAll();
+            MovementAPI.ClearEvaluationCache();
 
             Log.Engine.Info($"[Executor] ★ Weapon switch executed: {unit.CharacterName} -> Set {targetSet}");
             // ★ v3.9.78: Waiting 반환 — GameCommand 비동기 처리 대기
@@ -318,6 +320,8 @@ namespace CompanionAI_v3.Execution
                 if (cacheTarget != null)
                 {
                     CombatCache.InvalidateTarget(cacheTarget);
+                    // target push 가능성 → dedup cache 의 enemies 위치 stale 우려. 안전하게 비움.
+                    MovementAPI.ClearEvaluationCache();
                 }
             }
 
@@ -329,6 +333,7 @@ namespace CompanionAI_v3.Execution
                 if (caster != null)
                 {
                     CombatCache.InvalidateCaster(caster);
+                    MovementAPI.ClearEvaluationCache();
                 }
             }
 

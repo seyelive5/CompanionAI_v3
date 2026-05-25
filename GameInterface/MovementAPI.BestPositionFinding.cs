@@ -37,6 +37,33 @@ namespace CompanionAI_v3.GameInterface
             Vector3? lastMoveOrigin = null,
             CompanionAI_v3.Analysis.Situation situation = null)
         {
+            FindRangedCalls++;
+
+            // v3.117.54: plan-scope cache lookup. 모든 인자가 동일하면 HIT (후처리 포함 결과 재사용).
+            int lastMoveOriginQ = lastMoveOrigin.HasValue
+                ? ((int)(lastMoveOrigin.Value.x * 100)) ^ (((int)(lastMoveOrigin.Value.z * 100)) << 16)
+                : 0;
+            var _cacheKey = new BestPositionKey
+            {
+                UnitId = unit?.GetHashCode() ?? 0,
+                EnemiesHash = ComputeEnemiesContentHash(enemies),
+                WeaponRangeQ = (int)(weaponRange * 100),
+                MinSafeDistQ = (int)(minSafeDistance * 100),
+                PredictedMPQ = (int)(predictedMP * 100),
+                Role = (int)role,
+                LastMoveOriginQ = lastMoveOriginQ,
+                SituationId = situation?.GetHashCode() ?? 0
+            };
+            if (FindRangedCache.TryGetValue(_cacheKey, out var _cachedEntry))
+            {
+                FindRangedCacheHits++;
+                Log.Engine.Info($"[Perf] FindRangedAttackPositionSync: CACHE HIT unit={unit?.CharacterName}");
+                return _cachedEntry.Result?.Clone();
+            }
+            FindRangedCacheMisses++;
+
+            PositionScore _resultBest = null;
+            try {
             // ★ v3.8.13: AI용 패스파인딩 사용 - 경로 위협 데이터(ProvokedAttacks, EnteredAoE) 포함
             var tiles = predictedMP > 0
                 ? FindAllReachableTilesWithThreatsSync(unit, predictedMP)
@@ -625,7 +652,14 @@ namespace CompanionAI_v3.GameInterface
                 if (Main.IsDebugEnabled) Log.Engine.Debug($"[MovementAPI] {unit.CharacterName}: No better position found for ranged character with MP={predictedMP:F1}");
             }
 
+            _resultBest = best;
             return best;
+            }
+            finally
+            {
+                // v3.117.54: 결과 deep clone snapshot → caller mutation 격리. null 도 캐싱 (no-result 도 valid 결과).
+                FindRangedCache[_cacheKey] = new BestPositionCacheEntry { Result = _resultBest?.Clone() };
+            }
         }
 
         /// <summary>
@@ -648,6 +682,33 @@ namespace CompanionAI_v3.GameInterface
         {
             if (unit == null || target == null) return null;
 
+            FindMeleeCalls++;
+
+            // v3.117.56: plan-scope cache lookup. FindRanged 패턴과 동일.
+            int meleeLastMoveOriginQ = lastMoveOrigin.HasValue
+                ? ((int)(lastMoveOrigin.Value.x * 100)) ^ (((int)(lastMoveOrigin.Value.z * 100)) << 16)
+                : 0;
+            var _meleeCacheKey = new MeleePositionKey
+            {
+                UnitId = unit.GetHashCode(),
+                TargetId = target.GetHashCode(),
+                MeleeRangeQ = (int)(meleeRange * 100),
+                PredictedMPQ = (int)(predictedMP * 100),
+                Role = (int)role,
+                MeleeAoEAbilityId = meleeAoEAbility?.GetHashCode() ?? 0,
+                EnemiesHash = ComputeEnemiesContentHash(enemies),
+                LastMoveOriginQ = meleeLastMoveOriginQ
+            };
+            if (FindMeleeCache.TryGetValue(_meleeCacheKey, out var _meleeCachedEntry))
+            {
+                FindMeleeCacheHits++;
+                Log.Engine.Info($"[Perf] FindMeleeAttackPositionSync: CACHE HIT unit={unit.CharacterName}");
+                return _meleeCachedEntry.Result?.Clone();
+            }
+            FindMeleeCacheMisses++;
+
+            PositionScore _meleeResultBest = null;
+            try {
             // ★ v3.8.13: AI용 패스파인딩 사용 - 경로 위협 데이터 포함
             var tiles = predictedMP > 0
                 ? FindAllReachableTilesWithThreatsSync(unit, predictedMP)
@@ -796,7 +857,14 @@ namespace CompanionAI_v3.GameInterface
             Log.Engine.Info($"[MovementAPI] {unit.CharacterName}: Melee position at ({best.Position.x:F1},{best.Position.z:F1}) " +
                 $"dist={finalDistTiles:F1} tiles (range={meleeRange:F0}), score={best.TotalScore:F1}");
 
+            _meleeResultBest = best;
             return best;
+            }
+            finally
+            {
+                // v3.117.56: deep clone snapshot → caller mutation 격리. null 도 캐싱 (no-result 도 valid 결과).
+                FindMeleeCache[_meleeCacheKey] = new BestPositionCacheEntry { Result = _meleeResultBest?.Clone() };
+            }
         }
 
         /// <summary>
@@ -840,6 +908,34 @@ namespace CompanionAI_v3.GameInterface
             if (unit == null || enemies == null || enemies.Count == 0)
                 return null;
 
+            FindRetreatCalls++;
+
+            // v3.117.56: plan-scope cache lookup. FindRanged/Melee 패턴과 동일.
+            // 5-arg overload 도 같은 cache 사용 (default arg `null, 0f` → FamiliarPositionQ=0, MaxFamiliarDistQ=0).
+            int familiarPosQ = familiarPosition.HasValue
+                ? ((int)(familiarPosition.Value.x * 100)) ^ (((int)(familiarPosition.Value.z * 100)) << 16)
+                : 0;
+            var _retreatCacheKey = new RetreatPositionKey
+            {
+                UnitId = unit.GetHashCode(),
+                EnemiesHash = ComputeEnemiesContentHash(enemies),
+                MinSafeDistQ = (int)(minSafeDistance * 100),
+                MaxSafeDistQ = (int)(maxSafeDistance * 100),
+                PredictedMPQ = (int)(predictedMP * 100),
+                Role = (int)role,
+                FamiliarPositionQ = familiarPosQ,
+                MaxFamiliarDistQ = (int)(maxFamiliarDistanceMeters * 100)
+            };
+            if (FindRetreatCache.TryGetValue(_retreatCacheKey, out var _retreatCachedEntry))
+            {
+                FindRetreatCacheHits++;
+                Log.Engine.Info($"[Perf] FindRetreatPositionSync: CACHE HIT unit={unit.CharacterName}");
+                return _retreatCachedEntry.Result?.Clone();
+            }
+            FindRetreatCacheMisses++;
+
+            PositionScore _retreatResultBest = null;
+            try {
             // ★ v3.8.13: AI용 패스파인딩 사용 - 경로 위협 데이터 포함
             var tiles = predictedMP > 0
                 ? FindAllReachableTilesWithThreatsSync(unit, predictedMP)
@@ -1083,6 +1179,7 @@ namespace CompanionAI_v3.GameInterface
                 if (farthestCandidate != null)
                 {
                     Log.Engine.Info($"[MovementAPI] {unit.CharacterName}: Fallback retreat to ({farthestCandidate.Position.x:F1},{farthestCandidate.Position.z:F1}) dist={farthestDist:F1} tiles");
+                    _retreatResultBest = farthestCandidate;
                     return farthestCandidate;
                 }
 
@@ -1105,7 +1202,14 @@ namespace CompanionAI_v3.GameInterface
 
             if (Main.IsDebugEnabled) Log.Engine.Debug($"[MovementAPI] {unit.CharacterName}: Retreat to ({best.Position.x:F1},{best.Position.z:F1}) score={best.TotalScore:F1}, hittable={best.HittableEnemyCount}");
 
+            _retreatResultBest = best;
             return best;
+            }
+            finally
+            {
+                // v3.117.56: deep clone snapshot → caller mutation 격리. null 도 캐싱 (no-result 도 valid 결과).
+                FindRetreatCache[_retreatCacheKey] = new BestPositionCacheEntry { Result = _retreatResultBest?.Clone() };
+            }
         }
 
         /// <summary>
