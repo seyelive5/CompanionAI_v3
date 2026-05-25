@@ -318,9 +318,10 @@ namespace CompanionAI_v3.Settings
         /// <summary>★ v3.46.0: 전략 지시 UI 크기 배율 (0.8 ~ 2.0, 기본 1.0)</summary>
         public float DecisionOverlayScale { get; set; } = 1.0f;
 
-        /// <summary>★ v3.109.0: LLM 시각 오버레이 — 위협 랭킹 + Priority Target 마커 + 액션 프리뷰 (X-COM 스타일).
-        /// 전장 위에 AI의 결정을 직접 시각화. 게임 로직 무영향 (순수 렌더링).</summary>
-        public bool EnableLLMVisualOverlay { get; set; } = true;
+        /// <summary>v3.117.62: 라벨 변경 "LLM Visual Overlay" → "AI Visual Overlay" + default false.
+        ///   필드명은 settings.json 호환을 위해 유지. 위협 랭킹 + 액션 프리뷰는 LLM 무관 항상 작동.
+        ///   Priority Target 마커만 LLM Judge 활성 시 추가.</summary>
+        public bool EnableLLMVisualOverlay { get; set; } = false;
 
         /// <summary>★ LLM Combat AI: 전역 마스터 토글 (이것과 캐릭터별 EnableLLMJudge 모두 활성화 필요)</summary>
         public bool EnableLLMCombatAI { get; set; } = false;

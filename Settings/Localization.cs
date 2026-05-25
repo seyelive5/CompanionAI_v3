@@ -110,18 +110,18 @@ namespace CompanionAI_v3.Settings
                 { Language.Chinese, "回合开始时显示同伴对话——每个角色以自己的个性描述战场形势和作战计划" }
             },
             ["EnableLLMVisualOverlay"] = new() {
-                { Language.English, "LLM Visual Overlay" },
-                { Language.Korean, "LLM 시각 오버레이" },
-                { Language.Russian, "Визуальное наложение LLM" },
-                { Language.Japanese, "LLM ビジュアルオーバーレイ" },
-                { Language.Chinese, "LLM 视觉叠加" }
+                { Language.English, "AI Visual Overlay" },
+                { Language.Korean, "AI 시각 오버레이" },
+                { Language.Russian, "Визуальное наложение ИИ" },
+                { Language.Japanese, "AI ビジュアルオーバーレイ" },
+                { Language.Chinese, "AI 视觉叠加" }
             },
             ["EnableLLMVisualOverlayDesc"] = new() {
-                { Language.English, "Show threat ranking, priority target marker, and action preview icons on the battlefield — visualizes what the AI is thinking" },
-                { Language.Korean, "전장 위에 위협 랭킹, 우선 타겟 마커, 액션 프리뷰 아이콘 표시 — AI의 사고를 시각화" },
-                { Language.Russian, "Отображение рейтинга угроз, маркера приоритетной цели и предпросмотра действий на поле боя" },
-                { Language.Japanese, "戦場上に脅威ランキング、優先ターゲットマーカー、アクションプレビューを表示" },
-                { Language.Chinese, "在战场上显示威胁排名、优先目标标记和动作预览图标——可视化 AI 的思考" }
+                { Language.English, "Show threat ranking and action preview icons on the battlefield — visualizes AI's tactical thinking. Works regardless of LLM; priority target marker appears only when LLM Judge is active." },
+                { Language.Korean, "전장 위에 위협 랭킹과 액션 프리뷰 아이콘 표시 — AI의 전술적 사고를 시각화. LLM 비활성화 상태에서도 작동하며, LLM Judge 활성 시에만 우선 타겟 마커 추가." },
+                { Language.Russian, "Отображение рейтинга угроз и предпросмотра действий — визуализирует тактику ИИ. Работает без LLM; маркер приоритетной цели появляется только при активном LLM Judge." },
+                { Language.Japanese, "戦場上に脅威ランキングとアクションプレビューを表示 — AI の戦術思考を可視化。LLM 無効時でも動作。優先ターゲットマーカーは LLM Judge 有効時のみ。" },
+                { Language.Chinese, "在战场上显示威胁排名和动作预览——可视化 AI 的战术思考。LLM 禁用时仍可工作；优先目标标记仅在 LLM Judge 启用时显示。" }
             },
             ["OverlayScale"] = new() {
                 { Language.English, "Overlay Size" },
