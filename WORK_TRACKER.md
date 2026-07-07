@@ -210,3 +210,19 @@
 - [x] FilterAbilitiesByRangePreference 폴백 제거 (하드 제약)
 - [x] PlanMeleeAoEAttack 조기 반환 + PlanPostMoveAttack/FindAnyAttackAbility 근접 폴백 배제
 - [ ] **인게임 로그 증거**: `RangeFilter: PreferRanged - no ranged available this turn` 발생 턴에 근접 공격 없음 (버프/재배치로 대체되는지 확인)
+
+### 10. 블루프린트 덤프 감사 교정 (v3.118.4-5) — ⚠️ 인게임 검증 대기
+
+**배경**: 블루프린트 원본 덤프 3중 감사(펫/Warp Relay/분류). 상세 `blueprint_audit_findings_2026_07_07.md`.
+
+**v3.118.4 — 능력 분류 3건 교정**:
+- [x] Assassin Extermination Mark(`0fab919b`) 미등록 → Marker/EnemyTarget (0뎀 공격 오분류 해소)
+- [x] Ensanguinate(`858e84`) SelfDamage/hp60 → PreAttackBuff/hp40 (HP코스트 오인 교정, +3MP 템포)
+- [x] RavenCycle(`78e54abc`) PreCombatBuff → FamiliarOnly (제네릭 버프 경쟁 제거)
+- [x] **검증 후 제외**: Stabilize(SelfTargetOnly 실은 정확 — 파티효과=릴레이), Growl(저가치)
+- [ ] **인게임 검증**: Extermination Mark 실사용/처형루프, Ensanguinate 40%↑ 사용 관찰
+
+**v3.118.5 — Warp Relay 진단 RedirectTargetType 정밀화**:
+- [x] CombatAPI.GetRelayRedirectTargetType/IsRelayRedirectEnemyOnly/GetRelayRedirectTypeName
+- [x] FamiliarSupport: Enemy-리다이렉트 오탐 Warn 소거 + Any/Ally 로그에 redirect 종류 기록. 하드 veto 미도입(증거 우선)
+- [ ] **인게임 검증**: Warp Relay 로그 `redirect=Enemy`(안전 확정) vs `Any/Ally`(실제 위험) 관찰 → v3.117.77 차단 여부 최종 결정
