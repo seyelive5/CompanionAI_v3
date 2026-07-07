@@ -661,15 +661,34 @@ namespace CompanionAI_v3.GameInterface
             out int enemyCount,
             out int allyCount)
         {
+            TryCountUnitsInPattern(ability, targetPosition, casterPosition, caster,
+                enemies, allies, out enemyCount, out allyCount);
+        }
+
+        /// <summary>
+        /// CountUnitsInPattern과 동일하되 패턴 계산 성공 여부를 반환.
+        /// false = 패턴 계산 불가(빈 패턴/예외) — 카운트 0을 "적 없음"으로 해석하면 안 되는
+        /// 점유 게이트(NeedsReplan/Executor의 포인트 AoE 재검증)는 이 경우 fail-open 해야 함.
+        /// </summary>
+        public static bool TryCountUnitsInPattern(
+            AbilityData ability,
+            Vector3 targetPosition,
+            Vector3 casterPosition,
+            BaseUnitEntity caster,
+            List<BaseUnitEntity> enemies,
+            List<BaseUnitEntity> allies,
+            out int enemyCount,
+            out int allyCount)
+        {
             enemyCount = 0;
             allyCount = 0;
 
             try
             {
-                if (ability == null) return;
+                if (ability == null) return false;
 
                 var pattern = GetAffectedNodes(ability, targetPosition, casterPosition);
-                if (pattern.IsEmpty) return;
+                if (pattern.IsEmpty) return false;
 
                 _sharedUnitSet.Clear();
                 if (enemies != null)
@@ -721,10 +740,13 @@ namespace CompanionAI_v3.GameInterface
                         }
                     }
                 }
+
+                return true;
             }
             catch (Exception ex)
             {
                 if (Main.IsDebugEnabled) Log.Engine.Error(ex, $"[CombatAPI] CountUnitsInPattern error");
+                return false;
             }
         }
 

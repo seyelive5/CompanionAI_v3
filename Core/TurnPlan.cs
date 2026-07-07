@@ -207,6 +207,31 @@ namespace CompanionAI_v3.Core
                 }
             }
 
+            // 1-3b. 포인트 타겟 공격의 패턴 점유 재검증
+            // 유닛 타겟은 1-3이 사망을 잡지만 포인트 타겟(Target.Entity == null)은 계획 시점
+            // 좌표가 동결되어, 선행 액션의 킬/넉백/DoT 사망 후에도 빈 자리에 시전됨.
+            // 현재 캐스터 위치 기준으로 패턴을 재계산해 의식 있는 적이 0이면 리플랜.
+            // 패턴 계산 실패(Try=false)는 fail-open — 오탐 리플랜으로 정상 공격을 막지 않기 위함.
+            if (nextAction.Type == ActionType.Attack
+                && nextAction.Ability != null
+                && nextAction.Target != null
+                && nextAction.Target.Entity == null
+                && !nextAction.IsFamiliarTarget
+                && (nextAction.AllTargets == null || nextAction.AllTargets.Count == 0))
+            {
+                var point = nextAction.Target.Point;
+                var caster = currentSituation.Unit;
+                var liveEnemies = currentSituation.Enemies?.FindAll(e => e != null && e.IsConscious);
+                if (point.sqrMagnitude > 0.001f && caster != null && liveEnemies != null
+                    && CombatAPI.TryCountUnitsInPattern(nextAction.Ability, point, caster.Position, caster,
+                        liveEnemies, null, out int enemiesInPattern, out _)
+                    && enemiesInPattern == 0)
+                {
+                    Log.Engine.Info($"[TurnPlan] Replan needed: point AoE {nextAction.Ability.Name} at ({point.x:F1}, {point.z:F1}) no longer hits any enemy");
+                    return true;
+                }
+            }
+
             // 1-4. 모든 적 처치됨
             if (!currentSituation.HasLivingEnemies && Priority != TurnPriority.EndTurn)
             {

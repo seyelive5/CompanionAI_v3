@@ -272,6 +272,36 @@ namespace CompanionAI_v3.Execution
                 }
             }
 
+            // 포인트 타겟 공격 execution-time 재검증 (NeedsReplan 1-3b의 백스톱).
+            //   위 두 블록은 targetUnit != null 게이트라 포인트 타겟(빈 좌표에 동결된 AoE)은
+            //   생존/도달/아군안전 어느 것도 재검증되지 않았음 — 이동 부분 실패, 직전 액션의
+            //   킬/넉백 등 plan↔execute drift 시 빈 자리 시전 또는 아군 오폭 가능.
+            //   사역마 타겟은 위 Warp Relay 전용 점유 체크가 이미 담당하므로 제외.
+            //   패턴 계산 실패(Try=false)는 fail-open — 정상 공격을 오탐으로 막지 않기 위함.
+            if (action.Type == ActionType.Attack
+                && casterUnit != null && targetUnit == null
+                && !action.IsFamiliarTarget
+                && (action.AllTargets == null || action.AllTargets.Count == 0)
+                && target.Point.sqrMagnitude > 0.001f)
+            {
+                var liveEnemies = situation?.Enemies?.FindAll(e => e != null && e.IsConscious);
+                if (liveEnemies != null
+                    && CombatAPI.TryCountUnitsInPattern(ability, target.Point, casterUnit.Position, casterUnit,
+                        liveEnemies, null, out int enemiesInPattern, out _)
+                    && enemiesInPattern == 0)
+                {
+                    Log.Engine.Warn($"[Executor] Point AoE aborted: {ability.Name} at ({target.Point.x:F1}, {target.Point.z:F1}) no longer hits any enemy — plan↔execute drift");
+                    return ExecutionResult.Failure("No enemies in AoE pattern at target point");
+                }
+
+                var allies = CombatAPI.GetAllies(casterUnit);
+                if (allies != null && !AoESafetyChecker.IsAoESafe(ability, casterUnit, target.Point, allies))
+                {
+                    Log.Engine.Warn($"[Executor] Execution-time ally safety FAILED: {ability.Name} at point ({target.Point.x:F1}, {target.Point.z:F1}) from ({casterUnit.Position.x:F1}, {casterUnit.Position.z:F1}) — plan↔execute drift");
+                    return ExecutionResult.Failure($"AoE unsafe at execution position");
+                }
+            }
+
             // 최종 검증 - 타겟에게 사용 가능한지
             // ★ v3.7.25: MultiTarget 능력은 LOS 체크 스킵 (Point 타겟이므로)
             if (action.AllTargets == null || action.AllTargets.Count == 0)
