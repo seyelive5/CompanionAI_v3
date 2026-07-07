@@ -195,7 +195,11 @@ namespace CompanionAI_v3.Data
             // 적에게 사용 → 공격 시 보너스 획득, HP 비용 있음
             // ★ v3.9.50: HP 임계값 상향 (자해 스킬 제한 강화)
             { "590c990c1d684fd09ae883754d28a8ac", new AbilityInfo("590c990c1d684fd09ae883754d28a8ac", "BloodOath", AbilityTiming.Marker, hpThreshold: 70f, flags: AbilityFlags.EnemyTarget | AbilityFlags.SingleUse) },
-            { "858e841542554025bc3ecdb6336b87ea", new AbilityInfo("858e841542554025bc3ecdb6336b87ea", "Bloodletting", AbilityTiming.SelfDamage, hpThreshold: 60f) },
+            // ★ 2026-07-07 블루프린트 실측 교정: "Bloodletting"(실명 Ensanguinate)은 자해(HP코스트)가
+            // 아님 — AbilityResourceWounds 없음, 대신 +3 MP 회복(RestoreActionPoints) + 5뎀 자체 출혈 DOT.
+            // 기존 SelfDamage/hp60 등록은 오류(HP코스트 오인). 자체 출혈이 있으므로 hp40 게이트는 유지하되
+            // PreAttackBuff 로 재분류(60%↓ 사장 해소). 라벨도 실명으로 정정.
+            { "858e841542554025bc3ecdb6336b87ea", new AbilityInfo("858e841542554025bc3ecdb6336b87ea", "Ensanguinate", AbilityTiming.PreAttackBuff, hpThreshold: 40f, flags: AbilityFlags.SelfTargetOnly) },
             { "566b140329b3441aafa971d729124947", new AbilityInfo("566b140329b3441aafa971d729124947", "RecklessDecision", AbilityTiming.SelfDamage, hpThreshold: 80f) },
             // ★ v3.0.43: HyperMetabolism는 아군에게 추가 턴을 주는 버프 (SelfDamage → PreCombatBuff)
             // 아군 타겟 + 단일 사용, HP 임계값은 아군에게 적용되지 않으므로 제거
@@ -288,6 +292,11 @@ namespace CompanionAI_v3.Data
 
             // ★ v3.0.32: Warrior - 숙적 (Sworn Enemy) - 마킹 스킬 (데미지 없음, 보너스 부여만)
             { "4696f02da13b4596b941bb950d945a05", new AbilityInfo("4696f02da13b4596b941bb950d945a05", "SwornEnemy", AbilityTiming.Marker, flags: AbilityFlags.EnemyTarget) },
+
+            // Assassin - 처형 표식 (Extermination Mark) - 마킹 스킬 (데미지 없음, ApplyBuff×4)
+            // 블루프린트 실측: CanTargetEnemies=true/EffectOnEnemy=None/DealDamage=0 → 미등록 시
+            // AutoDetect 가 "0뎀 공격"으로 오분류(사장). 다른 마크와 동일하게 Marker/EnemyTarget 등록.
+            { "0fab919b33634efcbd04f8ff99b7958d", new AbilityInfo("0fab919b33634efcbd04f8ff99b7958d", "ExterminationMark", AbilityTiming.Marker, flags: AbilityFlags.EnemyTarget) },
 
             // ========================================
             // ★ v3.0.33: Warrior 추가 스킬
@@ -883,7 +892,9 @@ namespace CompanionAI_v3.Data
             { "319b06b3dbad4d47ae1dff5c1647f904", new AbilityInfo("319b06b3dbad4d47ae1dff5c1647f904", "RavenHex", AbilityTiming.Debuff, flags: AbilityFlags.SelfTargetOnly) },
 
             // ★ v3.36.0: Complete the Cycle (Raven) - 순환의 완성 (레이븐 사이킹 재사용)
-            { "78e54abc64dc4935a4b481f9ca745c27", new AbilityInfo("78e54abc64dc4935a4b481f9ca745c27", "RavenCycle", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
+            // ★ 2026-07-07 교정: Cycle 은 인전투 "마지막 릴레이 재시전"(PreCombatBuff 아님). PlanFamiliarCycle 이
+            // 이름 기반(IsCycleAbility)으로 항상 수집하므로, FamiliarOnly 로 바꿔 제네릭 버프 페이즈 경쟁만 제거.
+            { "78e54abc64dc4935a4b481f9ca745c27", new AbilityInfo("78e54abc64dc4935a4b481f9ca745c27", "RavenCycle", AbilityTiming.FamiliarOnly, flags: AbilityFlags.SelfTargetOnly) },
 
             // ★ v3.36.0: Strategic Adaptation - 전략적 적응 (적 처치 시 무료 공격+AP)
             { "8e7ca949c71e4350a758336d13fd5d93", new AbilityInfo("8e7ca949c71e4350a758336d13fd5d93", "StrategicAdaptation", AbilityTiming.PreCombatBuff, flags: AbilityFlags.SelfTargetOnly) },
