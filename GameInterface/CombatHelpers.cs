@@ -443,7 +443,11 @@ namespace CompanionAI_v3.GameInterface
                     if (Main.IsDebugEnabled) Log.Engine.Debug($"[CombatHelpers] RangeFilter: {preference} - {rangedOnly.Count} ranged (filtered {abilities.Count - rangedOnly.Count} melee)");
                     return rangedOnly;
                 }
-                if (Main.IsDebugEnabled) Log.Engine.Debug($"[CombatHelpers] No ranged abilities - fallback to all");
+                // 원거리 전용(PreferRanged)은 하드 제약 — 원거리가 일시 불가(쿨다운/탄약)한
+                // 턴에도 근접으로 폴백하지 않음. 유저 제보 "Ranged 설정인데 가끔 근접 공격"의
+                // 원인이 이 폴백이었음. (PreferMelee는 포지셔닝 선호라 기존 전체 폴백 유지)
+                Log.Engine.Info($"[CombatHelpers] RangeFilter: PreferRanged - no ranged available this turn, melee stays excluded");
+                return rangedOnly;
             }
             else if (preference == RangePreference.PreferMelee)
             {

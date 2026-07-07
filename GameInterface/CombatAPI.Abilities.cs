@@ -237,11 +237,19 @@ namespace CompanionAI_v3.GameInterface
                     }
                 }
 
-                // 폴백 무기 사용
+                // 폴백 무기 사용 — 원거리 전용(PreferRanged)은 근접 폴백 금지
+                // (비선호 무기 = 근접이므로 반환하면 "Ranged 설정인데 근접 공격" 누수)
                 if (fallbackAttack != null)
                 {
-                    if (Main.IsDebugEnabled) Log.Engine.Debug($"[CombatAPI] No preferred weapon, using fallback: {GetAbilityDisplayName(fallbackAttack)}");
-                    return fallbackAttack;
+                    if (preference == RangePreference.PreferRanged && fallbackAttack.IsMelee)
+                    {
+                        if (Main.IsDebugEnabled) Log.Engine.Debug($"[CombatAPI] Skipping melee fallback (PreferRanged): {GetAbilityDisplayName(fallbackAttack)}");
+                    }
+                    else
+                    {
+                        if (Main.IsDebugEnabled) Log.Engine.Debug($"[CombatAPI] No preferred weapon, using fallback: {GetAbilityDisplayName(fallbackAttack)}");
+                        return fallbackAttack;
+                    }
                 }
 
                 // ★ v3.0.17: 무기 공격이 없으면 공격성 능력 찾기 (v2.2 포팅)
@@ -254,6 +262,9 @@ namespace CompanionAI_v3.GameInterface
 
                         if (IsOffensiveAbility(abilityData))
                         {
+                            // 원거리 전용은 최종 폴백에서도 근접 배제 (위 사이킥 패스와 동일 기준)
+                            if (preference == RangePreference.PreferRanged && abilityData.IsMelee) continue;
+
                             List<string> reasons;
                             if (IsAbilityAvailable(abilityData, out reasons))
                             {

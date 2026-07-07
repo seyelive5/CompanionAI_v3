@@ -496,7 +496,9 @@ namespace CompanionAI_v3.Planning.Planners
                         attack = safeAttacks.FirstOrDefault(a => a.IsMelee);
                     }
 
-                    if (attack == null)
+                    // 원거리 전용은 근접 폴백 금지 — 위에서 !IsMelee 우선 탐색이 실패했다면
+                    // 남은 후보는 근접뿐이므로 여기서 멈춤. 그 외 선호는 아무 안전 공격이나 사용.
+                    if (attack == null && rangePreference != RangePreference.PreferRanged)
                     {
                         attack = safeAttacks.FirstOrDefault();
                     }
@@ -1737,6 +1739,11 @@ namespace CompanionAI_v3.Planning.Planners
             string roleName)
         {
             if (situation?.AvailableAttacks == null || situation.Enemies == null)
+                return null;
+
+            // 원거리 전용 유닛은 근접 AoE 계획 배제 — 아래 전체 능력 재검색이
+            // RangePreference 필터를 우회해 근접 능력을 되살리는 누수 차단.
+            if (situation.RangePreference == RangePreference.PreferRanged)
                 return null;
 
             var aoeConfig = AIConfig.GetAoEConfig();
