@@ -199,11 +199,12 @@
 - [x] CombatAPI.TryCountUnitsInPattern (패턴 계산 실패 fail-open 신호)
 - [ ] **인게임 로그 증거**: `[TurnPlan] Replan needed: point AoE ... no longer hits any enemy` 또는 `[Executor] Point AoE aborted` 발생 + 빈자리 AoE 시전 재현 없음
 
-**v3.118.1 — 자해 능력 HP 게이트 (컴포넌트 자동 감지)**:
-- [x] CombatAPI.IsSelfDamagingAbility (OnContextCaster 중첩 + self-only 직접 DealDamage, GUID-free)
-- [x] SituationAnalyzer 분류 루프 최상단 게이트 (전 Role/전 경로/리플랜 공통, 기본 40%)
-- [ ] **인게임 로그 증거**: 키벨라 저HP에서 `[Analyzer] Blocked self-damage ...` + 자해 연타 자살 재현 없음
-- [ ] **감지 확인**: 키벨라 자해 능력이 실제로 감지되는지 (블루프린트가 OnContextCaster 패턴인지 미확인 — 미감지 시 로그로 컴포넌트 구조 조사 필요)
+**v3.118.1→.3 — 자해 능력 HP 게이트 (블루프린트 덤프 실측으로 전제 교정)**:
+- [x] ~~v3.118.1: DealDamage 스캔~~ → **死코드였음** (게임 자해는 DealDamage 안 씀)
+- [x] v3.118.3: CombatAPI.IsSelfDamagingAbility 를 실제 메커니즘으로 재작성 — `AbilityResourceWounds`(HP 코스트, 주) + self-scoped DealDamage/ApplyDOT(보조), HealInsteadOfDamageFact 회복 변환 제외
+- [x] **블루프린트 실측 확정**: 키벨라 자해 3종(BloodOath `590c990c`/VeilOfBlades=BladeShroud `8b7bcaa0`/OathOfVengeance `3774147440`) 전부 AbilityResourceWounds. Bloodletting=Ensanguinate=ApplyDOT
+- [x] **⚠️ 근본 수정 아님**: 이 3종은 v3.9.64(2026-02-17)부터 hpThreshold 70f 등록 + Marker/PreCombatBuff/TurnEnding 분기가 이미 HP<70% 차단 중 → v3.118.3은 死코드 교정 + 메커니즘 기반 미등록 방어(defense-in-depth)
+- [ ] **제보 원인 재확인 필요**: 최신 버전이면 자해 스팸 불가(게이트됨) → 키벨라 사망은 근접 노출(Blade Dance whirlwind/Spring Attack 점프) 쪽일 개연. **제보자 버전 + GameLogFull 필요**
 
 **v3.118.2 — PreferRanged 근접 누수 3경로 차단**:
 - [x] FilterAbilitiesByRangePreference 폴백 제거 (하드 제약)
