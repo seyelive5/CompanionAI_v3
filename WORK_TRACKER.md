@@ -197,14 +197,15 @@
 - [x] TurnPlan 1-3b: 포인트-공격 패턴 내 의식 있는 적 0 → 리플랜
 - [x] ActionExecutor 백스톱: 점유 + 포인트 타겟 아군안전(IsAoESafe) 재검증
 - [x] CombatAPI.TryCountUnitsInPattern (패턴 계산 실패 fail-open 신호)
-- [ ] **인게임 로그 증거**: `[TurnPlan] Replan needed: point AoE ... no longer hits any enemy` 또는 `[Executor] Point AoE aborted` 발생 + 빈자리 AoE 시전 재현 없음
+- [x] **✅ 인게임 검증 완료 (2026-07-07 로그)**: `Replan needed: point AoE Machine Spirit Communion ... no longer hits any enemy` + `Plasma Overcharge ...` 2건 실포착. 예외 0.
 
 **v3.118.1→.3 — 자해 능력 HP 게이트 (블루프린트 덤프 실측으로 전제 교정)**:
 - [x] ~~v3.118.1: DealDamage 스캔~~ → **死코드였음** (게임 자해는 DealDamage 안 씀)
 - [x] v3.118.3: CombatAPI.IsSelfDamagingAbility 를 실제 메커니즘으로 재작성 — `AbilityResourceWounds`(HP 코스트, 주) + self-scoped DealDamage/ApplyDOT(보조), HealInsteadOfDamageFact 회복 변환 제외
 - [x] **블루프린트 실측 확정**: 키벨라 자해 3종(BloodOath `590c990c`/VeilOfBlades=BladeShroud `8b7bcaa0`/OathOfVengeance `3774147440`) 전부 AbilityResourceWounds. Bloodletting=Ensanguinate=ApplyDOT
 - [x] **⚠️ 근본 수정 아님**: 이 3종은 v3.9.64(2026-02-17)부터 hpThreshold 70f 등록 + Marker/PreCombatBuff/TurnEnding 분기가 이미 HP<70% 차단 중 → v3.118.3은 死코드 교정 + 메커니즘 기반 미등록 방어(defense-in-depth)
-- [ ] **제보 원인 재확인 필요**: 최신 버전이면 자해 스팸 불가(게이트됨) → 키벨라 사망은 근접 노출(Blade Dance whirlwind/Spring Attack 점프) 쪽일 개연. **제보자 버전 + GameLogFull 필요**
+- [x] **✅ 인게임 검증 완료 (2026-07-07 로그)**: `[Analyzer] Blocked self-damage Blood Oath: HP 65% < threshold 70%` 12건 — 키벨라 Blood Oath(AbilityResourceWounds) 70% 게이트 작동, 자살 스팸 불가 확정. 예외 0.
+- [ ] **제보 원인 재확인 (미해결)**: 최신 버전에서 자해 게이트됨 확인 → 키벨라 사망은 근접 노출(Blade Dance/Spring Attack) 쪽. **제보자 버전 + GameLogFull 필요**
 
 **v3.118.2 — PreferRanged 근접 누수 3경로 차단**:
 - [x] FilterAbilitiesByRangePreference 폴백 제거 (하드 제약)
@@ -220,9 +221,14 @@
 - [x] Ensanguinate(`858e84`) SelfDamage/hp60 → PreAttackBuff/hp40 (HP코스트 오인 교정, +3MP 템포)
 - [x] RavenCycle(`78e54abc`) PreCombatBuff → FamiliarOnly (제네릭 버프 경쟁 제거)
 - [x] **검증 후 제외**: Stabilize(SelfTargetOnly 실은 정확 — 파티효과=릴레이), Growl(저가치)
-- [ ] **인게임 검증**: Extermination Mark 실사용/처형루프, Ensanguinate 40%↑ 사용 관찰
+- [x] **✅ Ensanguinate 검증 (2026-07-07 로그)**: 키벨라 자기시전 1회 — 이전 60%↓ 사장 해소, 자살 아님. 예외 0.
+- [ ] **미검증(시나리오 미발생)**: Extermination Mark(Assassin 미출전) / Cycle(Raven Cycle 미발생) — 회귀 없음
 
 **v3.118.5 — Warp Relay 진단 RedirectTargetType 정밀화**:
 - [x] CombatAPI.GetRelayRedirectTargetType/IsRelayRedirectEnemyOnly/GetRelayRedirectTypeName
 - [x] FamiliarSupport: Enemy-리다이렉트 오탐 Warn 소거 + Any/Ally 로그에 redirect 종류 기록. 하드 veto 미도입(증거 우선)
-- [ ] **인게임 검증**: Warp Relay 로그 `redirect=Enemy`(안전 확정) vs `Any/Ally`(실제 위험) 관찰 → v3.117.77 차단 여부 최종 결정
+- [ ] **미검증(시나리오 미발생)**: 2026-07-07 로그에 Warp Relay Psychic Attack 0건(Overseer+Raven+Momentum+피해사이킥 조합 미발생) — 회귀 없음, 다음 기회에 관찰
+
+### 11. Fix γ 대기 — 로그로 확정된 미해결 (2026-07-07)
+- **파스칼 DPS 공격불가 (확정)**: `[Analyzer] Pasqal abilities: Debuffs=6, Attacks=0` → Hittable=0 → "DPS no targets" 턴종료 6회 (전투 통틀어 공격19/디버프51/no-target종료6). 공격 kit 이 전부 Debuff 분류 → 제보 "DPS인데 디버프만" 실증. **다음 작업 최우선 후보**.
+- **카시아 (부분)**: Support/Hittable=0(Lidless Stare 아군차단) + Frontline 키스톤 시전. 단 HP 100% 유지 → 이번 세션엔 "bullet sponge" 미재현. 포지셔닝 Phase 2 territory.
