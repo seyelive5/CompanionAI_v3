@@ -9,8 +9,10 @@ using Kingmaker.Pathfinding;                                      // CustomGridN
 using Kingmaker.UnitLogic.Abilities;                              // AbilityData, AbilityRange
 using Kingmaker.UnitLogic.Abilities.Blueprints;                   // BlueprintAbility extensions
 using Kingmaker.UnitLogic.Abilities.Components.AreaEffects;       // AreaEffectEntity, AbilityAreaEffectRunAction, AbilityAreaEffectBuff
-using Kingmaker.UnitLogic.Mechanics.Actions;                      // ContextActionDealDamage
+using Kingmaker.UnitLogic.Mechanics.Actions;                      // ContextActionDealDamage, ContextActionOnContextCaster
 using Kingmaker.UnitLogic.Mechanics.Components;                   // AddFactContextActions
+using Kingmaker.Mechanics.Actions;                                // ContextActionApplyDOT
+using Kingmaker.Designers.Mechanics.Facts;                        // AbilityResourceWounds (HP 코스트 자해 감지)
 using UnityEngine;                                                // Vector3
 using CompanionAI_v3.Data;                                        // AbilityDatabase, AbilityClassificationData
 using CompanionAI_v3.Logging;
@@ -625,69 +627,100 @@ namespace CompanionAI_v3.GameInterface
         public static void ClearDamagingAoECache()
         {
             _damagingAoECache.Clear();
-            _selfDamageAbilityCache.Clear();
+            _selfHarmRunActionCache.Clear();
             _lastHazardCheckUnit = null;
         }
 
         // ── 자해(HP 코스트) 능력 감지 ──
-        // Blade Dancer 등 DLC의 미등록 자해 능력을 GUID 등록 없이 블루프린트 컴포넌트로 판별.
-        // 게임의 AiBrainHelper.IsDealDamage 탐색 패턴을 "캐스터 스코프"로 좁혀 미러링.
+        // Blade Dancer(Reaper) 등 DLC의 미등록 자해 능력을 GUID 등록 없이 판별.
+        // ⚠️ 게임의 실제 자해 메커니즘은 ContextActionDealDamage 가 아니라 아래 2가지 (블루프린트 실측):
+        //   1) AbilityResourceWounds 컴포넌트 — 능력 코스트를 시전자 HP(Wounds)로 지불.
+        //      게임 AbilityResourceWounds.Spend() 가 RuleDealDamage(caster, caster, Direct) 실행.
+        //      CalculateResourceAmount() = caster.HitPointsLeft. 즉 자원 = HP.
+        //      Kibellah BloodOath/BladeShroud/OathOfVengeance + Executioner RecklessAbandon 전부 이 방식.
+        //      게임 자체 제한은 cost <= 현재HP 일 때만 허용(치명 코스트만 차단, near-0 까지 허용)
+        //      → AI 가 빈사까지 연타 → 우리 HP 게이트가 안전 마진 제공.
+        //   2) 런액션이 시전자에게 직접 ContextActionDealDamage/ApplyDOT (Ensanguinate=Bloodletting 류 self-DOT).
 
-        private static readonly Dictionary<string, bool> _selfDamageAbilityCache = new Dictionary<string, bool>();
+        private static readonly Dictionary<string, bool> _selfHarmRunActionCache = new Dictionary<string, bool>();
 
         /// <summary>
-        /// 능력이 시전자 자신의 HP를 소모(피해)하는지 블루프린트 컴포넌트로 판별. 감지 경로 2가지:
-        ///  1) ContextActionOnContextCaster 로 캐스터 스코프에 재지정된 ContextActionDealDamage (타겟 종류 무관)
-        ///  2) 자기 전용 타겟(self-only, 비-AoE) 능력의 런액션에 직접 ContextActionDealDamage
-        ///     — 이 경우 런액션의 타겟이 곧 시전자
-        /// 적 타겟 공격의 일반 피해는 캐스터 스코프가 아니므로 오탐되지 않음.
-        /// 버프 경유 자해 DoT는 미커버 — 그 유형은 AllyStateCache.HasBuff 중복 방지가 재시전을 이미 차단.
+        /// 능력이 시전자 자신의 HP를 소모(피해)하는지 블루프린트 컴포넌트로 판별.
+        /// 주 신호 = AbilityResourceWounds(HP 코스트), 보조 = self-scoped DealDamage/ApplyDOT 런액션.
+        /// HealInsteadOfDamageFact 를 가진 캐스터는 피해 대신 회복 → 자해로 보지 않음(게임 로직 미러).
         /// </summary>
         public static bool IsSelfDamagingAbility(AbilityData ability)
         {
             var bp = ability?.Blueprint;
             if (bp == null) return false;
 
-            string bpId = bp.AssetGuid?.ToString();
-            if (bpId != null && _selfDamageAbilityCache.TryGetValue(bpId, out bool cached))
-                return cached;
-
-            bool isSelfDamaging = false;
             try
             {
-                var runAction = BlueprintCache.GetCachedRunAction(bp);
-                if (runAction?.Actions != null)
+                // 주 메커니즘: AbilityResourceWounds (HP 코스트). caster-specific(heal fact)이라 캐시 안 함 — 저빈도 호출.
+                var components = bp.ComponentsArray;
+                if (components != null)
                 {
-                    bool selfOnlyTarget = bp.CanTargetSelf && !bp.CanTargetEnemies
-                        && !bp.CanTargetFriends && !ability.IsAOE;
-                    isSelfDamaging = ContainsCasterScopedDamage(runAction.Actions, selfOnlyTarget);
+                    foreach (var component in components)
+                    {
+                        if (!(component is AbilityResourceWounds woundsCost)) continue;
+                        var caster = ability.Caster;
+                        bool healsInstead = caster?.Facts != null
+                            && woundsCost.HealInsteadOfDamageFact != null
+                            && caster.Facts.Contains(woundsCost.HealInsteadOfDamageFact);
+                        if (!healsInstead) return true;   // HP 를 코스트로 지불 = 자해
+                    }
                 }
+
+                // 보조 메커니즘: 런액션이 시전자에게 직접 피해/DOT (blueprint-static → 캐시)
+                return HasCasterScopedHarmRunAction(bp, ability);
             }
             catch (Exception ex)
             {
                 Log.Engine.Error(ex, $"[CombatAPI] IsSelfDamagingAbility scan failed");
+                return false;
             }
-
-            if (bpId != null) _selfDamageAbilityCache[bpId] = isSelfDamaging;
-            return isSelfDamaging;
         }
 
         /// <summary>
-        /// ActionList에서 캐스터에게 적용되는 ContextActionDealDamage 탐색.
+        /// 런액션이 시전자에게 직접 ContextActionDealDamage/ApplyDOT 를 적용하는지 (blueprint-static, 캐시).
+        /// 캐스터 스코프 = ContextActionOnContextCaster 내부이거나 self-only(비-AoE) 능력의 런액션.
+        /// </summary>
+        private static bool HasCasterScopedHarmRunAction(BlueprintAbility bp, AbilityData ability)
+        {
+            string bpId = bp.AssetGuid?.ToString();
+            if (bpId != null && _selfHarmRunActionCache.TryGetValue(bpId, out bool cached))
+                return cached;
+
+            bool result = false;
+            var runAction = BlueprintCache.GetCachedRunAction(bp);
+            if (runAction?.Actions != null)
+            {
+                bool selfOnlyTarget = bp.CanTargetSelf && !bp.CanTargetEnemies
+                    && !bp.CanTargetFriends && !ability.IsAOE;
+                result = ContainsCasterScopedHarm(runAction.Actions, selfOnlyTarget);
+            }
+
+            if (bpId != null) _selfHarmRunActionCache[bpId] = result;
+            return result;
+        }
+
+        /// <summary>
+        /// ActionList 에서 캐스터에게 적용되는 ContextActionDealDamage/ApplyDOT 탐색.
         /// casterScope=true 는 이 리스트의 피해가 시전자에게 간다는 의미
         /// (ContextActionOnContextCaster 내부이거나 self-only 능력의 런액션).
-        /// RT에는 IfTrue/IfFalse형 Conditional GameAction이 없으므로(디컴파일 확인)
-        /// 캐스터 재지정 래퍼(OnContextCaster)만 재귀 추적하면 충분.
+        /// ContextActionOnContextCaster 래퍼는 재귀 추적. (Conditional 중첩 자해는 미커버 —
+        /// 실측상 HP 코스트는 전부 AbilityResourceWounds 로 잡히므로 이 보조 경로에 의존하지 않음.)
         /// </summary>
-        private static bool ContainsCasterScopedDamage(ActionList actionList, bool casterScope)
+        private static bool ContainsCasterScopedHarm(ActionList actionList, bool casterScope)
         {
             if (actionList?.Actions == null) return false;
             foreach (var action in actionList.Actions)
             {
                 if (action == null) continue;
-                if (casterScope && action is ContextActionDealDamage) return true;
+                if (casterScope && (action is ContextActionDealDamage || action is ContextActionApplyDOT))
+                    return true;
                 if (action is ContextActionOnContextCaster onCaster
-                    && ContainsCasterScopedDamage(onCaster.Actions, true))
+                    && ContainsCasterScopedHarm(onCaster.Actions, true))
                     return true;
             }
             return false;
