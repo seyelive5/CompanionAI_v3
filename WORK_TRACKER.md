@@ -232,3 +232,13 @@
 ### 11. Fix γ 대기 — 로그로 확정된 미해결 (2026-07-07)
 - **파스칼 DPS 공격불가 (확정)**: `[Analyzer] Pasqal abilities: Debuffs=6, Attacks=0` → Hittable=0 → "DPS no targets" 턴종료 6회 (전투 통틀어 공격19/디버프51/no-target종료6). 공격 kit 이 전부 Debuff 분류 → 제보 "DPS인데 디버프만" 실증. **다음 작업 최우선 후보**.
 - **카시아 (부분)**: Support/Hittable=0(Lidless Stare 아군차단) + Frontline 키스톤 시전. 단 HP 100% 유지 → 이번 세션엔 "bullet sponge" 미재현. 포지셔닝 Phase 2 territory.
+
+### 12. AoE 대피 이중계산 + 재대피 루프 (v3.118.6) — ⚠️ 인게임 검증 대기
+
+**배경**: 사용자 관찰 + 로그 확정. 대피가 여러 번 위치선택/이동(비효율) + 대피 후 공격 안 하고 턴엔드.
+
+- [x] **이중계산 근본**: 대피 TurnPlan 이 짧은 생성자→InitialAP/MP=0→NeedsReplan 3-2 "AP 증가(0→5)" 오판→같은 대피 반복. 로그: `Replan needed: AP increased (0.0->5.0)`.
+- [x] **CreateEarlyPhasePlan 헬퍼**: Ultimate/대피/긴급힐에 situation 스냅샷 전달(3개 초기 Phase 공통 버그 일괄).
+- [x] **재대피 루프 근본**: 포화 전장서 대피 이동이 AoE 못 벗어남→`Standing in DAMAGING AoE` 재발→루프→stagnation→턴엔드(Hittable>0 인데 공격 안 함).
+- [x] **Phase 0.5 `!HasMovedThisTurn` 가드**: 이미 이동했는데 여전히 AoE면 재대피 대신 공격. 첫 대피 보존.
+- [ ] **인게임 검증**: `Replan needed: AP increased (0.0->5.0)` 소멸 + 대피 후 공격 실행(Hittable>0 시) + stagnation 턴엔드 감소
