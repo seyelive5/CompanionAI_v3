@@ -188,3 +188,24 @@
 - [x] **Cautious/Confident Approach 자동 전환**: PlanApproachStance() — HP/위협/역할 기반 스탠스 선택 (전 Plan Phase 1.8, DPS/Overseer=Confident, Tank/Support=Cautious)
 - [x] **Voice of Command 등록 확인**: 기존 등록 (`9c78e44bf8ff44a9afff8370c673c9ad`, PreCombatBuff, AllyTarget)
 - [ ] **공격제한 미포함 공격 구분**: 보류 — 게임 API에 명시적 구분 없음, 0 AP는 PlanZeroAPAttacks()에서 이미 처리
+
+### 9. 게시판 피드백 Fix-α (v3.118.0-2) — 구현 완료, ⚠️ 인게임 검증 대기
+
+**배경**: 유저 피드백 4건 트리아지(2026-07-07) 중 확정 갭 3건 수정. 상세 진단은 세션 메모리 `nexus_feedback_triage_2026_07_07.md`.
+
+**v3.118.0 — 빈자리 AoE (포인트 타겟 점유 재검증)**:
+- [x] TurnPlan 1-3b: 포인트-공격 패턴 내 의식 있는 적 0 → 리플랜
+- [x] ActionExecutor 백스톱: 점유 + 포인트 타겟 아군안전(IsAoESafe) 재검증
+- [x] CombatAPI.TryCountUnitsInPattern (패턴 계산 실패 fail-open 신호)
+- [ ] **인게임 로그 증거**: `[TurnPlan] Replan needed: point AoE ... no longer hits any enemy` 또는 `[Executor] Point AoE aborted` 발생 + 빈자리 AoE 시전 재현 없음
+
+**v3.118.1 — 자해 능력 HP 게이트 (컴포넌트 자동 감지)**:
+- [x] CombatAPI.IsSelfDamagingAbility (OnContextCaster 중첩 + self-only 직접 DealDamage, GUID-free)
+- [x] SituationAnalyzer 분류 루프 최상단 게이트 (전 Role/전 경로/리플랜 공통, 기본 40%)
+- [ ] **인게임 로그 증거**: 키벨라 저HP에서 `[Analyzer] Blocked self-damage ...` + 자해 연타 자살 재현 없음
+- [ ] **감지 확인**: 키벨라 자해 능력이 실제로 감지되는지 (블루프린트가 OnContextCaster 패턴인지 미확인 — 미감지 시 로그로 컴포넌트 구조 조사 필요)
+
+**v3.118.2 — PreferRanged 근접 누수 3경로 차단**:
+- [x] FilterAbilitiesByRangePreference 폴백 제거 (하드 제약)
+- [x] PlanMeleeAoEAttack 조기 반환 + PlanPostMoveAttack/FindAnyAttackAbility 근접 폴백 배제
+- [ ] **인게임 로그 증거**: `RangeFilter: PreferRanged - no ranged available this turn` 발생 턴에 근접 공격 없음 (버프/재배치로 대체되는지 확인)
