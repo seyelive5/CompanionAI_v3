@@ -830,6 +830,33 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
+        /// Warp Relay 로 릴레이되는 능력의 리다이렉트 타겟 종류. null = AbilityRedirect 컴포넌트 없음
+        /// (릴레이가 아니거나 point-AoE 방식). 게임 AbilityData.IsValidTargetForRedirect 는 이 값으로
+        /// 재조준 대상을 필터 — Enemy 면 적만, Ally 면 아군만, Any 면 무제한(아군도 타격).
+        /// </summary>
+        public static TargetType? GetRelayRedirectTargetType(AbilityData ability)
+        {
+            try
+            {
+                var redirect = ability?.Blueprint?.GetComponent<AbilityRedirect>();
+                return redirect != null ? redirect.RedirectTargetType : (TargetType?)null;
+            }
+            catch (Exception ex)
+            {
+                if (Main.IsDebugEnabled) Log.Engine.Warn($"[CombatAPI] GetRelayRedirectTargetType failed for {ability?.Name}: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>릴레이 재조준이 적만 대상으로 하는지 (Enemy) — 그렇다면 아군 안전.</summary>
+        public static bool IsRelayRedirectEnemyOnly(AbilityData ability)
+            => GetRelayRedirectTargetType(ability) == TargetType.Enemy;
+
+        /// <summary>릴레이 재조준 종류 로그용 문자열 (없으면 "none/point-AoE").</summary>
+        public static string GetRelayRedirectTypeName(AbilityData ability)
+            => GetRelayRedirectTargetType(ability)?.ToString() ?? "none/point-AoE";
+
+        /// <summary>
         /// v3.117.30: Unit 이 친선 사격 자동 회피 (immunity) 보유 여부.
         ///
         /// 게임 native 메커니즘 (디컴파일 검증):

@@ -402,12 +402,17 @@ namespace CompanionAI_v3.Planning.Plans
                     // 진단 전용 (차단 없음): Warp Relay 경로에는 AoE 아군 안전 검사가 없음.
                     // Raven 은 의도적으로 아군/적 근처에 배치되므로 차단 검사를 넣으면 오탐으로 기능
                     // 전체가 막힐 위험 — 패턴에 아군이 실제로 포함되는지 로그로만 수집해 판단.
+                    // ★ 2026-07-07: RedirectTargetType 정밀화. 릴레이가 Enemy 재조준이면 게임이 적만
+                    //   타격하므로 AoE 패턴에 아군이 있어도 안전 → 오탐 Warn 소거. Any/Ally 또는 리다이렉트
+                    //   없는(point-AoE) 경우만 진단 Warn 유지(로그에 redirect 종류 기록해 인게임 판정 확정).
+                    bool relayHitsEnemiesOnly = CombatAPI.IsRelayRedirectEnemyOnly(attack);
                     var warpProbePos = willRelocateForDebuff ? optimalPos.Position : ravenPosForDebuff;
-                    if (!AoESafetyChecker.IsAoESafeForUnitTargetFromPosition(
+                    if (!relayHitsEnemiesOnly
+                        && !AoESafetyChecker.IsAoESafeForUnitTargetFromPosition(
                             attack, warpProbePos, situation.Unit, situation.Familiar, situation.Allies))
                     {
                         Log.Planning.Warn($"[{RoleName}] [진단] Warp Relay attack '{attack.Name}': AoE 패턴에 아군 포함 가능성 " +
-                            $"(probe={(willRelocateForDebuff ? "relocate-dest" : "current")}) — 차단하지 않음, 인게임 friendly fire 확인 필요");
+                            $"(redirect={CombatAPI.GetRelayRedirectTypeName(attack)}, probe={(willRelocateForDebuff ? "relocate-dest" : "current")}) — 차단하지 않음, 인게임 friendly fire 확인 필요");
                     }
 
                     remainingAP -= cost;
