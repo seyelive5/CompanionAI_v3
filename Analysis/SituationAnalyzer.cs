@@ -826,6 +826,21 @@ namespace CompanionAI_v3.Analysis
                     continue;  // 이 능력 스킵
                 }
 
+                // 자해(HP 코스트) 능력 게이트 — HP가 임계값 미만이면 어떤 분류 목록에도 넣지 않음.
+                // DB 등록 능력은 등록 임계값(예: Bloodletting 60), 미등록은 컴포넌트 자동 감지 +
+                // SC 기본 임계값. 리플랜마다 재평가되므로 연속 시전은 HP 하락과 함께 자연 중단됨.
+                // (기존엔 미등록 자해 능력이 threshold 0 버프로 분류돼 죽을 때까지 재시전 — Kibellah 제보)
+                if (CombatAPI.IsSelfDamagingAbility(ability))
+                {
+                    float selfDamageThreshold = AbilityDatabase.GetHPThreshold(ability);
+                    if (selfDamageThreshold <= 0f) selfDamageThreshold = SC.SelfDamageDefaultHPThreshold;
+                    if (situation.HPPercent < selfDamageThreshold)
+                    {
+                        Log.Analysis.Info($"[Analyzer] Blocked self-damage {CombatAPI.GetAbilityDisplayName(ability)}: HP {situation.HPPercent:F0}% < threshold {selfDamageThreshold:F0}%");
+                        continue;
+                    }
+                }
+
                 var timing = AbilityDatabase.GetTiming(ability);
 
                 // ★ v3.0.20: 분류 과정 디버그 로깅

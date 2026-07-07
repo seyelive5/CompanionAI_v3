@@ -27,7 +27,8 @@ namespace CompanionAI_v3.Settings
         public const float DesperatePhaseHP       = 35f;   // 절박 상황: 팀 평균 HP%
         public const float DesperateSelfHP        = 25f;   // 절박 상황: 자신 HP%
         public const int   CleanupEnemyCount      = 2;     // 정리 단계: 남은 적 수 이하
-        public const float SelfDamageMinHP        = 80f;   // 자해 스킬 사용 최소 HP%
+        public const float SelfDamageMinHP        = 80f;   // 자해 스킬 사용 최소 HP% (스코어링 보너스 기준)
+        public const float SelfDamageDefaultHPThreshold = 40f; // 미등록(컴포넌트 자동 감지) 자해 능력 하드 게이트 HP% — DB 등록 임계값이 있으면 그쪽 우선
         public const float ThreatProximity        = 5f;    // 위협 근접 거리 (미터)
         public const float HealPriorityLow        = 25f;   // 힐 최우선 HP% [구 HealPriorityThresholds[0]]
         public const float HealPriorityMid        = 50f;   // 힐 높음 HP%   [구 HealPriorityThresholds[1]]

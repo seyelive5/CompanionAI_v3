@@ -625,7 +625,72 @@ namespace CompanionAI_v3.GameInterface
         public static void ClearDamagingAoECache()
         {
             _damagingAoECache.Clear();
+            _selfDamageAbilityCache.Clear();
             _lastHazardCheckUnit = null;
+        }
+
+        // ── 자해(HP 코스트) 능력 감지 ──
+        // Blade Dancer 등 DLC의 미등록 자해 능력을 GUID 등록 없이 블루프린트 컴포넌트로 판별.
+        // 게임의 AiBrainHelper.IsDealDamage 탐색 패턴을 "캐스터 스코프"로 좁혀 미러링.
+
+        private static readonly Dictionary<string, bool> _selfDamageAbilityCache = new Dictionary<string, bool>();
+
+        /// <summary>
+        /// 능력이 시전자 자신의 HP를 소모(피해)하는지 블루프린트 컴포넌트로 판별. 감지 경로 2가지:
+        ///  1) ContextActionOnContextCaster 로 캐스터 스코프에 재지정된 ContextActionDealDamage (타겟 종류 무관)
+        ///  2) 자기 전용 타겟(self-only, 비-AoE) 능력의 런액션에 직접 ContextActionDealDamage
+        ///     — 이 경우 런액션의 타겟이 곧 시전자
+        /// 적 타겟 공격의 일반 피해는 캐스터 스코프가 아니므로 오탐되지 않음.
+        /// 버프 경유 자해 DoT는 미커버 — 그 유형은 AllyStateCache.HasBuff 중복 방지가 재시전을 이미 차단.
+        /// </summary>
+        public static bool IsSelfDamagingAbility(AbilityData ability)
+        {
+            var bp = ability?.Blueprint;
+            if (bp == null) return false;
+
+            string bpId = bp.AssetGuid?.ToString();
+            if (bpId != null && _selfDamageAbilityCache.TryGetValue(bpId, out bool cached))
+                return cached;
+
+            bool isSelfDamaging = false;
+            try
+            {
+                var runAction = BlueprintCache.GetCachedRunAction(bp);
+                if (runAction?.Actions != null)
+                {
+                    bool selfOnlyTarget = bp.CanTargetSelf && !bp.CanTargetEnemies
+                        && !bp.CanTargetFriends && !ability.IsAOE;
+                    isSelfDamaging = ContainsCasterScopedDamage(runAction.Actions, selfOnlyTarget);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Engine.Error(ex, $"[CombatAPI] IsSelfDamagingAbility scan failed");
+            }
+
+            if (bpId != null) _selfDamageAbilityCache[bpId] = isSelfDamaging;
+            return isSelfDamaging;
+        }
+
+        /// <summary>
+        /// ActionList에서 캐스터에게 적용되는 ContextActionDealDamage 탐색.
+        /// casterScope=true 는 이 리스트의 피해가 시전자에게 간다는 의미
+        /// (ContextActionOnContextCaster 내부이거나 self-only 능력의 런액션).
+        /// RT에는 IfTrue/IfFalse형 Conditional GameAction이 없으므로(디컴파일 확인)
+        /// 캐스터 재지정 래퍼(OnContextCaster)만 재귀 추적하면 충분.
+        /// </summary>
+        private static bool ContainsCasterScopedDamage(ActionList actionList, bool casterScope)
+        {
+            if (actionList?.Actions == null) return false;
+            foreach (var action in actionList.Actions)
+            {
+                if (action == null) continue;
+                if (casterScope && action is ContextActionDealDamage) return true;
+                if (action is ContextActionOnContextCaster onCaster
+                    && ContainsCasterScopedDamage(onCaster.Actions, true))
+                    return true;
+            }
+            return false;
         }
 
         // ── ★ v3.19.8: Unified Hazard Zone Detection ──
