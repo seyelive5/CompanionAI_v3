@@ -364,6 +364,17 @@ namespace CompanionAI_v3.Planning.Plans
         }
 
         /// <summary>
+        /// 초기 Phase(Ultimate / AoE 대피 / 긴급 힐) Emergency 플랜 생성 — situation 스냅샷 포함.
+        /// 짧은 생성자를 쓰면 InitialAP/MP 가 0 으로 남아 NeedsReplan 이 "AP 증가(0→N)"로 오판,
+        /// 같은 플랜을 반복 재계산함(대피 이중계산의 근본 원인). 정상 플랜과 동일 스냅샷을 넘겨 방지.
+        /// </summary>
+        protected TurnPlan CreateEarlyPhasePlan(List<PlannedAction> actions, TurnPriority priority, string reasoning, Situation situation)
+        {
+            return new TurnPlan(actions, priority, reasoning, situation.HPPercent, situation.NearestEnemyDistance,
+                situation.NormalHittableCount, situation.CurrentAP, situation.CurrentMP, 0);
+        }
+
+        /// <summary>
         /// ★ v3.12.0: 공통 초기 Phase 실행 (Phase 0 ~ 1.5)
         /// Phase 0: Ultimate (잠재력 초월) — early return 가능
         /// Phase 0.5: AoE 대피 — early return 가능
@@ -383,8 +394,8 @@ namespace CompanionAI_v3.Planning.Plans
                 if (ultimateAction != null)
                 {
                     actions.Add(ultimateAction);
-                    return new TurnPlan(actions, TurnPriority.Critical,
-                        $"{RoleName} ultimate (Transcend Potential)");
+                    return CreateEarlyPhasePlan(actions, TurnPriority.Critical,
+                        $"{RoleName} ultimate (Transcend Potential)", situation);
                 }
                 Log.Planning.Info($"[{RoleName}] Ultimate failed during Transcend Potential - ending turn");
                 actions.Add(PlannedAction.EndTurn($"{RoleName} no ultimate available"));
@@ -393,14 +404,18 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // Phase 0.5: AoE Evacuation
-            if (situation.NeedsAoEEvacuation && situation.CanMove)
+            // ★ HasMovedThisTurn 가드: 이미 이번 턴에 이동했는데도 여전히 AoE 안이면(포화 전장 등
+            //   MP 로 도달 가능한 안전 타일 없음) 재대피는 무의미 — 같은 곳 반복 이동하다 stagnation 으로
+            //   턴엔드됨. 대신 여기서 대피를 건너뛰어 이후 공격 Phase 로 진행(AoE 피해는 어차피 불가피,
+            //   최소한 공격은 하도록). 첫 이동 기회는 보존됨.
+            if (situation.NeedsAoEEvacuation && situation.CanMove && !situation.HasMovedThisTurn)
             {
                 var evacAction = PlanAoEEvacuation(situation);
                 if (evacAction != null)
                 {
                     actions.Add(evacAction);
-                    return new TurnPlan(actions, TurnPriority.Emergency,
-                        $"{RoleName} AoE evacuation");
+                    return CreateEarlyPhasePlan(actions, TurnPriority.Emergency,
+                        $"{RoleName} AoE evacuation", situation);
                 }
             }
 
@@ -409,8 +424,8 @@ namespace CompanionAI_v3.Planning.Plans
             if (healAction != null)
             {
                 actions.Add(healAction);
-                return new TurnPlan(actions, TurnPriority.Emergency,
-                    $"{RoleName} emergency heal");
+                return CreateEarlyPhasePlan(actions, TurnPriority.Emergency,
+                    $"{RoleName} emergency heal", situation);
             }
 
             // Phase 1.5: Reload (early return 없음 — 이후 Phase 계속 진행)
