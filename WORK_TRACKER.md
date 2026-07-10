@@ -267,6 +267,6 @@
   - F13: Extermination Mark New GUID `542f7f3cab6a41a6859da3ba9c984168` 동일 Marker/EnemyTarget 등록.
   - F15: GetRelayRedirectTargetType의 silent catch(Warn+ex.Message) → `Log.Engine.Error(ex,…)` (무음 실패 해소, 진단 오염 방지).
   - 컷라인: AbilityDatabase.cs 날짜 스탬프 ★ 마커 2곳(:198/:897) → 평문 주석(why 보존, 마커 제거).
-  - ⏳ **F9 (설계 결정 필요 — 사용자 확인 대기)**: 근접전용+PreferRanged 유닛 무경고 영구 수동. 옵션 A(warn-only: 유닛당 1회 Warn) vs B(auto-ignore: 해당 유닛 preference 자동 무시). B는 v3.118.2 하드 제약 의미론과 충돌 → 결정 필요.
+  - [x] **F9 (v3.118.11, 사용자 선택 A=warn-only 확정 → 구현 완료)**: SituationAnalyzer 필터 직후 `PreferRanged && !HasRangedWeapon && AvailableAttacks==0`일 때 유닛당 1회 Warn(`_f9WarnedUnits` static). v3.118.2 하드 제약 유지(auto-ignore 아님) — 오설정을 가시화만. 원거리 사이킥 보유 유닛은 필터 후 공격이 남아 미발화.
 - ⚠️ **§9/§12 인게임 검증 교차**: §12 검증은 F2/F3 수정 전 **실패 예상** — 로그 해석 시 혼동 금지. §9 근접누수 확인 시 F8(Blade Dance)/F14(0-AP Kick)가 예외로 관찰될 수 있음. F1은 수정 전 `point AoE Overwatch|Veil` grep으로 실증 데이터 확보 가능.
 - [x] **로그 사전 점검 (2026-07-10)**: F1 흔적 없음(보유자 미출전 — 판정은 코드 추적 유지) / §12 버그 현장 8회+Stagnant 3유닛 실증(v3.118.6 이전 바이너리) / F2 감시 라인 = 대피 턴 `New 0 AP attack`(Heinrix Slash 보유 확인) / Blood Oath 차단 주체는 이 로그 기준 DOOM(§9 "키벨라" 귀속 재확인 필요). 상세: 리뷰 문서 말미.

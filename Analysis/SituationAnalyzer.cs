@@ -27,6 +27,10 @@ namespace CompanionAI_v3.Analysis
         // ★ v3.8.48: per-unit Situation 풀 — 턴당 0 할당 (기존: 1 Situation + 13 List per turn)
         private readonly Dictionary<string, Situation> _situationPool = new Dictionary<string, Situation>();
 
+        // F9 (warn-only): PreferRanged 인데 원거리 무기가 없어 매턴 공격 불가한 유닛에게 유닛당 1회만
+        // 경고(스팸 방지). auto-ignore 대신 경고 — v3.118.2 PreferRanged 하드 제약 의미론 유지.
+        private static readonly HashSet<string> _f9WarnedUnits = new HashSet<string>();
+
         // ★ v3.8.80: continuation 턴 캐시 — 같은 턴 내 formation 데이터 재사용
         // 적은 이동하지 않았으므로 아군 평균 적 거리는 동일
         // ★ v3.110.18: FrontlineCalculator 제거 — 아군 평균 적 거리만 캐시
@@ -1107,6 +1111,17 @@ namespace CompanionAI_v3.Analysis
             // ★ RangePreference 필터 적용 (CombatHelpers 사용)
             situation.AvailableAttacks = CombatHelpers.FilterAbilitiesByRangePreference(
                 situation.AvailableAttacks, situation.RangePreference);
+
+            // F9 (warn-only): PreferRanged 인데 원거리 무기가 없고 필터 후 공격이 0 이면 이 유닛은
+            //   매턴 공격 불가(영구 수동). 유닛당 1회 Warn 으로 설정 오류를 가시화 — 하드 제약은 유지
+            //   (자동 무시하지 않음). 원거리 사이킥 등이 있으면 필터 후 공격이 남아 발화하지 않음.
+            if (situation.RangePreference == RangePreference.PreferRanged
+                && !situation.HasRangedWeapon
+                && situation.AvailableAttacks.Count == 0
+                && _f9WarnedUnits.Add(unit.UniqueId))
+            {
+                Log.Analysis.Warn($"[Analyzer] {unit.CharacterName}: RangePreference=PreferRanged 이지만 원거리 무기가 없어 매턴 공격 불가 — 설정을 Adaptive/PreferMelee 로 변경 권장(근접 무기 사용 허용).");
+            }
 
             // ★ v3.0.82: 필터링된 GapCloser 복원
             foreach (var gc in gapClosers)
