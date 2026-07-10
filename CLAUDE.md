@@ -259,6 +259,23 @@ PatternType.Circle → 1.6m | PatternType.Ray/Cone/Sector → 0.3m (Directional)
 
 ---
 
+## AI 플래닝 코드 함정 (v3.118 리뷰 교훈 — 반드시 준수)
+
+> 근거: [docs/reviews/2026-07-10-v3.118-code-review.md](docs/reviews/2026-07-10-v3.118-code-review.md) + LESSONS_LEARNED Lesson 20.
+> 아래 규칙 위반이 v3.118.0-6 리뷰 확정 결함 15건 중 12건의 원인.
+
+- **정책 필터(무기 선호/자해 게이트/AoE 안전)는 CombatAPI 조회 함수 내부에 넣어라.**
+  SituationAnalyzer 수집 지점에만 걸면 플래너의 raw 재조회(`GetAvailableAbilities`, `RawFacts`, `GetZeroAPAttacks`)가 전부 우회한다. 플래너에 raw 재조회 신설 금지, 기존 재조회 경로를 만지면 필터 통과 여부부터 확인.
+- **턴 내 "이미 했음" 상태는 TurnState/StrategicContext에 기록하라.**
+  플랜-로컬 변수와 생성자 인자는 replan이 언제든 버린다 (예: `hasUsedWarpRelayThisTurn`).
+- **TurnPlan 생성 시 스냅샷 인자(AP/MP/hittable/zeroAP) 생략·0 하드코딩 금지** —
+  같은 틱 NeedsReplan Section 3이 허위 발화해 replan 루프를 만든다.
+- **실행/replan 검증 게이트 신설 시**: ActionType+타겟 모양(Entity null? 포인트?)으로 의도를 추측하지 말고 PlannedAction/DB의 명시 플래그를 검사하라. 그리고 전 PlannedAction factory(AllTargets, PositionalAttack 포함)에 대해 **과잉차단/누락 양방향**을 점검하라 — Overwatch 사멸(과잉)과 AerialRush 무검증(누락)이 같은 게이트에서 동시 발생했다.
+- **능력 등록 시 CompanionAI_AllAbilities.txt에서 형제 변형(New/Mob/Legacy) 전수 확인.**
+- **함수의 폴백 의미를 바꾸면 호출부 전수 grep** — 특히 정책 enum을 하드코딩으로 넘기는 호출부가 조용히 회귀한다 (`FindAnyAttackAbility(PreferRanged)` 하드코딩 4곳 사례).
+
+---
+
 ## 코드 위생 룰 (반드시 준수)
 
 > 근거: [CompanionAI_v3_분석_및_개선안.md](CompanionAI_v3_분석_및_개선안.md) (2026-04-28).
@@ -332,6 +349,6 @@ PatternType.Circle → 1.6m | PatternType.Ray/Cone/Sector → 0.3m (Directional)
 
 ## 참조 리소스
 
-- **게임 디컴파일**: `C:\Users\veria\Downloads\roguetrader_decompile\project`
+- **게임 디컴파일**: `C:\Users\veria\Downloads\roguetrader_decompile\Code\Kingmaker` (게임 1.6.0, 2026-06-30 재디컴파일 — 옛 `\project\Code\` 경로는 폐기)
 - **게임 로그**: `C:\Users\veria\AppData\LocalLow\Owlcat Games\Warhammer 40000 Rogue Trader\GameLogFull.txt`
 - **과거 교훈**: [LESSONS_LEARNED.md](LESSONS_LEARNED.md) - AP 턴 감지, Hittable 계산, 능력 Available 체크, 거리 단위, AOE 패턴 등

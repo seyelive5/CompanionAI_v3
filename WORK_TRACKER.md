@@ -242,3 +242,13 @@
 - [x] **재대피 루프 근본**: 포화 전장서 대피 이동이 AoE 못 벗어남→`Standing in DAMAGING AoE` 재발→루프→stagnation→턴엔드(Hittable>0 인데 공격 안 함).
 - [x] **Phase 0.5 `!HasMovedThisTurn` 가드**: 이미 이동했는데 여전히 AoE면 재대피 대신 공격. 첫 대피 보존.
 - [ ] **인게임 검증**: `Replan needed: AP increased (0.0->5.0)` 소멸 + 대피 후 공격 실행(Hittable>0 시) + stagnation 턴엔드 감소
+
+### 13. v3.118.0-6 코드 리뷰 확정 결함 15건 — 수정 대기 (2026-07-10)
+
+**배경**: 릴리즈 범위 c970229..bdf6a8f 전수 리뷰(파인더 10각도 + 적대적 검증 5 + 갭스윕). **작업 지시서: [docs/reviews/2026-07-10-v3.118-code-review.md](docs/reviews/2026-07-10-v3.118-code-review.md)** — 항목별 앵커/메커니즘/수정 방향 + 반박 4건(재수정 금지) 포함. 재발 방지 가드는 적용 완료(CLAUDE.md "AI 플래닝 코드 함정" + Lesson 20 + code-metrics.sh 정규식 확장).
+
+- [ ] **그룹 A — 필터 API 내재화**: F4(자해 게이트 우회, 키벨라 Blood Oath)·F8(Blade Dance 재수집)·F14(0-AP preference) — FindAnyAttackAbility/GetZeroAPAttacks 내부에 게이트 내장
+- [ ] **그룹 B — 게이트 의도 플래그**: F1(**Overwatch/Veil TurnEnding 시전 사멸 회귀 — 최상위**)·F5(AllTargets 스테일 시전 무검증)
+- [ ] **그룹 C — replan 생존 상태**: F2(대피 zero-AP 루프 — v3.118.6 §12 무효화)·F12(짧은 생성자 9곳)·F3(!HasMovedThisTurn 대피 과잉 억제)·F7(RavenCycle 유실)
+- [ ] **그룹 D — 독립 소형**: F6(하드코딩 PreferRanged 4곳 → 근접 유닛 이동 회귀)·F10(자해 2차 보호 등록-키)·F11(갭클로저 단독후보)·F13(Extermination Mark New GUID — PLAUSIBLE, 검증 우선)·F15(catch 교정)·F9(근접전용+PreferRanged 무경고 — **설계 결정 필요**)
+- ⚠️ **§9/§12 인게임 검증 교차**: §12 검증은 F2/F3 수정 전 **실패 예상** — 로그 해석 시 혼동 금지. §9 근접누수 확인 시 F8(Blade Dance)/F14(0-AP Kick)가 예외로 관찰될 수 있음. F1은 수정 전 `point AoE Overwatch|Veil` grep으로 실증 데이터 확보 가능.

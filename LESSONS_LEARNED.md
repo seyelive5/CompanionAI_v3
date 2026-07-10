@@ -954,3 +954,49 @@ Phase E 플랜(2026-04-24) 이 "게임 내장 3대 API 미활용 — 전면 채�
 - flag-based A/B 전환 제안이 포함된 플랜
 
 전체 검증 기록: [docs/plans/2026-04-24-phase-e-game-api-battlefield.md](docs/plans/2026-04-24-phase-e-game-api-battlefield.md)
+
+---
+
+## 20. 정책 필터·검증 게이트는 우회 경로/오분류 전수 점검과 함께 (v3.118.0-6 리뷰)
+
+### 문제
+
+v3.118.0-6 릴리즈 전수 리뷰(2026-07-10, 파인더 10각도 + 적대적 검증 5 + 갭스윕)에서 확정 결함 14건 + PLAUSIBLE 1건 발견 — 대부분이 릴리즈의 수정 3건(Fix E 빈자리AoE / Fix F 자해게이트 / Fix B 근접누수) **자체가 만든 것**. 전체 목록·수정 방향: [docs/reviews/2026-07-10-v3.118-code-review.md](docs/reviews/2026-07-10-v3.118-code-review.md).
+
+반복 패턴 3개:
+
+1. **필터를 수집 지점에만 걸고 raw 재조회 우회 방치** (4건): Fix F/B 필터는 SituationAnalyzer 수집에만 적용 → `FindAnyAttackAbility`(RawFacts 직조회)가 자해 게이트를, `PlanSelfTargetedAoE`("전체에서 다시 찾기" 재수집)·`GetZeroAPAttacks`(파라미터 없음)가 선호 필터를 우회. 필터가 벗겨낸 상태(선호 공격 없음)가 정확히 폴백 진입 조건이라 **게이트가 스스로 우회를 유발**.
+2. **게이트 술어가 ActionType+타겟 모양으로 의도 추측** (2건): Fix E의 점유 게이트(`Attack + Entity==null + 포인트`)가 "데미지 AoE"를 의도했으나 — 과잉: Overwatch/Veil(TurnEnding 포인트 시전, 적 0이 정상)을 3중 차단해 기능 사멸. 누락: AllTargets 멀티포인트(AerialRush)는 4중 레이어 전부에서 제외돼 스테일 시전 무검증. **같은 게이트에서 양방향 오류 동시 발생.**
+3. **replan이 버리는 상태에 턴 사실 저장** (3건): 플랜-로컬 `hasUsedWarpRelayThisTurn`(replan 후 Cycle 유실), `initialZeroAPAttacks=0` 하드코딩(대피 replan 루프 → 위험지대 턴엔드), 짧은 생성자 9곳(스냅샷 0 → 허위 replan). replan 생존 표면(`TurnState.HasUsedAbility` — 호출자 0, StrategicContext)이 이미 있는데 미사용.
+
+### 원인
+
+- 수정을 "차단 지점 1곳 추가"로 설계하고 **우회 경로 호출 그래프를 그리지 않음**
+- 게이트 면제/포함 판정을 기존 타입 시스템(ActionType, TargetWrapper 모양)에 의존 — 의도(적 점유 필요? 스탠스? 멀티포인트?)를 표현하는 명시 플래그 부재
+- replan의 "모든 플랜 상태 폐기" 계약을 개별 수정에서 반복적으로 망각
+
+### 규칙 (CLAUDE.md "AI 플래닝 코드 함정" 섹션과 동일 — 신규 코드 즉시 적용)
+
+1. 정책 필터는 CombatAPI 조회 함수 **내부**에. 플래너 raw 재조회 신설 금지.
+2. 턴 내 "이미 했음"은 TurnState/StrategicContext에. 플랜-로컬/생성자 인자 금지.
+3. TurnPlan 스냅샷 인자 생략·0 하드코딩 금지.
+4. 게이트 신설 시 명시 의도 플래그 + 전 factory 과잉차단/누락 양방향 점검.
+5. 능력 등록 시 형제 변형(New/Mob/Legacy) 전수 확인 (Extermination Mark New 미등록 사례).
+6. 폴백 의미 변경 시 호출부 전수 grep (하드코딩 `PreferRanged` 4곳이 조용히 회귀한 사례).
+
+### 메타 교훈 — 기존 가드 3중 실패
+
+이번 위반 중 3건은 **기존 가드가 이미 커버하는 영역**이었다:
+
+- ★ 마커 "절대 금지" 규칙 존재 → 날짜 스탬프 변종(`★ 2026-07-07:`)이 metrics 정규식(`★\s*v[0-9]`)을 회피
+- catch 표준 존재 → `Warn + ex.Message` 변종이 silent-catch 정규식(`.Debug`만)을 회피
+- 완료 판정 기준 §2/§3("Replan/폴백 경로 확인") 존재 → 추상 문구는 grep 절차로 번역되지 않음
+
+**규칙은 변종에 약하고, 체크리스트는 추상성에 약하다.** 가드 강도 순서: ① 구조적 제거(필터를 API 안으로 → 규칙 자체가 불필요해짐) > ② 기계 검증(정규식은 변종을 포함하게 광범위하게) > ③ 트리거 조건이 달린 명령형 규칙 > ④ 추상 원칙. 이번 세션에서 ②를 수선(metrics 정규식 확장 + ★ 전수 카운트 추가)했고, ①은 수정 작업(그룹 A)의 목표.
+
+### 재사용 조건
+
+- 정책성 필터/게이트(선호·자해·안전·점유) 추가·변경하는 모든 작업
+- NeedsReplan / ActionExecutor에 검증 레이어 추가
+- "하드 제약" 시맨틱 도입 (불가능 설정 조합의 무경고 침묵 — PreferRanged+근접전용 사례 — 탐지/경고 필수)
+- 릴리즈 리뷰 시: 수정이 만든 신규 차단/필터에 대해 "이 게이트를 우회하는 경로"와 "이 게이트가 잘못 잡는 정상 케이스"를 각각 적대적 질문으로
