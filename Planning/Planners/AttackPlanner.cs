@@ -1652,6 +1652,18 @@ namespace CompanionAI_v3.Planning.Planners
             if (attack == null) return null;
             if (!CombatAPI.IsSelfTargetedAoEAttack(attack)) return null;
 
+            // F8: PreferRanged 유닛은 근접 분류 self-AoE(Blade Dance 등) 배제.
+            //   PlanSelfTargetedAoE(BasePlan.Attack)의 raw 재수집이 RangePreference 필터를 우회하므로
+            //   선택 함수에서 필터와 동일 기준(GetWeaponAttackType==Melee)으로 재적용. blanket 이 아니라
+            //   melee 분류만 — 원거리 self-AoE 노바는 PreferRanged 도 사용해야 함(형제 PlanMeleeAoEAttack 은
+            //   전부 근접이라 blanket, 여기는 혼재라 melee 한정).
+            if (situation.RangePreference == RangePreference.PreferRanged
+                && CombatHelpers.GetWeaponAttackType(attack) == CombatHelpers.WeaponAttackType.Melee)
+            {
+                if (Main.IsDebugEnabled) Log.Planning.Debug($"[{roleName}] Self-AoE {attack.Name} skipped: PreferRanged + melee-classified");
+                return null;
+            }
+
             float cost = CombatAPI.GetAbilityAPCost(attack);
             if (cost > remainingAP) return null;
 

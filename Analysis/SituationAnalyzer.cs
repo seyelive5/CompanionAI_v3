@@ -827,18 +827,15 @@ namespace CompanionAI_v3.Analysis
                 }
 
                 // 자해(HP 코스트) 능력 게이트 — HP가 임계값 미만이면 어떤 분류 목록에도 넣지 않음.
-                // DB 등록 능력은 등록 임계값(예: Bloodletting 60), 미등록은 컴포넌트 자동 감지 +
-                // SC 기본 임계값. 리플랜마다 재평가되므로 연속 시전은 HP 하락과 함께 자연 중단됨.
-                // (기존엔 미등록 자해 능력이 threshold 0 버프로 분류돼 죽을 때까지 재시전 — Kibellah 제보)
-                if (CombatAPI.IsSelfDamagingAbility(ability))
+                // 정책은 CombatAPI.IsSelfDamageBlockedAtHP 로 중앙화(관통 원인 1: 분석기 수집과
+                // 플래너 raw 재조회 FindAnyAttackAbility/GetZeroAPAttacks 가 동일 게이트 공유).
+                // 임계값 = DB 등록값 우선(예: Bloodletting 60), 없으면 SC 기본값. 리플랜마다 재평가되어
+                // 연속 시전은 HP 하락과 함께 자연 중단. (미등록 자해가 threshold 0 버프로 분류돼 죽을 때까지
+                // 재시전되던 Kibellah 제보 케이스 차단.)
+                if (CombatAPI.IsSelfDamageBlockedAtHP(ability, situation.HPPercent))
                 {
-                    float selfDamageThreshold = AbilityDatabase.GetHPThreshold(ability);
-                    if (selfDamageThreshold <= 0f) selfDamageThreshold = SC.SelfDamageDefaultHPThreshold;
-                    if (situation.HPPercent < selfDamageThreshold)
-                    {
-                        Log.Analysis.Info($"[Analyzer] Blocked self-damage {CombatAPI.GetAbilityDisplayName(ability)}: HP {situation.HPPercent:F0}% < threshold {selfDamageThreshold:F0}%");
-                        continue;
-                    }
+                    Log.Analysis.Info($"[Analyzer] Blocked self-damage {CombatAPI.GetAbilityDisplayName(ability)}: HP {situation.HPPercent:F0}% below threshold");
+                    continue;
                 }
 
                 var timing = AbilityDatabase.GetTiming(ability);

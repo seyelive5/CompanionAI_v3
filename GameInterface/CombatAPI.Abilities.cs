@@ -123,6 +123,10 @@ namespace CompanionAI_v3.GameInterface
                 var rawAbilities = unit.Abilities?.RawFacts;
                 if (rawAbilities == null) return null;
 
+                // F4: 자해 HP 게이트용 현재 HP% (아래 psyker 패스 + 최종 offensive 폴백에서 사용).
+                //   raw 재조회는 분석기 수집 게이트를 우회하므로 여기서 동일 정책을 재적용(관통 원인 1).
+                float hpPercent = CombatCache.GetHPPercent(unit);
+
                 AbilityData preferredAttack = null;
                 float preferredRange = 0f;
                 AbilityData fallbackAttack = null;
@@ -222,6 +226,10 @@ namespace CompanionAI_v3.GameInterface
                             // 근접 스킬 제외
                             if (abilityData.IsMelee) continue;
 
+                            // F4: 자해(HP 코스트) 능력 HP 게이트 — Blood Oath 등이 HP 임계값 아래에서 시전되어
+                            //   빈사에 이르는 것 방지. 분석기가 걸러도 이 raw 재조회가 되살리던 누수 차단.
+                            if (IsSelfDamageBlockedAtHP(abilityData, hpPercent)) continue;
+
                             List<string> reasons;
                             if (IsAbilityAvailable(abilityData, out reasons))
                             {
@@ -265,6 +273,10 @@ namespace CompanionAI_v3.GameInterface
                             // 원거리 전용은 최종 폴백에서도 근접 배제 (위 사이킥 패스와 동일 기준)
                             if (preference == RangePreference.PreferRanged && abilityData.IsMelee) continue;
 
+                            // F4: 자해 HP 게이트 (키벨라 Blood Oath 실증 누수 지점 — 게이트가 만든
+                            //   "선호 공격 불가" 상태로 폴백 진입 후 여기서 자해 능력을 반환하던 경로).
+                            if (IsSelfDamageBlockedAtHP(abilityData, hpPercent)) continue;
+
                             List<string> reasons;
                             if (IsAbilityAvailable(abilityData, out reasons))
                             {
@@ -286,6 +298,21 @@ namespace CompanionAI_v3.GameInterface
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// 자해(HP 코스트) 능력을 현재 HP% 에서 시전 차단해야 하는지 (정책 게이트).
+        /// 임계값 = DB 등록값(>0) 우선, 없으면 SC.SelfDamageDefaultHPThreshold.
+        /// 분석기 수집(SituationAnalyzer)과 플래너 raw 재조회(FindAnyAttackAbility/GetZeroAPAttacks)가
+        /// 공유 — 수집 지점에만 걸면 raw 재조회가 우회한다(관통 원인 1). 새 raw 재조회 신설 시 통과시킬 것.
+        /// </summary>
+        public static bool IsSelfDamageBlockedAtHP(AbilityData ability, float hpPercent)
+        {
+            if (ability == null) return false;
+            if (!IsSelfDamagingAbility(ability)) return false;
+            float threshold = AbilityDatabase.GetHPThreshold(ability);
+            if (threshold <= 0f) threshold = SC.SelfDamageDefaultHPThreshold;
+            return hpPercent < threshold;
         }
 
         public static float GetAbilityAPCost(AbilityData ability)
@@ -387,13 +414,15 @@ namespace CompanionAI_v3.GameInterface
         /// <summary>
         /// ★ v3.5.88: 0 AP 공격 목록 가져오기
         /// </summary>
-        public static List<AbilityData> GetZeroAPAttacks(BaseUnitEntity unit)
+        public static List<AbilityData> GetZeroAPAttacks(BaseUnitEntity unit, RangePreference preference = RangePreference.Adaptive)
         {
             var result = new List<AbilityData>();
             if (unit == null) return result;
 
             try
             {
+                // F4/F14: 자해 HP 게이트용 현재 HP% (0-AP 자해 능력을 임계값 아래에서 계획/카운트 금지).
+                float hpPercent = CombatCache.GetHPPercent(unit);
                 var abilities = GetAvailableAbilities(unit);
                 foreach (var ability in abilities)
                 {
@@ -403,6 +432,14 @@ namespace CompanionAI_v3.GameInterface
                     bool isAttack = ability.Weapon != null ||
                                    IsOffensiveAbility(ability);
                     if (!isAttack) continue;
+
+                    // F4/F14: 0-AP 자해 능력은 HP 임계값 아래에서 제외 (관통 원인 1 — API 내재화).
+                    if (IsSelfDamageBlockedAtHP(ability, hpPercent)) continue;
+
+                    // F14: PreferRanged 유닛은 0-AP 근접(Kick/Death Whisper 등) 제외 — 원거리 선호 누수 차단.
+                    //   FindAnyAttackAbility 의 PreferRanged&&IsMelee 배제와 동일 기준. count 호출자는 기본
+                    //   Adaptive 로 상호 일관(F2/F12 스냅샷↔replan), planning 호출자만 실제 preference 전달.
+                    if (preference == RangePreference.PreferRanged && ability.IsMelee) continue;
 
                     // ★ v3.8.86: GetEffectiveAPCost 사용 - bonus usage 공격도 감지
                     float cost = GetEffectiveAPCost(ability);

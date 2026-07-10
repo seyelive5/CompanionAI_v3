@@ -232,7 +232,9 @@ namespace CompanionAI_v3.Planning.Plans
         {
             if (!situation.HasHittableEnemies) return;
 
-            var zeroAPAttacks = CombatAPI.GetZeroAPAttacks(situation.Unit);
+            // F14: planning 은 유닛 실제 preference 전달 → PreferRanged 유닛의 0-AP 근접 누수 차단.
+            //   (스냅샷/replan count 호출자는 기본 Adaptive 유지 → 상호 일관성 = F2/F12 보존)
+            var zeroAPAttacks = CombatAPI.GetZeroAPAttacks(situation.Unit, situation.RangePreference);
             if (zeroAPAttacks.Count == 0) return;
 
             int planned = 0;

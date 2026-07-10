@@ -247,7 +247,11 @@
 
 **배경**: 릴리즈 범위 c970229..bdf6a8f 전수 리뷰(파인더 10각도 + 적대적 검증 5 + 갭스윕). **작업 지시서: [docs/reviews/2026-07-10-v3.118-code-review.md](docs/reviews/2026-07-10-v3.118-code-review.md)** — 항목별 앵커/메커니즘/수정 방향 + 반박 4건(재수정 금지) 포함. 재발 방지 가드는 적용 완료(CLAUDE.md "AI 플래닝 코드 함정" + Lesson 20 + code-metrics.sh 정규식 확장).
 
-- [ ] **그룹 A — 필터 API 내재화**: F4(자해 게이트 우회, 키벨라 Blood Oath)·F8(Blade Dance 재수집)·F14(0-AP preference) — FindAnyAttackAbility/GetZeroAPAttacks 내부에 게이트 내장
+- [x] **그룹 A — 필터 API 내재화 (v3.118.9, 구현 완료 — 인게임 검증 대기)**: F4(자해 게이트 우회, 키벨라 Blood Oath)·F8(Blade Dance 재수집)·F14(0-AP preference) — 관통 원인 1 해소
+  - 공유 헬퍼 `CombatAPI.IsSelfDamageBlockedAtHP(ability, hp%)` 신설(임계값 = DB 등록값 우선, 없으면 SC 기본). SituationAnalyzer:833 게이트를 이 헬퍼로 리팩토링(DRY).
+  - F4: FindAnyAttackAbility psyker 패스 + 최종 offensive 폴백에 헬퍼 게이트 적용 → Blood Oath 등 raw 재조회 누수 차단.
+  - F14: GetZeroAPAttacks에 자해 게이트(무조건) + `preference` 파라미터(PreferRanged 근접 배제) 내재화. planning(PlanZeroAPAttacks)만 실제 preference 전달, count 호출자(스냅샷/replan)는 기본 Adaptive 유지 → F2/F12 count 일관성 보존.
+  - F8: PlanSelfTargetedAoEAttack에 `PreferRanged && GetWeaponAttackType==Melee` 게이트(필터와 동일 기준) → Blade Dance 재수집 누수 차단, 원거리 self-AoE 노바는 유지(blanket 아님).
 - [x] **그룹 B — 게이트 의도 플래그 (v3.118.7, 구현 완료 — 인게임 검증 대기)**: F1(**Overwatch/Veil TurnEnding 시전 사멸 회귀 — 최상위**)·F5(AllTargets 스테일 시전 무검증)
   - `PlannedAction.RequiresEnemyOccupancy` 플래그 신설(기본 true = Fix E 유지). `PositionalAttack(..., requiresEnemyOccupancy=false)` 옵트아웃 2곳만: BuffPlanner.cs:1623(TurnEnding Overwatch/Veil)·MovementPlanner.cs:1136(후퇴 대시).
   - F1: TurnPlan 1-3b + ActionExecutor 백스톱(:281) 두 게이트에 `&& RequiresEnemyOccupancy` 추가 → Overwatch 3중 차단(replan 루프+백스톱+ally체크) 우회. 양방향 감사: AttackPlanner:963/1060/1371(공격형 AoE)·auto-convert(:129)·MovementPlanner leap(:322/447)는 default true 유지 → Fix E 무손상.
