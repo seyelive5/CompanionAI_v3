@@ -343,6 +343,9 @@ namespace CompanionAI_v3.Analysis
         /// <summary>★ v3.0.2: 이번 턴 이동 완료 여부 (중복 이동 방지)</summary>
         public bool HasMovedThisTurn { get; set; }
 
+        /// <summary>이번 턴 AoE 긴급 대피를 이미 시도했는지 (F3 — TurnState 미러). 공격 이동과 대피 이동을 구분해 재대피 게이트에 사용.</summary>
+        public bool HasEvacuatedThisTurn { get; set; }
+
         /// <summary>★ v3.0.3: 이번 턴 이동 횟수</summary>
         public int MoveCount { get; set; }
 
@@ -513,6 +516,7 @@ namespace CompanionAI_v3.Analysis
             HasHealedThisTurn = false;
             HasReloadedThisTurn = false;
             HasMovedThisTurn = false;
+            HasEvacuatedThisTurn = false;
             MoveCount = 0;
             AllowPostAttackMove = false;
             AllowChaseMove = false;

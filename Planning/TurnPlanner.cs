@@ -4,6 +4,7 @@ using Kingmaker.EntitySystem.Entities;
 using CompanionAI_v3.Core;
 using CompanionAI_v3.Analysis;
 using CompanionAI_v3.Diagnostics;
+using CompanionAI_v3.GameInterface;
 using CompanionAI_v3.Settings;
 using CompanionAI_v3.Planning.Plans;
 using CompanionAI_v3.Logging;
@@ -84,7 +85,11 @@ namespace CompanionAI_v3.Planning
             {
                 Log.Planning.Error($"[TurnPlanner] Error: {ex.Message}");
                 var fallbackActions = new List<PlannedAction> { PlannedAction.EndTurn($"Error: {ex.Message}") };
-                return new TurnPlan(fallbackActions, TurnPriority.EndTurn, "Error fallback");
+                // F12: 짧은 생성자는 InitialAP/MP/zeroAP=0 → NeedsReplan Section 3 허위 발화(같은 틱 replan 루프).
+                //   EndTurn 폴백에도 실제 스냅샷을 채움 (GetZeroAPAttacks 는 null/예외 내부 가드됨).
+                return new TurnPlan(fallbackActions, TurnPriority.EndTurn, "Error fallback",
+                    situation.HPPercent, situation.NearestEnemyDistance, situation.NormalHittableCount,
+                    situation.CurrentAP, situation.CurrentMP, CombatAPI.GetZeroAPAttacks(situation.Unit).Count);
             }
         }
 

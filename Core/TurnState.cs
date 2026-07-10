@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using Kingmaker.EntitySystem.Entities;
+using Kingmaker.UnitLogic.Abilities;
 using UnityEngine;
 using CompanionAI_v3.Analysis;
 using CompanionAI_v3.Logging;
@@ -76,6 +78,13 @@ namespace CompanionAI_v3.Core
 
         /// <summary>이동 완료 여부</summary>
         public bool HasMovedThisTurn { get; set; }
+
+        /// <summary>
+        /// 이번 턴 AoE 긴급 대피를 이미 시도했는지 (F3).
+        /// HasMovedThisTurn(모든 이동에 set)과 달리 IsEvacuationMove Move 에만 set —
+        /// 공격 위치로 이동 후 그 자리가 위험지대여도 재대피가 차단되지 않도록 게이트 분리.
+        /// </summary>
+        public bool HasEvacuatedThisTurn { get; set; }
 
         /// <summary>공격 완료 여부 (첫 공격)</summary>
         public bool HasAttackedThisTurn { get; set; }
@@ -250,6 +259,9 @@ namespace CompanionAI_v3.Core
                     case ActionType.Move:
                         HasMovedThisTurn = true;
                         MoveCount++;  // ★ v3.0.3: 이동 횟수 추적
+                        // F3: 대피 이동이면 별도 플래그 — replan 후에도 "이번 턴 대피 시도함" 보존
+                        if (action.IsEvacuationMove)
+                            HasEvacuatedThisTurn = true;
                         // ★ v3.74.2: 이동 전 위치 기록 (진동 방지)
                         if (Unit != null)
                             LastMoveOrigin = Unit.Position;
@@ -304,6 +316,21 @@ namespace CompanionAI_v3.Core
                 {
                     return true;
                 }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 이번 턴에 조건을 만족하는 능력을 성공적으로 사용했는지 (replan 생존 — ExecutedActions 기반).
+        /// 플랜-로컬 bool 은 replan 이 버리므로, 턴 단위 사실(예: Warp Relay 사용)은 이걸로 조회한다.
+        /// </summary>
+        public bool HasExecutedAbilityMatching(Func<AbilityData, bool> predicate)
+        {
+            if (predicate == null) return false;
+            foreach (var action in ExecutedActions)
+            {
+                if (action.WasSuccessful == true && action.Ability != null && predicate(action.Ability))
+                    return true;
             }
             return false;
         }

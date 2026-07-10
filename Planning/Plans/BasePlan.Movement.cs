@@ -354,7 +354,9 @@ namespace CompanionAI_v3.Planning.Plans
                 var safePos = ((CustomGridNodeBase)bestNode).Vector3Position;
                 Log.Planning.Info($"[{RoleName}] ★ AoE Evacuation: Moving to ({safePos.x:F1},{safePos.z:F1}), distance={bestDist:F1}m");
 
-                return PlannedAction.Move(safePos, $"Emergency evacuation ({reason})");
+                var evacMove = PlannedAction.Move(safePos, $"Emergency evacuation ({reason})");
+                evacMove.IsEvacuationMove = true;  // F3: TurnState.HasEvacuatedThisTurn 표식 (재대피 게이트 분리)
+                return evacMove;
             }
             catch (Exception ex)
             {
@@ -364,14 +366,16 @@ namespace CompanionAI_v3.Planning.Plans
         }
 
         /// <summary>
-        /// 초기 Phase(Ultimate / AoE 대피 / 긴급 힐) Emergency 플랜 생성 — situation 스냅샷 포함.
-        /// 짧은 생성자를 쓰면 InitialAP/MP 가 0 으로 남아 NeedsReplan 이 "AP 증가(0→N)"로 오판,
-        /// 같은 플랜을 반복 재계산함(대피 이중계산의 근본 원인). 정상 플랜과 동일 스냅샷을 넘겨 방지.
+        /// Situation 스냅샷을 채운 TurnPlan 생성 — situation 을 가진 모든 플랜 생성의 단일 진입점.
+        /// 짧은 생성자(스냅샷 인자 생략)를 쓰면 InitialAP/MP/zeroAP 가 0 으로 남아 NeedsReplan Section 3
+        /// 이 "AP 증가(0→N)" / "새 0-AP 공격(0→N)"으로 오판, 같은 틱 replan 루프를 만든다(F2/F12).
+        /// zeroAP 카운트까지 풀플랜 생성부(예: DPSPlan)와 동일 소스로 채워 이 오판을 원천 차단.
         /// </summary>
-        protected TurnPlan CreateEarlyPhasePlan(List<PlannedAction> actions, TurnPriority priority, string reasoning, Situation situation)
+        protected TurnPlan CreatePlanWithSnapshot(List<PlannedAction> actions, TurnPriority priority, string reasoning, Situation situation)
         {
             return new TurnPlan(actions, priority, reasoning, situation.HPPercent, situation.NearestEnemyDistance,
-                situation.NormalHittableCount, situation.CurrentAP, situation.CurrentMP, 0);
+                situation.NormalHittableCount, situation.CurrentAP, situation.CurrentMP,
+                CombatAPI.GetZeroAPAttacks(situation.Unit).Count);
         }
 
         /// <summary>
@@ -394,27 +398,28 @@ namespace CompanionAI_v3.Planning.Plans
                 if (ultimateAction != null)
                 {
                     actions.Add(ultimateAction);
-                    return CreateEarlyPhasePlan(actions, TurnPriority.Critical,
+                    return CreatePlanWithSnapshot(actions, TurnPriority.Critical,
                         $"{RoleName} ultimate (Transcend Potential)", situation);
                 }
                 Log.Planning.Info($"[{RoleName}] Ultimate failed during Transcend Potential - ending turn");
                 actions.Add(PlannedAction.EndTurn($"{RoleName} no ultimate available"));
-                return new TurnPlan(actions, TurnPriority.EndTurn,
-                    $"{RoleName} ultimate failed (Transcend Potential)");
+                return CreatePlanWithSnapshot(actions, TurnPriority.EndTurn,
+                    $"{RoleName} ultimate failed (Transcend Potential)", situation);
             }
 
             // Phase 0.5: AoE Evacuation
-            // ★ HasMovedThisTurn 가드: 이미 이번 턴에 이동했는데도 여전히 AoE 안이면(포화 전장 등
-            //   MP 로 도달 가능한 안전 타일 없음) 재대피는 무의미 — 같은 곳 반복 이동하다 stagnation 으로
-            //   턴엔드됨. 대신 여기서 대피를 건너뛰어 이후 공격 Phase 로 진행(AoE 피해는 어차피 불가피,
-            //   최소한 공격은 하도록). 첫 이동 기회는 보존됨.
-            if (situation.NeedsAoEEvacuation && situation.CanMove && !situation.HasMovedThisTurn)
+            // F3: HasEvacuatedThisTurn 가드 (HasMovedThisTurn 아님).
+            //   막으려는 것은 "대피→여전히 AoE→재대피" 루프뿐. 그런데 HasMovedThisTurn 은 공격 이동에도
+            //   set 되므로, 공격 위치로 이동한 뒤 그 자리가 위험지대(또는 이동 후 새 마커)면 대피가
+            //   영구 차단됐다(Run and Gun 으로 MP 회복 후 재대피도 차단). 대피 시도 자체를 추적하는
+            //   HasEvacuatedThisTurn 으로 게이트해 "이미 이번 턴 대피 시도함"일 때만 스킵.
+            if (situation.NeedsAoEEvacuation && situation.CanMove && !situation.HasEvacuatedThisTurn)
             {
                 var evacAction = PlanAoEEvacuation(situation);
                 if (evacAction != null)
                 {
                     actions.Add(evacAction);
-                    return CreateEarlyPhasePlan(actions, TurnPriority.Emergency,
+                    return CreatePlanWithSnapshot(actions, TurnPriority.Emergency,
                         $"{RoleName} AoE evacuation", situation);
                 }
             }
@@ -424,7 +429,7 @@ namespace CompanionAI_v3.Planning.Plans
             if (healAction != null)
             {
                 actions.Add(healAction);
-                return CreateEarlyPhasePlan(actions, TurnPriority.Emergency,
+                return CreatePlanWithSnapshot(actions, TurnPriority.Emergency,
                     $"{RoleName} emergency heal", situation);
             }
 
@@ -484,8 +489,8 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     ctx.Actions.AddRange(switchActions);
                     Log.Planning.Info($"[{ctx.RoleName}] Phase 1.55: Switch-First — switching weapon for better effectiveness");
-                    return new TurnPlan(ctx.Actions, TurnPriority.DirectAttack,
-                        $"{ctx.RoleName} weapon switch-first");
+                    return CreatePlanWithSnapshot(ctx.Actions, TurnPriority.DirectAttack,
+                        $"{ctx.RoleName} weapon switch-first", ctx.Situation);
                 }
             }
 
@@ -517,12 +522,17 @@ namespace CompanionAI_v3.Planning.Plans
         protected bool ExecuteFamiliarSupportPhase(
             List<PlannedAction> actions,
             Situation situation,
+            TurnState turnState,
             ref float remainingAP,
             bool supportMode,
             out HashSet<string> usedKeystoneGuids)
         {
             usedKeystoneGuids = supportMode ? new HashSet<string>() : null;
-            bool usedWarpRelay = false;
+            // F7: relay 사용 여부는 replan 을 넘겨 살아남아야 함 — 플랜-로컬 false 가 아니라
+            //   이번 턴 실행 기록(TurnState)에서 relay 대상 능력 사용을 조회해 초기화.
+            //   (relay 시전 → replan → 새 플랜의 keystone 루프 공백 → Cycle 유실 방지)
+            bool usedWarpRelay = situation.FamiliarType == PetType.Raven
+                && (turnState?.HasExecutedAbilityMatching(FamiliarAbilities.IsWarpRelayTarget) ?? false);
 
             if (!situation.HasFamiliar) return false;
 

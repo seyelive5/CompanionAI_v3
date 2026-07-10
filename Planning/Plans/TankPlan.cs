@@ -61,14 +61,14 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     actions.AddRange(switchActions);
                     Log.Planning.Info($"[Tank] Phase 1.55: Switch-First — switching weapon for better effectiveness");
-                    return new TurnPlan(actions, TurnPriority.DirectAttack, "Tank weapon switch-first");
+                    return CreatePlanWithSnapshot(actions, TurnPriority.DirectAttack, "Tank weapon switch-first", situation);
                 }
             }
 
             // ★ v3.12.0: Phase 1.75 공통 Familiar 처리
             HashSet<string> _; // Tank는 키스톤 GUID 추적 불필요
             bool usedWarpRelay = ExecuteFamiliarSupportPhase(
-                actions, situation, ref remainingAP,
+                actions, situation, turnState, ref remainingAP,
                 supportMode: false, out _);
 
             // ★ v3.40.0: Phase 1.8 — Cautious/Confident Approach 스탠스 선택 (Tank = 방어 우선)

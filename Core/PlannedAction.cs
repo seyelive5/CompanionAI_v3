@@ -30,6 +30,14 @@ namespace CompanionAI_v3.Core
         /// <summary>이동 목적지 (Move 타입일 때)</summary>
         public Vector3? MoveDestination { get; set; }
 
+        /// <summary>
+        /// 이 Move 가 AoE 긴급 대피 이동인지 (F3: 대피 시도 추적용).
+        /// TurnState.RecordAction 이 이 플래그를 보고 HasEvacuatedThisTurn 을 set —
+        /// "이동했음"(HasMovedThisTurn)과 "이번 턴 대피를 이미 시도함"을 구분해
+        /// 공격 이동 후 위험지대 재대피가 영구 차단되는 것을 방지.
+        /// </summary>
+        public bool IsEvacuationMove { get; set; }
+
         /// <summary>이 행동의 AP 비용</summary>
         public float APCost { get; set; }
 

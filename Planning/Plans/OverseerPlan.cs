@@ -69,7 +69,7 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     actions.AddRange(switchActions);
                     Log.Planning.Info($"[Overseer] Phase 1.55: Switch-First — switching weapon for better effectiveness");
-                    return new TurnPlan(actions, TurnPriority.DirectAttack, "Overseer weapon switch-first");
+                    return CreatePlanWithSnapshot(actions, TurnPriority.DirectAttack, "Overseer weapon switch-first", situation);
                 }
             }
 
@@ -98,7 +98,10 @@ namespace CompanionAI_v3.Planning.Plans
             }
 
             // 이번 턴 WarpRelay 사용 여부 추적
-            bool usedWarpRelay = false;
+            // F7: 플랜-로컬 false 가 아니라 이번 턴 실행 기록(TurnState)에서 초기화 —
+            //   relay 시전 → replan 후 새 플랜의 keystone 루프 공백에서도 Cycle 이 살아남도록.
+            bool usedWarpRelay = situation.FamiliarType == PetType.Raven
+                && (turnState?.HasExecutedAbilityMatching(FamiliarAbilities.IsWarpRelayTarget) ?? false);
             // ★ v3.18.0: Phase 3.5.5 공격적 재배치 여부 (Phase 4.6 문자열 매칭 대체)
             bool didAggressiveRelocate = false;
 
@@ -140,10 +143,8 @@ namespace CompanionAI_v3.Planning.Plans
                             actions.Add(reactivateAction);
                             Log.Planning.Info($"[Overseer] Phase 2.9: ★ Familiar Reactivation — {situation.Familiar.CharacterName}");
 
-                            return new TurnPlan(actions, TurnPriority.Emergency,
-                                "Overseer familiar reactivation",
-                                situation.HPPercent, situation.NearestEnemyDistance,
-                                situation.NormalHittableCount, situation.CurrentAP, situation.CurrentMP, 0);
+                            return CreatePlanWithSnapshot(actions, TurnPriority.Emergency,
+                                "Overseer familiar reactivation", situation);
                         }
                         else
                         {
@@ -173,10 +174,8 @@ namespace CompanionAI_v3.Planning.Plans
                                     actions.Add(moveReactivateAction);
                                     Log.Planning.Info($"[Overseer] Phase 2.9: ★ Move + Reactivate — {situation.Familiar.CharacterName} (dist after move: {distAfterMove:F1})");
 
-                                    return new TurnPlan(actions, TurnPriority.Emergency,
-                                        "Overseer move + familiar reactivation",
-                                        situation.HPPercent, situation.NearestEnemyDistance,
-                                        situation.NormalHittableCount, situation.CurrentAP, situation.CurrentMP, 0);
+                                    return CreatePlanWithSnapshot(actions, TurnPriority.Emergency,
+                                        "Overseer move + familiar reactivation", situation);
                                 }
                                 else
                                 {
@@ -364,10 +363,12 @@ namespace CompanionAI_v3.Planning.Plans
 
                 // ────────────────────────────────────────────────────────────
                 // 3.5: Raven Cycle (WarpRelay 후 재시전)
-                // ★ v3.18.8: BUFF 모드 Raven은 Phase 3.4 결과와 무관하게 시도
-                //   (Phase 3.4에서 근처 아군이 이미 버프됐어도 Cycle에서 다른 버프 시도 가능)
+                //   F7: usedWarpRelay 는 이제 TurnState 기반(replan 생존)이므로, BUFF 모드에서
+                //   이번 플랜 keystone 루프가 공백이어도 이번 턴 relay 를 썼다면 Cycle 이 발동한다.
+                //   (구 v3.18.8 의 `isRavenBuffPhase && Raven` 분기는 usedWarpRelay=false 를 그대로
+                //    전달해 항상 null 이던 inert 코드였음 — 제거.)
                 // ────────────────────────────────────────────────────────────
-                if (usedWarpRelay || (isRavenBuffPhase && situation.FamiliarType == PetType.Raven))
+                if (usedWarpRelay)
                 {
                     var cycle = PlanFamiliarCycle(situation, ref remainingAP, usedWarpRelay);
                     if (cycle != null)

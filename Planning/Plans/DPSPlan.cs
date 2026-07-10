@@ -71,7 +71,7 @@ namespace CompanionAI_v3.Planning.Plans
                     {
                         actions.AddRange(switchActions);
                         Log.Planning.Info($"[DPS] Phase 1.55: Switch-First — current weapon ineffective, switching before attacks");
-                        return new TurnPlan(actions, TurnPriority.DirectAttack, "DPS weapon switch-first");
+                        return CreatePlanWithSnapshot(actions, TurnPriority.DirectAttack, "DPS weapon switch-first", situation);
                     }
                 }
             }
@@ -110,7 +110,7 @@ namespace CompanionAI_v3.Planning.Plans
                         // 전략 컨텍스트에 보너스 전환 표시 — Phase 1.55가 되돌리지 않도록
                         turnState.SetContext(StrategicContextKeys.BonusWeaponSwitch, true);
                         Log.Planning.Info($"[DPS] Phase 1.56: All attacks bonus-only — switching weapon for AoE + trigger bonus");
-                        return new TurnPlan(actions, TurnPriority.DirectAttack, "DPS bonus weapon switch");
+                        return CreatePlanWithSnapshot(actions, TurnPriority.DirectAttack, "DPS bonus weapon switch", situation);
                     }
                 }
             }
@@ -225,7 +225,7 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.12.0: Phase 1.75 공통 Familiar 처리
             HashSet<string> _; // DPS는 키스톤 GUID 추적 불필요
             bool usedWarpRelay = ExecuteFamiliarSupportPhase(
-                actions, situation, ref remainingAP,
+                actions, situation, turnState, ref remainingAP,
                 supportMode: false, out _);
 
             // ★ v3.40.0: Phase 1.8 — Cautious/Confident Approach 스탠스 선택

@@ -1332,6 +1332,7 @@ namespace CompanionAI_v3.Analysis
             situation.HasHealedThisTurn = turnState.HasHealedThisTurn;
             situation.HasReloadedThisTurn = turnState.HasReloadedThisTurn;
             situation.HasMovedThisTurn = turnState.HasMovedThisTurn;
+            situation.HasEvacuatedThisTurn = turnState.HasEvacuatedThisTurn;  // F3
             situation.MoveCount = turnState.MoveCount;  // ★ v3.0.3
 
             // ★ v3.0.3: 공격 후 추가 이동 허용 판단

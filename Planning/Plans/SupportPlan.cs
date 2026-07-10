@@ -60,14 +60,14 @@ namespace CompanionAI_v3.Planning.Plans
                 {
                     actions.AddRange(switchActions);
                     Log.Planning.Info($"[Support] Phase 1.55: Switch-First — switching weapon for better effectiveness");
-                    return new TurnPlan(actions, TurnPriority.DirectAttack, "Support weapon switch-first");
+                    return CreatePlanWithSnapshot(actions, TurnPriority.DirectAttack, "Support weapon switch-first", situation);
                 }
             }
 
             // ★ v3.12.0: Phase 1.75 공통 Familiar 처리 (Support: GUID 추적 + 보호 능력 포함)
             HashSet<string> usedKeystoneAbilityGuids;
             bool usedWarpRelay = ExecuteFamiliarSupportPhase(
-                actions, situation, ref remainingAP,
+                actions, situation, turnState, ref remainingAP,
                 supportMode: true, out usedKeystoneAbilityGuids);
 
             // ★ v3.8.67: ClearMP 선제 후퇴는 Phase 5.8에서 처리
