@@ -252,3 +252,4 @@
 - [ ] **그룹 C — replan 생존 상태**: F2(대피 zero-AP 루프 — v3.118.6 §12 무효화)·F12(짧은 생성자 9곳)·F3(!HasMovedThisTurn 대피 과잉 억제)·F7(RavenCycle 유실)
 - [ ] **그룹 D — 독립 소형**: F6(하드코딩 PreferRanged 4곳 → 근접 유닛 이동 회귀)·F10(자해 2차 보호 등록-키)·F11(갭클로저 단독후보)·F13(Extermination Mark New GUID — PLAUSIBLE, 검증 우선)·F15(catch 교정)·F9(근접전용+PreferRanged 무경고 — **설계 결정 필요**)
 - ⚠️ **§9/§12 인게임 검증 교차**: §12 검증은 F2/F3 수정 전 **실패 예상** — 로그 해석 시 혼동 금지. §9 근접누수 확인 시 F8(Blade Dance)/F14(0-AP Kick)가 예외로 관찰될 수 있음. F1은 수정 전 `point AoE Overwatch|Veil` grep으로 실증 데이터 확보 가능.
+- [x] **로그 사전 점검 (2026-07-10)**: F1 흔적 없음(보유자 미출전 — 판정은 코드 추적 유지) / §12 버그 현장 8회+Stagnant 3유닛 실증(v3.118.6 이전 바이너리) / F2 감시 라인 = 대피 턴 `New 0 AP attack`(Heinrix Slash 보유 확인) / Blood Oath 차단 주체는 이 로그 기준 DOOM(§9 "키벨라" 귀속 재확인 필요). 상세: 리뷰 문서 말미.
