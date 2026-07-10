@@ -248,7 +248,10 @@
 **배경**: 릴리즈 범위 c970229..bdf6a8f 전수 리뷰(파인더 10각도 + 적대적 검증 5 + 갭스윕). **작업 지시서: [docs/reviews/2026-07-10-v3.118-code-review.md](docs/reviews/2026-07-10-v3.118-code-review.md)** — 항목별 앵커/메커니즘/수정 방향 + 반박 4건(재수정 금지) 포함. 재발 방지 가드는 적용 완료(CLAUDE.md "AI 플래닝 코드 함정" + Lesson 20 + code-metrics.sh 정규식 확장).
 
 - [ ] **그룹 A — 필터 API 내재화**: F4(자해 게이트 우회, 키벨라 Blood Oath)·F8(Blade Dance 재수집)·F14(0-AP preference) — FindAnyAttackAbility/GetZeroAPAttacks 내부에 게이트 내장
-- [ ] **그룹 B — 게이트 의도 플래그**: F1(**Overwatch/Veil TurnEnding 시전 사멸 회귀 — 최상위**)·F5(AllTargets 스테일 시전 무검증)
+- [x] **그룹 B — 게이트 의도 플래그 (v3.118.7, 구현 완료 — 인게임 검증 대기)**: F1(**Overwatch/Veil TurnEnding 시전 사멸 회귀 — 최상위**)·F5(AllTargets 스테일 시전 무검증)
+  - `PlannedAction.RequiresEnemyOccupancy` 플래그 신설(기본 true = Fix E 유지). `PositionalAttack(..., requiresEnemyOccupancy=false)` 옵트아웃 2곳만: BuffPlanner.cs:1623(TurnEnding Overwatch/Veil)·MovementPlanner.cs:1136(후퇴 대시).
+  - F1: TurnPlan 1-3b + ActionExecutor 백스톱(:281) 두 게이트에 `&& RequiresEnemyOccupancy` 추가 → Overwatch 3중 차단(replan 루프+백스톱+ally체크) 우회. 양방향 감사: AttackPlanner:963/1060/1371(공격형 AoE)·auto-convert(:129)·MovementPlanner leap(:322/447)는 default true 유지 → Fix E 무손상.
+  - F5: AllTargets 생산자는 AerialRush(MultiTargetAttack) 유일. FindBestAerialRushPath 선택 기준과 동일한 Bresenham `CountEnemiesInChargePath` 로 실행 시점(ActionExecutor)+replan(TurnPlan 1-3c) 재검증 → 스테일 라인 시전 시 실패→replan. 죽은 팩토리 2개(MultiTargetSupport/MoveThenMultiTargetAttack, 호출자 0) 제거.
 - [ ] **그룹 C — replan 생존 상태**: F2(대피 zero-AP 루프 — v3.118.6 §12 무효화)·F12(짧은 생성자 9곳)·F3(!HasMovedThisTurn 대피 과잉 억제)·F7(RavenCycle 유실)
 - [ ] **그룹 D — 독립 소형**: F6(하드코딩 PreferRanged 4곳 → 근접 유닛 이동 회귀)·F10(자해 2차 보호 등록-키)·F11(갭클로저 단독후보)·F13(Extermination Mark New GUID — PLAUSIBLE, 검증 우선)·F15(catch 교정)·F9(근접전용+PreferRanged 무경고 — **설계 결정 필요**)
 - ⚠️ **§9/§12 인게임 검증 교차**: §12 검증은 F2/F3 수정 전 **실패 예상** — 로그 해석 시 혼동 금지. §9 근접누수 확인 시 F8(Blade Dance)/F14(0-AP Kick)가 예외로 관찰될 수 있음. F1은 수정 전 `point AoE Overwatch|Veil` grep으로 실증 데이터 확보 가능.

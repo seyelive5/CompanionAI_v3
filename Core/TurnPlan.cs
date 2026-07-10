@@ -212,11 +212,13 @@ namespace CompanionAI_v3.Core
             // 좌표가 동결되어, 선행 액션의 킬/넉백/DoT 사망 후에도 빈 자리에 시전됨.
             // 현재 캐스터 위치 기준으로 패턴을 재계산해 의식 있는 적이 0이면 리플랜.
             // 패턴 계산 실패(Try=false)는 fail-open — 오탐 리플랜으로 정상 공격을 막지 않기 위함.
+            // RequiresEnemyOccupancy=false(구역 선점형 Overwatch/Veil·후퇴 대시)는 적 0이 정상이므로 제외.
             if (nextAction.Type == ActionType.Attack
                 && nextAction.Ability != null
                 && nextAction.Target != null
                 && nextAction.Target.Entity == null
                 && !nextAction.IsFamiliarTarget
+                && nextAction.RequiresEnemyOccupancy
                 && (nextAction.AllTargets == null || nextAction.AllTargets.Count == 0))
             {
                 var point = nextAction.Target.Point;
@@ -229,6 +231,30 @@ namespace CompanionAI_v3.Core
                 {
                     Log.Engine.Info($"[TurnPlan] Replan needed: point AoE {nextAction.Ability.Name} at ({point.x:F1}, {point.z:F1}) no longer hits any enemy");
                     return true;
+                }
+            }
+
+            // 1-3c. AllTargets(차지 라인) 공격의 경로 점유 재검증
+            //   AerialRush 등 P1→P2 멀티타겟 공격은 계획 시점 라인을 동결 — 선행 액션의 킬/넉백이나
+            //   적 이동으로 라인 상 적이 사라지면 빈 라인에 시전됨. 위 1-3b는 AllTargets 제외라 무검증.
+            //   FindBestAerialRushPath 선택 기준과 동일한 Bresenham CountEnemiesInChargePath 로 재확인
+            //   (동일 함수 → 방식 불일치 false-abort 없음). RequiresEnemyOccupancy=false 는 제외.
+            if (nextAction.Type == ActionType.Attack
+                && nextAction.RequiresEnemyOccupancy
+                && nextAction.AllTargets != null
+                && nextAction.AllTargets.Count >= 2)
+            {
+                var caster = currentSituation.Unit;
+                var liveEnemies = currentSituation.Enemies?.FindAll(e => e != null && e.IsConscious);
+                if (caster != null && liveEnemies != null && liveEnemies.Count > 0)
+                {
+                    var p1 = nextAction.AllTargets[0].Point;
+                    var p2 = nextAction.AllTargets[1].Point;
+                    if (PointTargetingHelper.CountEnemiesInChargePath(p1, p2, liveEnemies) == 0)
+                    {
+                        Log.Engine.Info($"[TurnPlan] Replan needed: charge line {nextAction.Ability?.Name} P1→P2 no longer hits any enemy");
+                        return true;
+                    }
                 }
             }
 

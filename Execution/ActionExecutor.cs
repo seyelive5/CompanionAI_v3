@@ -277,10 +277,14 @@ namespace CompanionAI_v3.Execution
             //   생존/도달/아군안전 어느 것도 재검증되지 않았음 — 이동 부분 실패, 직전 액션의
             //   킬/넉백 등 plan↔execute drift 시 빈 자리 시전 또는 아군 오폭 가능.
             //   사역마 타겟은 위 Warp Relay 전용 점유 체크가 이미 담당하므로 제외.
+            //   RequiresEnemyOccupancy=false(구역 선점형 Overwatch/Veil TurnEnding·후퇴 대시)는
+            //   적 0이 정상 시전이고 시전 시점에 즉발 AoE 피해가 없으므로 블록 전체 제외
+            //   (아군 안전 검사 포함 — 스탠스/이동은 즉발 피해 없음, 대시는 plan-time 안전 검증 존재).
             //   패턴 계산 실패(Try=false)는 fail-open — 정상 공격을 오탐으로 막지 않기 위함.
             if (action.Type == ActionType.Attack
                 && casterUnit != null && targetUnit == null
                 && !action.IsFamiliarTarget
+                && action.RequiresEnemyOccupancy
                 && (action.AllTargets == null || action.AllTargets.Count == 0)
                 && target.Point.sqrMagnitude > 0.001f)
             {
@@ -364,6 +368,29 @@ namespace CompanionAI_v3.Execution
                 {
                     CombatCache.InvalidateCaster(caster);
                     MovementAPI.ClearEvaluationCache();
+                }
+            }
+
+            // AllTargets(차지 라인) execution-time 재검증 (NeedsReplan 1-3c의 백스톱).
+            //   위 검증 레이어(생존/도달/아군안전/포인트백스톱)는 전부 AllTargets 제외라 stale
+            //   라인 시전이 무검증이었음. AerialRush 등은 계획 시점 P1→P2 라인을 동결 — 프레임 분산/
+            //   replan 사이 적 이동·사망으로 라인이 비면 빈 라인에 시전됨.
+            //   FindBestAerialRushPath 선택 기준과 동일한 Bresenham CountEnemiesInChargePath 로 재확인
+            //   (동일 함수 → 방식 불일치 false-abort 없음). RequiresEnemyOccupancy=false 는 제외.
+            if (action.Type == ActionType.Attack
+                && action.RequiresEnemyOccupancy
+                && action.AllTargets != null && action.AllTargets.Count >= 2)
+            {
+                var liveChargeEnemies = situation?.Enemies?.FindAll(e => e != null && e.IsConscious);
+                if (liveChargeEnemies != null && liveChargeEnemies.Count > 0)
+                {
+                    var chargeP1 = action.AllTargets[0].Point;
+                    var chargeP2 = action.AllTargets[1].Point;
+                    if (PointTargetingHelper.CountEnemiesInChargePath(chargeP1, chargeP2, liveChargeEnemies) == 0)
+                    {
+                        Log.Engine.Warn($"[Executor] MultiTarget charge aborted: {ability.Name} P1→P2 line no longer hits any enemy — plan↔execute drift");
+                        return ExecutionResult.Failure("No enemies in charge path at execution");
+                    }
                 }
             }
 

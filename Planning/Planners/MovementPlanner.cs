@@ -1131,7 +1131,9 @@ namespace CompanionAI_v3.Planning.Planners
                 Log.Planning.Info($"[MovementPlanner] {unit.CharacterName}: Retreat dash {dashAbility.Name} to ({landingPosition.Value.x:F1},{landingPosition.Value.z:F1}), " +
                     $"distance {currentDistToEnemy:F1}m → {newDistToEnemy:F1}m (AP:{apCost:F1})");
 
-                return PlannedAction.PositionalAttack(dashAbility, landingPosition.Value, $"Dash retreat from {situation.NearestEnemy.CharacterName}", apCost);
+                // 후퇴 대시는 적에게서 멀어지는 이동 — 착지에 적 0이 정상(오히려 적 없는 곳이 목표).
+                // requiresEnemyOccupancy:false 로 빈 자리 AoE 게이트에서 제외 (plan-time 안전 검증은 위에서 수행).
+                return PlannedAction.PositionalAttack(dashAbility, landingPosition.Value, $"Dash retreat from {situation.NearestEnemy.CharacterName}", apCost, requiresEnemyOccupancy: false);
             }
 
             return null;

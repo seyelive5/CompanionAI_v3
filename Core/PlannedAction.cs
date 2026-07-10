@@ -53,6 +53,15 @@ namespace CompanionAI_v3.Core
         public List<TargetWrapper> AllTargets { get; set; }
 
         /// <summary>
+        /// 이 공격이 "적이 있어야" 유효한지 여부 (기본 true).
+        /// true  = 빈 자리/빈 라인 시전 차단 대상. Point 또는 AllTargets(차지 라인) 공격이
+        ///          실행·replan 시점에 대상 지점/경로에 의식 있는 적이 0이면 실패 → replan.
+        /// false = 구역 선점형(Overwatch/Veil of Blades 등 턴종료 스탠스)·후퇴 대시처럼 적이
+        ///          없어도 시전이 정상인 능력. 점유/차지 게이트에서 제외.
+        /// </summary>
+        public bool RequiresEnemyOccupancy { get; set; } = true;
+
+        /// <summary>
         /// ★ v3.8.86: 액션 그룹 태그 - 논리적 단위를 연결
         /// null이면 독립 액션 (기존 동작과 동일, 하위 호환)
         /// 같은 문자열 = 같은 그룹 (예: "KillSeq_적ID", "Combo_능력GUID")
@@ -241,8 +250,10 @@ namespace CompanionAI_v3.Core
 
         /// <summary>
         /// ★ v3.0.81: 위치 타겟 공격 (Death from Above 등 갭클로저)
+        /// requiresEnemyOccupancy=false 는 구역 선점형(Overwatch/Veil TurnEnding)·후퇴 대시 전용 —
+        /// 적이 없어도 시전이 정상이므로 빈 자리 AoE 게이트에서 제외 (기본 true = 게이트 적용).
         /// </summary>
-        public static PlannedAction PositionalAttack(AbilityData ability, Vector3 position, string reason, float apCost)
+        public static PlannedAction PositionalAttack(AbilityData ability, Vector3 position, string reason, float apCost, bool requiresEnemyOccupancy = true)
         {
             return new PlannedAction
             {
@@ -251,12 +262,15 @@ namespace CompanionAI_v3.Core
                 Target = new TargetWrapper(position),
                 APCost = apCost,
                 Reason = reason,
-                Priority = 25  // 일반 Attack(50)보다 우선 (갭클로저 → 공격 연계)
+                Priority = 25,  // 일반 Attack(50)보다 우선 (갭클로저 → 공격 연계)
+                RequiresEnemyOccupancy = requiresEnemyOccupancy
             };
         }
 
         /// <summary>
-        /// ★ v3.7.25: MultiTarget 공격 (AerialRush 등 2개 Point 필요)
+        /// ★ v3.7.25: MultiTarget 공격 (AerialRush 등 2개 Point 필요 — 유일 생산자)
+        /// AllTargets[0]=P1, [1]=P2 차지 라인. RequiresEnemyOccupancy 기본 true 상속 →
+        /// 실행/replan 시점에 라인이 비면(적 이동·사망) 실패 처리됨.
         /// </summary>
         public static PlannedAction MultiTargetAttack(AbilityData ability, List<TargetWrapper> allTargets, string reason, float apCost)
         {
@@ -269,45 +283,6 @@ namespace CompanionAI_v3.Core
                 APCost = apCost,
                 Reason = reason,
                 Priority = 25  // 갭클로저 수준 우선순위
-            };
-        }
-
-        /// <summary>
-        /// ★ v3.8.25: MultiTarget 서포트 (Familiar Relocate 등)
-        /// PropertyCalculatorComponent.ForMainTarget 컨텍스트가 필요한 능력에 사용
-        /// - AllTargets 경로 사용으로 UnitUseAbilityParams 직접 실행 (BehaviourTree 컨텍스트 우회)
-        /// - MyPet 평가기가 올바른 Caster 컨텍스트 획득
-        /// </summary>
-        public static PlannedAction MultiTargetSupport(AbilityData ability, List<TargetWrapper> allTargets, string reason, float apCost)
-        {
-            return new PlannedAction
-            {
-                Type = ActionType.Support,
-                Ability = ability,
-                Target = allTargets?.Count > 0 ? allTargets[0] : null,
-                AllTargets = allTargets,
-                APCost = apCost,
-                Reason = reason,
-                Priority = 12  // PositionalBuff와 동일한 우선순위
-            };
-        }
-
-        /// <summary>
-        /// ★ v3.7.45: 이동 후 MultiTarget 공격
-        /// Master가 먼저 이동한 후 Familiar 능력 사용 (Overseer 핵심 패턴)
-        /// </summary>
-        public static PlannedAction MoveThenMultiTargetAttack(Vector3 moveDestination, AbilityData ability, List<TargetWrapper> allTargets, string reason, float apCost)
-        {
-            return new PlannedAction
-            {
-                Type = ActionType.Attack,
-                Ability = ability,
-                Target = allTargets?.Count > 0 ? allTargets[0] : null,
-                AllTargets = allTargets,
-                MoveDestination = moveDestination,  // 이동 목적지 설정
-                APCost = apCost,
-                Reason = reason,
-                Priority = 20  // Move보다 우선, 갭클로저보다 약간 우선
             };
         }
 

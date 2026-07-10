@@ -1616,9 +1616,11 @@ namespace CompanionAI_v3.Planning.Planners
 
                     // ★ v3.0.89: PointTarget이면 PositionalAction 반환
                     // ★ v3.1.28: targetPoint 사용 (오프셋 적용된 위치)
+                    // TurnEnding 버프(Overwatch/Veil of Blades 등 구역 선점형)는 적이 없어도 시전이 정상
+                    // → requiresEnemyOccupancy:false 로 빈 자리 AoE 게이트에서 제외 (기능 사멸 방지).
                     if (isPointTarget)
                     {
-                        return PlannedAction.PositionalAttack(ability, targetPoint, "Turn ending ability (point)", cost);
+                        return PlannedAction.PositionalAttack(ability, targetPoint, "Turn ending ability (point)", cost, requiresEnemyOccupancy: false);
                     }
                     return PlannedAction.Buff(ability, situation.Unit, "Turn ending ability", cost);
                 }
