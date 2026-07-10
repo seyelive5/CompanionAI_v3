@@ -153,6 +153,11 @@ namespace CompanionAI_v3.Planning.Planners
             var filteredAttacks = situation.AvailableAttacks
                 .Where(a => !CombatHelpers.ShouldExcludeFromAttack(a, isInThreatArea))
                 .Where(a => !IsAbilityExcluded(a, excludeAbilityGuids))
+                // F11: PreferRanged 유닛은 갭클로저(근접 돌격)를 공격 후보에서 제외 — 원거리 옵션이
+                //   쿨다운/탄약으로 0 이 되면 갭클로저가 유일 후보가 되어 근접 돌격하던 구멍 차단.
+                //   갭클로저는 v3.0.82 로 AvailableAttacks 에 복원돼 있으나(후퇴 대시용), 후퇴 대시는
+                //   MovementPlanner 가 AvailableAttacks 를 직접 소비하므로 이 필터에 무영향.
+                .Where(a => !(rangePreference == RangePreference.PreferRanged && AbilityDatabase.IsGapCloser(a)))
                 .ToList();
 
             // ★ v3.74.2: 장착 무기 공격 우선 — 액세서리 슬롯(Stinger Ring 등) 공격 후순위

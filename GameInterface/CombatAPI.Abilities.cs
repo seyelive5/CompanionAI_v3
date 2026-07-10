@@ -315,6 +315,27 @@ namespace CompanionAI_v3.GameInterface
             return hpPercent < threshold;
         }
 
+        /// <summary>
+        /// 유닛의 사거리 선호(사용자 캐릭터 설정). SituationAnalyzer.LoadSettings 와 동일 소스 —
+        /// situation 없이 preference 가 필요한 CombatAPI/MovementAPI 포지셔닝 조회에서 PreferRanged
+        /// 하드코딩 대체용. (v3.118.2 로 PreferRanged 근접 폴백이 제거된 뒤, 근접 유닛에 PreferRanged 를
+        /// 강제하면 FindAnyAttackAbility 가 null → 포지셔닝이 hittable=0 으로 붕괴. 실제 선호가 유일한 정합.)
+        /// </summary>
+        public static RangePreference GetRangePreference(BaseUnitEntity unit)
+        {
+            if (unit == null) return RangePreference.Adaptive;
+            try
+            {
+                var charSettings = ModSettings.Instance?.GetOrCreateSettings(unit.UniqueId, unit.CharacterName);
+                return charSettings?.RangePreference ?? RangePreference.Adaptive;
+            }
+            catch (Exception ex)
+            {
+                Log.Engine.Error(ex, $"[CombatAPI] GetRangePreference failed for {unit?.CharacterName}");
+                return RangePreference.Adaptive;
+            }
+        }
+
         public static float GetAbilityAPCost(AbilityData ability)
         {
             if (ability == null) return 1f;

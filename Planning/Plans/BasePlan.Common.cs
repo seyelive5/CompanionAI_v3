@@ -71,7 +71,8 @@ namespace CompanionAI_v3.Planning.Plans
                 if (timing == AbilityTiming.PreAttackBuff ||
                     timing == AbilityTiming.HeroicAct ||
                     timing == AbilityTiming.RighteousFury ||
-                    timing == AbilityTiming.SelfDamage)  // ★ v3.9.14: Phase 9에서 자해 버프 차단 (HP 낭비 방지)
+                    timing == AbilityTiming.SelfDamage ||  // ★ v3.9.14: Phase 9에서 자해 버프 차단 (HP 낭비 방지)
+                    CombatAPI.IsSelfDamagingAbility(buff))  // F10: AutoDetect 가 SelfDamage 를 안 주는 컴포넌트 감지 자해도 차단
                     continue;
 
                 // 턴 종료 능력 제외

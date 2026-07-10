@@ -624,10 +624,16 @@ namespace CompanionAI_v3.Planning.Planners
             // ═══════════════════════════════════════════════
             // 8. SelfDamage HP 안전 마진 (★ v3.40.2)
             // HP가 임계값 바로 위면 감점 (위험), 여유 있으면 가산
+            // F10: 등록 SelfDamage 뿐 아니라 컴포넌트 감지 자해(v3.118.3 미등록 wounds 버프)도 검사.
+            //   AutoDetect 가 SelfDamage 를 안 줘서 미등록은 PreCombatBuff 로 분류 → 이 마진이 통째로
+            //   빠지던 갭. 임계값 = 등록값(>0) 우선, 없으면 SC 기본값.
             // ═══════════════════════════════════════════════
-            if (info != null && info.Timing == AbilityTiming.SelfDamage)
+            bool isSelfDamageBuff = (info != null && info.Timing == AbilityTiming.SelfDamage)
+                || CombatAPI.IsSelfDamagingAbility(buff);
+            if (isSelfDamageBuff)
             {
-                float hpMargin = situation.HPPercent - info.HPThreshold;
+                float sdThreshold = (info != null && info.HPThreshold > 0) ? info.HPThreshold : Settings.SC.SelfDamageDefaultHPThreshold;
+                float hpMargin = situation.HPPercent - sdThreshold;
                 if (hpMargin < 10f)
                     score -= 30f;  // HP 임계값 +10% 미만: 위험
                 else if (hpMargin >= 30f)

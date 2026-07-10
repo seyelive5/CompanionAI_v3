@@ -843,7 +843,10 @@ namespace CompanionAI_v3.GameInterface
             }
             catch (Exception ex)
             {
-                if (Main.IsDebugEnabled) Log.Engine.Warn($"[CombatAPI] GetRelayRedirectTargetType failed for {ability?.Name}: {ex.Message}");
+                // 무음 실패 금지: 기본 로그 레벨에서도 스택과 함께 남긴다. 반환 null 은 "재조준 없음"과
+                // 동일하므로, 오류가 무음으로 진단(Warp Relay friendly-fire 판정)을 오염시키지 않도록
+                // Error 로 가시화 — 진단 로그에 redirect=none 이 찍혀도 이 Error 로 오류였음을 식별 가능.
+                Log.Engine.Error(ex, $"[CombatAPI] GetRelayRedirectTargetType failed for {ability?.Name}");
                 return null;
             }
         }

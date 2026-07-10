@@ -172,9 +172,9 @@ namespace CompanionAI_v3.GameInterface
             ApplyBlackboardScores(score, score.Position, role);
 
             // 명중률 보너스 — 같은 함수 사용 (현재 위치에서 적들 향한 hit chance).
-            var primaryAttack = CombatAPI.FindAnyAttackAbility(unit, Settings.RangePreference.PreferRanged);
+            var primaryAttack = CombatAPI.FindAnyAttackAbility(unit, CombatAPI.GetRangePreference(unit));
             if (primaryAttack == null)
-                primaryAttack = CombatAPI.FindAnyAttackAbility(unit, Settings.RangePreference.PreferRanged, includeDangerousAoE: true);
+                primaryAttack = CombatAPI.FindAnyAttackAbility(unit, CombatAPI.GetRangePreference(unit), includeDangerousAoE: true);
             bool isScatter = CombatAPI.IsScatterAttack(primaryAttack);
             bool isMelee = primaryAttack?.IsMelee ?? false;
             score.HitChanceBonus = CalculateHitChanceBonus(score.Position, enemies, weaponRange, isScatter, isMelee, unit, primaryAttack);

@@ -369,7 +369,7 @@ namespace CompanionAI_v3.GameInterface
                 profile.EffectiveRange = profile.OptimalRange > 0 ? profile.OptimalRange : profile.MaxRange;
 
                 // Scatter 체크 — 주 공격 능력에서 확인
-                var primaryAttack = FindAnyAttackAbility(unit, Settings.RangePreference.PreferRanged);
+                var primaryAttack = FindAnyAttackAbility(unit, GetRangePreference(unit));
                 if (primaryAttack != null)
                 {
                     profile.IsScatter = primaryAttack.IsScatter;

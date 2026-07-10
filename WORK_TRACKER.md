@@ -260,6 +260,13 @@
   - F2+F12: `CreateEarlyPhasePlan` → `CreatePlanWithSnapshot` 리네임 + zeroAP 하드코딩 `0` → `CombatAPI.GetZeroAPAttacks(situation.Unit).Count`. 짧은 생성자 9곳 전부 스냅샷 라우팅(DPS/Tank/Support/Overseer 무기전환·재활성화 + Movement Ultimate실패/무기전환 + TurnPlanner error 폴백 인라인). 잔여 `new TurnPlan(...스냅샷...)`은 풀플랜 엔드포인트 5곳뿐.
   - F3: `PlannedAction.IsEvacuationMove` + `TurnState.HasEvacuatedThisTurn`(RecordAction Move case) + `Situation.HasEvacuatedThisTurn`(SituationAnalyzer 미러). 게이트 `!HasMovedThisTurn` → `!HasEvacuatedThisTurn` → 공격 이동 후 위험지대 재대피 차단 해소.
   - F7: `TurnState.HasExecutedAbilityMatching(predicate)` 신설(HasUsedAbility 옆). `usedWarpRelay` 초기값을 플랜-로컬 false → `Raven && turnState.HasExecutedAbilityMatching(IsWarpRelayTarget)`(Movement ExecuteFamiliarSupportPhase에 turnState 파라미터 추가 + 3콜러 갱신, OverseerPlan:101). OverseerPlan:370 inert 분기(`isRavenBuffPhase && Raven`) 제거 → `if (usedWarpRelay)`.
-- [ ] **그룹 D — 독립 소형**: F6(하드코딩 PreferRanged 4곳 → 근접 유닛 이동 회귀)·F10(자해 2차 보호 등록-키)·F11(갭클로저 단독후보)·F13(Extermination Mark New GUID — PLAUSIBLE, 검증 우선)·F15(catch 교정)·F9(근접전용+PreferRanged 무경고 — **설계 결정 필요**)
+- [x] **그룹 D — 독립 소형 (v3.118.10, F6/F10/F11/F13/F15 구현 완료 — 인게임 검증 대기 · F9는 설계 결정 대기)**
+  - F6: `CombatAPI.GetRangePreference(unit)` 헬퍼(ModSettings 소스, 분석기와 동일) 신설, 하드코딩 `FindAnyAttackAbility(unit, PreferRanged)` 7곳(4파일: AbilityChecks·WeaponSystem·MovementAPI·BestPositionFinding)을 실제 preference 전달로 교체 → 근접 유닛 포지셔닝 hittable=0 붕괴 해소.
+  - F10: BuffPlanner 마진 페널티(:628) + BasePlan.Common Phase 9 차단(:71)을 `info.Timing==SelfDamage || CombatAPI.IsSelfDamagingAbility(ability)`로 확장 + 임계값 폴백(등록값>0 ? : SC 기본). 컴포넌트 감지 미등록 wounds 버프도 보호.
+  - F11: SelectBestAttack 필터에 `!(PreferRanged && IsGapCloser)` 추가 → 원거리 옵션 0 시 갭클로저 단독 돌격 차단(후퇴 대시는 MovementPlanner 직접 소비라 무영향).
+  - F13: Extermination Mark New GUID `542f7f3cab6a41a6859da3ba9c984168` 동일 Marker/EnemyTarget 등록.
+  - F15: GetRelayRedirectTargetType의 silent catch(Warn+ex.Message) → `Log.Engine.Error(ex,…)` (무음 실패 해소, 진단 오염 방지).
+  - 컷라인: AbilityDatabase.cs 날짜 스탬프 ★ 마커 2곳(:198/:897) → 평문 주석(why 보존, 마커 제거).
+  - ⏳ **F9 (설계 결정 필요 — 사용자 확인 대기)**: 근접전용+PreferRanged 유닛 무경고 영구 수동. 옵션 A(warn-only: 유닛당 1회 Warn) vs B(auto-ignore: 해당 유닛 preference 자동 무시). B는 v3.118.2 하드 제약 의미론과 충돌 → 결정 필요.
 - ⚠️ **§9/§12 인게임 검증 교차**: §12 검증은 F2/F3 수정 전 **실패 예상** — 로그 해석 시 혼동 금지. §9 근접누수 확인 시 F8(Blade Dance)/F14(0-AP Kick)가 예외로 관찰될 수 있음. F1은 수정 전 `point AoE Overwatch|Veil` grep으로 실증 데이터 확보 가능.
 - [x] **로그 사전 점검 (2026-07-10)**: F1 흔적 없음(보유자 미출전 — 판정은 코드 추적 유지) / §12 버그 현장 8회+Stagnant 3유닛 실증(v3.118.6 이전 바이너리) / F2 감시 라인 = 대피 턴 `New 0 AP attack`(Heinrix Slash 보유 확인) / Blood Oath 차단 주체는 이 로그 기준 DOOM(§9 "키벨라" 귀속 재확인 필요). 상세: 리뷰 문서 말미.

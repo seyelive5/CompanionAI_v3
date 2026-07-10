@@ -100,13 +100,13 @@ namespace CompanionAI_v3.GameInterface
 
             // ★ v3.6.8: Scatter/근접 공격 여부 감지 (위치 보너스 계산에 사용)
             // Scatter/근접은 거리와 무관하게 100% 명중 → 거리 보너스 불필요
-            var primaryAttack = CombatAPI.FindAnyAttackAbility(unit, Settings.RangePreference.PreferRanged);
+            var primaryAttack = CombatAPI.FindAnyAttackAbility(unit, CombatAPI.GetRangePreference(unit));
             // ★ v3.9.92: 일반 공격 없으면 DangerousAoE (화염방사기 Cone/Ray 등) 시도
             // DangerousAoE는 CanTargetEnemies=false라 기본 탐색에서 누락
             // 위치 평가에는 패턴 반경+LOS로 hittable 판정 가능
             if (primaryAttack == null)
             {
-                primaryAttack = CombatAPI.FindAnyAttackAbility(unit, Settings.RangePreference.PreferRanged, includeDangerousAoE: true);
+                primaryAttack = CombatAPI.FindAnyAttackAbility(unit, CombatAPI.GetRangePreference(unit), includeDangerousAoE: true);
                 if (primaryAttack != null && Main.IsDebugEnabled)
                     Log.Engine.Debug($"[MovementAPI] {unit.CharacterName}: Using DangerousAoE for position eval: {primaryAttack.Name}");
             }

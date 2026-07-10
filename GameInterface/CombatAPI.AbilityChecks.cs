@@ -403,12 +403,12 @@ namespace CompanionAI_v3.GameInterface
             // 공격 능력이 없으면 가장 기본 공격 찾기
             if (primaryAttack == null)
             {
-                primaryAttack = FindAnyAttackAbility(unit, Settings.RangePreference.PreferRanged);
+                primaryAttack = FindAnyAttackAbility(unit, GetRangePreference(unit));
             }
             // ★ v3.9.92: 일반 공격 없으면 DangerousAoE (화염방사기 등) 시도
             if (primaryAttack == null)
             {
-                primaryAttack = FindAnyAttackAbility(unit, Settings.RangePreference.PreferRanged, includeDangerousAoE: true);
+                primaryAttack = FindAnyAttackAbility(unit, GetRangePreference(unit), includeDangerousAoE: true);
             }
 
             if (primaryAttack == null)
