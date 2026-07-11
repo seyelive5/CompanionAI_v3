@@ -317,11 +317,11 @@ namespace CompanionAI_v3.Planning.Plans
                     return null;
                 }
 
-                // 가장 가까운 안전 타일 탐색 (위험 구역 밖 + 최단 이동거리)
+                // 가장 가까운 안전 타일 탐색 (위험 구역 밖 + 정지 가능 + 최단 경로비용)
                 GraphNode bestNode = null;
-                float bestDist = float.MaxValue;
+                float bestCost = float.MaxValue;
 
-                // ★ v3.18.16: 그리드 노드 비교로 "Already at destination" 루프 방지
+                // 그리드 노드 비교로 "Already at destination" 루프 방지
                 var currentNode = unit.Position.GetNearestNodeXZ();
 
                 foreach (var kvp in reachableTiles)
@@ -329,20 +329,24 @@ namespace CompanionAI_v3.Planning.Plans
                     var node = kvp.Key as CustomGridNodeBase;
                     if (node == null) continue;
 
-                    // ★ v3.18.16: 같은 그리드 노드면 스킵 (기존 1m 체크 대체)
+                    // 같은 그리드 노드면 스킵
                     if (node == currentNode) continue;
+
+                    // 점유/정지 불가 셀 제외 — 게임 실행기 CanStopAtNode(=cells[node].IsCanStand)와 동일 기준.
+                    // 미검사 시 게임이 경로를 트림해 AoE 안에 착지하거나 이동 자체가 실패함 (턴 사멸).
+                    if (!kvp.Value.IsCanStand) continue;
 
                     var pos = node.Vector3Position;
 
-                    // ★ 핵심: 이 타일이 모든 위험 구역 밖인지 확인
+                    // 이 타일이 모든 위험 구역 밖인지 확인
                     if (inDamage && CombatAPI.IsPositionInDamagingAoE(pos, unit)) continue;
                     if (inPsychicNull && CombatAPI.IsPositionInPsychicNullZone(pos)) continue;
 
-                    // 이동 거리 계산 (짧을수록 좋음 — 에너지 절약)
-                    float moveDist = Vector3.Distance(unit.Position, pos);
-                    if (moveDist < bestDist)
+                    // 실경로 비용(MP) 기준 최단 — 직선거리는 벽/우회 경로를 왜곡
+                    float pathCost = kvp.Value.Length;
+                    if (pathCost < bestCost)
                     {
-                        bestDist = moveDist;
+                        bestCost = pathCost;
                         bestNode = kvp.Key;
                     }
                 }
@@ -354,7 +358,7 @@ namespace CompanionAI_v3.Planning.Plans
                 }
 
                 var safePos = ((CustomGridNodeBase)bestNode).Vector3Position;
-                Log.Planning.Info($"[{RoleName}] ★ AoE Evacuation: Moving to ({safePos.x:F1},{safePos.z:F1}), distance={bestDist:F1}m");
+                Log.Planning.Info($"[{RoleName}] ★ AoE Evacuation: Moving to ({safePos.x:F1},{safePos.z:F1}), pathCost={bestCost:F1}MP");
 
                 var evacMove = PlannedAction.Move(safePos, $"Emergency evacuation ({reason})");
                 evacMove.IsEvacuationMove = true;  // F3: TurnState.HasEvacuatedThisTurn 표식 (재대피 게이트 분리)

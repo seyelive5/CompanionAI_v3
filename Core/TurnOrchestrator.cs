@@ -1301,6 +1301,62 @@ namespace CompanionAI_v3.Core
         }
 
         /// <summary>
+        /// 이동 설정 실패 통지 — CustomBehaviourTree.SetupMovement가 목적지를 게임 이동 변형
+        /// (UnitMoveVariants)으로 변환하지 못했을 때 호출.
+        /// MoveTo 결과는 dispatch 시점에 RecordAction(success=true)으로 선기록되므로,
+        /// 실제 미실행 상태를 회수(WasSuccessful/HasEvacuatedThisTurn 롤백)하고 플랜을 취소해
+        /// 다음 틱에 재계획한다. 기존 '즉시 턴 종료'는 AP 전량 미사용 턴 사멸을 유발했음.
+        /// 반복 실패는 ConsecutiveFailures(≤3) + FallbackReplanCount(≤2) 가드가 턴 종료로 수렴.
+        /// </summary>
+        /// <returns>true = 재계획 예약됨(호출자는 Running 유지), false = 턴 상태 없음(호출자가 턴 종료)</returns>
+        public bool NotifyMoveSetupFailed(BaseUnitEntity unit)
+        {
+            if (unit == null) return false;
+            if (!_turnStates.TryGetValue(unit.UniqueId, out var turnState) || turnState == null) return false;
+
+            // 선기록 회수 — 마지막 Move는 실제로 실행되지 않았음
+            PlannedAction failedMove = null;
+            for (int i = turnState.ExecutedActions.Count - 1; i >= 0; i--)
+            {
+                if (turnState.ExecutedActions[i].Type == ActionType.Move)
+                {
+                    failedMove = turnState.ExecutedActions[i];
+                    break;
+                }
+            }
+            if (failedMove != null)
+            {
+                failedMove.WasSuccessful = false;
+
+                // 실패한 대피는 대피로 치지 않음 — 재계획에서 재시도 허용 (HasEvacuatedThisTurn 게이트 오염 방지)
+                if (failedMove.IsEvacuationMove)
+                    turnState.HasEvacuatedThisTurn = false;
+
+                // 이동 플래그 재계산 — 이 Move 외 성공 이동이 없으면 롤백
+                bool anyOtherSuccessfulMove = false;
+                for (int i = 0; i < turnState.ExecutedActions.Count; i++)
+                {
+                    var a = turnState.ExecutedActions[i];
+                    if (!ReferenceEquals(a, failedMove) && a.Type == ActionType.Move && a.WasSuccessful == true)
+                    {
+                        anyOtherSuccessfulMove = true;
+                        break;
+                    }
+                }
+                if (!anyOtherSuccessfulMove)
+                    turnState.HasMovedThisTurn = false;
+                if (turnState.MoveCount > 0)
+                    turnState.MoveCount--;
+            }
+
+            turnState.ConsecutiveFailures++;
+            turnState.Plan?.Cancel("Move setup failed (destination not reachable/standable)");
+            Log.Engine.Warn($"[Orchestrator] {unit.CharacterName}: Move setup failed — cancelling plan for replan " +
+                $"(failures={turnState.ConsecutiveFailures}/{GameConstants.MAX_CONSECUTIVE_FAILURES})");
+            return true;
+        }
+
+        /// <summary>
         /// ★ v3.11.2: 행동 실패 시 TeamBlackboard 예약 해제
         /// 도발 또는 힐 액션이 실패하면 다른 유닛이 해당 타겟을 예약할 수 있도록 해제
         /// - 힐: action.Target == 예약 대상 (동일)

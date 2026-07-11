@@ -233,7 +233,7 @@
 - **파스칼 DPS 공격불가 (확정)**: `[Analyzer] Pasqal abilities: Debuffs=6, Attacks=0` → Hittable=0 → "DPS no targets" 턴종료 6회 (전투 통틀어 공격19/디버프51/no-target종료6). 공격 kit 이 전부 Debuff 분류 → 제보 "DPS인데 디버프만" 실증. **다음 작업 최우선 후보**.
 - **카시아 (부분)**: Support/Hittable=0(Lidless Stare 아군차단) + Frontline 키스톤 시전. 단 HP 100% 유지 → 이번 세션엔 "bullet sponge" 미재현. 포지셔닝 Phase 2 territory.
 
-### 12. AoE 대피 이중계산 + 재대피 루프 (v3.118.6) — ⚠️ 인게임 검증 대기
+### 12. AoE 대피 이중계산 + 재대피 루프 (v3.118.6) — ✅ 인게임 검증 완료 (2026-07-11)
 
 **배경**: 사용자 관찰 + 로그 확정. 대피가 여러 번 위치선택/이동(비효율) + 대피 후 공격 안 하고 턴엔드.
 
@@ -241,7 +241,7 @@
 - [x] **CreateEarlyPhasePlan 헬퍼**: Ultimate/대피/긴급힐에 situation 스냅샷 전달(3개 초기 Phase 공통 버그 일괄).
 - [x] **재대피 루프 근본**: 포화 전장서 대피 이동이 AoE 못 벗어남→`Standing in DAMAGING AoE` 재발→루프→stagnation→턴엔드(Hittable>0 인데 공격 안 함).
 - [x] **Phase 0.5 `!HasMovedThisTurn` 가드**: 이미 이동했는데 여전히 AoE면 재대피 대신 공격. 첫 대피 보존.
-- [ ] **인게임 검증**: `Replan needed: AP increased (0.0->5.0)` 소멸 + 대피 후 공격 실행(Hittable>0 시) + stagnation 턴엔드 감소
+- [x] **인게임 검증 (2026-07-11, v3.118.11 + F2/F3)**: AoE 위험지대 전투에서 3역할(Heinrix DPS/DOOM Overseer/Abelard Tank) 대피 발동 — 유닛당 대피 **1회**만, `AP increased (0.0->5.0)` **소멸**, 재대피 루프 **없음**(대피 후 공격/버프 전환 = F3 게이트 홀딩), Stagnant #1에서 정지(#2/#3·강제 턴엔드 0건). 단, **대피 자체가 AoE를 못 벗어나는 별개 결함 발견 → §14**.
 
 ### 13. v3.118.0-6 코드 리뷰 확정 결함 15건 — 수정 대기 (2026-07-10)
 
@@ -270,3 +270,15 @@
   - [x] **F9 (v3.118.11, 사용자 선택 A=warn-only 확정 → 구현 완료)**: SituationAnalyzer 필터 직후 `PreferRanged && !HasRangedWeapon && AvailableAttacks==0`일 때 유닛당 1회 Warn(`_f9WarnedUnits` static). v3.118.2 하드 제약 유지(auto-ignore 아님) — 오설정을 가시화만. 원거리 사이킥 보유 유닛은 필터 후 공격이 남아 미발화.
 - ⚠️ **§9/§12 인게임 검증 교차**: §12 검증은 F2/F3 수정 전 **실패 예상** — 로그 해석 시 혼동 금지. §9 근접누수 확인 시 F8(Blade Dance)/F14(0-AP Kick)가 예외로 관찰될 수 있음. F1은 수정 전 `point AoE Overwatch|Veil` grep으로 실증 데이터 확보 가능.
 - [x] **로그 사전 점검 (2026-07-10)**: F1 흔적 없음(보유자 미출전 — 판정은 코드 추적 유지) / §12 버그 현장 8회+Stagnant 3유닛 실증(v3.118.6 이전 바이너리) / F2 감시 라인 = 대피 턴 `New 0 AP attack`(Heinrix Slash 보유 확인) / Blood Oath 차단 주체는 이 로그 기준 DOOM(§9 "키벨라" 귀속 재확인 필요). 상세: 리뷰 문서 말미.
+- [x] **인게임 검증 1차 (2026-07-11, v3.118.11 두 세션)**: **F9 확정**(Cassia PreferRanged+원거리무기無 → 정확히 1회 Warn, 스팸 없음) / **F2·F3 확정**(§12 참조) / F4 과잉차단 없음(키벨라 HP=100% Blood Oath 정상 시전; hp70 미만 케이스 미발생) / 크래시·예외·replan 루프 0건. **미발동**: F1(Overwatch/Veil 미시전), F5(AerialRush 미시전), F8/F14(해당 유닛 턴 미관찰) — 후속 세션 필요.
+
+### 14. 대피 목적지 도달 불가 — 게임 실행기 트림/턴 사멸 (v3.118.12) — ⚠️ 인게임 검증 대기
+
+**배경 (2026-07-11 AoE 전투 로그)**: §12 재검증 중 발견. 3유닛 전부 대피 목적지가 게임 패스파인더에서 `unreachable, trim path` — Heinrix 한 칸 못미침(여전히 AoE 안), DOOM (66,83)→(66,82) 트림, **Abelard는 완전 실패 → `Nothing to do, finish turn` → AP 5.0 전량 미사용 턴 사멸**.
+
+**근본 원인 (디컴파일 확정)**: 게임 실행기 `TaskNodeSetupMoveCommand`가 endpoint부터 역방향 `CanStopAtNode` = **`UnitMoveVariants.cells[node].IsCanStand`** 검사(SetupMoveCommandHelper.cs:318) + `RuleCalculateMovementCost.Calculate`가 위협지역/override 코스트로 재계산해 추가 절단. 정지가능 prefix < 2포인트면 Failure → 우리 트리가 TaskNodeTryFinishTurn 폴백 = 턴 사멸. 우리 쪽은 **PlanAoEEvacuation과 SetupMovement만 IsCanStand 미검사**(코드베이스 나머지 12곳+는 관례 준수) + 유클리드 거리 사용 + 실패 시 `IsFinishedTurn=true`.
+
+- [x] **Fix A (탐색)**: PlanAoEEvacuation에 `!IsCanStand → continue` + 거리 기준 유클리드 → `cell.Length`(실경로 MP).
+- [x] **Fix B (핸드오프)**: CustomBehaviourTree.SetupMovement 4분기(정확일치/A*역탐색/최근접/MP트림) 전부 standability 준수 + 트림 후 부모 체인 standable-walk → 게임이 거부할 endpoint를 아예 안 넘김.
+- [x] **Fix C (턴 사멸 복구)**: `TurnOrchestrator.NotifyMoveSetupFailed` 신설 — RecordAction(success=true) 선기록 회수(WasSuccessful/HasEvacuatedThisTurn/HasMovedThisTurn/MoveCount 롤백) + 플랜 취소 → decision node가 턴 종료 대신 Running 반환 → 다음 틱 재계획. ConsecutiveFailures(≤3)+FallbackReplan(≤2) 가드로 바운드. 트리 개조는 배제(게임 Loop가 자식 Failure 시 같은 프레임 동기 재반복 → 프리즈 위험).
+- [ ] **인게임 검증**: AoE 위험지대 전투에서 ① `unreachable, trim path` 대상이 우리 대피 목적지가 아닐 것 ② 대피 착지가 AoE 밖 ③ `Nothing to do, finish turn` 즉사 소멸(발생 시 `Move setup failed — cancelling plan for replan` Warn 후 재계획 확인)

@@ -604,7 +604,14 @@ namespace CompanionAI_v3.GameInterface
                                 Log.Engine.Warn($"[CompanionAIDecisionNode] {unit.CharacterName}: Failed to setup movement");
                             }
                         }
-                        // 이동 설정 실패 시 턴 종료
+                        // 이동 설정 실패: 오케스트레이터에 통지 → 선기록 회수 + 플랜 취소 → 다음 틱 재계획.
+                        // 기존 '즉시 턴 종료'는 대피 실패 시 AP 전량 미사용 턴 사멸을 유발 (Abelard 사례).
+                        // 반복 실패는 ConsecutiveFailures/FallbackReplan 가드가 턴 종료로 수렴시킴.
+                        if (TurnOrchestrator.Instance.NotifyMoveSetupFailed(unit))
+                        {
+                            return Status.Running;
+                        }
+                        // 턴 상태 없음 (비정상) → 안전 폴백: 턴 종료
                         blackboard.IsFinishedTurn = true;
                         return Status.Success;
 
@@ -677,7 +684,8 @@ namespace CompanionAI_v3.GameInterface
                 float bestDistance = float.MaxValue;
 
                 // 목적지에 정확히 있으면 사용, 아니면 가장 가까운 cell 찾기
-                if (cells.TryGetValue(targetNode, out var exactCell))
+                // 정지 불가 셀(IsCanStand=false)은 게임 실행기 CanStopAtNode가 거부하고 경로를 트림/실패시킴 → 선차단
+                if (cells.TryGetValue(targetNode, out var exactCell) && exactCell.IsCanStand)
                 {
                     bestCell = exactCell;
                     foundCell = true;
@@ -703,6 +711,9 @@ namespace CompanionAI_v3.GameInterface
                                 {
                                     if (cells.TryGetValue(fullPath.path[i], out var pathCell))
                                     {
+                                        // 정지 불가 셀 스킵 — 게임 CanStopAtNode(cells[node].IsCanStand) 기준
+                                        if (!pathCell.IsCanStand) continue;
+
                                         // 거리 가드: 현재보다 목적지에 더 가까운 노드만 선택
                                         var pathNodeBase = fullPath.path[i] as CustomGridNodeBase;
                                         if (pathNodeBase != null)
@@ -738,6 +749,9 @@ namespace CompanionAI_v3.GameInterface
                         {
                             var node = kvp.Key as CustomGridNodeBase;
                             if (node == null) continue;
+
+                            // 정지 불가 셀 스킵 — 게임 CanStopAtNode 기준
+                            if (!kvp.Value.IsCanStand) continue;
 
                             float dist = Vector3.Distance(node.Vector3Position, destination);
                             if (dist < bestDistance)
@@ -782,6 +796,19 @@ namespace CompanionAI_v3.GameInterface
                         else break;
                     }
                     bestCell = trimmedCell;
+                }
+
+                // 최종 셀이 정지 불가면 부모 체인을 따라 첫 정지 가능 셀로 후퇴
+                // (MP 트림이 정지 불가 부모에 착지할 수 있음 — 게임 실행기가 거부/트림하기 전에 선처리)
+                while (!bestCell.IsCanStand && bestCell.ParentNode != null
+                       && cells.TryGetValue(bestCell.ParentNode, out var standableParent))
+                {
+                    bestCell = standableParent;
+                }
+                if (!bestCell.IsCanStand)
+                {
+                    Log.Engine.Warn($"[CompanionAIDecisionNode] No standable cell toward destination {destination}");
+                    return false;
                 }
 
                 // 현재 위치와 같으면 이동 불필요
