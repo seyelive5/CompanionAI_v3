@@ -309,8 +309,11 @@ namespace CompanionAI_v3.Planning.Plans
 
             try
             {
-                // 도달 가능 타일 조회 (캐시 활용)
-                var reachableTiles = MovementAPI.FindAllReachableTilesWithThreatsSync(unit);
+                // 도달 가능 타일 조회 — 게임이 이 틱에 계산한 UnitMoveVariants 우선 (실행기와 동일 데이터).
+                // 자체 재계산은 100ms 타임아웃 시 player 폴백이라 게임 AI 도달성과 발산 → 대피 목적지가
+                // 게임 변형에 없으면 1칸 못미쳐 AoE 안에 착지 (2026-07-11 3유닛 실증). 없을 때만 폴백.
+                var reachableTiles = MovementAPI.GetTickMoveVariants(unit)
+                    ?? MovementAPI.FindAllReachableTilesWithThreatsSync(unit);
                 if (reachableTiles == null || reachableTiles.Count == 0)
                 {
                     Log.Planning.Info($"[{RoleName}] AoE Evacuation: No reachable tiles");

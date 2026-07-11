@@ -12,6 +12,44 @@ namespace CompanionAI_v3.GameInterface
 {
     public static partial class MovementAPI
     {
+        #region Tick Move Variants (게임 DecisionContext 권위 데이터)
+
+        // CompanionAIDecisionNode가 ProcessTurn 직전에 게임의 UnitMoveVariants.cells를 등록.
+        // 게임 실행기(TaskNodeSetupMoveCommand)가 실제로 수락하는 도달성/IsCanStand의 원본이므로,
+        // 즉시 실행할 이동 목적지 선택(대피 등)은 자체 재계산보다 이 데이터를 우선해야 발산이 없다.
+        // (자체 FindAllReachableTilesWithThreatsSync는 100ms 타임아웃 시 player 폴백 —
+        //  2026-07-11 실증: 3유닛 대피 목적지 전부 게임 변형에 부재 → 1칸 못미쳐 AoE 안 착지)
+        private static string _tickVariantsUnitId;
+        private static Dictionary<GraphNode, WarhammerPathAiCell> _tickVariantsCells;
+
+        /// <summary>게임 틱의 UnitMoveVariants 등록 (decision node 전용, ProcessTurn 동안만 유효)</summary>
+        public static void SetTickMoveVariants(BaseUnitEntity unit, Dictionary<GraphNode, WarhammerPathAiCell> cells)
+        {
+            if (unit == null || cells == null || cells.Count == 0)
+            {
+                _tickVariantsUnitId = null;
+                _tickVariantsCells = null;
+                return;
+            }
+            _tickVariantsUnitId = unit.UniqueId;
+            _tickVariantsCells = cells;
+        }
+
+        public static void ClearTickMoveVariants()
+        {
+            _tickVariantsUnitId = null;
+            _tickVariantsCells = null;
+        }
+
+        /// <summary>현재 틱의 게임 이동 변형 조회 — 해당 유닛 것이 아니거나 없으면 null (호출자는 자체 계산 폴백)</summary>
+        public static Dictionary<GraphNode, WarhammerPathAiCell> GetTickMoveVariants(BaseUnitEntity unit)
+        {
+            if (unit == null || _tickVariantsCells == null) return null;
+            return _tickVariantsUnitId == unit.UniqueId ? _tickVariantsCells : null;
+        }
+
+        #endregion
+
         #region Tile Discovery
 
         public static Dictionary<GraphNode, WarhammerPathPlayerCell> FindAllReachableTilesSync(

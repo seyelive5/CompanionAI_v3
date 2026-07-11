@@ -530,7 +530,19 @@ namespace CompanionAI_v3.GameInterface
                 CustomBehaviourTreePatch.RecordDecisionNodeReached(unit.UniqueId);
 
                 // ★ TurnOrchestrator에서 결정 가져오기
-                var result = TurnOrchestrator.Instance.ProcessTurn(unit);
+                // 게임이 이 틱에 계산한 이동 변형(UnitMoveVariants)을 플래너에 노출 —
+                // 실행기가 실제로 수락할 도달성/정지가능 데이터 (자체 재계산과의 발산 제거)
+                ExecutionResult result;
+                MovementAPI.SetTickMoveVariants(unit,
+                    context.UnitMoveVariants.IsZero ? null : context.UnitMoveVariants.cells);
+                try
+                {
+                    result = TurnOrchestrator.Instance.ProcessTurn(unit);
+                }
+                finally
+                {
+                    MovementAPI.ClearTickMoveVariants();
+                }
 
                 switch (result.Type)
                 {
