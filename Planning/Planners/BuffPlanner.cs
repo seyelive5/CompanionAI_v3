@@ -865,6 +865,14 @@ namespace CompanionAI_v3.Planning.Planners
                         continue;
                     }
 
+                    // 포인트 AoE 착탄 사전 검증 — Debuff 팩토리는 포인트 변환 후 실행/replan 게이트가
+                    // 검사하지 않는 Type=Debuff 액션이 되므로, 미검증 시 조용한 헛방으로 AP 낭비 (§15 동일 클래스)
+                    if (!CombatAPI.WillPointCastReachTarget(debuff, situation.Unit, target))
+                    {
+                        Log.Planning.Info($"[{roleName}] Debuff SKIPPED (target not in pattern): {debuff.Name} -> {target.CharacterName}");
+                        continue;
+                    }
+
                     remainingAP -= cost;
                     plannedGuids?.Add(debuffGuid);  // ★ v3.110.7: dedup 등록
                     Log.Planning.Info($"[{roleName}] Debuff: {debuff.Name} -> {target.CharacterName}");
@@ -920,6 +928,13 @@ namespace CompanionAI_v3.Planning.Planners
                 string reason;
                 if (CombatAPI.CanUseAbilityOn(marker, targetWrapper, out reason))
                 {
+                    // 포인트 변환 마커의 착탄 사전 검증 (유닛 타겟 마커는 즉시 통과 — fail-open)
+                    if (!CombatAPI.WillPointCastReachTarget(marker, situation.Unit, target))
+                    {
+                        if (Main.IsDebugEnabled) Log.Planning.Debug($"[{roleName}] Marker skipped: {marker.Name} target not in pattern");
+                        continue;
+                    }
+
                     remainingAP -= cost;
                     Log.Planning.Info($"[{roleName}] Marker: {marker.Name} -> {target.CharacterName}");
                     return PlannedAction.Debuff(marker, target, $"Mark {target.CharacterName}", cost);

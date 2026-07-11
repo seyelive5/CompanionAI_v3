@@ -285,7 +285,14 @@
 - [x] **Fix D (v3.118.13, 발산 구조 제거)**: 플랜은 BT 틱 안에서 실행되고 게임의 `UnitMoveVariants`가 DecisionContext에 이미 존재(AsyncTaskNodeCreateMoveVariants가 decision node 직전 실행) → `MovementAPI.Set/Get/ClearTickMoveVariants`로 decision node가 ProcessTurn 전후 stash/clear, PlanAoEEvacuation이 **게임 딕셔너리 우선** 사용(없을 때만 자체 계산 폴백). 선택 노드가 게임 변형에 by-construction 존재 → SetupMovement 정확일치 → 전체 경로 실행. 게임 변형에 AoE 밖 정지가능 타일이 없으면 대피 생략(부분 이동으로 MP 낭비 대신 제자리 전투 — 올바른 정책).
 - [x] **인게임 검증 2차 (2026-07-11, v3.118.13) — ✅ 전 항목 통과**: ② DOOM 요청 (10.13,39.83)→BestCell (62,84) **정확 일치**·Abelard (19.58,35.78)→(69,81) **정확 일치**, 트림 0, **대피 직후 `Standing in DAMAGING AoE` 미재발 = AoE 탈출 확인**. Abelard는 탈출 후 SmartTaunt 이동+Taunting Scream 3적 도발까지. Heinrix는 3회 검색 전부 `No safe tile found`(게임 메트릭상 탈출 불가) → **제자리 풀 턴**(버프 4+공격 4+이동 2, "No AP remaining" 정상 종료) — 의도한 정책 그대로. 관찰: 같은 턴 내 검색 실패→성공 전이(DOOM/Abelard 첫 시도 실패, 수 초 후 성공) = 틱별 게임 상태(존 만료/MP) 변화의 정직한 반영, 무해.
 
-### 15. Overseer Phase 9 Enfeeble 스테일 포인트 — 플래너↔점유게이트 불일치 (관찰 2026-07-11, 조사 대기)
+### 15. 포인트 AoE 착탄 밀림 — 플래너 사전검증 부재 (v3.118.14 수정, 인게임 검증 대기)
 
-**배경 (v3.118.13 검증 로그)**: DOOM이 MP=0/AP=4/Hittable=0 상태에서 Phase 9 "Final debuff Enfeeble → Cutthroat Rebel"이 point (27.7,39.8)를 **3연속 동일하게 선택**, 매번 점유 게이트가 정당 차단(실행기 백스톱 "plan↔execute drift" 2회 + NeedsReplan 1-3b 1회) → Fallback replan #1/#2 → Stagnant #3 강제 턴엔드(AP=4 미사용). **가드는 전부 설계대로 작동**(바운드, 프리즈 없음, F1 과잉차단 아님 — 해당 포인트에 적이 실제로 없음). 결함은 **플래너의 포인트 선택이 게이트의 패턴 점유 계산과 불일치**하는 것: 적이 정지 상태인데 플래너는 "Cutthroat Rebel을 친다"고 보고 게이트는 "그 포인트 패턴에 적 0"이라 판단 — 패턴 타입/반경/방향성 계산 차이 또는 스테일 클러스터 포인트 의심.
-- [ ] 조사: Enfeeble GUID `0fd6606266b245d19127ff2bf44e0d52` 패턴 타입(Circle vs 방향성) 확인 + Phase 9 debuff 포인트 산출 경로 vs `CountEnemiesInPattern` 비교. 동일 게이트 기준으로 플랜 시점에 사전 검증하면 3연속 헛시도 소멸.
+**배경 (v3.118.13 검증 로그)**: DOOM이 MP=0/AP=4/Hittable=0 상태에서 Phase 9 "Final debuff Enfeeble → Cutthroat Rebel"이 point (27.7,39.8)를 **3연속 동일하게 선택**, 매번 점유 게이트가 차단 → Fallback replan #1/#2 → Stagnant #3 강제 턴엔드(AP=4 미사용).
+
+**조사 결과 (2026-07-11, 디컴파일+블루프린트 확정) — 게이트가 옳았음**:
+- Enfeeble 블루프린트(`Biomancy_Enfeeble_Ability.jbp`): 포인트 AoE 확정 — `AbilityTargetsInPattern` Custom 패턴 반경 3, `IgnoreLos=false`, `IgnoreLevelDifference=false`, CustomRange 10. 우리 DB 등록(PointTarget) 정확.
+- **착탄 메커니즘**: 게임 `AoEPatternHelper.GetActualCastNode`가 시전자→타겟 **그리드 라인캐스트**로 착탄점을 정함 — 장애물/절벽에서 멈추면 패턴 중심이 타겟 앞으로 밀림. DOOM(하층 y=-16.1)→적(상층 y=-13.5, 2.6m 절벽): 라인캐스트가 절벽에서 멈춤 → 패턴이 하층에 깔림 + `IgnoreLevelDifference=false`로 상층 배제 → **적 미포함(비어있지 않은 패턴) → count 0 → 게이트 정당 차단**. 실제 시전했어도 같은 계산으로 헛방.
+- **결함 = 플래너 사전검증 부재**: `CanUseAbilityOn(유닛)`은 시야 LOS 기준이라 통과 → 안 닿는 타겟을 3연속 재선택. 공격 경로는 Analyzer hittable 계산의 `IsAoEHeightInRange`(:595)가 이미 사전 필터하지만 **디버프/마커 경로는 착탄 검증 전무**. BuffPlanner.PlanDebuff 경로는 Type=Debuff라 1-3b 게이트도 안 타서 **조용한 헛방**(관찰된 Attack-type보다 나쁜 변형).
+
+- [x] **수정 (v3.118.14)**: `CombatAPI.WillPointCastReachTarget(ability, caster, target)` 신설 — 게이트(TryCountUnitsInPattern)와 **동일 계산**으로 "포인트 변환 시전이 타겟을 실제로 맞추는지" 사전 검증, 비포인트/계산실패는 fail-open(게이트와 동일 시맨틱, 과잉차단 방지). 적용 3곳: BasePlan.Common Phase 9 Final debuff(실증 사이트) + BuffPlanner.PlanDebuff(조용한 헛방 변형) + PlanMarker(보험). 기존 site 관례(IsAttackSafeForTarget도 현재 위치 기준)와 동일하게 현재 위치 기준.
+- [ ] **인게임 검증**: 다층 맵에서 psyker 디버프 보유 유닛(DOOM Enfeeble) 전투 — `Final debuff SKIPPED (target not in pattern)` 로그 확인 + Enfeeble 3연속 차단→Stagnant 턴엔드 패턴 소멸(대신 다른 행동 또는 정상 턴엔드).

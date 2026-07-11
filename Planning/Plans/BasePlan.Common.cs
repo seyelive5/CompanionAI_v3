@@ -125,6 +125,14 @@ namespace CompanionAI_v3.Planning.Plans
                             continue;
                         }
 
+                        // 포인트 AoE 착탄 사전 검증 — 다층 절벽 등에서 착탄점이 밀리면 타겟이 패턴 밖.
+                        // 미검증 시 계획→게이트 차단→재계획 반복 후 Stagnant 턴엔드로 AP 낭비 (§15 DOOM Enfeeble 실증)
+                        if (!CombatAPI.WillPointCastReachTarget(debuff, situation.Unit, situation.NearestEnemy))
+                        {
+                            Log.Planning.Info($"[{RoleName}] Phase 9: Final debuff SKIPPED (target not in pattern): {debuff.Name} -> {situation.NearestEnemy.CharacterName}");
+                            continue;
+                        }
+
                         remainingAP -= cost;
                         _plannedBuffGuids.Add(abilityId);  // ★ v3.110.7: dedup 등록
                         Log.Planning.Info($"[{RoleName}] Phase 9: Final debuff - {debuff.Name} -> {situation.NearestEnemy.CharacterName}");

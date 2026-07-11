@@ -751,6 +751,38 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
+        /// 포인트 시전(유닛→포인트 자동 변환 포함)이 의도한 유닛을 실제로 맞추는지 사전 검증.
+        /// 게임은 착탄점을 시전자→타겟 그리드 라인캐스트로 정하므로(AoEPatternHelper.GetActualCastNode),
+        /// 다층 절벽/장애물에서 패턴 중심이 밀려 타겟이 패턴 밖이 될 수 있음 — 이때 시전은 헛방.
+        /// 실행/replan 게이트(TryCountUnitsInPattern)와 동일 계산 사용: 비포인트 능력/계산 실패는
+        /// true(fail-open) — 게이트가 차단하지 않을 시전을 계획 단계에서 과잉 차단하지 않기 위함.
+        /// (2026-07-11 실증: DOOM이 하층에서 상층 적에게 Enfeeble 포인트 계획 → 착탄 밀림 → 3연속 차단)
+        /// </summary>
+        public static bool WillPointCastReachTarget(AbilityData ability, BaseUnitEntity caster, BaseUnitEntity target)
+        {
+            try
+            {
+                if (ability == null || caster == null || target == null) return true;
+                if (!IsPointTargetAbility(ability) || ability.IsMelee) return true;  // 포인트 변환 대상 아님
+
+                _pointCastReachBuf.Clear();
+                _pointCastReachBuf.Add(target);
+                if (!TryCountUnitsInPattern(ability, target.Position, caster.Position, caster,
+                        _pointCastReachBuf, null, out int hits, out _))
+                    return true;  // 패턴 계산 실패 — fail-open (게이트와 동일 시맨틱)
+
+                return hits > 0;
+            }
+            catch (Exception ex)
+            {
+                Log.Engine.Error(ex, $"[CombatAPI] WillPointCastReachTarget error for {ability?.Name}");
+                return true;  // fail-open
+            }
+        }
+
+        private static readonly List<BaseUnitEntity> _pointCastReachBuf = new List<BaseUnitEntity>(1);
+
+        /// <summary>
         /// ★ v3.5.39: 특정 유닛이 패턴 내에 있는지 확인
         /// </summary>
         public static bool IsUnitInPattern(
