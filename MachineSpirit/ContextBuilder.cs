@@ -1478,7 +1478,9 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
             else
                 systemSb.AppendLine("[REMINDER: Respond as Machine Spirit only. First person. No narration.]");
 
-            return systemSb.ToString();
+            // 각 섹션이 앞에 빈 줄을 붙이므로 선두 개행이 남는다. system 안에 있을 때는
+            // 고정 프롬프트에 이어져 문제 없었지만, 이제 user 메시지 맨 앞이라 정리한다.
+            return systemSb.ToString().TrimStart('\r', '\n');
         }
 
         /// <summary>
