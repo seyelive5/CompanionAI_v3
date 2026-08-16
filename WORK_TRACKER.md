@@ -370,3 +370,28 @@
 - [x] **C-3. ChatWindow 배율 대응**: MIN/MAX 크기(280×250 / 800×1000)와 버블 패딩이 하드코딩이라 고배율에서 최소폭에 글자가 몇 자 못 들어가던 문제 → `Sd()` 적용.
 - [ ] **인게임 검증**: ① 첫 화면에 탭 5개 + `▶ 고급` ② 고급 펼침/접힘이 재시작 후 유지 ③ **배율 0.8x·1.5x·2.5x 에서 레이아웃 확인**(여백이 비례 확대되는지) ④ 채팅창 고배율에서 최소 크기 정상
 - 미착수(후속 후보): Machine Spirit 탭 내부 단계 분리(B안 — 상태 한 줄 + "설정 변경" 뒤로 설치·모델관리 숨김, 803줄 재구성) / 색상 토큰 중복(`Danger`=`RoleRed`, `Green`=`RoleGreen`) 의미 기준 통일.
+
+### 21. 이동/타일 선택 — "아직 안 움직인 적은 제자리에 있다" 가정 (v3.120.1 계측) — ⚠️ 데이터 수집 대기
+
+**배경**: 사용자 가설 — "각 유닛이 자신의 시야에 안 보이는 적은 없다고 보고 그 방향을 안전하다고 판단하는 것 아닌가".
+
+**코드 분석 결과 — 가설은 절반 맞음, 원인은 다름**:
+- **가시성 개념 자체가 없음**: `IsVisible`/`Stealth`/`FogOfWar` 코드베이스 grep 0건. `CombatAPI.GetEnemies` 는 시야 무관하게 전투 참가 적 전원을 반환 → "안 보이는 적을 없다고 취급"하지는 **않음**.
+- **타일 점수의 위험 4항목**(`MovementAPI.PositionScoring.TotalScore`):
+
+| 항목 | 크기 | LOS 의존 | 적 이동 반영 |
+|---|---|---|---|
+| `+ HideScore` | **최대 110 (최대 항목)** | 예 | **조건부** ⚠️ |
+| `− ExposureScore` | sqrt(n)×10 (1명 10 · 10명 32) | 예 | **아니오** ⚠️ |
+| `− EnemyTurnThreatSum × 8` | 적 1명당 8 | **아니오** | **예** ✅ |
+| `+ StayingAwayBonus` | ×10~40 | 아니오 | 예 ✅ |
+
+- **진짜 구멍**: `TileScorerPort.GetEnsuredCoverComponents`(:164~203)는 적별로 예상 이동 위치 전체에 대해 worst-cover 를 취하지만, **예상 이동이 없는 적은 현재 위치 LOS 로 fallback**. 예상 이동 출처인 `EnemyMoveCache` 는 Harmony 로 **게임이 그 적의 턴에 계산한** `AsyncUpdateEnemyMoveVariants` 를 가로채 저장(`EnemyMoveCachePatch.cs:87`) → **아직 이번 전투에서 행동하지 않은 적은 캐시가 없음**.
+  - 즉 정확한 표현은 "안 보이는 적을 무시"가 아니라 **"아직 안 움직인 적은 지금 자리에 계속 있을 것으로 가정"**. 벽 뒤에 숨었는데 그 적이 걸어 나와 쏘는 상황이 이 구멍.
+  - `EnemyTurnThreatSum`(LOS 무관·이동 반영)이 부분적으로 상쇄하지만 적 1명당 8점 vs HideScore 최대 110 으로 비중 차이가 큼.
+- **부수 발견 — 거짓 설정**: `UsePredictiveMovement` 가 UI 에 노출·저장되는데 **로직에서 읽히지 않아** 꺼도 아무 일이 없었음. (앞서 찾은 데드 설정 4개는 UI 미노출이라 무해했으나 이건 사용자가 끌 수 있고 껐다고 믿게 됨 — 더 나쁜 종류.)
+
+- [x] **C. 계측 추가 (v3.120.1)**: `PredictedEnemyMoves.Compute` 의 캐시 히트 로그를 Debug → **불완전할 때만 Info**(라운드 번호 포함, 완전하면 Debug 유지 = 정상 상태는 조용히). 형식: `[PredictedMoves] R2: 3/8 enemies have predicted moves — 5 uncached (their cover/exposure judged from current position only)`
+- [x] **D. 거짓 설정 배선 (v3.120.1)**: `situation.CharacterSettings?.UsePredictiveMovement ?? true` 게이트 추가 — 끄면 `PredictedMoves = null` 로 예측 없던 시절 동작.
+- [ ] **데이터 수집**: 전투 1~2판 후 `[PredictedMoves]` 로그 확인 — **라운드별 미보유 비율**이 핵심. R1 에서 높고 R2+ 에서 낮아지면 "첫 라운드 한정 문제", 계속 높으면 구조적 문제.
+- [ ] **A안 (데이터 확인 후 판단)**: 캐시 없는 적을 `GetEnemyThreatRangeInTiles` 기반 도달 반경으로 근사해 worst-cover 계산. **타일 점수 최대 항목(110)을 건드리므로 전 유닛 포지셔닝이 바뀜** — LESSONS_LEARNED "AI 점수 튜닝의 한계"에 따라 인게임 관찰 없이 착수 금지.

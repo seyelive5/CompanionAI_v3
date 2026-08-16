@@ -756,7 +756,16 @@ namespace CompanionAI_v3.Analysis
             }
 
             // ★ v3.111.0 Phase 5: 적 예상 이동 위치 — 같은 유닛/라운드에서 재사용
-            if (isContinuation && _cachedPredictedMoves != null)
+            //   UsePredictiveMovement(캐릭터별 설정, 기본 켜짐)가 꺼지면 예측을 쓰지 않는다.
+            //   기존에는 이 설정이 UI 에만 있고 로직에서 읽히지 않아, 꺼도 아무 일이 없었다(거짓 설정).
+            //   끄면 엄폐/노출이 적의 현재 위치 기준으로만 평가된다(= 예측 없던 시절 동작).
+            bool usePrediction = situation.CharacterSettings?.UsePredictiveMovement ?? true;
+            if (!usePrediction)
+            {
+                situation.PredictedMoves = null;
+                _cachedPredictedMoves = null;
+            }
+            else if (isContinuation && _cachedPredictedMoves != null)
             {
                 situation.PredictedMoves = _cachedPredictedMoves;
             }

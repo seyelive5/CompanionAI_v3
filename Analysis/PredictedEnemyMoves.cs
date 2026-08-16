@@ -24,17 +24,34 @@ namespace CompanionAI_v3.Analysis
         public static PredictedEnemyMoves Compute(List<BaseUnitEntity> enemies)
         {
             var result = new PredictedEnemyMoves(enemies);
-            if (Main.IsDebugEnabled)
+
+            int total = enemies?.Count ?? 0;
+            int hits = 0;
+            if (enemies != null)
             {
-                int hits = 0;
-                if (enemies != null)
+                foreach (var e in enemies)
                 {
-                    foreach (var e in enemies)
-                    {
-                        if (EnemyMoveCache.Get(e) != null) hits++;
-                    }
+                    if (EnemyMoveCache.Get(e) != null) hits++;
                 }
-                Log.Analysis.Debug($"[PredictedMoves] Cache query: {hits}/{enemies?.Count ?? 0} enemies have cached moves (total cache size: {EnemyMoveCache.Count})");
+            }
+
+            // 계측: 캐시가 없는 적은 엄폐/노출이 "적의 현재 위치" 기준으로만 평가된다
+            //   (TileScorerPort.GetEnsuredCoverComponents 의 fallback 경로). 즉 아직 행동하지 않은 적은
+            //   "지금 자리에 계속 있을 것"으로 가정되어, 그 적에게 노출될 타일이 안전해 보일 수 있다.
+            //   실제 전투에서 미보유 비율이 얼마인지 알아야 보정 필요성을 판단할 수 있으므로,
+            //   불완전할 때만 기본 로그 레벨로 남긴다 (완전하면 Debug — 정상 상태는 조용히).
+            if (total > 0 && hits < total)
+            {
+                int round = -1;
+                try { round = Kingmaker.Game.Instance?.TurnController?.CombatRound ?? -1; }
+                catch { /* 라운드 번호는 계측 부가정보 — 실패해도 본 로그는 남긴다 */ }
+
+                Log.Analysis.Info($"[PredictedMoves] R{round}: {hits}/{total} enemies have predicted moves — " +
+                    $"{total - hits} uncached (their cover/exposure judged from current position only)");
+            }
+            else if (Main.IsDebugEnabled)
+            {
+                Log.Analysis.Debug($"[PredictedMoves] Cache query: {hits}/{total} enemies have cached moves (total cache size: {EnemyMoveCache.Count})");
             }
             return result;
         }
