@@ -490,3 +490,46 @@
 - **의도적으로 유지**: `RECOMMENDED_JUDGE_MODEL` / `LLMHttpClient` 폴백 = `gemma4:e4b`. QAT 로 바꾸면 이미 `gemma4:e4b` 를 받아 둔 사용자(테스터 포함)의 전투 LLM 이 즉시 404 가 된다.
 - **보류**: qwen3.6(27b/35b)·qwen3.8(27b) — 각각 2026-08-14·08-15 출시로 검증 기간이 짧고, **27B 이상 크기만 있어** 저사양 사용자에게 의미가 없다.
 - [ ] **인게임 검증**: MS 탭 티어 3개가 새 목록으로 뜨는지, 모델 다운로드가 실제로 되는지(`gemma4:e4b-it-qat`), 설치 안 된 모델 설정 시 연결 테스트가 **정직하게 실패**하는지.
+
+### 26. LLM 방법론 최신화 — 구조화 출력 재도입 + 대화 프롬프트 캐시 복구 (v3.123.0)
+
+**배경**: 사용자 제기 "LLM 대화 방법론과 전투 로직이 예전에 개발한 내용이라 최신 기준으로 개선할 게 있는지 검토".
+
+#### ① 전투 LLM: Ollama Structured Output(`format`) 재도입
+
+**이전 상태**: `LLMJudge` 주석은 "Structured Output 으로 강제"라고 적혀 있었으나 **실제 요청에 `format` 필드가 없었다.** 응답은 수동 문자열 파싱(`IndexOf`/`Substring`/문자 단위 스캔) + 3중 폴백.
+
+**금지 사유가 해소됨**: 메모리 [[llm-gemma4-primacy-bias]] 에 "Ollama `think=false` + `format` 조합 버그(issue #15260) — format 재도입 시도 금지" 로 기록돼 있었다. 그 이슈는 **PR #15678 (2026-04-21 머지)** 로 수정됐다 — think 값에 따라 첫 토큰부터 format 을 적용하도록 변경.
+
+**재도입 전 실측** (Ollama 0.24.0 및 업데이트 후 0.32.13, 모두 `think=false`):
+| 모델 | 스키마 | 결과 |
+|---|---|---|
+| gemma4:e4b | 문자열 enum + 정수 범위 (Scorer 형태) | 3/3 준수, temp=0 에서 완전 결정적 |
+| qwen3.5:9b | 동일 | 3/3 준수, 결정적 |
+| gemma4:e4b | 배열+문자열 (Confidence 형태) | 3/3 준수, ratios 합=1.0 |
+
+- [x] `LLMSchemas.cs` 신설 — Scorer/JudgeChoice/JudgeConfidence 스키마. Scorer 는 **숫자가 아니라 문자열 enum** 으로 강제(v3.102.0 이 카테고리를 우선한 이유와 동일 — 소형 모델은 범주가 안정적).
+- [x] `LLMHttpClient.BuildChatRequest` 에 `format` 옵션 파라미터 추가. 미지정 시 종전 요청과 바이트 동일.
+- [x] Scorer / Judge(choice) / Judge(confidence) 3곳 배선. 프롬프트에도 "Return as JSON" 명시(Ollama 권장).
+- [x] `TryParseConfidenceJson` 추가 — `{"ratios":[...],"narration":"..."}` 처리. **기존 텍스트 파서는 전부 존치** (구버전 Ollama·미지원 모델 폴백).
+- 부수 관찰: 시험 프롬프트에서 `priority_target` 이 0 이 아닌 값(가장 약한 적)을 골랐다. 다만 프롬프트가 달라 primacy bias 해소의 증거로는 불충분 — 실제 인코더로 로그 확인 필요.
+
+#### ② 대화 LLM: KV 캐시 프리픽스 복구
+
+**정확한 기전 (첫 진단을 측정으로 정정함)**: 처음엔 "휘발성 상태가 system 에 있어 매 요청 프리픽스가 깨진다"고 봤으나, **`GetSystemPrompt()`(고정)가 system 안에서 이미 앞에 오므로 고정 부분 자체는 캐시되고 있었다.** 실제 손해는 **휘발성 블록 뒤에 오는 대화 히스토리 전체가 무효화**되는 것이다. 히스토리가 짧으면 차이가 없고(1차 측정에서 확인), 길수록 손해가 커진다.
+
+**측정** (gemma4:e4b, 고정 ~2.8K 토큰 + 히스토리 16턴, 센서 데이터 변경 후 2턴째 `prompt_eval_duration`):
+| 배치 | 2턴째 prefill |
+|---|---|
+| A 기존 (휘발성이 system 안) | 216 / 219 / 225 ms |
+| B 신규 (휘발성이 마지막 user 턴) | 62 / 56 / 56 ms |
+
+**약 3.7배 단축.** 히스토리가 길수록 격차가 커진다.
+
+- [x] `BuildSystemContent` 를 `BuildStableContent`(페르소나·규칙) / `BuildVolatileContent`(요약·SENSOR DATA·반복방지)로 분리.
+- [x] `Build()` — system=고정, 휘발성은 **가장 최근 user 턴** 앞에 부착. `userMessage` 가 없는 빌드(아이들 등)도 마지막 user 턴에 이어 붙이거나 새 user 턴을 만들어 **상황 정보가 사라지지 않게** 처리.
+- [x] `BuildForKnowledgeQuery` 도 동일 분리. REFERENCE DATA 는 질의마다 달라지므로 휘발성 쪽. **`sysInUser` 분기에서 `queryContent` 를 `query` 로 되돌려 참고 자료가 사라지던 버그도 함께 수정.**
+- 전투 쪽 `LLMScorer` 는 원래부터 올바른 구조였다(시스템=역할별 캐시, 전장=user 메시지). 같은 저장소 안에서 두 방식이 갈려 있던 것.
+- [ ] **인게임 검증**: ① 전투 로그에서 Scorer/Judge 응답이 스키마대로 오는지, 폴백 경로(`Structured confidence parse failed`) 가 뜨지 않는지 ② `priority_target` 분포가 0 편중에서 벗어나는지 ③ 머신스피릿 다회 대화에서 응답 시작이 빨라지는지 ④ **SENSOR DATA 위치가 프롬프트 끝으로 옮겨졌으므로 답변 품질·환각 여부 관찰 필요**(내용은 동일하나 배치가 바뀜).
+
+**보류**: 임베딩 모델 교체(`nomic-embed-text` → `embeddinggemma`, 재계산 비용) / 소형 모델 컨텍스트 4096 상향(VRAM 비용, 이득 불확실) / Judge CoT·양방향 평가(지연 2배, 현재 셔플이 합리적 타협).

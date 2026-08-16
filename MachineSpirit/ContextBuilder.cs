@@ -1262,11 +1262,28 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
         }
 
         /// <summary>
-        /// Build the full system content string (prompt + summary + sensor data + anti-repetition).
+        /// 프롬프트의 <b>고정</b> 부분 — 페르소나와 규칙만.
+        ///
+        /// Ollama 는 프리픽스가 바이트 단위로 동일할 때만 KV 캐시를 재사용한다. 이 문자열은
+        /// 사용자가 페르소나 설정을 바꾸지 않는 한 턴이 바뀌어도 동일하므로, 두 번째 턴부터
+        /// prefill 을 건너뛸 수 있다. 게임 상태처럼 매번 달라지는 값은 절대 여기 넣지 말 것
+        /// — 한 글자만 달라져도 그 뒤 전체가 재계산된다.
         /// </summary>
-        private static string BuildSystemContent(string conversationSummary, MachineSpiritConfig config = null, List<ChatMessage> chatHistory = null)
+        private static string BuildStableContent() => GetSystemPrompt();
+
+        /// <summary>
+        /// 프롬프트의 <b>가변</b> 부분 — 대화 요약 + SENSOR DATA + 반복 방지.
+        ///
+        /// 파티 HP·지역·월드 상태·전투 상황은 게임이 진행되면 계속 바뀐다. 예전에는 이 내용이
+        /// system 메시지(= 캐시 프리픽스)에 들어가 있어 <b>턴마다 프롬프트 전체가 재처리</b>됐다.
+        /// 이제 가장 최근 user 턴에 붙는다 — 앞쪽이 고정되므로 캐시가 살아 있고,
+        /// 현재 상태가 사용자의 질문 바로 옆에 오므로 참조도 쉬워진다.
+        /// (전투 쪽 <c>LLMScorer</c> 는 원래부터 이 구조였다 — 시스템 메시지는 역할별 캐시,
+        ///  전장 상태는 user 메시지.)
+        /// </summary>
+        private static string BuildVolatileContent(string conversationSummary, MachineSpiritConfig config = null, List<ChatMessage> chatHistory = null)
         {
-            var systemSb = new StringBuilder(GetSystemPrompt());
+            var systemSb = new StringBuilder(256);
 
             // ★ v3.72.0: Small model budget — skip heavy sections to stay within 4K context
             bool isSmall = IsSmallModel(config);
@@ -1532,7 +1549,12 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
             string conversationSummary = null)
         {
             var messages = new List<LLMClient.ChatMessage>();
-            string systemContent = BuildSystemContent(conversationSummary, config, chatHistory);
+
+            // 프롬프트를 고정(페르소나·규칙)/가변(요약·SENSOR DATA)으로 분리한다.
+            // 고정 부분만 앞에 두어야 Ollama 가 KV 캐시 프리픽스를 재사용할 수 있다.
+            // 가변 부분은 아래에서 가장 최근 user 턴에 붙인다.
+            string systemContent = BuildStableContent();
+            string volatileContent = BuildVolatileContent(conversationSummary, config, chatHistory);
 
             // ★ v3.71.0: System-in-user workaround for Gemma + Mistral
             // Gemma: ignores system role entirely
@@ -1589,10 +1611,14 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
                 }
             }
 
-            // Current user message
+            // Current user message — 가변 컨텍스트(요약·SENSOR DATA)를 여기에 붙인다.
+            // 여기까지의 메시지는 턴이 바뀌어도 동일하므로 프리픽스 캐시가 유지된다.
             if (!string.IsNullOrEmpty(userMessage))
             {
                 string content = userMessage;
+
+                if (!string.IsNullOrEmpty(volatileContent))
+                    content = $"{volatileContent}\n\n{content}";
 
                 // If Gemma workaround wasn't applied yet (empty history), inject here
                 if (useGemmaWorkaround && !systemInjected)
@@ -1612,8 +1638,27 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
                 messages.Add(new LLMClient.ChatMessage
                 {
                     Role = "user",
-                    Content = $"{sysTag}\n{systemContent}\n{sysEndTag}\n\n(Respond in character.)"
+                    Content = $"{sysTag}\n{systemContent}\n{sysEndTag}\n\n{volatileContent}\n\n(Respond in character.)"
                 });
+            }
+            else if (!string.IsNullOrEmpty(volatileContent))
+            {
+                // userMessage 없는 빌드(아이들 코멘터리 등) — 가변 컨텍스트를 붙일 곳이 없으면
+                // 모델이 현재 상황을 전혀 못 본다. 마지막 user 턴에 이어 붙이거나 새로 추가한다.
+                if (messages.Count > 0 && messages[messages.Count - 1].Role == "user")
+                {
+                    var last = messages[messages.Count - 1];
+                    last.Content = $"{volatileContent}\n\n{last.Content}";
+                    messages[messages.Count - 1] = last;
+                }
+                else
+                {
+                    messages.Add(new LLMClient.ChatMessage
+                    {
+                        Role = "user",
+                        Content = $"{volatileContent}\n\n(Respond in character.)"
+                    });
+                }
             }
 
             // Debug: log final message structure
@@ -1634,8 +1679,10 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
             // Build the same way as Build() but add [REFERENCE DATA] section
             var messages = new List<LLMClient.ChatMessage>();
 
-            // System prompt — same as normal but with reference data appended
-            string systemContent = BuildSystemContent(conversationSummary, config, chatHistory);
+            // Build() 과 동일한 분리 — 고정 부분만 프리픽스에 둔다.
+            // 참고 자료(REFERENCE DATA)는 질의마다 달라지므로 당연히 가변 쪽이다.
+            string systemContent = BuildStableContent();
+            var volatileSb = new StringBuilder(BuildVolatileContent(conversationSummary, config, chatHistory));
 
             // Add reference data section
             var refSb = new StringBuilder();
@@ -1662,7 +1709,8 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
             refSb.AppendLine("- Only discuss: stats, abilities, combat mechanics, current quest objectives, lore background.");
             refSb.AppendLine("- If asked about a character's future, say 'That remains to be seen' or similar.");
 
-            systemContent += refSb.ToString();
+            volatileSb.Append(refSb.ToString());
+            string volatileContent = volatileSb.ToString();
 
             bool sysInUser = NeedsSystemInUserWorkaround(config);
             if (!sysInUser)
@@ -1696,13 +1744,17 @@ Style examples (use as rough guides, NOT templates -- be creative and vary your 
             }
 
             // Add user query with system injection for Gemma/Mistral
-            string queryContent = query;
+            // 가변 컨텍스트(SENSOR DATA + REFERENCE DATA)는 질의 바로 앞에 붙인다.
+            string queryContent = string.IsNullOrEmpty(volatileContent)
+                ? query
+                : $"{volatileContent}\n\n{query}";
             if (sysInUser)
             {
                 var family = LLMClient.DetectFamily(config?.Model);
                 string tag = family == LLMClient.ModelFamily.Mistral ? "### System Instructions ###" : "[INSTRUCTION]";
                 string endTag = family == LLMClient.ModelFamily.Mistral ? "### End Instructions ###" : "[/INSTRUCTION]";
-                queryContent = $"{tag}\n{systemContent}\n{endTag}\n\n{query}";
+                // queryContent 에는 이미 가변 컨텍스트가 붙어 있다 — query 로 되돌리면 참고 자료가 사라진다.
+                queryContent = $"{tag}\n{systemContent}\n{endTag}\n\n{queryContent}";
             }
             messages.Add(new LLMClient.ChatMessage { Role = "user", Content = queryContent });
 

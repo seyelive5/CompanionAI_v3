@@ -153,9 +153,10 @@ namespace CompanionAI_v3.Planning.LLM
                 string model = LLMHttpClient.ResolveModel();
 
                 // 3. Ollama 요청 구성 (LLMHttpClient.BuildChatRequest 위임)
-                // ★ CRITICAL: format 파라미터 없음 (Gemma4 빈 응답 문제)
                 // ★ CRITICAL: think=false (thinking 모드 비활성화)
                 // num_predict=120: JSON 가중치 + reasoning 1문장 (~50 토큰)
+                // format: 스키마로 출력 제약 (Ollama issue #15260 이 PR #15678 로 수정된 뒤 재도입).
+                //   ScorerWeights.Parse 의 텍스트 폴백은 그대로 둔다 — 구버전 Ollama 대비.
                 var requestBody = LLMHttpClient.BuildChatRequest(
                     model: model,
                     systemMsg: systemMsg,
@@ -163,7 +164,8 @@ namespace CompanionAI_v3.Planning.LLM
                     numPredict: 120,
                     temperature: 0f,
                     think: false,
-                    keepAlive: -1);
+                    keepAlive: -1,
+                    format: LLMSchemas.ScorerWeights(enemyCount));
 
                 // 4. Ollama URL 결정 (LLMHttpClient 정규화)
                 string baseUrl = Main.Settings?.MachineSpirit?.ApiUrl;

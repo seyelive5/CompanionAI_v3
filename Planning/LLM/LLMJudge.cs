@@ -190,7 +190,9 @@ namespace CompanionAI_v3.Planning.LLM
                     numPredict: 50,    // thinking 토큰 소진 방지 여유
                     temperature: 0f,
                     think: false,      // ★ Gemma4/Qwen3 thinking 모드 비활성화 — Judge는 즉답만 필요
-                    keepAlive: -1);
+                    keepAlive: -1,
+                    // {"choice":"A"} 강제. ParseResponse 의 plain-text 폴백은 그대로 둔다.
+                    format: LLMSchemas.JudgeChoice(candidateCount, ChoiceLabels));
 
                 // 3. baseUrl + 로그
                 string baseUrl = Main.Settings?.MachineSpirit?.ApiUrl;
@@ -314,7 +316,10 @@ namespace CompanionAI_v3.Planning.LLM
                     numPredict: 100,  // confidence + narration (~50 토큰 추가)
                     temperature: 0f,
                     think: false,
-                    keepAlive: -1);
+                    keepAlive: -1,
+                    // {"ratios":[...],"narration":"..."} 강제.
+                    // ParseConfidenceResponse 는 이 JSON 과 기존 "A:0.7,B:0.3" 텍스트를 모두 처리한다.
+                    format: LLMSchemas.JudgeConfidence(candidateCount));
 
                 // 3. baseUrl + 로그
                 string baseUrl = Main.Settings?.MachineSpirit?.ApiUrl;
@@ -434,7 +439,9 @@ namespace CompanionAI_v3.Planning.LLM
             // ★ v3.100.0: Rule reminders — 무효 플랜 선택 편향 감소
             _sbSystem.Append("Rules: Standard attacks and most abilities are once-per-turn. Actions cost AP/MP shown in [brackets]. ");
             _sbSystem.Append("Prefer plans with valid, unique action sequences — reject plans that list the same attack twice unless marked bonus.\n");
-            _sbSystem.Append("Respond with ONLY the letter of your choice (").Append(choiceStr).Append("). Nothing else.");
+            // 출력은 format 스키마로 강제되지만, Ollama 문서는 프롬프트에도 JSON 을 명시하라고 권한다
+            // (모델이 스키마를 인지하지 못한 채 산문을 시작하면 제약 하에서 어색한 토큰이 나온다).
+            _sbSystem.Append("Return as JSON: {\"choice\":\"<").Append(choiceStr).Append(">\"}. Nothing else.");
 
             _cachedSystemRole = roleName;
             _cachedCandidateCount = candidateCount;
@@ -566,26 +573,32 @@ namespace CompanionAI_v3.Planning.LLM
 
             int count = System.Math.Min(candidateCount, ChoiceLabels.Length);
 
-            // 예시 생성: "A:0.7,B:0.3" 또는 "A:0.5,B:0.3,C:0.2"
-            var exSb = new StringBuilder(count * 5);
+            // 라벨 나열 ("A, B, C") — ratios 배열 순서를 명시하기 위한 것
+            var labelSb = new StringBuilder(count * 3);
+            // 예시 비율 ("0.7,0.3" / "0.7,0.3,0.0")
+            var exSb = new StringBuilder(count * 4);
             for (int i = 0; i < count; i++)
             {
-                if (i > 0) exSb.Append(',');
-                exSb.Append(ChoiceLabels[i]).Append(':');
+                if (i > 0) { labelSb.Append(", "); exSb.Append(','); }
+                labelSb.Append(ChoiceLabels[i]);
                 if (i == 0) exSb.Append("0.7");
                 else if (i == 1) exSb.Append("0.3");
                 else exSb.Append("0.0");
             }
-            string example = exSb.ToString();
+            string labelList = labelSb.ToString();
+            string exampleRatios = exSb.ToString();
 
             _sbSystem.Clear();
             _sbSystem.Append("You are a tactical combat advisor for a ").Append(roleName).Append(" unit.\n");
             _sbSystem.Append("Given the battlefield and candidate action plans, rate each plan's confidence.\n");
             _sbSystem.Append("Evaluate: threat elimination, ally survival, damage efficiency, positioning.\n");
-            _sbSystem.Append("Line 1: confidence distribution like: ").Append(example).Append(" (must sum to 1.0)\n");
-            _sbSystem.Append("Line 2: brief tactical narration (1 sentence, what this unit will do and why)\n");
-            _sbSystem.Append("Example:\n").Append(example).Append('\n');
-            _sbSystem.Append("Buff and strike the weakened Psyker to eliminate the biggest threat.");
+            // format 스키마로 {"ratios":[...],"narration":"..."} 를 강제하되, 프롬프트에도 명시한다.
+            // ratios 는 후보 순서(A,B,C...)와 같은 순서로, 합이 1.0.
+            _sbSystem.Append("Return as JSON: {\"ratios\":[<one number per plan, in order ")
+                     .Append(labelList).Append(", summing to 1.0>],")
+                     .Append("\"narration\":\"<1 sentence: what this unit will do and why>\"}\n");
+            _sbSystem.Append("Example: {\"ratios\":[").Append(exampleRatios)
+                     .Append("],\"narration\":\"Buff and strike the weakened Psyker to eliminate the biggest threat.\"}");
 
             _cachedConfidenceRole = roleName;
             _cachedConfidenceCount = candidateCount;
@@ -601,6 +614,62 @@ namespace CompanionAI_v3.Planning.LLM
         /// 3. "A: 0.7, B: 0.3" (공백 포함)
         /// 4. 단일 문자 "A" → [1.0, 0.0] (이진 폴백)
         /// </summary>
+        /// <summary>
+        /// Structured Output 형식 파싱 — {"ratios":[0.7,0.3],"narration":"..."}.
+        /// 비율은 합이 1이 되도록 정규화한다(스키마는 값 범위를 강제하지 못함).
+        /// 파싱 불가 시 IsValid=false 를 반환해 호출자가 텍스트 경로로 폴백하게 한다.
+        /// </summary>
+        private static JudgeConfidence TryParseConfidenceJson(string content, int candidateCount)
+        {
+            var invalid = new JudgeConfidence { PreferredIndex = 0, IsValid = false };
+
+            try
+            {
+                var json = JObject.Parse(content);
+                var arr = json["ratios"] as JArray;
+                if (arr == null || arr.Count == 0) return invalid;
+
+                var ratios = new float[candidateCount];
+                float sum = 0f;
+                int n = System.Math.Min(candidateCount, arr.Count);
+                for (int i = 0; i < n; i++)
+                {
+                    float v = arr[i].Type == JTokenType.Float || arr[i].Type == JTokenType.Integer
+                        ? (float)arr[i]
+                        : 0f;
+                    if (v < 0f) v = 0f;
+                    ratios[i] = v;
+                    sum += v;
+                }
+
+                if (sum <= 0f) return invalid;
+
+                int best = 0;
+                for (int i = 0; i < candidateCount; i++)
+                {
+                    ratios[i] /= sum;
+                    if (ratios[i] > ratios[best]) best = i;
+                }
+
+                string narration = json["narration"]?.ToString()?.Trim();
+                if (string.IsNullOrEmpty(narration)) narration = null;
+                else if (narration.Length > 200) narration = narration.Substring(0, 200);
+
+                return new JudgeConfidence
+                {
+                    Ratios = ratios,
+                    PreferredIndex = best,
+                    IsValid = true,
+                    Narration = narration
+                };
+            }
+            catch (Exception ex)
+            {
+                Log.Planning.Debug($"[LLMJudge] Structured confidence parse failed, falling back to text: {ex.Message}");
+                return invalid;
+            }
+        }
+
         private static JudgeConfidence ParseConfidenceResponse(string rawResponse, int candidateCount)
         {
             var fallback = new JudgeConfidence { PreferredIndex = 0, IsValid = false };
@@ -615,6 +684,14 @@ namespace CompanionAI_v3.Planning.LLM
                     return fallback;
 
                 content = content.Trim();
+
+                // Structured Output 경로: {"ratios":[0.7,0.3],"narration":"..."}
+                // 실패하면 아래 텍스트 파싱으로 폴백 (구버전 Ollama·미지원 모델).
+                if (content.StartsWith("{"))
+                {
+                    var structured = TryParseConfidenceJson(content, candidateCount);
+                    if (structured.IsValid) return structured;
+                }
 
                 // 줄 분리: 1줄째 = confidence, 나머지 = narration
                 string confidenceLine = content;

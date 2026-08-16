@@ -115,6 +115,11 @@ namespace CompanionAI_v3.Planning.LLM
         /// <param name="temperature">샘플링 온도 (default 0 — deterministic).</param>
         /// <param name="think">thinking 모드 활성화 여부 (Gemma4 는 false 권장).</param>
         /// <param name="keepAlive">모델 메모리 유지 시간(초). -1 = 무한, 0 = 즉시 언로드.</param>
+        /// <param name="format">
+        /// Ollama Structured Output 스키마 (<see cref="LLMSchemas"/>). null 이면 미첨부 — 종전 동작.
+        /// 지정 시 모델 출력이 스키마에 맞게 제약된다. 호출자의 파서는 그대로 두는 것이 안전하다
+        /// (구버전 Ollama·미지원 모델에서는 제약이 걸리지 않을 수 있음).
+        /// </param>
         public static JObject BuildChatRequest(
             string model,
             string systemMsg,
@@ -122,7 +127,8 @@ namespace CompanionAI_v3.Planning.LLM
             int numPredict,
             float temperature = 0f,
             bool think = false,
-            int keepAlive = -1)
+            int keepAlive = -1,
+            JObject format = null)
         {
             var messages = new JArray();
             if (!string.IsNullOrEmpty(systemMsg))
@@ -132,7 +138,7 @@ namespace CompanionAI_v3.Planning.LLM
             // ★ v3.114.0 (Phase F.2 review): legacy 4 callers 의 JObject 삽입 순서 보존 —
             //   options 가 think 보다 먼저. JSON wire-level byte-identity 유지 (Ollama 는 순서 무관하지만
             //   네트워크 캡쳐 diff 시 마이그레이션 전후 동일).
-            return new JObject
+            var body = new JObject
             {
                 ["model"] = model,
                 ["messages"] = messages,
@@ -145,6 +151,11 @@ namespace CompanionAI_v3.Planning.LLM
                 },
                 ["think"] = think
             };
+
+            // format 은 마지막에 — 미지정 시 종전 요청과 바이트 동일하게 유지된다.
+            if (format != null) body["format"] = format;
+
+            return body;
         }
 
         /// <summary>
