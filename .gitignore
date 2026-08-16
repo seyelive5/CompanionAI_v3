@@ -20,3 +20,12 @@ Thumbs.db
 # Temp files
 *.tmp
 *~
+
+# 배포 아티팩트 (릴리즈 zip / Ollama 설치본 — 1.8GB)
+CompanionAI_v3_*.zip
+OllamaSetup.exe
+*.lscache
+
+# 도구가 남기는 임시 파일
+tmpclaude-*
+.claude/settings.local.json
