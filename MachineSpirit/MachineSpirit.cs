@@ -356,6 +356,227 @@ namespace CompanionAI_v3.MachineSpirit
             return msg.Text;
         }
 
+        #region Connection Diagnostic
+
+        /// <summary>진단 결과 한 줄 (설정 UI 상태줄). null = 아직 실행 안 함.</summary>
+        public static string DiagnosticStatus { get; private set; }
+
+        /// <summary>마지막 진단이 통과했는지 (UI 색상 결정).</summary>
+        public static bool DiagnosticOk { get; private set; }
+
+        /// <summary>진단 진행 중 (UI 색상 결정).</summary>
+        public static bool DiagnosticRunning { get; private set; }
+
+        /// <summary>
+        /// "연결 테스트" 실제 진단 — 기존엔 인사 메시지 한 번 보내는 게 전부라
+        /// 서버가 꺼져 있으면 아무 표시 없이 침묵했다(커뮤니티 제보의 직접 원인).
+        /// 이제 단계별로 확인해 실패 지점을 특정한다:
+        ///   1) 설정 유효성 → 2) (Ollama) 서버 도달 + 모델 설치 여부 → 3) 실제 응답 1회
+        /// </summary>
+        public static void RunConnectionDiagnostic()
+        {
+            if (DiagnosticRunning) return;
+            CoroutineRunner.EnsureInstance();
+            CoroutineRunner.Start(ConnectionDiagnosticRoutine());
+        }
+
+        private static IEnumerator ConnectionDiagnosticRoutine()
+        {
+            DiagnosticRunning = true;
+            DiagnosticOk = false;
+            ClearLastError();
+
+            try
+            {
+                if (Config == null || !Config.Enabled)
+                {
+                    DiagnosticStatus = "Machine Spirit is disabled — enable it first.";
+                    yield break;
+                }
+                if (string.IsNullOrWhiteSpace(Config.ApiUrl))
+                {
+                    DiagnosticStatus = "API URL is empty — set it first.";
+                    yield break;
+                }
+                if (string.IsNullOrWhiteSpace(Config.Model))
+                {
+                    DiagnosticStatus = "No model selected — pick a model first.";
+                    yield break;
+                }
+
+                // Ollama 는 로컬 서버라 "서버 미실행 / 모델 미설치"가 압도적으로 흔한 실패 —
+                // 실제 대화를 시도하기 전에 이 둘을 분리해서 알려준다.
+                if (Config.Provider == ApiProvider.Ollama)
+                {
+                    DiagnosticStatus = "Checking Ollama server...";
+                    yield return OllamaSetup.FetchInstalledModels();
+
+                    var installed = OllamaSetup.InstalledModels;
+                    if (installed == null || installed.Count == 0)
+                    {
+                        DiagnosticStatus = "Ollama server not responding (or no models installed). "
+                            + "Start the Ollama server, then test again.";
+                        yield break;
+                    }
+
+                    bool hasModel = false;
+                    var names = new List<string>();
+                    for (int i = 0; i < installed.Count; i++)
+                    {
+                        string m = installed[i].FullName;
+                        if (string.IsNullOrEmpty(m)) m = installed[i].Name;
+                        if (string.IsNullOrEmpty(m)) continue;
+                        names.Add(m);
+                        // 태그 생략 표기(예: "gemma3:4b" vs "gemma3:4b-it-qat") 허용
+                        if (m.Equals(Config.Model, StringComparison.OrdinalIgnoreCase)
+                            || m.StartsWith(Config.Model, StringComparison.OrdinalIgnoreCase)
+                            || Config.Model.StartsWith(m, StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasModel = true;
+                        }
+                    }
+
+                    if (!hasModel)
+                    {
+                        DiagnosticStatus = $"Server OK, but model '{Config.Model}' is not installed. "
+                            + $"Run: ollama pull {Config.Model}  (installed: {string.Join(", ", names.ToArray())})";
+                        yield break;
+                    }
+
+                    DiagnosticStatus = "Server OK, model found — sending a test message...";
+                }
+                else
+                {
+                    DiagnosticStatus = "Sending a test message...";
+                }
+
+                // 실제 왕복 1회 — 성공/실패는 ReportLLMFailure/응답 경로가 채팅에도 남긴다.
+                _diagnosticPending = true;
+                OnUserMessage("Hello, Machine Spirit. Respond with a brief greeting.");
+
+                float deadline = Time.time + 60f;
+                while (_diagnosticPending && Time.time < deadline)
+                    yield return null;
+
+                if (_diagnosticPending)
+                {
+                    _diagnosticPending = false;
+                    DiagnosticStatus = "No response within 60s — the model may be too large for this machine.";
+                }
+                else if (!string.IsNullOrEmpty(LastError))
+                {
+                    DiagnosticStatus = LastError;
+                }
+                else
+                {
+                    DiagnosticOk = true;
+                    DiagnosticStatus = $"Connection OK — {Config.Model} responded.";
+                }
+            }
+            finally
+            {
+                DiagnosticRunning = false;
+            }
+        }
+
+        // 진단이 실제 응답/실패를 기다리는 중인지 — 응답·실패 경로에서 내려간다.
+        private static bool _diagnosticPending;
+
+        #endregion
+
+        #region LLM Failure Reporting
+
+        /// <summary>마지막 LLM 실패 사유(사용자 표시용) — 설정 UI 상태줄이 읽는다. 성공 시 null.</summary>
+        public static string LastError { get; private set; }
+
+        /// <summary>마지막 LLM 실패 시각(Time.time). 0 = 실패 이력 없음.</summary>
+        public static float LastErrorTime { get; private set; }
+
+        /// <summary>마지막 요청이 성공했음을 기록 — 상태줄이 "정상"으로 돌아간다.</summary>
+        public static void ClearLastError()
+        {
+            LastError = null;
+            LastErrorTime = 0f;
+        }
+
+        /// <summary>
+        /// LLM 요청 실패를 사용자에게 보이게 처리 — 기존엔 Debug 로그로만 남아(=침묵) 사용자가
+        /// "설정은 다 했는데 반응이 없다"로 겪던 문제(커뮤니티 제보)를 해소.
+        /// 채팅에 `[ERROR]` 접두 메시지로 표기(이 접두사는 ContextBuilder·요약에서 제외되므로 대화 오염 없음)
+        /// + LastError 에 보관해 설정 패널 상태줄에서도 확인 가능.
+        /// </summary>
+        private static void ReportLLMFailure(string rawError)
+        {
+            LastError = DescribeLLMError(rawError);
+            LastErrorTime = Time.time;
+            _diagnosticPending = false;  // 진단 대기 해제 (실패로 확정)
+
+            // "이미 요청 진행 중"은 정상적인 중복 방지라 사용자에게 알릴 실패가 아님 (로그만)
+            bool userVisible = !string.IsNullOrEmpty(rawError)
+                && rawError.IndexOf("already in progress", StringComparison.OrdinalIgnoreCase) < 0;
+
+            if (userVisible)
+            {
+                _chatHistory.Add(new ChatMessage
+                {
+                    IsUser = false,
+                    Text = $"[ERROR] {LastError}",
+                    Timestamp = Time.time
+                });
+                TrimHistory();
+            }
+
+            Log.MachineSpirit.Warn($"[MachineSpirit] LLM request failed: {rawError} (provider={Config?.Provider}, model={Config?.Model})");
+        }
+
+        /// <summary>
+        /// 원시 오류 문자열(HTTP 코드/예외 메시지)을 사용자가 조치할 수 있는 한 문장으로 변환.
+        /// 원문은 로그에 남으므로 여기서는 "무엇을 해야 하는가"에 집중한다.
+        /// </summary>
+        private static string DescribeLLMError(string rawError)
+        {
+            string e = rawError ?? "unknown";
+            bool isOllama = Config?.Provider == ApiProvider.Ollama;
+
+            // 연결 자체 실패 — 서버 미실행이 압도적으로 흔한 원인
+            if (e.IndexOf("Cannot connect", StringComparison.OrdinalIgnoreCase) >= 0
+                || e.IndexOf("Connection refused", StringComparison.OrdinalIgnoreCase) >= 0
+                || e.IndexOf("Failed to connect", StringComparison.OrdinalIgnoreCase) >= 0
+                || e.StartsWith("HTTP 0", StringComparison.OrdinalIgnoreCase))
+            {
+                return isOllama
+                    ? $"Cannot reach Ollama at {Config?.ApiUrl}. Is the Ollama server running? (start it, then press Test Connection)"
+                    : $"Cannot reach the API server at {Config?.ApiUrl}. Check the URL and your internet connection.";
+            }
+
+            if (e.StartsWith("HTTP 404", StringComparison.OrdinalIgnoreCase))
+            {
+                return isOllama
+                    ? $"Model '{Config?.Model}' not found on the Ollama server. Pull it first (ollama pull {Config?.Model}) or pick an installed model."
+                    : "Endpoint or model not found (HTTP 404). Check the API URL and model name.";
+            }
+
+            if (e.StartsWith("HTTP 401", StringComparison.OrdinalIgnoreCase)
+                || e.StartsWith("HTTP 403", StringComparison.OrdinalIgnoreCase))
+                return "API key rejected (HTTP 401/403). Check the API key for this provider.";
+
+            if (e.StartsWith("HTTP 429", StringComparison.OrdinalIgnoreCase))
+                return "Rate limited by the provider (HTTP 429). Wait a moment and try again.";
+
+            if (e.IndexOf("timeout", StringComparison.OrdinalIgnoreCase) >= 0
+                || e.IndexOf("timed out", StringComparison.OrdinalIgnoreCase) >= 0)
+                return isOllama
+                    ? "The model did not respond in time. A smaller model may be needed for this machine."
+                    : "The request timed out. Check your connection or try again.";
+
+            if (e.IndexOf("Empty response", StringComparison.OrdinalIgnoreCase) >= 0)
+                return $"The model '{Config?.Model}' returned an empty response. Try another model.";
+
+            return $"Request failed: {e}";
+        }
+
+        #endregion
+
         private static void RemoveMsgByIdIfEmpty(int id)
         {
             int idx = FindMsgIndexById(id);
@@ -383,7 +604,11 @@ namespace CompanionAI_v3.MachineSpirit
                 {
                     string finalText = FinalizeStreamedMsg(id);   // 빈/[SKIP] 이면 null
                     ChatWindow.SetThinking(false);
-                    if (!string.IsNullOrEmpty(finalText)) onFinalText?.Invoke(finalText);
+                    if (!string.IsNullOrEmpty(finalText))
+                    {
+                        _diagnosticPending = false;  // 진단 대기 해제 (성공)
+                        onFinalText?.Invoke(finalText);
+                    }
                     if (summarize) MaybeSummarize();
                     onAlways?.Invoke();
                 },
@@ -391,7 +616,7 @@ namespace CompanionAI_v3.MachineSpirit
                 {
                     RemoveMsgByIdIfEmpty(id);
                     ChatWindow.SetThinking(false);
-                    Log.MachineSpirit.Debug($"[MachineSpirit] LLM error (silent): {error}");
+                    ReportLLMFailure(error);
                     onAlways?.Invoke();
                 }
             ));
@@ -444,6 +669,7 @@ namespace CompanionAI_v3.MachineSpirit
                                 Text = response,
                                 Timestamp = Time.time
                             });
+                            _diagnosticPending = false;  // 진단 대기 해제 (성공)
                         }
                         ChatWindow.SetThinking(false);
                         MaybeSummarize();
@@ -451,7 +677,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        Log.MachineSpirit.Debug($"[MachineSpirit] LLM error (silent): {error}");
+                        ReportLLMFailure(error);
                     }
                 ));
             }
@@ -501,7 +727,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        Log.MachineSpirit.Debug($"[MachineSpirit] LLM error (silent): {error}");
+                        ReportLLMFailure(error);
                     }
                 ));
             }
@@ -553,7 +779,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        Log.MachineSpirit.Debug($"[MachineSpirit] LLM error (silent): {error}");
+                        ReportLLMFailure(error);
                     }
                 ));
             }
@@ -600,7 +826,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        Log.MachineSpirit.Debug($"[MachineSpirit] LLM error (silent): {error}");
+                        ReportLLMFailure(error);
                     }
                 ));
             }
@@ -636,7 +862,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        Log.MachineSpirit.Debug($"[MachineSpirit] LLM error (silent): {error}");
+                        ReportLLMFailure(error);
                     }
                 ));
             }
@@ -690,7 +916,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        Log.MachineSpirit.Debug($"[MachineSpirit] LLM error (silent): {error}");
+                        ReportLLMFailure(error);
                     }
                 ));
             }
@@ -811,7 +1037,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        Log.MachineSpirit.Debug($"[MachineSpirit] LLM error (silent): {error}");
+                        ReportLLMFailure(error);
                     }
                 ));
             }
@@ -914,7 +1140,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        Log.MachineSpirit.Debug($"[MachineSpirit] LLM error (silent): {error}");
+                        ReportLLMFailure(error);
                     }
                 ));
             }
@@ -1047,7 +1273,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        Log.MachineSpirit.Debug($"[MachineSpirit] LLM error (silent): {error}");
+                        ReportLLMFailure(error);
                     }
                 ));
             }

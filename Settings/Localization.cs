@@ -435,6 +435,21 @@ namespace CompanionAI_v3.Settings
                 { Language.Chinese, "在单回合内使用两套武器组。\n切换武器(0 AP)以使用备用武器组的攻击。\n⚠️ 此功能正在开发中，可能无法按预期工作。" }
             },
 
+            ["FinishLowHPEnemies"] = new() {
+                { Language.English, "Prioritize Finishing Blows" },
+                { Language.Korean, "마무리 우선" },
+                { Language.Russian, "Приоритет добивания" },
+                { Language.Japanese, "とどめ優先" },
+                { Language.Chinese, "优先补刀" }
+            },
+            ["FinishLowHPEnemiesDesc"] = new() {
+                { Language.English, "ON (default): strongly prefers enemies that can be killed this turn.\nOFF: reduces that preference, so high-threat or high-HP enemies (bosses) get targeted more often.\nTurn this off for missions where only the boss matters." },
+                { Language.Korean, "켜짐(기본): 이번 턴에 확실히 처치할 수 있는 적을 크게 우선합니다.\n꺼짐: 그 우선도를 낮춰, 위협적이거나 체력이 많은 적(보스)을 더 자주 노립니다.\n보스만 잡으면 되는 임무에서 끄세요." },
+                { Language.Russian, "ВКЛ (по умолчанию): сильно предпочитает врагов, которых можно убить в этот ход.\nВЫКЛ: снижает этот приоритет, чаще атакуя опасных или живучих врагов (боссов).\nОтключите для миссий, где важен только босс." },
+                { Language.Japanese, "オン(既定): このターンで確実に倒せる敵を強く優先します。\nオフ: その優先度を下げ、脅威度や体力の高い敵(ボス)を狙いやすくなります。\nボスのみが重要な任務ではオフにしてください。" },
+                { Language.Chinese, "开启(默认)：强烈优先本回合可击杀的敌人。\n关闭：降低该优先级，更常攻击高威胁或高生命值的敌人(首领)。\n仅需击杀首领的任务请关闭。" }
+            },
+
             // ★ Phase 3: LLM-as-Judge
             ["EnableLLMJudge"] = new() {
                 { Language.English, "LLM Judge" },

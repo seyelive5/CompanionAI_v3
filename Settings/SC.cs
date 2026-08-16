@@ -29,6 +29,11 @@ namespace CompanionAI_v3.Settings
         public const int   CleanupEnemyCount      = 2;     // 정리 단계: 남은 적 수 이하
         public const float SelfDamageMinHP        = 80f;   // 자해 스킬 사용 최소 HP% (스코어링 보너스 기준)
         public const float SelfDamageDefaultHPThreshold = 40f; // 미등록(컴포넌트 자동 감지) 자해 능력 하드 게이트 HP% — DB 등록 임계값이 있으면 그쪽 우선
+        // CharacterSettings.FinishLowHPEnemies = false 일 때 킬 보너스에 곱하는 계수.
+        //   0 이 아닌 이유: 확실한 처치는 여전히 이득이므로 완전 무시는 과교정. 0.33 이면
+        //   1타킬 60→20, 킬시퀀스 40~90→13~30 으로 위협도 보너스(최대 30)와 같은 급이 되어
+        //   "잡몹 마무리 vs 고위협 보스" 가 실제로 경쟁하게 된다.
+        public const float KillPriorityDisabledMultiplier = 0.33f;
         public const float ThreatProximity        = 5f;    // 위협 근접 거리 (미터)
         public const float HealPriorityLow        = 25f;   // 힐 최우선 HP% [구 HealPriorityThresholds[0]]
         public const float HealPriorityMid        = 50f;   // 힐 높음 HP%   [구 HealPriorityThresholds[1]]

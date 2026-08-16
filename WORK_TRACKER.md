@@ -305,3 +305,17 @@
 - [x] **위생 H1~H9**: catch 3곳 `Error(ex,…)` / 4 Role 플랜 종결부 `CreatePlanWithSnapshot` 통합(−16줄, ★12) / 차지라인 재검증 `PointTargetingHelper.ChargeLineHitsAnyEnemy` 헬퍼(1-3c+F5 통합) / `HasUsedWarpRelayThisTurn` 헬퍼 / 자해 차단 로그 임계값 복원(`GetSelfDamageHPThreshold`) / XML doc(ClearTickMoveVariants·GetZeroAPAttacks preference 계약) / 날짜 스탬프 3·★ 2 제거 / F9 문구 정정 / deep-if 4209→4202.
 - [ ] **인게임 검증**: 이동 설정 실패 로그 관찰 시 — `Move setup failed — cancelling plan for replan (setup failures=1/2 …)` → 재실패면 `movement blocked for the rest of this turn` 후 제자리 플랜(공격/버프)으로 AP 소진 → 프리즈 없음. `Skipping Move — movement blocked` 가 뜨면 플래너가 CanMove=false 를 우회한 경로가 있다는 뜻(어느 플래너인지 앞 로그로 식별).
 - 관찰(후속 후보, 결함 아님): 후퇴 대시 착지 AoE 피해의 아군 안전 미검사(v3.118.0 이전부터, IsAoESafe 가 피해 미구분이라 현재 구조론 과잉차단) / 자체 dict 즉시 이동 경로의 게임 도달성 발산 잔존(R1 로 바운드) / code-metrics.sh `Error+ex.Message` 변종 31곳 미집계.
+
+### 17. 커뮤니티 피드백 2건 (v3.119.0) — ⚠️ 인게임 검증 대기
+
+**배경**: 넥서스/커뮤니티 제보 2건. 사용자 전달 → 원인 코드 확인 후 수정.
+
+- [x] **제보 A — "체력 높은 적(보스)과 전투를 피한다"**: 회피 로직은 없음(ShouldRetreat 는 적 체력 미참조). 실제 원인은 **타겟 점수 구조**: 1타킬 +60 / 킬시퀀스 +40~90(효율 비례) vs 위협도 최대 +30 → 체력 큰 보스는 킬 보너스를 **구조적으로 못 받아** 마무리 가능한 잡몹에 항상 밀림.
+  - 수정: `CharacterSettings.FinishLowHPEnemies`(기존 **미사용 데드 설정**) 를 실제 배선. `TargetScorer.GetKillPriorityFactor(situation)` 단일 헬퍼로 1타킬·킬시퀀스 **두 경로에 동일 계수** 적용(불일치 방지). 켜짐(기본)=1.0 → **기존 동작 무변경**, 꺼짐=`SC.KillPriorityDisabledMultiplier`(0.33) → 킬 보너스가 위협도와 같은 급이 되어 보스와 경쟁.
+  - UI: 캐릭터별 토글 + 설명(5개 언어), 기본값 리셋에 포함.
+  - 참고: 같은 클래스의 **미사용 설정 4개 잔존** — `AllowRetreat`/`ConserveAmmo`/`SeekCover`/`UseBuffsBeforeAttack`(UI 미노출이라 사용자 오해는 없음). 배선 또는 제거는 별도 판단.
+- [x] **제보 B — "Machine Spirit이 응답하지 않는다"**: 원인은 **실패의 완전 침묵**. `onError` 10곳이 전부 `Log.MachineSpirit.Debug("... (silent)")` 로만 처리 → UI 무표시, 로그도 Debug 라 기본 비노출. "연결 테스트" 버튼도 인사 메시지 1회 전송이 전부라 서버 미실행 시 아무 반응 없음.
+  - 수정: `ReportLLMFailure(raw)` 중앙 처리기 — ① 채팅에 `[ERROR] …` 메시지(이 접두사는 ContextBuilder·요약에서 이미 제외되어 대화 오염 없음) ② `DescribeLLMError` 로 원시 오류를 조치 문장으로 변환(연결 거부/404 모델 없음/401·403 키/429/타임아웃/빈 응답) ③ `LastError` 보관 ④ Warn 로그(provider/model 포함). 10곳 전부 교체.
+  - `RunConnectionDiagnostic()` 신설 — 설정 유효성 → (Ollama) 서버 도달 + **모델 설치 여부** → 실제 응답 1회(60s) 단계별 판정. "연결 테스트" 버튼이 이걸 호출.
+  - 설정 UI 상태줄: 진단 상태(초록/노랑/빨강) + 마지막 실패 사유 + `Provider · Model · ApiUrl` 상시 표시.
+- [ ] **인게임 검증**: ① 보스 전투에서 마무리 우선 OFF 시 보스 타겟팅 빈도 증가 ② Ollama 서버 끈 상태로 연결 테스트 → "Cannot reach Ollama at …" 표시, 모델 미설치 시 "ollama pull …" 안내 ③ 채팅에서 실패 시 `[ERROR]` 메시지 노출

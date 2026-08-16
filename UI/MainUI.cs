@@ -1062,9 +1062,37 @@ namespace CompanionAI_v3.UI
             GUILayout.FlexibleSpace();
             if (GUILayout.Button($"<color={UIStyles.TextLight}>{L("MSTestConnection")}</color>", UIStyles.Button, GUILayout.Width(UIStyles.Sd(160)), GUILayout.Height(BUTTON_HEIGHT)))
             {
-                MSp.MachineSpirit.OnUserMessage("Hello, Machine Spirit. Respond with a brief greeting.");
+                MSp.MachineSpirit.RunConnectionDiagnostic();
             }
             GUILayout.EndHorizontal();
+
+            DrawMachineSpiritStatus(ms);
+        }
+
+        /// <summary>
+        /// Machine Spirit 연결 상태 상시 표시 — 실패가 로그에만 남아 사용자가
+        /// "설정은 다 했는데 반응이 없다"로 겪던 문제(커뮤니티 제보) 해소.
+        /// 진단 진행/결과 + 마지막 요청 실패 사유를 이 한 줄에서 확인 가능.
+        /// </summary>
+        private static void DrawMachineSpiritStatus(MSp.MachineSpiritConfig ms)
+        {
+            GUILayout.Space(3);
+
+            string diag = MSp.MachineSpirit.DiagnosticStatus;
+            if (!string.IsNullOrEmpty(diag))
+            {
+                string diagColor = MSp.MachineSpirit.DiagnosticOk ? UIStyles.RoleGreen
+                    : MSp.MachineSpirit.DiagnosticRunning ? UIStyles.Gold
+                    : UIStyles.RoleRed;
+                GUILayout.Label($"<color={diagColor}>{diag}</color>", UIStyles.Description);
+            }
+
+            string lastError = MSp.MachineSpirit.LastError;
+            if (!string.IsNullOrEmpty(lastError))
+                GUILayout.Label($"<color={UIStyles.RoleRed}>⚠ {lastError}</color>", UIStyles.Description);
+
+            // 목적지 요약 — 사용자가 어디에 연결하려 하는지 항상 보이게
+            GUILayout.Label($"<color={UIStyles.TextMid}>{ms.Provider} · {ms.Model} · {ms.ApiUrl}</color>", UIStyles.Description);
         }
 
         // ═════════════════════════════════════════════════════════
@@ -1683,6 +1711,11 @@ namespace CompanionAI_v3.UI
             GUILayout.Label($"<color={UIStyles.TextMid}>{L("EnableWeaponSetRotationDesc")}</color>", UIStyles.Description);
             GUILayout.Space(15);
 
+            // 마무리 우선 — 끄면 킬 보너스가 축소되어 고위협/고체력 적(보스)을 더 적극적으로 노린다
+            _editingSettings.FinishLowHPEnemies = DrawCheckbox(_editingSettings.FinishLowHPEnemies, L("FinishLowHPEnemies"));
+            GUILayout.Label($"<color={UIStyles.TextMid}>{L("FinishLowHPEnemiesDesc")}</color>", UIStyles.Description);
+            GUILayout.Space(15);
+
             DrawAdvancedSettings();
             GUILayout.Space(10);
         }
@@ -1715,6 +1748,7 @@ namespace CompanionAI_v3.UI
                 _editingSettings.UseAoEOptimization = true;
                 _editingSettings.UsePredictiveMovement = true;
                 _editingSettings.EnableWeaponSetRotation = false;
+                _editingSettings.FinishLowHPEnemies = true;
             }
             GUILayout.Space(15);
 

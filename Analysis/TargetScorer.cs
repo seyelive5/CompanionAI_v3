@@ -240,6 +240,22 @@ namespace CompanionAI_v3.Analysis
         #region Enemy Scoring
 
         /// <summary>
+        /// 킬 보너스 계수 — CharacterSettings.FinishLowHPEnemies(기본 true)가 꺼지면 축소.
+        /// 켜짐(기본) = 1.0 로 기존 동작과 완전 동일. 꺼짐 = SC.KillPriorityDisabledMultiplier.
+        ///
+        /// 왜 필요한가: 킬 보너스(1타킬 60 / 킬시퀀스 40~90)는 위협도 보너스(최대 30)를 압도한다.
+        /// 체력이 큰 보스는 한 턴에 죽일 수 없어 이 보너스를 구조적으로 받지 못하므로,
+        /// 마무리 가능한 잡몹이 하나라도 있으면 항상 그쪽이 선택된다("보스를 피한다"는 사용자 체감).
+        /// 이 계수를 낮추면 킬 보너스가 위협도와 같은 급이 되어 둘이 실제로 경쟁한다.
+        /// 1타킬·킬시퀀스 두 경로가 반드시 같은 계수를 써야 하므로 헬퍼로 단일화.
+        /// </summary>
+        private static float GetKillPriorityFactor(Situation situation)
+        {
+            bool finishLowHP = situation?.CharacterSettings?.FinishLowHPEnemies ?? true;
+            return finishLowHP ? 1f : SC.KillPriorityDisabledMultiplier;
+        }
+
+        /// <summary>
         /// Role 기반 적 타겟 점수 계산
         /// </summary>
         public static float ScoreEnemy(
@@ -288,7 +304,7 @@ namespace CompanionAI_v3.Analysis
                 {
                     if (CombatAPI.CanKillInOneHit(situation.PrimaryAttack, target))
                     {
-                        score += ENEMY_ONE_HIT_KILL_BONUS * weights.CanKill;
+                        score += ENEMY_ONE_HIT_KILL_BONUS * weights.CanKill * GetKillPriorityFactor(situation);
                     }
                 }
 
@@ -525,7 +541,7 @@ namespace CompanionAI_v3.Analysis
                         //   0.02 = 2% — 진짜 0 만 막고 그 외는 거의 비례.
                         float pKill = Math.Max(0.02f, killSequence.KillProbability);
                         float baseBonus = ENEMY_CONFIRMED_KILL_BASE + Math.Min(killSequence.Efficiency * ENEMY_KILL_EFFICIENCY_RATE, ENEMY_KILL_EFFICIENCY_CAP);
-                        float killBonus = baseBonus * pKill;
+                        float killBonus = baseBonus * pKill * GetKillPriorityFactor(situation);
 
                         // Phase 2a: Overkill 패널티 — 비싼 시퀀스 (>1 AP) 가 HP 대비 과한 데미지면 자원 낭비.
                         //   1AP 단발은 cheap 이라 overkill 도 OK. 다발/특수 ability 는 신중.
