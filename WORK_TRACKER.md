@@ -444,3 +444,24 @@
 - [x] **수정 ②**: Phase 8.5 가 Move 를 추가하면 `hasMoveAfterPhase8 = true`. 로그 문구도 "within familiar range" 제거(실제로 일반 후퇴일 수 있어 오해 유발 — 이번 조사에서 실제로 오해를 유발했음).
 - [ ] **인게임 검증**: 사역마 없는 턴의 DOOM 이 ① `PlanOverseerRetreat: No familiar — delegating to standard retreat` 를 찍는지 ② 한 턴에 Move 가 1개만 잡히는지 ③ 적과의 거리가 확보되는지.
 - 별건(미착수): **위치 선정에 턴 순서 반영** — "아군이 먼저 처리할 적"을 덜 위협으로 볼지. 이번 건의 원인은 아니므로 독립 과제.
+
+### 24. 설정 파일에 적/NPC 항목 795개 누적 (v3.121.2)
+
+**배경**: §23 의 "DOOM 역할이 Overseer 로 잘못 잡혀 있다" 를 계기로 사용자가 "여러 세이브를 오가며 설정이 꼬인 것 아닌가, 저장 기준점을 바꿔야 하나" 제기.
+
+**먼저 확인한 것 — 세이브 분리는 정상. DOOM 건은 세이브 꼬임이 아니다.**
+- 설정은 이미 회차별 파일(`settings_{Player.GameId}.json`). 실제로 5개 파일이 분리 존재.
+- 현재 회차 파일에 DOOM `"Role": 4`(= Overseer) 가 **실제로 저장돼 있음** → 다른 세이브에서 새어 들어온 게 아니라 이 회차에서 UI 로 설정된 값.
+- 모드가 `Role` 을 프로그램적으로 쓰는 경로는 `TurnOrchestrator:1798`(게스트 아군 → DPS) 하나뿐이고 Overseer 를 쓰지 않는다.
+- 같은 회차 안에서 세이브 슬롯이 달라도 설정을 공유하는 것은 의도된 동작이며 정상 작동 중.
+
+**실제 결함 (실측)**: 현재 회차 파일 **500KB / 항목 813개**, 그중 **795개가 `CharacterName` 이 빈 문자열**(적·NPC). 실제 캐릭터는 18개뿐.
+- `GetOrCreateSettings(unit.UniqueId, ...)` 가 **분석되는 모든 유닛**(적 포함)에 대해 항목을 생성한다. `AoESafetyChecker.cs:347/446` 은 이름 인자 없이 호출 → 이름 빈 항목.
+- v3.6.23 은 **자동 저장만** 껐고 **항목 생성 자체는 그대로** → 게임 저장 시점에 전부 파일로 나간다.
+- UI 에는 `GetPartyMembers()`(파티만) 로 표시되므로 사용자 눈에는 안 보인다.
+
+- [x] **수정: 무정보 항목 프룬** — `PruneUninformativeEntries` 를 `Load()`/`Save()` 양쪽에 연결. **보존 규칙: 이름이 있거나 로스터에 속하면 무조건 보존.**
+  - **무손실 근거**: 이름 없는 항목은 값이 항상 `DefaultSettings` 사본이다 — 사용자가 편집할 방법이 없기 때문. UI 편집은 `DrawCharacterRow → GetOrCreateSettings(character.Id, character.Name)` 를 거치고 `character.Name` 은 `GetPartyMembers()` 의 `unit.CharacterName ?? "Unnamed"` 라 **항상 비어 있지 않다**. 게스트 아군 자동 설정도 이름과 함께 생성된다. 따라서 제거해도 다음 조회 때 동일 값으로 재생성된다.
+  - **로스터 기준은 `Player.AllCharacters`** — `PartyAndPets` 가 아니다. 디컴파일 확인(`Player.cs:615`, `AddCharacterToLists`): 파티·펫·벤치(Remote/Detached) 동료·크로스씬 유닛을 모두 포함 → **배에 두고 온 동료의 설정이 지워지지 않는다.** 조회 실패 시 `null` 반환 → 이름 규칙만 적용(더 보수적).
+- [ ] **인게임 검증**: 로드 시 `[PerSaveSettings] Loaded … — N 개 무정보 항목 제거됨`, 게임 저장 후 `settings_6101f716….json` 크기가 500KB → 10KB 대로 감소, 파티 탭 설정이 그대로 유지되는지.
+- 미착수(사용자와 합의하에 보류): **동료 설정을 블루프린트 GUID 기준 전역 저장** → 새 회차에도 튜닝 유지. 단 주인공·용병은 블루프린트가 공유돼 회차끼리 섞일 위험이 있어 "동료=전역 / 주인공·용병=회차별" 2층 구조 + 기존 파일 마이그레이션이 필요. 실익은 분명하나 설계 변경이라 별건.

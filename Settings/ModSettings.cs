@@ -197,7 +197,9 @@ namespace CompanionAI_v3.Settings
                             _cached.CharacterSettings = new Dictionary<string, CharacterSettings>();
                         // 정상 로드 → 이번 세션 실패 기록 해제 (디스크 .corrupted-* marker 는 Save 가 직접 검사)
                         _failedGameIds.Remove(gameId);
-                        Log.Persistence.Info($"[PerSaveSettings] Loaded {_cached.CharacterSettings?.Count ?? 0} settings from {Path.GetFileName(filePath)} (GameId={gameId})");
+                        int prunedOnLoad = PruneUninformativeEntries(_cached.CharacterSettings);
+                        Log.Persistence.Info($"[PerSaveSettings] Loaded {_cached.CharacterSettings?.Count ?? 0} settings from {Path.GetFileName(filePath)} (GameId={gameId})" +
+                            (prunedOnLoad > 0 ? $" — {prunedOnLoad} 개 무정보 항목 제거됨(다음 저장 시 파일에 반영)" : ""));
                     }
                 }
                 else
@@ -216,6 +218,66 @@ namespace CompanionAI_v3.Settings
                 Log.Persistence.Error($"[PerSaveSettings] Load error (GameId={_currentGameId}): {ex.Message}. Save 차단 활성화 — 손상 파일은 .corrupted-* 로 백업됨.");
                 _cached = new PerSaveSettings();
             }
+        }
+
+        /// <summary>
+        /// 현재 회차의 전체 로스터 ID. 파티뿐 아니라 배에 남긴 동료·펫·크로스씬 유닛까지
+        /// 포함하는 `Player.AllCharacters` 를 쓴다 — 파티에서 빠져 있는 동료의 설정이
+        /// 지워지지 않도록 의도적으로 넉넉하게 잡는다.
+        /// 조회 불가(메인 메뉴, 로드 중 등) 시 null → 호출부는 이름 규칙만 적용한다.
+        /// </summary>
+        private static HashSet<string> GetRosterIds()
+        {
+            try
+            {
+                var all = Kingmaker.Game.Instance?.Player?.AllCharacters;
+                if (all == null || all.Count == 0) return null;
+
+                var set = new HashSet<string>();
+                for (int i = 0; i < all.Count; i++)
+                {
+                    var id = all[i]?.UniqueId;
+                    if (!string.IsNullOrEmpty(id)) set.Add(id);
+                }
+                return set.Count > 0 ? set : null;
+            }
+            catch (Exception ex)
+            {
+                Log.Persistence.Error(ex, "[PerSaveSettings] Roster lookup failed");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 정보를 담고 있지 않은 항목 제거. 무손실이다.
+        ///
+        /// `GetOrCreateSettings` 는 분석되는 **모든** 유닛(적 포함)에 대해 항목을 만든다.
+        /// 그중 이름 없이 만들어진 항목(`AoESafetyChecker` 등 이름 인자 없는 호출 경로)은
+        /// 값이 항상 `DefaultSettings` 사본이다 — 사용자가 편집할 방법이 없기 때문:
+        ///   · UI 목록은 `GetPartyMembers()`(= 이름 있는 파티원)만 보여주고
+        ///   · 게스트 아군 자동 설정(`TurnOrchestrator`)도 이름과 함께 생성한다.
+        /// 따라서 제거해도 다음 조회 때 동일한 값으로 재생성된다.
+        ///
+        /// 실측(2026-08-16): 813 개 중 795 개가 이 유형이었고 파일이 500KB 였다.
+        /// 이름이 있거나 로스터에 속한 항목은 어떤 경우에도 보존한다.
+        /// </summary>
+        private static int PruneUninformativeEntries(Dictionary<string, CharacterSettings> dict)
+        {
+            if (dict == null || dict.Count == 0) return 0;
+
+            var roster = GetRosterIds();
+            List<string> doomed = null;
+
+            foreach (var kvp in dict)
+            {
+                if (!string.IsNullOrEmpty(kvp.Value?.CharacterName)) continue;  // 이름 있으면 보존
+                if (roster != null && roster.Contains(kvp.Key)) continue;       // 로스터면 보존
+                (doomed ?? (doomed = new List<string>())).Add(kvp.Key);
+            }
+
+            if (doomed == null) return 0;
+            for (int i = 0; i < doomed.Count; i++) dict.Remove(doomed[i]);
+            return doomed.Count;
         }
 
         /// <summary>파일에 설정 저장</summary>
@@ -254,6 +316,10 @@ namespace CompanionAI_v3.Settings
                 }
 
                 if (_cached == null) return;
+
+                int pruned = PruneUninformativeEntries(_cached.CharacterSettings);
+                if (pruned > 0)
+                    Log.Persistence.Info($"[PerSaveSettings] Pruned {pruned} uninformative entries — {_cached.CharacterSettings.Count} remain");
 
                 // v3.117.60: read-only 속성 사전 체크 — 사용자 인지 가능한 명확한 에러.
                 if (File.Exists(filePath))
