@@ -1081,7 +1081,10 @@ namespace CompanionAI_v3.Planning.Plans
                     if (safeRetreatAction != null)
                     {
                         actions.Add(safeRetreatAction);
-                        Log.Planning.Info($"[Overseer] Phase 8.5: Safe retreat within familiar range: {retreatReason}");
+                        // 플래그를 갱신하지 않으면 Phase 8.7 이 같은 턴에 두 번째 Move 를 추가한다.
+                        // 두 이동 모두 이동 전 위치·동일 remainingMP 기준으로 계산되어 서로 모순된다.
+                        hasMoveAfterPhase8 = true;
+                        Log.Planning.Info($"[Overseer] Phase 8.5: Safe retreat: {retreatReason}");
                     }
                 }
             }
@@ -1179,6 +1182,17 @@ namespace CompanionAI_v3.Planning.Plans
         /// </summary>
         private PlannedAction PlanOverseerRetreat(Situation situation, float remainingMP)
         {
+            // 사역마가 없으면 situation.FamiliarPosition 은 default(Vector3.zero) 로 남는다
+            // — SituationAnalyzer 가 HasFamiliar=false 에서 대입 전에 조기 return 하기 때문.
+            // 그대로 진행하면 맵 원점(0,0,0)을 사역마 위치로 착각해 원점 방향으로 이동하고,
+            // 이 경로의 "사역마 쪽으로 이동" 폴백 분기는 적 위치를 전혀 보지 않으므로
+            // 적진 한복판에 착지할 수 있다. 일반 후퇴(적 턴 위협 반영)로 위임한다.
+            if (!situation.HasFamiliar || situation.Familiar == null)
+            {
+                if (Main.IsDebugEnabled) Log.Planning.Debug($"[Overseer] PlanOverseerRetreat: No familiar — delegating to standard retreat");
+                return PlanRetreat(situation);
+            }
+
             // 사역마 스킬 최대 사거리 조회
             float maxFamiliarRange = FamiliarAPI.GetMaxFamiliarAbilityRange(situation.Unit);
             float currentDistToFamiliar = Vector3.Distance(situation.Unit.Position, situation.FamiliarPosition);

@@ -398,7 +398,7 @@
 
 ### 22. 후퇴 위치 선정이 "적 추격 가능성"을 안 봄 + 쿨다운 턴에도 사거리 상한 적용 (v3.121.0) — ⚠️ 인게임 검증 대기
 
-**배경**: 사용자 관찰 "전투 초반 카시아 첫 이동이 적에게 너무 가까웠고 실제로 총에 맞았다" → 로그 실측으로 **원인 2겹 확정**.
+**배경**(카시아 후퇴는 2026-08-16 23:04 세션에서 개선 확인됨): 사용자 관찰 "전투 초반 카시아 첫 이동이 적에게 너무 가까웠고 실제로 총에 맞았다" → 로그 실측으로 **원인 2겹 확정**.
 
 **실측 (2026-08-16 22:28 세션, v3.120.1)**:
 - 이동 사유 `[Support] Phase 8.7: Tactical reposition (all attacks on cooldown, MP=23.0)`
@@ -415,3 +415,32 @@
 - [x] **검증 로그**: `TacticalReposition: (x,z), score=…, move=…m, cover=…, nearestEnemy=Nt, enemyTurnThreat=N, maxSafe=Nt`
 - [ ] **인게임 검증**: 같은 상황(공격 쿨다운) 재현 시 ① `maxSafe` 가 사거리−1 보다 크게 잡히는지 ② `nearestEnemy` 가 이전보다 멀어지는지 ③ `enemyTurnThreat` 가 0 에 가까운 자리를 고르는지 ④ 후퇴 후 피격이 줄었는지. **후퇴 행동 전반이 바뀌므로 다른 유닛의 후퇴도 함께 관찰할 것.**
 - 미착수(사용자 제기, 별건): **서포터는 무기 사거리가 아니라 "아군 지원 거리" 기준이어야** — Phase 8.7 후퇴는 역할 무관하게 무기 사거리만 본다. `PlanMoveTowardAllies` 가 별도로 있으나 이 경로와 연결돼 있지 않음. / `AutoMinSafe = 사거리×0.3`(카시아 3칸) 적정성 — 원거리 유닛 치고 가까움(단 이번 사건의 원인은 아님).
+
+### 23. Overseer 후퇴가 존재하지 않는 사역마(맵 원점)를 향함 + 한 턴 이중 이동 (v3.121.1)
+
+**배경**: §22 수정 인게임 확인 중 사용자 관찰 — "카시아는 안전해졌는데 DOOM(주인공)이 적 한복판으로 들어갔다. 다만 주변 적의 행동 순서가 나중이었으니 그걸 계산한 선택이면 괜찮을 수도."
+
+**답: 턴 순서 계산이 아니다.** 턴 순서를 보는 곳은 `TargetScorer`(`TurnUrgency` — 먼저 행동할 적을 우선 사격)뿐이고 **위치 선정 경로에는 이니셔티브 개념이 전혀 없다.** 또 라운드제에서는 순서와 무관하게 각 적이 내 다음 턴 전에 정확히 1회 행동하므로 "적 턴이 나중 = 더 안전"도 성립하지 않는다(유일한 실제 차이는 "그 사이 아군이 먼저 처치할 가능성"이며 이는 모델링돼 있지 않음).
+
+**실측 (2026-08-16 23:04 세션, v3.121.0)**:
+```
+[Overseer] CreatePlan: AP=1.0, MP=5.0, FamiliarType=, HasFamiliar=False
+[Overseer] PlanOverseerRetreat: maxFamiliarRange=15.0m, currentDist=205.1m
+[Overseer] Retreating toward familiar (current=205.1m → 199.3m)
+[Overseer] Phase 8.5: Safe retreat within familiar range: ahead of party (7.5m forward)
+[MovementPlanner] TacticalReposition: (-93.8,174.8), … nearestEnemy=2.8t, enemyTurnThreat=3, maxSafe=12.7t
+[Overseer] Phase 8.7: Tactical reposition (all attacks on cooldown, MP=5.0)
+[TurnPlan] Created: Actions=3  — [Move]→(-87.08,54.53,170.78) / [Move]→(-93.83,54.49,174.83) / [Buff]
+```
+
+**원인 ① 사역마 없음인데 사역마 후퇴 실행 → 좌표가 (0,0,0)**: `SituationAnalyzer`(:1424~1427)는 `HasFamiliar=false` 면 `FamiliarPosition` 대입 **전에 조기 return** → `default(Vector3)` = 맵 원점으로 남는다. `PlanOverseerRetreat` 은 `HasFamiliar` 를 확인하지 않고 `Distance(unit.Position, Vector3.zero)` 를 "사역마까지 거리"로 사용.
+  - **검산 확정**: 이동 목적지 `(-87.08, 54.53, 170.78)` 의 원점까지 거리 = √(7582.9+2973.5+29165.8) = **199.30m** = 로그의 "→ 199.3m" 소수점 일치. 두 번 발생했고 둘 다 `currentDist=205.1m`(동일 시작 위치, 원점 기준).
+  - 게다가 이 "사역마 쪽으로 이동" 폴백 분기(:1318~1326)에는 **적 거리 검증이 없다** — 검증(`distImprovement >= 2m`)은 `bestPos.HasValue` 분기에만 있음. 즉 **적을 전혀 보지 않고** 원점 방향 타일을 고름.
+  - DOOM 은 자동 감지가 `Support=42, Overseer=0 → Support` 인데 **사용자 수동 설정이 Overseer**(`GetEffectiveRole`: Auto 가 아니면 설정값 그대로). 사역마(Raven)가 있는 턴/없는 턴이 섞여 있어 없는 턴마다 이 경로를 탔다.
+
+**원인 ② 한 턴 이중 이동**: `hasMoveAfterPhase8` 은 Phase 8.5 **이전**(:1052)에 계산되는데 Phase 8.5 가 Move 를 추가하고도 **플래그를 갱신하지 않아** Phase 8.7 이 두 번째 Move 를 추가. 두 이동 모두 **이동 전 위치·동일 `remainingMP`** 기준으로 계산(`Cache HIT slot1 (AP=5.0, 58 tiles)`)되어 서로 모순. 이번엔 첫 이동으로 MP 가 0 이 되어 두 번째는 버려졌으나(`MP=0.0`), MP 가 넉넉했으면 비정상 이동.
+
+- [x] **수정 ①**: `PlanOverseerRetreat` 진입 가드 — `!HasFamiliar || Familiar == null` 이면 `PlanRetreat`(= `FindRetreatPositionSync`, §22 에서 적 턴 위협 반영됨)로 위임.
+- [x] **수정 ②**: Phase 8.5 가 Move 를 추가하면 `hasMoveAfterPhase8 = true`. 로그 문구도 "within familiar range" 제거(실제로 일반 후퇴일 수 있어 오해 유발 — 이번 조사에서 실제로 오해를 유발했음).
+- [ ] **인게임 검증**: 사역마 없는 턴의 DOOM 이 ① `PlanOverseerRetreat: No familiar — delegating to standard retreat` 를 찍는지 ② 한 턴에 Move 가 1개만 잡히는지 ③ 적과의 거리가 확보되는지.
+- 별건(미착수): **위치 선정에 턴 순서 반영** — "아군이 먼저 처리할 적"을 덜 위협으로 볼지. 이번 건의 원인은 아니므로 독립 과제.
