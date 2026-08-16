@@ -311,7 +311,7 @@ namespace CompanionAI_v3.Planning.Plans
             {
                 // 도달 가능 타일 조회 — 게임이 이 틱에 계산한 UnitMoveVariants 우선 (실행기와 동일 데이터).
                 // 자체 재계산은 100ms 타임아웃 시 player 폴백이라 게임 AI 도달성과 발산 → 대피 목적지가
-                // 게임 변형에 없으면 1칸 못미쳐 AoE 안에 착지 (2026-07-11 3유닛 실증). 없을 때만 폴백.
+                // 게임 변형에 없으면 1칸 못미쳐 AoE 안에 착지(AoE 대피 3유닛 실증). 없을 때만 폴백.
                 var reachableTiles = MovementAPI.GetTickMoveVariants(unit)
                     ?? MovementAPI.FindAllReachableTilesWithThreatsSync(unit);
                 if (reachableTiles == null || reachableTiles.Count == 0)
@@ -369,7 +369,7 @@ namespace CompanionAI_v3.Planning.Plans
             }
             catch (Exception ex)
             {
-                Log.Planning.Error($"[{RoleName}] AoE Evacuation error: {ex.Message}");
+                Log.Planning.Error(ex, $"[{RoleName}] AoE Evacuation error");
                 return null;
             }
         }
@@ -521,6 +521,17 @@ namespace CompanionAI_v3.Planning.Plans
         #endregion
 
         /// <summary>
+        /// 이번 턴에 Warp Relay(레이븐 keystone 전파) 를 이미 사용했는지 — 플랜-로컬 bool 이 아니라
+        /// TurnState 실행 기록으로 판정해 replan 을 넘겨 살아남게 한다 (relay 시전 → replan → 새 플랜의
+        /// keystone 루프 공백에서도 Cycle 재시전이 발동). ExecuteFamiliarSupportPhase 와 OverseerPlan 공용.
+        /// </summary>
+        protected static bool HasUsedWarpRelayThisTurn(Situation situation, TurnState turnState)
+        {
+            return situation.FamiliarType == PetType.Raven
+                && (turnState?.HasExecutedAbilityMatching(FamiliarAbilities.IsWarpRelayTarget) ?? false);
+        }
+
+        /// <summary>
         /// ★ v3.12.0: 공통 Familiar 능력 Phase (Phase 1.75)
         /// DPS/Tank/Support에서 동일한 사역마 능력 시퀀스 실행
         /// supportMode=true: 추가 보호 능력(Protect, Screen) + 키스톤 GUID 추적
@@ -537,11 +548,7 @@ namespace CompanionAI_v3.Planning.Plans
             out HashSet<string> usedKeystoneGuids)
         {
             usedKeystoneGuids = supportMode ? new HashSet<string>() : null;
-            // F7: relay 사용 여부는 replan 을 넘겨 살아남아야 함 — 플랜-로컬 false 가 아니라
-            //   이번 턴 실행 기록(TurnState)에서 relay 대상 능력 사용을 조회해 초기화.
-            //   (relay 시전 → replan → 새 플랜의 keystone 루프 공백 → Cycle 유실 방지)
-            bool usedWarpRelay = situation.FamiliarType == PetType.Raven
-                && (turnState?.HasExecutedAbilityMatching(FamiliarAbilities.IsWarpRelayTarget) ?? false);
+            bool usedWarpRelay = HasUsedWarpRelayThisTurn(situation, turnState);
 
             if (!situation.HasFamiliar) return false;
 

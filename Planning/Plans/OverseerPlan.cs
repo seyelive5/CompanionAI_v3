@@ -97,11 +97,8 @@ namespace CompanionAI_v3.Planning.Plans
                 Log.Planning.Info($"[Overseer] Phase 2: HeroicAct planned (Momentum will be active for WarpRelay)");
             }
 
-            // 이번 턴 WarpRelay 사용 여부 추적
-            // F7: 플랜-로컬 false 가 아니라 이번 턴 실행 기록(TurnState)에서 초기화 —
-            //   relay 시전 → replan 후 새 플랜의 keystone 루프 공백에서도 Cycle 이 살아남도록.
-            bool usedWarpRelay = situation.FamiliarType == PetType.Raven
-                && (turnState?.HasExecutedAbilityMatching(FamiliarAbilities.IsWarpRelayTarget) ?? false);
+            // 이번 턴 WarpRelay 사용 여부 추적 (replan 생존 — TurnState 실행 기록 기반 초기화)
+            bool usedWarpRelay = HasUsedWarpRelayThisTurn(situation, turnState);
             // ★ v3.18.0: Phase 3.5.5 공격적 재배치 여부 (Phase 4.6 문자열 매칭 대체)
             bool didAggressiveRelocate = false;
 
@@ -1170,10 +1167,7 @@ namespace CompanionAI_v3.Planning.Plans
 
             if (Main.IsDebugEnabled) Log.Planning.Debug($"[Overseer] Plan complete: {actions.Count} actions, AP={remainingAP:F1}, MP={remainingMP:F1}");
 
-            int zeroAPAttackCount = CombatAPI.GetZeroAPAttacks(situation.Unit).Count;
-            // ★ v3.9.26: NormalHittableCount 사용 — DangerousAoE 부풀림이 replan을 불필요하게 유발 방지
-            return new TurnPlan(actions, priority, reasoning, situation.HPPercent, situation.NearestEnemyDistance,
-                situation.NormalHittableCount, situation.CurrentAP, situation.CurrentMP, zeroAPAttackCount);
+            return CreatePlanWithSnapshot(actions, priority, reasoning, situation);
         }
 
         #region Overseer-Specific Methods

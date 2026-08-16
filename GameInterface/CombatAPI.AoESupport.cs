@@ -756,7 +756,7 @@ namespace CompanionAI_v3.GameInterface
         /// 다층 절벽/장애물에서 패턴 중심이 밀려 타겟이 패턴 밖이 될 수 있음 — 이때 시전은 헛방.
         /// 실행/replan 게이트(TryCountUnitsInPattern)와 동일 계산 사용: 비포인트 능력/계산 실패는
         /// true(fail-open) — 게이트가 차단하지 않을 시전을 계획 단계에서 과잉 차단하지 않기 위함.
-        /// (2026-07-11 실증: DOOM이 하층에서 상층 적에게 Enfeeble 포인트 계획 → 착탄 밀림 → 3연속 차단)
+        /// (실증: DOOM이 하층에서 상층 적에게 Enfeeble 포인트 계획 → 착탄 밀림 → 3연속 차단)
         /// </summary>
         public static bool WillPointCastReachTarget(AbilityData ability, BaseUnitEntity caster, BaseUnitEntity target)
         {

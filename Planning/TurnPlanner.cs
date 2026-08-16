@@ -83,7 +83,7 @@ namespace CompanionAI_v3.Planning
             }
             catch (Exception ex)
             {
-                Log.Planning.Error($"[TurnPlanner] Error: {ex.Message}");
+                Log.Planning.Error(ex, "[TurnPlanner] CreatePlan failed — EndTurn fallback");
                 var fallbackActions = new List<PlannedAction> { PlannedAction.EndTurn($"Error: {ex.Message}") };
                 // F12: 짧은 생성자는 InitialAP/MP/zeroAP=0 → NeedsReplan Section 3 허위 발화(같은 틱 replan 루프).
                 //   EndTurn 폴백에도 실제 스냅샷을 채움 (GetZeroAPAttacks 는 null/예외 내부 가드됨).

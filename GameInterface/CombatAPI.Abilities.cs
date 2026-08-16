@@ -310,9 +310,17 @@ namespace CompanionAI_v3.GameInterface
         {
             if (ability == null) return false;
             if (!IsSelfDamagingAbility(ability)) return false;
-            float threshold = AbilityDatabase.GetHPThreshold(ability);
-            if (threshold <= 0f) threshold = SC.SelfDamageDefaultHPThreshold;
-            return hpPercent < threshold;
+            return hpPercent < GetSelfDamageHPThreshold(ability);
+        }
+
+        /// <summary>
+        /// 자해 능력에 적용되는 HP 임계값(%) — DB 등록값(>0) 우선, 없으면 SC.SelfDamageDefaultHPThreshold.
+        /// 게이트(IsSelfDamageBlockedAtHP)와 진단 로그가 같은 수치를 쓰도록 공개 (등록값/기본값 구분 관측용).
+        /// </summary>
+        public static float GetSelfDamageHPThreshold(AbilityData ability)
+        {
+            float threshold = ability != null ? AbilityDatabase.GetHPThreshold(ability) : 0f;
+            return threshold > 0f ? threshold : SC.SelfDamageDefaultHPThreshold;
         }
 
         /// <summary>
@@ -433,7 +441,9 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
-        /// ★ v3.5.88: 0 AP 공격 목록 가져오기
+        /// 0 AP 공격 목록 (자해 HP 게이트 내재화). preference 계약: 스냅샷/NeedsReplan 3-4/HasZeroAPAttack 등
+        /// count 호출자는 기본값(Adaptive)을 유지해 서로 일관되게 세고(불일치 시 same-tick replan 루프),
+        /// 계획 호출자(PlanZeroAPAttacks)만 유닛 실제 선호를 전달해 PreferRanged 의 0-AP 근접 누수를 막는다.
         /// </summary>
         public static List<AbilityData> GetZeroAPAttacks(BaseUnitEntity unit, RangePreference preference = RangePreference.Adaptive)
         {

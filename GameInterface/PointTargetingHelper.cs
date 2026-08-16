@@ -4,6 +4,7 @@ using Kingmaker;
 using Kingmaker.Controllers;
 using Kingmaker.EntitySystem.Entities;
 using Kingmaker.Pathfinding;
+using Kingmaker.Utility;
 using Kingmaker.View;
 using Kingmaker.View.Covers;
 using Pathfinding;
@@ -602,6 +603,19 @@ namespace CompanionAI_v3.GameInterface
             int casterSize = 1)
         {
             return GetEnemiesInChargePath(p1Pos, p2Pos, allEnemies, casterSize).Count;
+        }
+
+        /// <summary>
+        /// 차지 라인(AllTargets[0]=P1 → [1]=P2) 위에 의식 있는 적이 있는지 — 계획 후 재검증용 (replan 1-3c / 실행기 백스톱).
+        /// FindBestAerialRushPath 의 수락 기준과 동일한 Bresenham CountEnemiesInChargePath 를 사용해
+        /// 방식 불일치로 인한 false-abort 가 없다. 판정 불가(라인 2점 미만·적 목록 없음)면 null — 호출자는 fail-open.
+        /// </summary>
+        public static bool? ChargeLineHitsAnyEnemy(List<TargetWrapper> allTargets, List<BaseUnitEntity> enemies)
+        {
+            if (allTargets == null || allTargets.Count < 2 || enemies == null) return null;
+            var live = enemies.FindAll(e => e != null && e.IsConscious);
+            if (live.Count == 0) return null;
+            return CountEnemiesInChargePath(allTargets[0].Point, allTargets[1].Point, live) > 0;
         }
 
         /// <summary>

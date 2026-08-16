@@ -618,7 +618,7 @@ namespace CompanionAI_v3.GameInterface
                         }
                         // 이동 설정 실패: 오케스트레이터에 통지 → 선기록 회수 + 플랜 취소 → 다음 틱 재계획.
                         // 기존 '즉시 턴 종료'는 대피 실패 시 AP 전량 미사용 턴 사멸을 유발 (Abelard 사례).
-                        // 반복 실패는 ConsecutiveFailures/FallbackReplan 가드가 턴 종료로 수렴시킴.
+                        // 반복 실패는 TurnState.MoveSetupFailCount 로 수렴: 2회째 이동 차단(제자리 재계획), 3회째 false → 턴 종료.
                         if (TurnOrchestrator.Instance.NotifyMoveSetupFailed(unit))
                         {
                             return Status.Running;
@@ -843,7 +843,7 @@ namespace CompanionAI_v3.GameInterface
             }
             catch (Exception ex)
             {
-                Log.Engine.Error($"[CompanionAIDecisionNode] SetupMovement error: {ex.Message}");
+                Log.Engine.Error(ex, "[CompanionAIDecisionNode] SetupMovement error");
                 return false;
             }
         }

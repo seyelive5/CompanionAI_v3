@@ -276,7 +276,7 @@ namespace CompanionAI_v3.Core
         }
 
         /// <summary>
-        /// ★ v3.7.25: MultiTarget 공격 (AerialRush 등 2개 Point 필요 — 유일 생산자)
+        /// MultiTarget 공격 (AerialRush 등 2개 Point 필요 — 유일 생산자)
         /// AllTargets[0]=P1, [1]=P2 차지 라인. RequiresEnemyOccupancy 기본 true 상속 →
         /// 실행/replan 시점에 라인이 비면(적 이동·사망) 실패 처리됨.
         /// </summary>

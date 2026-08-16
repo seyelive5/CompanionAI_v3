@@ -237,25 +237,14 @@ namespace CompanionAI_v3.Core
             // 1-3c. AllTargets(차지 라인) 공격의 경로 점유 재검증
             //   AerialRush 등 P1→P2 멀티타겟 공격은 계획 시점 라인을 동결 — 선행 액션의 킬/넉백이나
             //   적 이동으로 라인 상 적이 사라지면 빈 라인에 시전됨. 위 1-3b는 AllTargets 제외라 무검증.
-            //   FindBestAerialRushPath 선택 기준과 동일한 Bresenham CountEnemiesInChargePath 로 재확인
-            //   (동일 함수 → 방식 불일치 false-abort 없음). RequiresEnemyOccupancy=false 는 제외.
+            //   실행기 백스톱과 같은 헬퍼(ChargeLineHitsAnyEnemy = FindBestAerialRushPath 수락 기준의 Bresenham)로
+            //   재확인 → 방식 불일치 false-abort 없음. 판정 불가(null)는 fail-open. RequiresEnemyOccupancy=false 는 제외.
             if (nextAction.Type == ActionType.Attack
                 && nextAction.RequiresEnemyOccupancy
-                && nextAction.AllTargets != null
-                && nextAction.AllTargets.Count >= 2)
+                && PointTargetingHelper.ChargeLineHitsAnyEnemy(nextAction.AllTargets, currentSituation.Enemies) == false)
             {
-                var caster = currentSituation.Unit;
-                var liveEnemies = currentSituation.Enemies?.FindAll(e => e != null && e.IsConscious);
-                if (caster != null && liveEnemies != null && liveEnemies.Count > 0)
-                {
-                    var p1 = nextAction.AllTargets[0].Point;
-                    var p2 = nextAction.AllTargets[1].Point;
-                    if (PointTargetingHelper.CountEnemiesInChargePath(p1, p2, liveEnemies) == 0)
-                    {
-                        Log.Engine.Info($"[TurnPlan] Replan needed: charge line {nextAction.Ability?.Name} P1→P2 no longer hits any enemy");
-                        return true;
-                    }
-                }
+                Log.Engine.Info($"[TurnPlan] Replan needed: charge line {nextAction.Ability?.Name} P1→P2 no longer hits any enemy");
+                return true;
             }
 
             // 1-4. 모든 적 처치됨

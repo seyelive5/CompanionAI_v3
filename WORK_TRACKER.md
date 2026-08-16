@@ -296,3 +296,12 @@
 
 - [x] **수정 (v3.118.14)**: `CombatAPI.WillPointCastReachTarget(ability, caster, target)` 신설 — 게이트(TryCountUnitsInPattern)와 **동일 계산**으로 "포인트 변환 시전이 타겟을 실제로 맞추는지" 사전 검증, 비포인트/계산실패는 fail-open(게이트와 동일 시맨틱, 과잉차단 방지). 적용 3곳: BasePlan.Common Phase 9 Final debuff(실증 사이트) + BuffPlanner.PlanDebuff(조용한 헛방 변형) + PlanMarker(보험). 기존 site 관례(IsAttackSafeForTarget도 현재 위치 기준)와 동일하게 현재 위치 기준.
 - [ ] **인게임 검증**: 다층 맵에서 psyker 디버프 보유 유닛(DOOM Enfeeble) 전투 — `Final debuff SKIPPED (target not in pattern)` 로그 확인 + Enfeeble 3연속 차단→Stagnant 턴엔드 패턴 소멸(대신 다른 행동 또는 정상 턴엔드).
+
+### 16. v3.118.7~14 코드 리뷰 — R1 이동 설정 실패 무한 재계획(프리즈) 회귀 + 위생 8건 (v3.118.15) — ⚠️ 인게임 검증 대기
+
+**배경**: 릴리즈 범위 `bdf6a8f..fa3d1e6` 리뷰. 다중 에이전트 워크플로우가 세션 한도로 규약 각도 1개만 완료 → 나머지 6각도는 단독 정독. **리뷰 문서: [docs/reviews/2026-07-11-v3.118.7-14-code-review.md](docs/reviews/2026-07-11-v3.118.7-14-code-review.md)** (CONFIRMED 1 + 위생 8 + 안전 확인 + 관찰).
+
+- [x] **R1 (medium, v3.118.12 Fix C 회귀)**: `NotifyMoveSetupFailed` 의 `ConsecutiveFailures++` 는 MoveTo 선기록 `RecordAction(success=true)` 가 매 사이클 0 리셋 → 0↔1 진동, 상한 불가. StagnantPlan 은 이미 공격한 턴엔 안 셈 → 포위 상태 재배치 Move 반복 시 **AI 타임아웃 300s 까지 프리즈** 가능(인게임 미발생 — 대피는 게임 dict 로 성공, 잠재 회귀). 수정: `TurnState.MoveSetupFailCount` 전용 카운터 — 1회 재계획(이동 허용) / 2회 `MovementBlockedThisTurn` → Analyzer `CanMove=false` 미러 + ExecuteNextAction 잔여 Move 스킵 → **제자리 재계획** / 3회 턴 종료(하드 상한). `GameConstants.MOVE_SETUP_FAILURES_BLOCK_MOVEMENT=2 / MAX_MOVE_SETUP_FAILURES=3`.
+- [x] **위생 H1~H9**: catch 3곳 `Error(ex,…)` / 4 Role 플랜 종결부 `CreatePlanWithSnapshot` 통합(−16줄, ★12) / 차지라인 재검증 `PointTargetingHelper.ChargeLineHitsAnyEnemy` 헬퍼(1-3c+F5 통합) / `HasUsedWarpRelayThisTurn` 헬퍼 / 자해 차단 로그 임계값 복원(`GetSelfDamageHPThreshold`) / XML doc(ClearTickMoveVariants·GetZeroAPAttacks preference 계약) / 날짜 스탬프 3·★ 2 제거 / F9 문구 정정 / deep-if 4209→4202.
+- [ ] **인게임 검증**: 이동 설정 실패 로그 관찰 시 — `Move setup failed — cancelling plan for replan (setup failures=1/2 …)` → 재실패면 `movement blocked for the rest of this turn` 후 제자리 플랜(공격/버프)으로 AP 소진 → 프리즈 없음. `Skipping Move — movement blocked` 가 뜨면 플래너가 CanMove=false 를 우회한 경로가 있다는 뜻(어느 플래너인지 앞 로그로 식별).
+- 관찰(후속 후보, 결함 아님): 후퇴 대시 착지 AoE 피해의 아군 안전 미검사(v3.118.0 이전부터, IsAoESafe 가 피해 미구분이라 현재 구조론 과잉차단) / 자체 dict 즉시 이동 경로의 게임 도달성 발산 잔존(R1 로 바운드) / code-metrics.sh `Error+ex.Message` 변종 31곳 미집계.

@@ -162,6 +162,20 @@ namespace CompanionAI_v3.Core
         /// <summary>★ v3.9.14: AP 정체 연속 횟수 (AP 변화 없고 공격 안 했으면 +1, 3회 시 EndTurn)</summary>
         public int StagnantPlanCount { get; set; }
 
+        /// <summary>
+        /// 이번 턴 이동 설정(SetupMovement) 실패 횟수 — 목적지를 게임 이동 변형으로 변환하지 못한 횟수.
+        /// ConsecutiveFailures 와 별도인 이유: MoveTo 는 dispatch 시점에 RecordAction(success=true) 로
+        /// 선기록되어 ConsecutiveFailures 가 매 사이클 0 으로 리셋되므로 그 카운터로는 수렴하지 않는다.
+        /// </summary>
+        public int MoveSetupFailCount { get; set; }
+
+        /// <summary>
+        /// 이동 설정 실패가 반복되어 이번 턴 나머지 동안 이동 계획을 차단 (Analyzer 가 CanMove=false 로 미러,
+        /// Orchestrator 는 남은 Move 액션을 스킵). 같은 목적지를 재선택하는 replan 루프를 끊고
+        /// 제자리에서 남은 AP 를 쓰게 한다.
+        /// </summary>
+        public bool MovementBlockedThisTurn { get; set; }
+
         /// <summary>최대 액션 도달 여부</summary>
         public bool HasReachedMaxActions => ActionCount >= MaxActionsPerTurn;
 

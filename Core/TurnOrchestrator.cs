@@ -1116,6 +1116,15 @@ namespace CompanionAI_v3.Core
                 return ExecutionResult.EndTurn("Plan complete");
             }
 
+            // 이동 차단 턴(반복 이동 설정 실패)에는 잔여 Move 를 dispatch 하지 않고 스킵 —
+            // CanMove=false 미러를 우회해 Move 를 만든 플래너가 있어도 SetupMovement 재실패 사이클을 막는다.
+            if (nextAction.Type == ActionType.Move && turnState.MovementBlockedThisTurn)
+            {
+                Log.Engine.Info($"[Orchestrator] {unitName}: Skipping Move — movement blocked this turn after repeated setup failures");
+                if (++skipCount <= maxSkips) goto executeNextAction;
+                return ExecutionResult.Continue();
+            }
+
             // ★ v3.8.48: 실행 시간 측정
             _profilerStopwatch.Restart();
 
@@ -1306,54 +1315,76 @@ namespace CompanionAI_v3.Core
         /// MoveTo 결과는 dispatch 시점에 RecordAction(success=true)으로 선기록되므로,
         /// 실제 미실행 상태를 회수(WasSuccessful/HasEvacuatedThisTurn 롤백)하고 플랜을 취소해
         /// 다음 틱에 재계획한다. 기존 '즉시 턴 종료'는 AP 전량 미사용 턴 사멸을 유발했음.
-        /// 반복 실패는 ConsecutiveFailures(≤3) + FallbackReplanCount(≤2) 가드가 턴 종료로 수렴.
+        ///
+        /// 수렴 보장은 전용 카운터 TurnState.MoveSetupFailCount 로 한다 — ConsecutiveFailures 는
+        /// 위 선기록(success=true)이 매 사이클 0 으로 리셋해 이 경로에서 절대 상한에 닿지 않고,
+        /// StagnantPlanCount 는 이미 공격한 턴에는 세지 않는다(둘 다 이 루프의 가드가 아님).
+        ///   1회 실패: 플랜 취소 → 재계획(이동 허용 — 다른 목적지/행동이 성공할 수 있음)
+        ///   MOVE_SETUP_FAILURES_BLOCK_MOVEMENT 회: MovementBlockedThisTurn=true → 이후 재계획은 이동 없이
+        ///     (Analyzer 가 CanMove=false 미러, ExecuteNextAction 이 잔여 Move 스킵) → 제자리에서 남은 AP 사용
+        ///   MAX_MOVE_SETUP_FAILURES 회: 차단 후에도 실패(비정상) → false 반환 → 호출자가 턴 종료
         /// </summary>
-        /// <returns>true = 재계획 예약됨(호출자는 Running 유지), false = 턴 상태 없음(호출자가 턴 종료)</returns>
+        /// <returns>true = 재계획 예약됨(호출자는 Running 유지), false = 턴 종료해야 함(상태 없음 또는 하드 상한)</returns>
         public bool NotifyMoveSetupFailed(BaseUnitEntity unit)
         {
             if (unit == null) return false;
             if (!_turnStates.TryGetValue(unit.UniqueId, out var turnState) || turnState == null) return false;
 
-            // 선기록 회수 — 마지막 Move는 실제로 실행되지 않았음
+            RollbackLastMoveRecord(turnState);
+
+            turnState.MoveSetupFailCount++;
+            turnState.Plan?.Cancel("Move setup failed (destination not reachable/standable)");
+
+            if (turnState.MoveSetupFailCount >= GameConstants.MAX_MOVE_SETUP_FAILURES)
+            {
+                Log.Engine.Warn($"[Orchestrator] {unit.CharacterName}: Move setup failed {turnState.MoveSetupFailCount}x this turn " +
+                    $"(hard cap {GameConstants.MAX_MOVE_SETUP_FAILURES}) — ending turn");
+                return false;
+            }
+
+            if (turnState.MoveSetupFailCount >= GameConstants.MOVE_SETUP_FAILURES_BLOCK_MOVEMENT)
+            {
+                turnState.MovementBlockedThisTurn = true;
+                Log.Engine.Warn($"[Orchestrator] {unit.CharacterName}: Move setup failed {turnState.MoveSetupFailCount}x — " +
+                    "movement blocked for the rest of this turn, replanning without movement");
+                return true;
+            }
+
+            Log.Engine.Warn($"[Orchestrator] {unit.CharacterName}: Move setup failed — cancelling plan for replan " +
+                $"(setup failures={turnState.MoveSetupFailCount}/{GameConstants.MOVE_SETUP_FAILURES_BLOCK_MOVEMENT} before movement block)");
+            return true;
+        }
+
+        /// <summary>
+        /// 실행되지 않은 마지막 Move 의 선기록 회수 — RecordAction(success=true) 이 남긴
+        /// WasSuccessful/HasEvacuatedThisTurn/HasMovedThisTurn/MoveCount 를 실제 상태(미이동)로 되돌린다.
+        /// 마지막 Move 가 실패한 그 Move 인 것은 호출 순서가 보장: ExecuteNextAction 이 MoveTo 를 반환하면
+        /// 같은 틱에 다른 액션 없이 decision node 의 SetupMovement 로 이어진다.
+        /// </summary>
+        private static void RollbackLastMoveRecord(TurnState turnState)
+        {
             PlannedAction failedMove = null;
             for (int i = turnState.ExecutedActions.Count - 1; i >= 0; i--)
             {
-                if (turnState.ExecutedActions[i].Type == ActionType.Move)
-                {
-                    failedMove = turnState.ExecutedActions[i];
-                    break;
-                }
+                if (turnState.ExecutedActions[i].Type != ActionType.Move) continue;
+                failedMove = turnState.ExecutedActions[i];
+                break;
             }
-            if (failedMove != null)
-            {
-                failedMove.WasSuccessful = false;
+            if (failedMove == null) return;
 
-                // 실패한 대피는 대피로 치지 않음 — 재계획에서 재시도 허용 (HasEvacuatedThisTurn 게이트 오염 방지)
-                if (failedMove.IsEvacuationMove)
-                    turnState.HasEvacuatedThisTurn = false;
+            failedMove.WasSuccessful = false;
 
-                // 이동 플래그 재계산 — 이 Move 외 성공 이동이 없으면 롤백
-                bool anyOtherSuccessfulMove = false;
-                for (int i = 0; i < turnState.ExecutedActions.Count; i++)
-                {
-                    var a = turnState.ExecutedActions[i];
-                    if (!ReferenceEquals(a, failedMove) && a.Type == ActionType.Move && a.WasSuccessful == true)
-                    {
-                        anyOtherSuccessfulMove = true;
-                        break;
-                    }
-                }
-                if (!anyOtherSuccessfulMove)
-                    turnState.HasMovedThisTurn = false;
-                if (turnState.MoveCount > 0)
-                    turnState.MoveCount--;
-            }
+            // 실패한 대피는 대피로 치지 않음 — 재계획에서 재시도 허용 (HasEvacuatedThisTurn 게이트 오염 방지)
+            if (failedMove.IsEvacuationMove)
+                turnState.HasEvacuatedThisTurn = false;
 
-            turnState.ConsecutiveFailures++;
-            turnState.Plan?.Cancel("Move setup failed (destination not reachable/standable)");
-            Log.Engine.Warn($"[Orchestrator] {unit.CharacterName}: Move setup failed — cancelling plan for replan " +
-                $"(failures={turnState.ConsecutiveFailures}/{GameConstants.MAX_CONSECUTIVE_FAILURES})");
-            return true;
+            // 이동 플래그 재계산 — 이 Move 외 성공 이동이 없으면 롤백
+            bool anyOtherSuccessfulMove = turnState.ExecutedActions.Any(a =>
+                !ReferenceEquals(a, failedMove) && a.Type == ActionType.Move && a.WasSuccessful == true);
+            if (!anyOtherSuccessfulMove)
+                turnState.HasMovedThisTurn = false;
+            if (turnState.MoveCount > 0)
+                turnState.MoveCount--;
         }
 
         /// <summary>

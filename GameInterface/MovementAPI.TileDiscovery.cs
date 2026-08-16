@@ -18,7 +18,7 @@ namespace CompanionAI_v3.GameInterface
         // 게임 실행기(TaskNodeSetupMoveCommand)가 실제로 수락하는 도달성/IsCanStand의 원본이므로,
         // 즉시 실행할 이동 목적지 선택(대피 등)은 자체 재계산보다 이 데이터를 우선해야 발산이 없다.
         // (자체 FindAllReachableTilesWithThreatsSync는 100ms 타임아웃 시 player 폴백 —
-        //  2026-07-11 실증: 3유닛 대피 목적지 전부 게임 변형에 부재 → 1칸 못미쳐 AoE 안 착지)
+        //  실증: AoE 대피 3유닛의 목적지가 전부 게임 변형에 부재 → 1칸 못미쳐 AoE 안 착지)
         private static string _tickVariantsUnitId;
         private static Dictionary<GraphNode, WarhammerPathAiCell> _tickVariantsCells;
 
@@ -35,6 +35,7 @@ namespace CompanionAI_v3.GameInterface
             _tickVariantsCells = cells;
         }
 
+        /// <summary>틱 이동 변형 해제 — decision node 가 ProcessTurn 종료(finally) 시 호출, stale 참조 방지</summary>
         public static void ClearTickMoveVariants()
         {
             _tickVariantsUnitId = null;

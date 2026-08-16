@@ -142,7 +142,10 @@ namespace CompanionAI_v3.Analysis
             // 따라서 게임 API 값을 직접 사용 (TurnState 값은 참조용)
             situation.CurrentAP = CombatAPI.GetCurrentAP(unit);
             situation.CurrentMP = CombatAPI.GetCurrentMP(unit);
-            situation.CanMove = situation.CurrentMP > 0 && CombatAPI.CanMove(unit);
+            // MovementBlockedThisTurn: 이동 설정 실패 반복 후 이번 턴 이동 계획 차단 (TurnOrchestrator.NotifyMoveSetupFailed).
+            //   플래너는 CanMove 로 이동 여부를 판단하므로 여기서 미러해 제자리 플랜을 유도한다.
+            situation.CanMove = situation.CurrentMP > 0 && CombatAPI.CanMove(unit)
+                && !(turnState?.MovementBlockedThisTurn ?? false);
             situation.CanAct = CombatAPI.CanAct(unit);
 
             // ★ v3.111.12: Canonical API 기반 ExtraTurn 감지.
@@ -838,7 +841,7 @@ namespace CompanionAI_v3.Analysis
                 // 재시전되던 Kibellah 제보 케이스 차단.)
                 if (CombatAPI.IsSelfDamageBlockedAtHP(ability, situation.HPPercent))
                 {
-                    Log.Analysis.Info($"[Analyzer] Blocked self-damage {CombatAPI.GetAbilityDisplayName(ability)}: HP {situation.HPPercent:F0}% below threshold");
+                    Log.Analysis.Info($"[Analyzer] Blocked self-damage {CombatAPI.GetAbilityDisplayName(ability)}: HP {situation.HPPercent:F0}% < threshold {CombatAPI.GetSelfDamageHPThreshold(ability):F0}%");
                     continue;
                 }
 
@@ -1113,14 +1116,14 @@ namespace CompanionAI_v3.Analysis
                 situation.AvailableAttacks, situation.RangePreference);
 
             // F9 (warn-only): PreferRanged 인데 원거리 무기가 없고 필터 후 공격이 0 이면 이 유닛은
-            //   매턴 공격 불가(영구 수동). 유닛당 1회 Warn 으로 설정 오류를 가시화 — 하드 제약은 유지
-            //   (자동 무시하지 않음). 원거리 사이킥 등이 있으면 필터 후 공격이 남아 발화하지 않음.
+            //   매턴 무기 공격 불가(디버프/사이킥 등 비공격 능력은 계속 사용). 유닛당 1회 Warn 으로 설정 오류를
+            //   가시화 — 하드 제약은 유지(자동 무시하지 않음). 원거리 사이킥 공격이 있으면 필터 후 공격이 남아 발화하지 않음.
             if (situation.RangePreference == RangePreference.PreferRanged
                 && !situation.HasRangedWeapon
                 && situation.AvailableAttacks.Count == 0
                 && _f9WarnedUnits.Add(unit.UniqueId))
             {
-                Log.Analysis.Warn($"[Analyzer] {unit.CharacterName}: RangePreference=PreferRanged 이지만 원거리 무기가 없어 매턴 공격 불가 — 설정을 Adaptive/PreferMelee 로 변경 권장(근접 무기 사용 허용).");
+                Log.Analysis.Warn($"[Analyzer] {unit.CharacterName}: RangePreference=PreferRanged 이지만 원거리 무기가 없어 무기 공격을 계획하지 않습니다(능력은 계속 사용) — 근접 무기 공격도 허용하려면 설정을 Adaptive/PreferMelee 로 변경하세요.");
             }
 
             // ★ v3.0.82: 필터링된 GapCloser 복원

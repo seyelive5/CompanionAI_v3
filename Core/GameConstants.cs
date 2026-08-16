@@ -27,6 +27,17 @@ namespace CompanionAI_v3.Core
         /// </summary>
         public const int MAX_FALLBACK_REPLANS = 2;
 
+        /// <summary>
+        /// 턴당 이동 설정(SetupMovement) 실패가 이 횟수에 도달하면 이번 턴 나머지 동안 이동 계획 차단
+        /// (TurnState.MovementBlockedThisTurn) — 같은 목적지 재선택 replan 루프를 끊고 제자리 플랜으로 전환.
+        /// </summary>
+        public const int MOVE_SETUP_FAILURES_BLOCK_MOVEMENT = 2;
+
+        /// <summary>
+        /// 턴당 이동 설정 실패 하드 상한 — 이동 차단 후에도 실패가 계속되면(비정상) 턴 종료.
+        /// </summary>
+        public const int MAX_MOVE_SETUP_FAILURES = 3;
+
         #endregion
 
         #region Thresholds

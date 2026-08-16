@@ -375,23 +375,14 @@ namespace CompanionAI_v3.Execution
             //   위 검증 레이어(생존/도달/아군안전/포인트백스톱)는 전부 AllTargets 제외라 stale
             //   라인 시전이 무검증이었음. AerialRush 등은 계획 시점 P1→P2 라인을 동결 — 프레임 분산/
             //   replan 사이 적 이동·사망으로 라인이 비면 빈 라인에 시전됨.
-            //   FindBestAerialRushPath 선택 기준과 동일한 Bresenham CountEnemiesInChargePath 로 재확인
-            //   (동일 함수 → 방식 불일치 false-abort 없음). RequiresEnemyOccupancy=false 는 제외.
+            //   replan 1-3c 와 같은 헬퍼(ChargeLineHitsAnyEnemy = FindBestAerialRushPath 수락 기준의 Bresenham)로
+            //   재확인 → 방식 불일치 false-abort 없음. 판정 불가(null)는 fail-open. RequiresEnemyOccupancy=false 는 제외.
             if (action.Type == ActionType.Attack
                 && action.RequiresEnemyOccupancy
-                && action.AllTargets != null && action.AllTargets.Count >= 2)
+                && PointTargetingHelper.ChargeLineHitsAnyEnemy(action.AllTargets, situation?.Enemies) == false)
             {
-                var liveChargeEnemies = situation?.Enemies?.FindAll(e => e != null && e.IsConscious);
-                if (liveChargeEnemies != null && liveChargeEnemies.Count > 0)
-                {
-                    var chargeP1 = action.AllTargets[0].Point;
-                    var chargeP2 = action.AllTargets[1].Point;
-                    if (PointTargetingHelper.CountEnemiesInChargePath(chargeP1, chargeP2, liveChargeEnemies) == 0)
-                    {
-                        Log.Engine.Warn($"[Executor] MultiTarget charge aborted: {ability.Name} P1→P2 line no longer hits any enemy — plan↔execute drift");
-                        return ExecutionResult.Failure("No enemies in charge path at execution");
-                    }
-                }
+                Log.Engine.Warn($"[Executor] MultiTarget charge aborted: {ability.Name} P1→P2 line no longer hits any enemy — plan↔execute drift");
+                return ExecutionResult.Failure("No enemies in charge path at execution");
             }
 
             // ★ v3.7.25: MultiTarget 능력 처리

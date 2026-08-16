@@ -691,12 +691,7 @@ namespace CompanionAI_v3.Planning.Plans
             // ★ v3.0.55: MP 추적 로깅
             if (Main.IsDebugEnabled) Log.Planning.Debug($"[Support] Plan complete: AP={remainingAP:F1}, MP={remainingMP:F1} (started with {situation.CurrentMP:F1})");
 
-            // ★ v3.1.09: InitialAP/InitialMP 전달 (리플랜 감지용)
-            // ★ v3.5.88: 0 AP 공격 수 전달 (Break Through → Slash 감지용)
-            int zeroAPAttackCount = CombatAPI.GetZeroAPAttacks(situation.Unit).Count;
-            // ★ v3.9.26: NormalHittableCount 사용 — DangerousAoE 부풀림이 replan을 불필요하게 유발 방지
-            return new TurnPlan(actions, priority, reasoning, situation.HPPercent, situation.NearestEnemyDistance,
-                situation.NormalHittableCount, situation.CurrentAP, situation.CurrentMP, zeroAPAttackCount);
+            return CreatePlanWithSnapshot(actions, priority, reasoning, situation);
         }
 
         #region Support-Specific Methods
