@@ -1388,6 +1388,19 @@ namespace CompanionAI_v3.Planning.Planners
             float maxSafeDistance = situation.WeaponRange.MaxRetreatDistance;
             if (maxSafeDistance < 2f && !situation.WeaponRange.IsScatter)
                 maxSafeDistance = 2f;
+
+            // 이 Phase 는 정의상 "이번 턴 공격 불가"(전부 쿨다운)일 때만 실행된다.
+            //   기존 상한 MaxRetreatDistance(= 사거리 − 1)는 "다음 턴에 바로 쏘려면 사거리 안에 머물라"는
+            //   의도인데, 이번 턴에 못 쏘는 상황에서는 사거리 유지로 얻는 게 없다. 그럼에도 상한이 그대로
+            //   적용돼 적 사거리 안에 남았고, 초과 거리에는 제곱 패널티(excess²×10)까지 붙어 사실상 하드 캡이었다.
+            //   (실증: 카시아 MP=23 인데 9칸 밖으로 못 나가 적 턴에 피격, HP 100%→69%)
+            //   원칙: "다음 턴에 사거리로 복귀할 수 있는 만큼은 물러서도 된다" → 사거리 + 다음 턴 이동력.
+            //   이동력이 낮은 유닛은 상한이 자연히 작아져 과도한 후퇴도 함께 막힌다.
+            float returnableMP = CombatAPI.GetNextTurnMP(unit);
+            if (returnableMP <= 0f) returnableMP = remainingMP;
+            float returnableTiles = returnableMP / CombatAPI.GridCellSize;
+            maxSafeDistance = Math.Max(maxSafeDistance, weaponRange + returnableTiles);
+
             AIRole role = situation.CharacterSettings?.Role ?? AIRole.Auto;
 
             // ★ 핵심: FindRetreatPositionSync 사용 — 안전 최대화 (공격 위치가 아님!)
@@ -1419,8 +1432,14 @@ namespace CompanionAI_v3.Planning.Planners
                 return null;
             }
 
+            // 검증용: 후퇴가 실제로 "적 턴 위협"을 줄였는지 보려면 착지 거리와 위협 수를 함께 봐야 한다.
+            //   enemyTurnThreat = 다음 턴에 이 자리를 칠 수 있는 적 수(0 이면 안전), maxSafe = 이번 허용 상한.
+            float landedDist = situation.NearestEnemy != null
+                ? CombatAPI.MetersToTiles(Vector3.Distance(bestPosition.Position, situation.NearestEnemy.Position))
+                : -1f;
             Log.Planning.Info($"[MovementPlanner] TacticalReposition: ({bestPosition.Position.x:F1},{bestPosition.Position.z:F1}), " +
-                $"score={bestPosition.TotalScore:F1}, move={moveDistance:F1}m, cover={bestPosition.CoverScore:F1}");
+                $"score={bestPosition.TotalScore:F1}, move={moveDistance:F1}m, cover={bestPosition.CoverScore:F1}, " +
+                $"nearestEnemy={landedDist:F1}t, enemyTurnThreat={bestPosition.EnemyTurnThreatSum:F0}, maxSafe={maxSafeDistance:F1}t");
 
             // ★ v3.10.0: 이동 위치 예약 (다른 유닛 밀집 방지)
             Core.TeamBlackboard.Instance?.ReserveMovePosition(bestPosition.Position);

@@ -1019,6 +1019,19 @@ namespace CompanionAI_v3.GameInterface
                 // ★ v3.9.02: 아군 밀집 패널티 — 적 AoE 분산 + 아군 AoE 공간 확보
                 float allyClusterPenalty = CalculateAllyClusterPenalty(pos, unit);
 
+                // 적 턴 위협 — "적이 다음 턴에 이 자리까지 와서 칠 수 있는가"(적 1명당 1.0).
+                //   후퇴 위치 선정에는 이 항목이 빠져 있어서, 정작 물러설 자리를 고를 때
+                //   추격 가능성을 보지 않았다(현재 거리만 봄). 공격 위치 선정에는 이미 쓰던 계산을
+                //   그대로 재사용 — TotalScore 에서 ×8 로 반영된다.
+                //   실증: 카시아가 사거리 상한(9칸) 안쪽에 머물러 적 턴에 피격(HP 100%→69%).
+                float retreatTurnThreat = 0f;
+                for (int ei = 0; ei < enemies.Count; ei++)
+                {
+                    var te = enemies[ei];
+                    if (te == null || te.LifeState.IsDead) continue;
+                    retreatTurnThreat += CombatAPI.GetEnemyTurnThreatScore(te, pos);
+                }
+
                 var score = new PositionScore
                 {
                     Node = node,
@@ -1030,7 +1043,8 @@ namespace CompanionAI_v3.GameInterface
                     // ★ v3.8.13: 경로 위협도 반영
                     ThreatScore = destThreatScore + pathThreatScore,
                     // ★ v3.9.02: 아군 분산 유도
-                    AllyClusterPenalty = allyClusterPenalty
+                    AllyClusterPenalty = allyClusterPenalty,
+                    EnemyTurnThreatSum = retreatTurnThreat
                 };
 
                 // ★ v3.110.16: ApplyInfluenceScores 제거. Blackboard + PathRisk 직접 호출.

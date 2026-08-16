@@ -91,6 +91,28 @@ namespace CompanionAI_v3.GameInterface
         }
 
         /// <summary>
+        /// 다음 턴 시작 시 갖게 될 이동력(MP) — 턴 시작 AP Blue 기준.
+        /// "여기까지 물러서도 다음 턴에 복귀 가능한가" 판단에 사용한다.
+        /// 게임 ProtectionTileScorer 가 적 위협 반경을 구할 때 쓰는 것과 같은 소스
+        /// (GetEnemyTurnThreatScore 폴백 경로 참조). 조회 실패 시 현재 MP 로 폴백.
+        /// </summary>
+        public static float GetNextTurnMP(BaseUnitEntity unit)
+        {
+            if (unit == null) return 0f;
+            try
+            {
+                var initialAP = unit.CombatState?.WarhammerInitialAPBlue;
+                if (initialAP != null) return (float)initialAP.ModifiedValue;
+                if (unit.Blueprint != null) return (float)unit.Blueprint.WarhammerInitialAPBlue;
+            }
+            catch (Exception ex)
+            {
+                Log.Engine.Warn($"[CombatAPI] GetNextTurnMP failed for {unit?.CharacterName}: {ex.Message}");
+            }
+            return GetCurrentMP(unit);
+        }
+
+        /// <summary>
         /// ★ v3.111.18 Phase C.4: 적별 threat range 턴별 캐시.
         ///   reflection 호출 (AiCollectedDataStorage + weapon blueprint)이 비싸서
         ///   EvaluatePosition이 tile × enemies 반복 호출 시 3,200회/scan 핫스팟.

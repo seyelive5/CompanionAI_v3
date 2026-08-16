@@ -395,3 +395,23 @@
 - [x] **D. 거짓 설정 배선 (v3.120.1)**: `situation.CharacterSettings?.UsePredictiveMovement ?? true` 게이트 추가 — 끄면 `PredictedMoves = null` 로 예측 없던 시절 동작.
 - [ ] **데이터 수집**: 전투 1~2판 후 `[PredictedMoves]` 로그 확인 — **라운드별 미보유 비율**이 핵심. R1 에서 높고 R2+ 에서 낮아지면 "첫 라운드 한정 문제", 계속 높으면 구조적 문제.
 - [ ] **A안 (데이터 확인 후 판단)**: 캐시 없는 적을 `GetEnemyThreatRangeInTiles` 기반 도달 반경으로 근사해 worst-cover 계산. **타일 점수 최대 항목(110)을 건드리므로 전 유닛 포지셔닝이 바뀜** — LESSONS_LEARNED "AI 점수 튜닝의 한계"에 따라 인게임 관찰 없이 착수 금지.
+
+### 22. 후퇴 위치 선정이 "적 추격 가능성"을 안 봄 + 쿨다운 턴에도 사거리 상한 적용 (v3.121.0) — ⚠️ 인게임 검증 대기
+
+**배경**: 사용자 관찰 "전투 초반 카시아 첫 이동이 적에게 너무 가까웠고 실제로 총에 맞았다" → 로그 실측으로 **원인 2겹 확정**.
+
+**실측 (2026-08-16 22:28 세션, v3.120.1)**:
+- 이동 사유 `[Support] Phase 8.7: Tactical reposition (all attacks on cooldown, MP=23.0)`
+- 카시아: `EffectiveRange=10.0`, `AutoMinSafe=3.0`, **MP=23** (≈17타일 이동 가능)
+- 판정 `InDanger=False` → 이동 후 **HP 100% → 85% → 69%** (피격 확인)
+
+**원인 ① 후퇴 점수에 적 턴 위협 누락**: `FindRetreatPositionSync` 점수 구성은 거리/이동거리/경로위협(AoO·AoE)/엄폐/아군밀집뿐 — **`EnemyTurnThreatSum`(적이 다음 턴 이 자리를 칠 수 있는가)이 빠져 있었다.** 일반 공격 위치 선정(`FindRangedAttackPositionSync`)에는 이미 있고 TotalScore 에서 ×8 로 반영된다. 즉 **"물러설 자리를 고르면서 적이 쫓아올 수 있는지는 안 봤다"**(사용자 표현: "행동 이후의 미래를 생각 못함").
+  - ※ 검토 중 오독 정정: 로그의 `TurnThreat=-7.0` 은 점수가 아니라 **위협 적 수(7명)** 이며 실제 감점은 ×8 = −56. 일반 이동 경로의 위협 반영은 정상 작동 중이었다(검산: 107.6+25+20+18.6+12+24+7.2−10−56 = 148.4 = 로그 score 일치).
+
+**원인 ② 쿨다운 턴에도 사거리 상한**: `maxSafeDistance = MaxRetreatDistance = EffectiveRange − 1` (카시아 9칸). 초과 시 `excess²×10` 제곱 패널티 + `effectiveDistForScore = min(dist, maxSafe)` 로 **9칸 초과는 안전 점수가 더 오르지 않음** → 멀리 갈수록 이득 0/벌점 폭증 = 사실상 하드 캡. 그런데 Phase 8.7 은 **정의상 "이번 턴 공격 전부 쿨다운"** 일 때만 실행 → 사거리 유지로 얻는 게 없는 상황에서 적 사거리 안에 강제로 남았다.
+
+- [x] **수정 ①**: `FindRetreatPositionSync` 점수에 `EnemyTurnThreatSum` 추가 (공격 위치 선정과 동일 계산 재사용).
+- [x] **수정 ②**: Phase 8.7 한정으로 상한 완화 — `maxSafeDistance = max(사거리−1, 사거리 + 다음턴MP타일)`. 원칙 "다음 턴에 사거리로 복귀할 수 있는 만큼은 물러서도 된다". 이동력 낮은 유닛은 상한이 자연히 작아져 과도 후퇴도 방지. `CombatAPI.GetNextTurnMP(unit)` 신설(턴 시작 AP Blue, 실패 시 현재 MP 폴백).
+- [x] **검증 로그**: `TacticalReposition: (x,z), score=…, move=…m, cover=…, nearestEnemy=Nt, enemyTurnThreat=N, maxSafe=Nt`
+- [ ] **인게임 검증**: 같은 상황(공격 쿨다운) 재현 시 ① `maxSafe` 가 사거리−1 보다 크게 잡히는지 ② `nearestEnemy` 가 이전보다 멀어지는지 ③ `enemyTurnThreat` 가 0 에 가까운 자리를 고르는지 ④ 후퇴 후 피격이 줄었는지. **후퇴 행동 전반이 바뀌므로 다른 유닛의 후퇴도 함께 관찰할 것.**
+- 미착수(사용자 제기, 별건): **서포터는 무기 사거리가 아니라 "아군 지원 거리" 기준이어야** — Phase 8.7 후퇴는 역할 무관하게 무기 사거리만 본다. `PlanMoveTowardAllies` 가 별도로 있으나 이 경로와 연결돼 있지 않음. / `AutoMinSafe = 사거리×0.3`(카시아 3칸) 적정성 — 원거리 유닛 치고 가까움(단 이번 사건의 원인은 아님).
