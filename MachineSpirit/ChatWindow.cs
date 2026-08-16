@@ -30,6 +30,7 @@ namespace CompanionAI_v3.MachineSpirit
         private static Vector2 _pendingPosDelta;
         private const float EDGE = 14f; // edge drag zone thickness
         private const float CORNER = 24f; // corner drag zone size
+        // 배율 미적용 기준값 — 사용 시 UIStyles.Sd() 로 스케일한다 (고배율에서 최소폭이 상대적으로 좁아지던 문제)
         private const float MIN_W = 280f, MIN_H = 250f;
         private const float MAX_W = 800f, MAX_H = 1000f;
 
@@ -83,8 +84,8 @@ namespace CompanionAI_v3.MachineSpirit
             // Apply pending resize/position AFTER GUI.Window returns
             if (_pendingSizeDelta != Vector2.zero || _pendingPosDelta != Vector2.zero)
             {
-                float newW = Mathf.Clamp(_windowRect.width + _pendingSizeDelta.x, MIN_W, MAX_W);
-                float newH = Mathf.Clamp(_windowRect.height + _pendingSizeDelta.y, MIN_H, MAX_H);
+                float newW = Mathf.Clamp(_windowRect.width + _pendingSizeDelta.x, UIStyles.Sd(MIN_W), UIStyles.Sd(MAX_W));
+                float newH = Mathf.Clamp(_windowRect.height + _pendingSizeDelta.y, UIStyles.Sd(MIN_H), UIStyles.Sd(MAX_H));
 
                 // For top/left edges: adjust position by the actual size change (clamped)
                 float dw = newW - _windowRect.width;
@@ -110,7 +111,7 @@ namespace CompanionAI_v3.MachineSpirit
                 wordWrap = true,
                 richText = true,
                 fontSize = Mathf.RoundToInt(14 * UIStyles.Scale),
-                padding = new RectOffset(8, 8, 4, 4),
+                padding = new RectOffset(Mathf.RoundToInt(UIStyles.Sd(8)), Mathf.RoundToInt(UIStyles.Sd(8)), Mathf.RoundToInt(UIStyles.Sd(4)), Mathf.RoundToInt(UIStyles.Sd(4))),
                 normal = { textColor = Color.white }
             };
 

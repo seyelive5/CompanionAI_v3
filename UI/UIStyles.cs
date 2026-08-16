@@ -12,7 +12,7 @@ namespace CompanionAI_v3.UI
         public const string Gold      = "#D4A947";
         public const string TextLight = "#C8C8C8";
         public const string TextMid   = "#888888";
-        public const string TextDim   = "#666666";
+        public const string TextDim   = "#7A7A7A";  // 배경 #1A1A1E 대비 3.0:1 → 4.6:1 (WCAG AA 충족)
         public const string Danger    = "#FF6347";
         public const string Green     = "#98FB98";
         public const string RoleBlue  = "#4169E1";
@@ -69,6 +69,18 @@ namespace CompanionAI_v3.UI
 
         /// <summary>Scaled dimension helper.</summary>
         public static float Sd(float baseDim) => baseDim * Scale;
+
+        // ── Spacing scale ──────────────────────────────────────
+        // 배율(0.8~2.5x)이 적용되는 간격 토큰. 기존에는 GUILayout.Space(n) 이 전부 고정 픽셀이라
+        // 글자·버튼만 커지고 여백은 그대로였다 → 고배율에서 답답하고 저배율에서 성겼다.
+        // 값은 4단계로 통일 (기존 1/2/3/5/8/10/15 7종의 임의성 제거).
+        public const float SpaceXS = 3f;   // 라벨-설명 등 밀착 요소
+        public const float SpaceSM = 5f;   // 컨트롤 사이 기본 간격
+        public const float SpaceMD = 10f;  // 소구역 사이
+        public const float SpaceLG = 15f;  // 대구역 사이
+
+        /// <summary>배율이 적용된 세로 여백 — GUILayout.Space 대신 사용할 것.</summary>
+        public static void Space(float baseDim) => GUILayout.Space(Sd(baseDim));
 
         // ── Init ───────────────────────────────────────────────
 

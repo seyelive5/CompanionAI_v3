@@ -344,6 +344,14 @@ namespace CompanionAI_v3.Settings
         /// <summary>★ v3.50.0: UI 전체 크기 배율 (0.8 ~ 2.5, 기본 1.5)</summary>
         public float UIScale { get; set; } = 1.5f;
 
+        /// <summary>
+        /// 고급 탭(LLM 전투 AI · 성능 · 디버그) 표시 여부. 기본 false —
+        /// 대부분의 플레이어가 쓰지 않는 탭이 필수 탭과 같은 무게로 노출되던 문제 해소.
+        /// 한 번 펼치면 이 설정에 저장되어 다음 세션에도 유지된다.
+        /// (Machine Spirit 은 모드의 간판 기능이라 항상 표시 — 접지 않는다.)
+        /// </summary>
+        public bool ShowAdvancedTabs { get; set; } = false;
+
         /// <summary>Machine Spirit (LLM-powered voidship AI companion) settings</summary>
         public MachineSpiritConfig MachineSpirit { get; set; } = new MachineSpiritConfig();
 

@@ -21,16 +21,23 @@ namespace CompanionAI_v3.UI
         private enum UITab { Party, Gameplay, Combat, Performance, Language, Debug, MachineSpirit, LLMCombatAI }
         private static UITab _activeTab = UITab.Party;
 
-        private static readonly (UITab tab, string locKey)[] TabDefs = new[]
+        // 필수 탭 — 항상 표시. Machine Spirit 은 모드의 간판 기능이라 여기에 포함한다.
+        private static readonly (UITab tab, string locKey)[] PrimaryTabDefs = new[]
         {
-            (UITab.Party,       "TabParty"),
-            (UITab.Gameplay,    "TabGameplay"),
-            (UITab.Combat,      "TabCombat"),
-            (UITab.Performance, "TabPerformance"),
-            (UITab.Language,    "TabLanguage"),
-            (UITab.Debug,       "TabDebug"),
+            (UITab.Party,         "TabParty"),
+            (UITab.Gameplay,      "TabGameplay"),
+            (UITab.Combat,        "TabCombat"),
             (UITab.MachineSpirit, "TabMachineSpirit"),
-            (UITab.LLMCombatAI,  "TabLLMCombatAI"),
+            (UITab.Language,      "TabLanguage"),
+        };
+
+        // 고급 탭 — 기본 접힘(Settings.ShowAdvancedTabs). 대부분의 플레이어가 쓰지 않는데
+        // 필수 탭과 같은 무게로 노출되어 "UI 가 복잡하다"는 인상의 주원인이었다.
+        private static readonly (UITab tab, string locKey)[] AdvancedTabDefs = new[]
+        {
+            (UITab.LLMCombatAI,   "TabLLMCombatAI"),
+            (UITab.Performance,   "TabPerformance"),
+            (UITab.Debug,         "TabDebug"),
         };
 
         // ── State ────────────────────────────────────────────────
@@ -66,7 +73,7 @@ namespace CompanionAI_v3.UI
                 GUILayout.BeginVertical(UIStyles.Background);
                 DrawHeader();
                 DrawTabBar();
-                GUILayout.Space(5);
+                UIStyles.Space(UIStyles.SpaceSM);
                 DrawTabContent();
                 GUILayout.EndVertical();
                 GUILayout.EndScrollView();
@@ -89,7 +96,7 @@ namespace CompanionAI_v3.UI
             GUILayout.Label($"<color={UIStyles.TextDim}>v{GetVersion()}</color>", UIStyles.Label);
             GUILayout.EndHorizontal();
             GUILayout.Label($"<color={UIStyles.TextMid}>TurnPlanner-based Tactical AI System</color>", UIStyles.Description);
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
         }
 
         private static string GetVersion()
@@ -100,15 +107,51 @@ namespace CompanionAI_v3.UI
 
         private static void DrawTabBar()
         {
+            bool showAdvanced = Main.Settings.ShowAdvancedTabs;
+
+            // 1행: 필수 탭 + 고급 토글
             GUILayout.BeginHorizontal();
-            foreach (var (tab, locKey) in TabDefs)
+            foreach (var (tab, locKey) in PrimaryTabDefs)
+                DrawTabButton(tab, L(locKey));
+
+            GUILayout.FlexibleSpace();
+
+            string arrow = showAdvanced ? "▼" : "▶";
+            string advColor = showAdvanced ? UIStyles.Gold : UIStyles.TextMid;
+            if (GUILayout.Button($"<color={advColor}>{arrow} {L("TabAdvanced")}</color>",
+                UIStyles.TabInactive, GUILayout.Height(UIStyles.Sd(24))))
             {
-                var style = (_activeTab == tab) ? UIStyles.TabActive : UIStyles.TabInactive;
-                if (GUILayout.Button(L(locKey), style, GUILayout.Height(UIStyles.Sd(24))))
-                    _activeTab = tab;
+                Main.Settings.ShowAdvancedTabs = !showAdvanced;
+                // 접을 때 고급 탭을 보고 있었다면 필수 탭으로 되돌린다 (빈 화면 방지)
+                if (!Main.Settings.ShowAdvancedTabs && IsAdvancedTab(_activeTab))
+                    _activeTab = UITab.Party;
             }
+            GUILayout.EndHorizontal();
+
+            if (!showAdvanced) return;
+
+            // 2행: 고급 탭 (펼쳤을 때만)
+            UIStyles.Space(3);
+            GUILayout.BeginHorizontal();
+            GUILayout.Space(UIStyles.Sd(12));  // 하위 항목임을 들여쓰기로 표현
+            foreach (var (tab, locKey) in AdvancedTabDefs)
+                DrawTabButton(tab, L(locKey));
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
+        }
+
+        private static void DrawTabButton(UITab tab, string label)
+        {
+            var style = (_activeTab == tab) ? UIStyles.TabActive : UIStyles.TabInactive;
+            if (GUILayout.Button(label, style, GUILayout.Height(UIStyles.Sd(24))))
+                _activeTab = tab;
+        }
+
+        private static bool IsAdvancedTab(UITab tab)
+        {
+            foreach (var (t, _) in AdvancedTabDefs)
+                if (t == tab) return true;
+            return false;
         }
 
         private static void DrawTabContent()
@@ -136,7 +179,7 @@ namespace CompanionAI_v3.UI
         {
             UIStyles.SectionTitle(L("PartyMembers"));
             UIStyles.DrawDivider();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             var characters = GetPartyMembers();
             if (characters.Count == 0)
@@ -153,7 +196,7 @@ namespace CompanionAI_v3.UI
             GUILayout.Label($"<color={UIStyles.TextLight}><b>{L("Range")}</b></color>", UIStyles.Label, GUILayout.Width(RANGE_LABEL_WIDTH));
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
-            GUILayout.Space(10);
+            UIStyles.Space(UIStyles.SpaceMD);
 
             foreach (var character in characters)
                 DrawCharacterRow(character);
@@ -167,7 +210,7 @@ namespace CompanionAI_v3.UI
         {
             UIStyles.SectionTitle(L("GameplaySettings"));
             UIStyles.DrawDivider();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // UI Scale
             GUILayout.BeginHorizontal();
@@ -176,9 +219,9 @@ namespace CompanionAI_v3.UI
             Main.Settings.UIScale = Mathf.Round(Main.Settings.UIScale * 10f) / 10f; // snap to 0.1
             GUILayout.Label($"<color={UIStyles.Gold}>{Main.Settings.UIScale:F1}x</color>", UIStyles.Label, GUILayout.Width(UIStyles.Sd(40)));
             GUILayout.EndHorizontal();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
             UIStyles.DrawDivider();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // AI Speech
             Main.Settings.EnableAISpeech = DrawCheckbox(Main.Settings.EnableAISpeech, L("EnableAISpeech"));
@@ -198,9 +241,9 @@ namespace CompanionAI_v3.UI
             // Victory Bark
             Main.Settings.EnableVictoryBark = DrawCheckbox(Main.Settings.EnableVictoryBark, L("EnableVictoryBark"));
 
-            GUILayout.Space(10);
+            UIStyles.Space(UIStyles.SpaceMD);
             UIStyles.DrawDivider();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // Allied NPC AI
             Main.Settings.EnableAlliedNPCAI = DrawCheckbox(Main.Settings.EnableAlliedNPCAI, L("EnableAlliedNPCAI"));
@@ -219,11 +262,11 @@ namespace CompanionAI_v3.UI
         {
             UIStyles.SectionTitle(L("CombatSettings"));
             UIStyles.DrawDivider();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // ── AoE Section ──────────────────────────────────────
             GUILayout.Label($"<color={UIStyles.Gold}>{L("AoESettings")}</color>", UIStyles.BoldLabel);
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             var aoeConfig = AIConfig.GetAoEConfig();
             if (aoeConfig != null)
@@ -233,7 +276,7 @@ namespace CompanionAI_v3.UI
                     AIConfig.Instance.AoE = new AoEConfig();
                     AIConfig.Save();
                 }
-                GUILayout.Space(10);
+                UIStyles.Space(UIStyles.SpaceMD);
 
                 bool aoeChanged = false;
                 int iv;
@@ -249,26 +292,26 @@ namespace CompanionAI_v3.UI
                 if (aoeChanged) AIConfig.Save();
             }
 
-            GUILayout.Space(10);
+            UIStyles.Space(UIStyles.SpaceMD);
             UIStyles.DrawDivider();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // ── Weapon Rotation Section ──────────────────────────
             GUILayout.Label($"<color={UIStyles.Gold}>{L("WeaponRotationSettings")}</color>", UIStyles.BoldLabel);
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             var wrConfig = AIConfig.GetWeaponRotationConfig();
             if (wrConfig != null)
             {
                 GUILayout.Label($"<color={UIStyles.TextMid}>{L("WeaponRotationWarning")}</color>", UIStyles.Description);
-                GUILayout.Space(5);
+                UIStyles.Space(UIStyles.SpaceSM);
 
                 if (GUILayout.Button($"<color={UIStyles.Gold}>{L("ResetWeaponRotationToDefault")}</color>", UIStyles.Button, GUILayout.Width(UIStyles.Sd(234)), GUILayout.Height(CHECKBOX_DRAW_SIZE)))
                 {
                     wrConfig.MaxSwitchesPerTurn = new WeaponRotationConfig().MaxSwitchesPerTurn;
                     AIConfig.Save();
                 }
-                GUILayout.Space(10);
+                UIStyles.Space(UIStyles.SpaceMD);
 
                 int iv = DrawSliderSettingIntLarge(L("MaxSwitchesPerTurn"), L("MaxSwitchesPerTurnDesc"), wrConfig.MaxSwitchesPerTurn, 1, 4);
                 if (iv != wrConfig.MaxSwitchesPerTurn)
@@ -287,10 +330,10 @@ namespace CompanionAI_v3.UI
         {
             UIStyles.SectionTitle(L("PerformanceSettings"));
             UIStyles.DrawDivider();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             GUILayout.Label($"<color={UIStyles.Danger}>{L("PerformanceWarning")}</color>", UIStyles.Description);
-            GUILayout.Space(10);
+            UIStyles.Space(UIStyles.SpaceMD);
 
             if (GUILayout.Button($"<color={UIStyles.Gold}>{L("ResetPerformanceToDefault")}</color>", UIStyles.Button, GUILayout.Width(UIStyles.Sd(234)), GUILayout.Height(CHECKBOX_DRAW_SIZE)))
             {
@@ -299,7 +342,7 @@ namespace CompanionAI_v3.UI
                 Main.Settings.MaxClusters = 5;
                 Main.Settings.MaxTilesPerEnemy = 100;
             }
-            GUILayout.Space(15);
+            UIStyles.Space(UIStyles.SpaceLG);
 
             Main.Settings.MaxEnemiesToAnalyze = DrawSliderSettingIntLarge(
                 L("MaxEnemiesToAnalyze"),
@@ -334,7 +377,7 @@ namespace CompanionAI_v3.UI
         {
             UIStyles.SectionTitle(L("Language"));
             UIStyles.DrawDivider();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             foreach (Language lang in Enum.GetValues(typeof(Language)))
             {
@@ -358,7 +401,7 @@ namespace CompanionAI_v3.UI
                     Localization.CurrentLanguage = lang;
                     Diagnostics.TacticalDialogueDB.ReloadFromJson();
                 }
-                GUILayout.Space(5);
+                UIStyles.Space(UIStyles.SpaceSM);
             }
         }
 
@@ -370,31 +413,31 @@ namespace CompanionAI_v3.UI
         {
             UIStyles.SectionTitle(L("DebugDiagnostics"));
             UIStyles.DrawDivider();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             GUILayout.Label($"<color={UIStyles.TextMid}>{L("DebugDiagnosticsDesc")}</color>", UIStyles.Description);
-            GUILayout.Space(10);
+            UIStyles.Space(UIStyles.SpaceMD);
 
             Main.Settings.EnableDebugLogging = DrawCheckbox(Main.Settings.EnableDebugLogging, L("EnableDebugLogging"));
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
             Main.Settings.ShowAIThoughts = DrawCheckbox(Main.Settings.ShowAIThoughts, L("ShowAIDecisionLog"));
 
-            GUILayout.Space(10);
+            UIStyles.Space(UIStyles.SpaceMD);
             UIStyles.DrawDivider();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // Combat Report
             Main.Settings.EnableCombatReport = DrawCheckbox(Main.Settings.EnableCombatReport, L("EnableCombatReport"));
             GUILayout.Label($"<color={UIStyles.TextMid}>{L("EnableCombatReportDesc")}</color>", UIStyles.Description);
 
-            GUILayout.Space(10);
+            UIStyles.Space(UIStyles.SpaceMD);
 
             // Tactical Narrator / Decision Overlay
             Main.Settings.EnableDecisionOverlay = DrawCheckbox(Main.Settings.EnableDecisionOverlay, L("EnableDecisionOverlay"));
             GUILayout.Label($"<color={UIStyles.TextMid}>{L("EnableDecisionOverlayDesc")}</color>", UIStyles.Description);
             if (Main.Settings.EnableDecisionOverlay)
             {
-                GUILayout.Space(5);
+                UIStyles.Space(UIStyles.SpaceSM);
                 GUILayout.BeginHorizontal();
                 GUILayout.Label($"<color={UIStyles.TextLight}>    {L("OverlayScale")}: {Main.Settings.DecisionOverlayScale:F1}x</color>", UIStyles.SliderLabel, GUILayout.Width(UIStyles.Sd(134)));
                 Main.Settings.DecisionOverlayScale = GUILayout.HorizontalSlider(
@@ -407,10 +450,10 @@ namespace CompanionAI_v3.UI
             GUILayout.Label($"<color={UIStyles.TextMid}>{L("EnableLLMVisualOverlayDesc")}</color>", UIStyles.Description);
 
             // ★ v3.84.0: LLM Developer Tools section
-            GUILayout.Space(15);
+            UIStyles.Space(UIStyles.SpaceLG);
             GUILayout.Label($"<color={UIStyles.RoleGold}>\u2500\u2500 {L("LLMDevTools")} \u2500\u2500</color>", UIStyles.BoldLabel);
             GUILayout.Label($"<color={UIStyles.Danger}>{L("LLMDevToolsWarning")}</color>", UIStyles.Description);
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             Main.Settings.EnableTrainingDataCollection = DrawCheckbox(
                 Main.Settings.EnableTrainingDataCollection, L("EnableTrainingDataCollection"));
@@ -457,18 +500,18 @@ namespace CompanionAI_v3.UI
             GUILayout.Label($"<color={UIStyles.Danger}><b>\u26A0 {L("LLMCombatAIExperimental")} \u26A0</b></color>", UIStyles.BoldLabel);
             GUILayout.Label($"<color={UIStyles.TextLight}>{L("LLMCombatAIExperimentalDesc")}</color>", UIStyles.Description);
             GUILayout.EndVertical();
-            GUILayout.Space(10);
+            UIStyles.Space(UIStyles.SpaceMD);
 
             UIStyles.SectionTitle(L("LLMCombatAITitle"));
             GUILayout.Label($"<color={UIStyles.TextMid}>{L("LLMCombatAIDesc")}</color>", UIStyles.Description);
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // ══════════════════════════════════════════════════════
             // Section 1: Global Enable + Ollama Status
             // ══════════════════════════════════════════════════════
 
             Main.Settings.EnableLLMCombatAI = DrawCheckbox(Main.Settings.EnableLLMCombatAI, L("LLMCombatAIEnable"));
-            GUILayout.Space(3);
+            UIStyles.Space(UIStyles.SpaceXS);
 
             // 전투 LLM 상태 — 실패해도 휴리스틱으로 조용히 폴백하므로, 표시가 없으면
             // "켜져 있는데 실제로는 안 쓰이는" 상태를 사용자가 알 수 없다.
@@ -484,7 +527,7 @@ namespace CompanionAI_v3.UI
                 {
                     GUILayout.Label($"<color={UIStyles.RoleGreen}>{L("LLMCombatAIActive")}</color>", UIStyles.Description);
                 }
-                GUILayout.Space(3);
+                UIStyles.Space(UIStyles.SpaceXS);
             }
 
             var ollamaState = MSp.OllamaSetup.State;
@@ -508,14 +551,14 @@ namespace CompanionAI_v3.UI
             if (!Main.Settings.EnableLLMCombatAI) return;
 
             UIStyles.DrawDivider();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // ══════════════════════════════════════════════════════
             // Section 2: Model Selection (installed models)
             // ══════════════════════════════════════════════════════
 
             GUILayout.Label($"<color={UIStyles.Gold}>{L("LLMCombatAIModel")}</color>", UIStyles.SubHeader);
-            GUILayout.Space(3);
+            UIStyles.Space(UIStyles.SpaceXS);
 
             // Auto-select after install completes
             if (_llmCombatPendingModelSelect != null && !_llmCombatInstallingModel)
@@ -534,22 +577,22 @@ namespace CompanionAI_v3.UI
             }
             string installedMark = isCurrentInstalled ? $"<color={UIStyles.Green}>\u2713 Installed</color>" : $"<color={UIStyles.Danger}>\u2717 Not Installed</color>";
             GUILayout.Label($"<color={UIStyles.TextLight}>{L("LLMCombatAICurrent")}: </color><color={UIStyles.Gold}>{currentModel}</color>  {installedMark}", UIStyles.BoldLabel);
-            GUILayout.Space(3);
+            UIStyles.Space(UIStyles.SpaceXS);
 
             GUILayout.Label($"<color={UIStyles.Gold}>\u2605 {L("LLMCombatAIRecommended")}</color>", UIStyles.Description);
             GUILayout.Label($"<color={UIStyles.TextMid}>{L("LLMCombatAIRecommendedDesc")}</color>", UIStyles.Description);
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // Install progress indicator
             if (_llmCombatInstallingModel && !string.IsNullOrEmpty(_llmCombatInstallStatus))
             {
                 GUILayout.Label($"<color={UIStyles.Gold}>{_llmCombatInstallStatus}</color>", UIStyles.BoldLabel);
-                GUILayout.Space(3);
+                UIStyles.Space(UIStyles.SpaceXS);
             }
 
             // Installed models list
             GUILayout.Label($"<color={UIStyles.TextLight}>{L("LLMCombatAIAvailable")}</color>", UIStyles.BoldLabel);
-            GUILayout.Space(3);
+            UIStyles.Space(UIStyles.SpaceXS);
 
             if (MSp.OllamaSetup.IsFetchingModels)
             {
@@ -595,7 +638,7 @@ namespace CompanionAI_v3.UI
                 }
             }
 
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // Refresh button
             if (GUILayout.Button($"<color={UIStyles.TextLight}>\u21bb {L("LLMCombatAIRefresh")}</color>",
@@ -605,7 +648,7 @@ namespace CompanionAI_v3.UI
             }
 
             UIStyles.DrawDivider();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // ══════════════════════════════════════════════════════
             // Section 2b: Downloadable Model Catalog (Collapsible)
@@ -614,14 +657,14 @@ namespace CompanionAI_v3.UI
             DrawLLMCombatAIDownloadCatalog(ollamaConnected, installed);
 
             UIStyles.DrawDivider();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // ══════════════════════════════════════════════════════
             // Section 3: Character Selection
             // ══════════════════════════════════════════════════════
 
             GUILayout.Label($"<color={UIStyles.Gold}>{L("LLMCombatAIApplyTo")}</color>", UIStyles.SubHeader);
-            GUILayout.Space(3);
+            UIStyles.Space(UIStyles.SpaceXS);
 
             var characters = GetPartyMembers();
             if (characters.Count == 0)
@@ -670,21 +713,21 @@ namespace CompanionAI_v3.UI
             }
 
             UIStyles.DrawDivider();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // ── Display Options ──
             GUILayout.Label($"<color={UIStyles.Gold}>{L("LLMCombatAIDisplay")}</color>", UIStyles.SubHeader);
-            GUILayout.Space(3);
+            UIStyles.Space(UIStyles.SpaceXS);
 
             Main.Settings.ShowLLMOverlay = DrawCheckbox(Main.Settings.ShowLLMOverlay, L("LLMCombatAIOverlay"));
             GUILayout.Label($"<color={UIStyles.TextMid}>{L("LLMCombatAIOverlayDesc")}</color>", UIStyles.Description);
 
             UIStyles.DrawDivider();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // ── Statistics ──
             GUILayout.Label($"<color={UIStyles.Gold}>{L("LLMCombatAIStats")}</color>", UIStyles.SubHeader);
-            GUILayout.Space(3);
+            UIStyles.Space(UIStyles.SpaceXS);
 
             long lastTime = Planning.LLM.LLMJudge.LastJudgeTimeMs;
             if (lastTime > 0)
@@ -714,7 +757,7 @@ namespace CompanionAI_v3.UI
 
             if (!_llmCombatCatalogExpanded) return;
 
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             if (!ollamaConnected)
             {
@@ -731,7 +774,7 @@ namespace CompanionAI_v3.UI
             GUILayout.Label($"<color={UIStyles.Gold}><b>Action</b></color>", UIStyles.Label, GUILayout.Width(UIStyles.Sd(110)));
             GUILayout.EndHorizontal();
 
-            GUILayout.Space(2);
+            UIStyles.Space(UIStyles.SpaceXS);
 
             // ── Table Rows ──
             for (int i = 0; i < DOWNLOADABLE_MODELS.Length; i++)
@@ -815,7 +858,7 @@ namespace CompanionAI_v3.UI
                 }
 
                 GUILayout.EndHorizontal();
-                GUILayout.Space(1);
+                UIStyles.Space(UIStyles.SpaceXS);
             }
         }
 
@@ -938,7 +981,7 @@ namespace CompanionAI_v3.UI
             if (!ms.Enabled) return; // early out — nothing else to show
 
             UIStyles.DrawDivider();
-            GUILayout.Space(3);
+            UIStyles.Space(UIStyles.SpaceXS);
 
             // Provider selection: Ollama vs Cloud
             GUILayout.BeginHorizontal();
@@ -963,7 +1006,7 @@ namespace CompanionAI_v3.UI
             }
 
             UIStyles.DrawDivider();
-            GUILayout.Space(3);
+            UIStyles.Space(UIStyles.SpaceXS);
 
             // Provider-specific section (model selection + cloud config)
             if (_mainProviderChoice == 0)
@@ -975,9 +1018,9 @@ namespace CompanionAI_v3.UI
             // Zone 2: Foldout "Customize" (default open)
             // ══════════════════════════════════════════════════════
 
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
             UIStyles.DrawDivider();
-            GUILayout.Space(3);
+            UIStyles.Space(UIStyles.SpaceXS);
 
             string customizeArrow = _showCustomize ? "\u25be" : "\u25b8";
             if (GUILayout.Button($"<color={UIStyles.TextLight}>{customizeArrow} {L("MSCustomize")}</color>",
@@ -986,7 +1029,7 @@ namespace CompanionAI_v3.UI
 
             if (_showCustomize)
             {
-                GUILayout.Space(3);
+                UIStyles.Space(UIStyles.SpaceXS);
 
                 // ── Personality ──
                 GUILayout.Label($"<color={UIStyles.Gold}>{L("MSPersonality")}</color>", UIStyles.SubHeader);
@@ -1008,7 +1051,7 @@ namespace CompanionAI_v3.UI
                 }
                 GUILayout.Label($"<color={UIStyles.TextMid}>{personalityDescs[newPersonality]}</color>", UIStyles.Description);
 
-                GUILayout.Space(5);
+                UIStyles.Space(UIStyles.SpaceSM);
 
                 // ── Idle Commentary ──
                 GUILayout.Label($"<color={UIStyles.Gold}>{L("MSIdleMode")}</color>", UIStyles.SubHeader);
@@ -1021,7 +1064,7 @@ namespace CompanionAI_v3.UI
                     ms.IdleMode = (MSp.IdleFrequency)newIdle;
                 GUILayout.Label($"<color={UIStyles.TextMid}>{L("MSIdleDesc")}</color>", UIStyles.Description);
 
-                GUILayout.Space(3);
+                UIStyles.Space(UIStyles.SpaceXS);
 
                 // ── Knowledge Base ──
                 ms.EnableKnowledge = DrawCheckbox(ms.EnableKnowledge, L("MSKnowledgeEnable"));
@@ -1030,7 +1073,7 @@ namespace CompanionAI_v3.UI
                 // ── Vision (Ollama only) ──
                 if (ms.Provider == MSp.ApiProvider.Ollama && ms.IdleMode != MSp.IdleFrequency.Off)
                 {
-                    GUILayout.Space(3);
+                    UIStyles.Space(UIStyles.SpaceXS);
                     ms.EnableVision = DrawCheckbox(ms.EnableVision, L("MSEnableVision"));
                     if (ms.EnableVision)
                         GUILayout.Label($"<color={UIStyles.TextMid}>{L("MSVisionDesc")}</color>", UIStyles.Description);
@@ -1043,10 +1086,10 @@ namespace CompanionAI_v3.UI
                 // ── Advanced Settings (Cloud providers only) ──
                 if (ms.Provider != MSp.ApiProvider.Ollama)
                 {
-                    GUILayout.Space(5);
+                    UIStyles.Space(UIStyles.SpaceSM);
                     GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSAdvanced")}</color>", UIStyles.BoldLabel);
                     GUILayout.Label($"<color={UIStyles.TextDim}>{L("MSAdvancedHint")}</color>", UIStyles.Description);
-                    GUILayout.Space(3);
+                    UIStyles.Space(UIStyles.SpaceXS);
 
                     // Max Tokens slider (50-500)
                     GUILayout.BeginHorizontal();
@@ -1054,7 +1097,7 @@ namespace CompanionAI_v3.UI
                     ms.MaxTokens = Mathf.RoundToInt(GUILayout.HorizontalSlider(ms.MaxTokens, 50, 500, GUILayout.Width(UIStyles.Sd(200)), GUILayout.Height(UIStyles.Sd(15))));
                     GUILayout.Label($"<color={UIStyles.Gold}>{ms.MaxTokens}</color>", UIStyles.Label, GUILayout.Width(UIStyles.Sd(50)));
                     GUILayout.EndHorizontal();
-                    GUILayout.Space(3);
+                    UIStyles.Space(UIStyles.SpaceXS);
 
                     // Temperature slider (0.0-2.0)
                     GUILayout.BeginHorizontal();
@@ -1070,9 +1113,9 @@ namespace CompanionAI_v3.UI
             // Zone 3: Footer (always visible, compact)
             // ══════════════════════════════════════════════════════
 
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
             UIStyles.DrawDivider();
-            GUILayout.Space(3);
+            UIStyles.Space(UIStyles.SpaceXS);
 
             GUILayout.BeginHorizontal();
             GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSHotkey")}: </color><color={UIStyles.Gold}>{ms.Hotkey}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
@@ -1093,7 +1136,7 @@ namespace CompanionAI_v3.UI
         /// </summary>
         private static void DrawMachineSpiritStatus(MSp.MachineSpiritConfig ms)
         {
-            GUILayout.Space(3);
+            UIStyles.Space(UIStyles.SpaceXS);
 
             string diag = MSp.MachineSpirit.DiagnosticStatus;
             if (!string.IsNullOrEmpty(diag))
@@ -1124,7 +1167,7 @@ namespace CompanionAI_v3.UI
                 string statusColor = MSp.OllamaSetup.State == MSp.OllamaSetup.SetupState.Error
                     ? UIStyles.RoleRed : UIStyles.Gold;
                 GUILayout.Label($"<color={statusColor}>{MSp.OllamaSetup.StatusText}</color>", UIStyles.Label);
-                GUILayout.Space(3);
+                UIStyles.Space(UIStyles.SpaceXS);
             }
 
             // Model selection (Ollama presets + scan installed)
@@ -1149,13 +1192,13 @@ namespace CompanionAI_v3.UI
 
             // Provider guide
             GUILayout.Label($"<color={UIStyles.TextMid}>{L("MSGuide_" + ms.Provider)}</color>", UIStyles.Description);
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // Setup steps (Groq/Gemini/OpenAI)
             if (ms.Provider == MSp.ApiProvider.Groq || ms.Provider == MSp.ApiProvider.Gemini || ms.Provider == MSp.ApiProvider.OpenAI)
             {
                 GUILayout.Label($"<color={UIStyles.Gold}>{L("MSSteps_" + ms.Provider)}</color>", UIStyles.Description);
-                GUILayout.Space(5);
+                UIStyles.Space(UIStyles.SpaceSM);
             }
 
             // API URL (Custom only)
@@ -1165,7 +1208,7 @@ namespace CompanionAI_v3.UI
                 GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSApiUrl")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
                 ms.ApiUrl = GUILayout.TextField(ms.ApiUrl, GUILayout.ExpandWidth(true));
                 GUILayout.EndHorizontal();
-                GUILayout.Space(5);
+                UIStyles.Space(UIStyles.SpaceSM);
             }
 
             // API Key (all cloud providers)
@@ -1173,7 +1216,7 @@ namespace CompanionAI_v3.UI
             GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSApiKey")}</color>", UIStyles.BoldLabel, GUILayout.Width(UIStyles.Sd(120)));
             ms.ApiKey = GUILayout.PasswordField(ms.ApiKey, '*', GUILayout.ExpandWidth(true));
             GUILayout.EndHorizontal();
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // Model selection (cloud presets)
             DrawModelSelection(ms);
@@ -1334,7 +1377,7 @@ namespace CompanionAI_v3.UI
 
             // ── Active Model ──
             GUILayout.Label($"<color={UIStyles.Gold}>\u25b6 Active: {(string.IsNullOrEmpty(ms.Model) ? "None" : ms.Model)}</color>", UIStyles.SubHeader);
-            GUILayout.Space(3);
+            UIStyles.Space(UIStyles.SpaceXS);
 
             // ── Installed Models ──
             var installed = MSp.OllamaSetup.InstalledModels;
@@ -1391,7 +1434,7 @@ namespace CompanionAI_v3.UI
                 // Delete confirmation
                 if (!string.IsNullOrEmpty(MSp.OllamaSetup.DeleteConfirmModel))
                 {
-                    GUILayout.Space(3);
+                    UIStyles.Space(UIStyles.SpaceXS);
                     GUILayout.Label($"<color=#FF6666>\u26a0 {L("MSDeleteConfirm")} '{MSp.OllamaSetup.DeleteConfirmModel}'?</color>", UIStyles.Description);
                     GUILayout.BeginHorizontal();
                     if (GUILayout.Button($"<color=#FF6666>{L("MSDeleteYes")}</color>", UIStyles.Button,
@@ -1415,12 +1458,12 @@ namespace CompanionAI_v3.UI
                 GUILayout.Label($"<color={UIStyles.TextMid}>Scanning installed models...</color>", UIStyles.Description);
             }
 
-            GUILayout.Space(5);
+            UIStyles.Space(UIStyles.SpaceSM);
 
             // ── Add New Model (always visible) ──
             UIStyles.DrawDivider();
             GUILayout.Label($"<color={UIStyles.TextLight}>{L("MSAddModel")}</color>", UIStyles.BoldLabel);
-            GUILayout.Space(3);
+            UIStyles.Space(UIStyles.SpaceXS);
             {
 
                 // Tier tabs
@@ -1436,7 +1479,7 @@ namespace CompanionAI_v3.UI
                 if (tier.IsHighEnd)
                     GUILayout.Label($"<color=#FF6666>\u26a0 {L("MSTierWarning")}</color>", UIStyles.Description);
 
-                GUILayout.Space(3);
+                UIStyles.Space(UIStyles.SpaceXS);
 
                 // Models in selected tier — each with install status
                 var models = tier.Models;
@@ -1482,14 +1525,14 @@ namespace CompanionAI_v3.UI
 
                     // Description below (brighter text)
                     GUILayout.Label($"<color={UIStyles.TextMid}>{L(models[i].DescKey)}</color>", UIStyles.Description);
-                    GUILayout.Space(2);
+                    UIStyles.Space(UIStyles.SpaceXS);
                 }
             }
 
             // Install progress (always visible during install, even if foldout closed)
             if (_isInstallingModel && !string.IsNullOrEmpty(_installStatus))
             {
-                GUILayout.Space(3);
+                UIStyles.Space(UIStyles.SpaceXS);
                 GUILayout.Label($"<color={UIStyles.Gold}>{_installStatus}</color>", UIStyles.Label);
             }
         }
@@ -1717,24 +1760,24 @@ namespace CompanionAI_v3.UI
         {
             if (_editingSettings == null) return;
 
-            GUILayout.Space(10);
+            UIStyles.Space(UIStyles.SpaceMD);
             DrawRoleSelection();
-            GUILayout.Space(15);
+            UIStyles.Space(UIStyles.SpaceLG);
             DrawRangePreferenceSelection();
-            GUILayout.Space(15);
+            UIStyles.Space(UIStyles.SpaceLG);
 
             // Weapon Set Rotation — per-character toggle
             _editingSettings.EnableWeaponSetRotation = DrawCheckbox(_editingSettings.EnableWeaponSetRotation, L("EnableWeaponSetRotation"));
             GUILayout.Label($"<color={UIStyles.TextMid}>{L("EnableWeaponSetRotationDesc")}</color>", UIStyles.Description);
-            GUILayout.Space(15);
+            UIStyles.Space(UIStyles.SpaceLG);
 
             // 마무리 우선 — 끄면 킬 보너스가 축소되어 고위협/고체력 적(보스)을 더 적극적으로 노린다
             _editingSettings.FinishLowHPEnemies = DrawCheckbox(_editingSettings.FinishLowHPEnemies, L("FinishLowHPEnemies"));
             GUILayout.Label($"<color={UIStyles.TextMid}>{L("FinishLowHPEnemiesDesc")}</color>", UIStyles.Description);
-            GUILayout.Space(15);
+            UIStyles.Space(UIStyles.SpaceLG);
 
             DrawAdvancedSettings();
-            GUILayout.Space(10);
+            UIStyles.Space(UIStyles.SpaceMD);
         }
 
         private static void DrawAdvancedSettings()
@@ -1754,7 +1797,7 @@ namespace CompanionAI_v3.UI
 
             // Warning
             GUILayout.Label($"<color={UIStyles.Danger}>{L("AdvancedWarning")}</color>", UIStyles.Description);
-            GUILayout.Space(10);
+            UIStyles.Space(UIStyles.SpaceMD);
 
             // Reset button
             if (GUILayout.Button($"<color={UIStyles.Gold}>{L("ResetToDefault")}</color>", UIStyles.Button, GUILayout.Width(UIStyles.Sd(134)), GUILayout.Height(UIStyles.Sd(24))))
@@ -1767,20 +1810,20 @@ namespace CompanionAI_v3.UI
                 _editingSettings.EnableWeaponSetRotation = false;
                 _editingSettings.FinishLowHPEnemies = true;
             }
-            GUILayout.Space(15);
+            UIStyles.Space(UIStyles.SpaceLG);
 
             // Toggle options
             _editingSettings.UseKillSimulator = DrawCheckbox(_editingSettings.UseKillSimulator, L("UseKillSimulator"));
             GUILayout.Label($"<color={UIStyles.TextMid}>{L("UseKillSimulatorDesc")}</color>", UIStyles.Description);
-            GUILayout.Space(8);
+            UIStyles.Space(UIStyles.SpaceMD);
 
             _editingSettings.UseAoEOptimization = DrawCheckbox(_editingSettings.UseAoEOptimization, L("UseAoEOptimization"));
             GUILayout.Label($"<color={UIStyles.TextMid}>{L("UseAoEOptimizationDesc")}</color>", UIStyles.Description);
-            GUILayout.Space(8);
+            UIStyles.Space(UIStyles.SpaceMD);
 
             _editingSettings.UsePredictiveMovement = DrawCheckbox(_editingSettings.UsePredictiveMovement, L("UsePredictiveMovement"));
             GUILayout.Label($"<color={UIStyles.TextMid}>{L("UsePredictiveMovementDesc")}</color>", UIStyles.Description);
-            GUILayout.Space(15);
+            UIStyles.Space(UIStyles.SpaceLG);
 
             // Sliders
             // ★ v3.110.11: MinSafeDistance 슬라이더 삭제 — WeaponRangeProfile 자동 계산.
@@ -1802,7 +1845,7 @@ namespace CompanionAI_v3.UI
         {
             GUILayout.Label($"<color={UIStyles.TextLight}><b>{L("CombatRole")}</b></color>", UIStyles.BoldLabel);
             GUILayout.Label($"<color={UIStyles.TextMid}><i>{L("CombatRoleDesc")}</i></color>", UIStyles.Description);
-            GUILayout.Space(8);
+            UIStyles.Space(UIStyles.SpaceMD);
 
             GUILayout.BeginHorizontal();
             foreach (AIRole role in Enum.GetValues(typeof(AIRole)))
@@ -1821,7 +1864,7 @@ namespace CompanionAI_v3.UI
                 }
             }
             GUILayout.EndHorizontal();
-            GUILayout.Space(8);
+            UIStyles.Space(UIStyles.SpaceMD);
             GUILayout.Label($"<color={UIStyles.TextMid}><i>{Localization.GetRoleDescription(_editingSettings.Role)}</i></color>", UIStyles.Description);
         }
 
@@ -1829,7 +1872,7 @@ namespace CompanionAI_v3.UI
         {
             GUILayout.Label($"<color={UIStyles.TextLight}><b>{L("RangePreference")}</b></color>", UIStyles.BoldLabel);
             GUILayout.Label($"<color={UIStyles.TextMid}><i>{L("RangePreferenceDesc")}</i></color>", UIStyles.Description);
-            GUILayout.Space(8);
+            UIStyles.Space(UIStyles.SpaceMD);
 
             GUILayout.BeginHorizontal();
             foreach (RangePreference pref in Enum.GetValues(typeof(RangePreference)))
@@ -1847,7 +1890,7 @@ namespace CompanionAI_v3.UI
                 }
             }
             GUILayout.EndHorizontal();
-            GUILayout.Space(8);
+            UIStyles.Space(UIStyles.SpaceMD);
             GUILayout.Label($"<color={UIStyles.TextMid}><i>{Localization.GetRangeDescription(_editingSettings.RangePreference)}</i></color>", UIStyles.Description);
         }
 

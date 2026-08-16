@@ -435,6 +435,14 @@ namespace CompanionAI_v3.Settings
                 { Language.Chinese, "在单回合内使用两套武器组。\n切换武器(0 AP)以使用备用武器组的攻击。\n⚠️ 此功能正在开发中，可能无法按预期工作。" }
             },
 
+            ["TabAdvanced"] = new() {
+                { Language.English, "Advanced" },
+                { Language.Korean, "고급" },
+                { Language.Russian, "Дополнительно" },
+                { Language.Japanese, "詳細" },
+                { Language.Chinese, "高级" }
+            },
+
             ["LLMCombatAIActive"] = new() {
                 { Language.English, "LLM is responding — combat AI is using it." },
                 { Language.Korean, "LLM 응답 정상 — 전투 AI가 사용 중입니다." },
