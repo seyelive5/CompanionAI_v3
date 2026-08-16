@@ -349,6 +349,8 @@ PatternType.Circle → 1.6m | PatternType.Ray/Cone/Sector → 0.3m (Directional)
 
 ## 참조 리소스
 
-- **게임 디컴파일**: `C:\Users\veria\Downloads\roguetrader_decompile\Code\Kingmaker` (게임 1.6.0, 2026-06-30 재디컴파일 — 옛 `\project\Code\` 경로는 폐기)
+- **게임 디컴파일 (현행)**: `C:\Users\veria\Downloads\roguetrader_decompile_new\Code\<dotted.namespace>\Type.cs` — 게임 2026-07-14 빌드, ilspycmd 10 이라 네임스페이스 폴더가 **평면**(예: `Kingmaker.AI.BehaviourTrees.Nodes\Loop.cs`).
+  - 구 트리 `roguetrader_decompile\Code\Kingmaker\AI\...`(2026-06-30, 중첩 폴더)도 유효 — 7월 패치는 `Kingmaker.AI.*`/Pathfinding/BehaviourTree 를 **전혀 바꾸지 않음**(전수 디프 확인).
+  - **디컴파일 디프 시 주의**: 구/신 트리를 그대로 비교하면 도구 버전 차이로 거의 전 파일이 오탐된다. 반드시 구 DLL 사본을 **현재와 같은 ilspycmd 버전**으로 재디컴파일한 뒤 비교할 것.
 - **게임 로그**: `C:\Users\veria\AppData\LocalLow\Owlcat Games\Warhammer 40000 Rogue Trader\GameLogFull.txt`
 - **과거 교훈**: [LESSONS_LEARNED.md](LESSONS_LEARNED.md) - AP 턴 감지, Hittable 계산, 능력 Available 체크, 거리 단위, AOE 패턴 등
