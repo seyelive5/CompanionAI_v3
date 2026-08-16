@@ -33,7 +33,7 @@ namespace CompanionAI_v3.MachineSpirit
         public bool Enabled { get; set; } = false;
         public ApiProvider Provider { get; set; } = ApiProvider.Ollama;
         public string ApiUrl { get; set; } = "http://localhost:11434/v1";
-        public string Model { get; set; } = "gemma3:4b-it-qat";
+        public string Model { get; set; } = "gemma4:e4b-it-qat";
         public int MaxTokens { get; set; } = 500;
         public float Temperature { get; set; } = 0.8f;
         public KeyCode Hotkey { get; set; } = KeyCode.F2;
@@ -91,19 +91,20 @@ namespace CompanionAI_v3.MachineSpirit
             {
                 case ApiProvider.Ollama:
                     ApiUrl = "http://localhost:11434/v1";
-                    Model = "gemma3:4b-it-qat";
+                    Model = "gemma4:e4b-it-qat";
                     break;
                 case ApiProvider.Groq:
                     ApiUrl = "https://api.groq.com/openai/v1";
-                    Model = "llama-3.3-70b-versatile";
+                    // 이전 기본값 llama-3.3-70b-versatile 은 2026-08-16 자로 Groq 에서 폐기됨.
+                    Model = "qwen/qwen3.6-27b";
                     break;
                 case ApiProvider.Gemini:
                     ApiUrl = "https://generativelanguage.googleapis.com/v1beta/openai";
-                    Model = "gemini-2.5-flash";
+                    Model = "gemini-3.5-flash-lite";
                     break;
                 case ApiProvider.OpenAI:
                     ApiUrl = "https://api.openai.com/v1";
-                    Model = "gpt-4o-mini";
+                    Model = "gpt-5.4-mini";
                     break;
                 // Custom: user edits manually
             }

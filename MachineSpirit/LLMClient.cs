@@ -3,6 +3,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -94,24 +95,74 @@ namespace CompanionAI_v3.MachineSpirit
         /// 12B models: 8192 (balanced)
         /// 27B+ models: 16384 (maximum context for deep reasoning)
         /// </summary>
+        /// <summary>소형/중형 경계 (십억 파라미터). 미만이면 0(소형).</summary>
+        private const float SIZE_CLASS_SMALL_MAX_B = 6f;
+        /// <summary>중형/대형 경계 (십억 파라미터). 이상이면 2(대형).</summary>
+        private const float SIZE_CLASS_LARGE_MIN_B = 20f;
+
         /// <summary>
-        /// Classify model into size tier: 0=small(1-4B), 1=mid(7-14B), 2=large(27B+).
-        /// Handles both parameter-count naming (gemma3:4b) and known model names (mistral-nemo).
+        /// Classify model into size tier: 0=small(~1-4B), 1=mid(~7-14B), 2=large(~20B+).
+        /// 태그에서 파라미터 수를 파싱해 판정한다 (<see cref="ParseParamBillions"/>).
+        ///
+        /// 이전 구현은 부분 문자열 포함(`m.Contains("4b")` 등)이라 신형 태그에서 깨졌다:
+        ///   gemma4:31b   → "1b" 에 걸려 소형 판정 → 31B 모델에 4096 컨텍스트
+        ///   qwen3.5:0.8b → "8b" 에 걸려 중형 판정
+        ///   gemma4:26b · gemma4:e2b · qwen3.5:2b · qwen3.5:35b · qwen3.5:122b → 어디에도 안 걸려 중형 폴백
         /// </summary>
         public static int GetModelSizeClass(string model)
         {
             if (string.IsNullOrEmpty(model)) return 1;
             string m = model.ToLowerInvariant();
 
-            // Known model name → size mapping (models without size in name)
+            float billions = ParseParamBillions(m);
+            if (billions > 0f)
+            {
+                if (billions < SIZE_CLASS_SMALL_MAX_B) return 0;
+                if (billions >= SIZE_CLASS_LARGE_MIN_B) return 2;
+                return 1;
+            }
+
+            // 이름에 크기가 없는 모델 — 알려진 것만 수동 매핑
             if (m.Contains("mistral-nemo") || m.Contains("nemomix")) return 1;  // 12B
 
-            // Parameter count in name
-            if (m.Contains("27b") || m.Contains("32b") || m.Contains("70b") || m.Contains("big-tiger")) return 2;
-            if (m.Contains("4b") || m.Contains("3b") || m.Contains("1b") || m.Contains("0.6b")) return 0;
-            if (m.Contains("12b") || m.Contains("14b") || m.Contains("7b") || m.Contains("8b")) return 1;
-
             return 1; // Default: mid-range
+        }
+
+        /// <summary>
+        /// 모델 태그에서 파라미터 수(십억 단위)를 뽑는다. 없으면 0.
+        ///
+        /// `숫자+b`(십억) 또는 `숫자+m`(백만) 중 **가장 앞의 것**을 취한다.
+        /// 앞의 것인 이유: MoE 표기 `gemma4:26b-a4b` 는 총 26B / 활성 4B 이고, 메모리를 결정하는 건 총량이다.
+        /// 양자화·포맷 접미사(`-it-q4_K_M`, `-mlx-bf16`, `:q4-k-m`)의 숫자는 크기 표기 뒤에 오므로 영향이 없고,
+        /// 계열 번호(`qwen3.5:`, `gemma4:`, `llama-3.3-`)는 뒤에 b/m 이 붙지 않아 자연히 걸러진다.
+        /// </summary>
+        private static float ParseParamBillions(string m)
+        {
+            for (int i = 0; i < m.Length; i++)
+            {
+                if (!char.IsDigit(m[i])) continue;
+
+                int start = i;
+                int j = i;
+                while (j < m.Length && (char.IsDigit(m[j]) || m[j] == '.')) j++;
+                if (j >= m.Length) break;  // 숫자로 끝남 = 단위 없음
+
+                char unit = m[j];
+                if (unit != 'b' && unit != 'm') { i = j; continue; }
+
+                // 단위 뒤에 숫자가 이어지면 크기 표기가 아니다 (방어적)
+                if (j + 1 < m.Length && char.IsDigit(m[j + 1])) { i = j; continue; }
+
+                if (!float.TryParse(m.Substring(start, j - start), NumberStyles.Float,
+                        CultureInfo.InvariantCulture, out float value) || value <= 0f)
+                {
+                    i = j;
+                    continue;
+                }
+
+                return unit == 'm' ? value / 1000f : value;
+            }
+            return 0f;
         }
 
         private static int GetOllamaContextSize(string model)

@@ -427,10 +427,15 @@ namespace CompanionAI_v3.MachineSpirit
                         if (string.IsNullOrEmpty(m)) m = installed[i].Name;
                         if (string.IsNullOrEmpty(m)) continue;
                         names.Add(m);
-                        // 태그 생략 표기(예: "gemma3:4b" vs "gemma3:4b-it-qat") 허용
-                        if (m.Equals(Config.Model, StringComparison.OrdinalIgnoreCase)
-                            || m.StartsWith(Config.Model, StringComparison.OrdinalIgnoreCase)
-                            || Config.Model.StartsWith(m, StringComparison.OrdinalIgnoreCase))
+                        // Ollama 는 요청한 태그를 정확히 찾는다 — "gemma4:e4b" 가 설치돼 있어도
+                        // "gemma4:e4b-it-qat" 요청은 404 다. 이전의 양방향 StartsWith 매칭은
+                        // 두 경우 모두 "설치됨" 으로 보고해, 진단이 통과했는데 실제 호출은 실패하는
+                        // 거짓 양성을 만들었다(진단의 존재 이유를 무력화).
+                        // 정당한 느슨함은 태그 생략뿐 — 이때만 Ollama 가 ":latest" 로 해석한다.
+                        bool exactMatch = m.Equals(Config.Model, StringComparison.OrdinalIgnoreCase);
+                        bool latestAlias = Config.Model.IndexOf(':') < 0
+                            && m.Equals(Config.Model + ":latest", StringComparison.OrdinalIgnoreCase);
+                        if (exactMatch || latestAlias)
                         {
                             hasModel = true;
                         }

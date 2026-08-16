@@ -465,3 +465,28 @@
   - **로스터 기준은 `Player.AllCharacters`** — `PartyAndPets` 가 아니다. 디컴파일 확인(`Player.cs:615`, `AddCharacterToLists`): 파티·펫·벤치(Remote/Detached) 동료·크로스씬 유닛을 모두 포함 → **배에 두고 온 동료의 설정이 지워지지 않는다.** 조회 실패 시 `null` 반환 → 이름 규칙만 적용(더 보수적).
 - [ ] **인게임 검증**: 로드 시 `[PerSaveSettings] Loaded … — N 개 무정보 항목 제거됨`, 게임 저장 후 `settings_6101f716….json` 크기가 500KB → 10KB 대로 감소, 파티 탭 설정이 그대로 유지되는지.
 - 미착수(사용자와 합의하에 보류): **동료 설정을 블루프린트 GUID 기준 전역 저장** → 새 회차에도 튜닝 유지. 단 주인공·용병은 블루프린트가 공유돼 회차끼리 섞일 위험이 있어 "동료=전역 / 주인공·용병=회차별" 2층 구조 + 기존 파일 마이그레이션이 필요. 실익은 분명하나 설계 변경이라 별건.
+
+### 25. 모델 목록 최신화 — 폐기된 Groq 모델 3종·존재하지 않는 태그·크기 판정 붕괴 (v3.122.0)
+
+**배경**: 사용자 제기 "머신스피릿과 전투 LLM 의 모델들이 옛날 것 같다. 커스텀 모델은 빼고 Gemma/Qwen 같은 검증된 것으로." → 전수 조사 결과 **이미 고장난 항목**이 있었다.
+
+**조사 결과 (2026-08-16 기준, Ollama·Groq·Gemini·OpenAI 공식 문서 확인)**
+
+- **Groq 프리셋 3종 전부 폐기**: `llama-3.3-70b-versatile`(**2026-08-16 폐기**, Groq 기본값이었음), `qwen/qwen3-32b`·`meta-llama/llama-4-scout-17b-16e-instruct`(**2026-07-17 폐기**). → Groq 공급자가 통째로 동작 불능이었다. 공식 대체: `qwen/qwen3.6-27b`, `openai/gpt-oss-20b/120b`.
+- **`gemma4:27b` 은 존재하지 않는 태그**(MS 27B+ 티어의 ★ 항목). Gemma 4 실제 크기는 **e2b · e4b · 12b · 26b · 31b**.
+- **`GetModelSizeClass` 가 부분 문자열 매칭이라 신형 태그에서 붕괴**: `gemma4:31b`→"1b" 매칭→**소형(4096 컨텍스트)**, `qwen3.5:0.8b`→"8b" 매칭→중형, `gemma4:26b`·`e2b`·`qwen3.5:2b`·`:35b`·`:122b`→매칭 실패→중형 폴백. 이 값이 컨텍스트 크기와 히스토리 윈도우를 결정하므로, **고치지 않고 모델만 추가하면 새 모델이 조용히 잘못 설정된다.**
+- **기본값과 추천 불일치**: MS 기본 `gemma3:4b-it-qat`(1년 전) vs UI ★추천 `gemma4:e4b` → 처음 켜는 사용자가 구세대를 받았다.
+- **티어 라벨 오류**: "4B (6GB GPU)" 티어에 `gemma4:e4b` = **9.6GB**(6GB VRAM 에 안 들어감). 같은 모델의 QAT 판 `gemma4:e4b-it-qat` 는 **6.1GB**.
+- **세대 불일치**: 전투 탭 `qwen3.5`(2개월) vs MS 탭 `qwen3:14b`/`qwen3:32b`(10개월).
+- **클라우드 노후**: OpenAI `gpt-4o`/`gpt-4o-mini`, Gemini `2.5-*`(현행 stable 은 3.x).
+
+- [x] **`GetModelSizeClass` 숫자 파싱으로 교체** — `ParseParamBillions` 신설. `숫자+b`(십억)/`숫자+m`(백만) 중 **가장 앞의 것**을 취한다(MoE `26b-a4b` 는 총량이 메모리를 결정하므로 앞의 26 이 맞다). 경계 상수 `SIZE_CLASS_SMALL_MAX_B=6` / `SIZE_CLASS_LARGE_MIN_B=20`. **csc 로 30 케이스 검증 전부 통과**(신형 태그 + 사용자 로컬 설치 모델 + 양자화 접미사 오탐 + 회귀 케이스).
+- [x] **Groq 3종 교체** + Gemini 3.x + OpenAI GPT-5.4/5.5 로 클라우드 갱신. **Gemini 3.1 Pro 는 preview 라 제외** — preview 는 2주 예고로 폐기 가능해 프리셋에 넣으면 이번 Groq 사태가 반복된다.
+- [x] **MS Ollama 티어 재구성** (Gemma 4 + Qwen 3.5 만): Light(6GB) `gemma4:e4b-it-qat`★/`e2b-it-qat`/`qwen3.5:4b` · Medium(12GB) `gemma4:12b`★/`e4b`/`qwen3.5:9b` · Large(24GB) `gemma4:26b`★/`31b`/`qwen3.5:27b`. `gemma4:27b`(존재하지 않음) 제거.
+- [x] **커스텀 모델 4종 제거**: `elated_hamilton_557/daichi-12b`, `michaelbui/nemomix-unleashed-12b:q4-k-m`, `jean-luc/big-tiger-gemma:27b-v1c-Q3_K_M`, `VladimirGav/gemma4-26b-16GB-VRAM`. **단 `DetectFamily` 의 이름 매핑(daichi/big-tiger/nemomix)은 존치** — 이미 설치해 쓰는 사용자의 샘플링 설정이 바뀌지 않도록.
+- [x] **전투 카탈로그 보강**: `gemma4:e2b-it-qat`(4.3GB)·`e4b-it-qat`(6.1GB)·`12b`(7.6GB)·`31b`(20GB)·`qwen3.5:35b`(24GB) 추가.
+- [x] **기본 모델 갱신**: Ollama `gemma4:e4b-it-qat`, Groq `qwen/qwen3.6-27b`, Gemini `gemini-3.5-flash-lite`, OpenAI `gpt-5.4-mini`.
+- [x] **인접 결함 수정 — 진단이 거짓 양성을 냈음**: `RunConnectionDiagnostic` 의 설치 모델 확인이 **양방향 `StartsWith`** 라 `gemma4:e4b` 설치 + `gemma4:e4b-it-qat` 설정이면 "설치됨" 으로 통과시켰다. Ollama 는 태그를 정확히 찾으므로 실제 호출은 404 → **진단을 통과했는데 동작하지 않는** 상태가 된다(§18 에서 만든 진단의 존재 이유를 무력화). 정확 일치 + 태그 생략 시 `:latest` 별칭만 허용으로 축소.
+- **의도적으로 유지**: `RECOMMENDED_JUDGE_MODEL` / `LLMHttpClient` 폴백 = `gemma4:e4b`. QAT 로 바꾸면 이미 `gemma4:e4b` 를 받아 둔 사용자(테스터 포함)의 전투 LLM 이 즉시 404 가 된다.
+- **보류**: qwen3.6(27b/35b)·qwen3.8(27b) — 각각 2026-08-14·08-15 출시로 검증 기간이 짧고, **27B 이상 크기만 있어** 저사양 사용자에게 의미가 없다.
+- [ ] **인게임 검증**: MS 탭 티어 3개가 새 목록으로 뜨는지, 모델 다운로드가 실제로 되는지(`gemma4:e4b-it-qat`), 설치 안 된 모델 설정 시 연결 테스트가 **정직하게 실패**하는지.

@@ -281,8 +281,8 @@ namespace CompanionAI_v3.MachineSpirit
 
         public struct InstalledModel
         {
-            public string Name;     // display name (e.g., "gemma3:4b-it-qat")
-            public string FullName; // full name for API calls (e.g., "gemma3:4b-it-qat")
+            public string Name;     // display name (e.g., "gemma4:e4b-it-qat")
+            public string FullName; // full name for API calls (e.g., "gemma4:e4b-it-qat")
             public float SizeGB;    // size in GB
         }
 

@@ -1847,7 +1847,126 @@ namespace CompanionAI_v3.Settings
                 { Language.Chinese, "输入您的提供商支持的任意模型ID。" }
             },
 
-            // ── Ollama models (Gemma 3 recommended per latest research) ──
+            // ── Ollama models (Gemma 4 + Qwen 3.5) ──
+            ["MSModel_gemma4_e4b_qat"] = new() {
+                { Language.English, "★ RECOMMENDED — Gemma 4 E4B QAT. Same model as E4B at 2/3 the download (6.1GB). Fits 6GB VRAM. 128K context." },
+                { Language.Korean, "★ 추천 — Gemma 4 E4B QAT. E4B 와 같은 모델인데 용량은 2/3 (6.1GB). 6GB VRAM 에 들어감. 128K 컨텍스트." },
+                { Language.Russian, "★ РЕКОМЕНДУЕТСЯ — Gemma 4 E4B QAT. Та же модель, что E4B, но 2/3 размера (6.1ГБ). Влезает в 6ГБ VRAM." },
+                { Language.Japanese, "★ 推奨 — Gemma 4 E4B QAT。E4B と同じモデルで容量は2/3（6.1GB）。6GB VRAM に収まる。128Kコンテキスト。" },
+                { Language.Chinese, "★ 推荐 — Gemma 4 E4B QAT。与 E4B 同款模型，体积仅 2/3（6.1GB）。适配 6GB 显存。128K 上下文。" }
+            },
+            ["MSModel_gemma4_e2b_qat"] = new() {
+                { Language.English, "Gemma 4 E2B QAT — smallest option (4.3GB). For low-VRAM GPUs. 128K context." },
+                { Language.Korean, "Gemma 4 E2B QAT — 가장 작은 선택지 (4.3GB). 저사양 GPU 용. 128K 컨텍스트." },
+                { Language.Russian, "Gemma 4 E2B QAT — самый компактный вариант (4.3ГБ). Для GPU с малым VRAM." },
+                { Language.Japanese, "Gemma 4 E2B QAT — 最小構成（4.3GB）。低VRAM GPU 向け。128Kコンテキスト。" },
+                { Language.Chinese, "Gemma 4 E2B QAT — 最小选项（4.3GB）。适合低显存 GPU。128K 上下文。" }
+            },
+            ["MSModel_gemma4_12b"] = new() {
+                { Language.English, "★ Gemma 4 12B — dense 12B, yet smaller on disk (7.6GB) than E4B. Best quality per GB. 128K context." },
+                { Language.Korean, "★ Gemma 4 12B — 진짜 12B 인데 용량은 E4B 보다 작음 (7.6GB). 용량 대비 품질 최고. 128K 컨텍스트." },
+                { Language.Russian, "★ Gemma 4 12B — полноценная 12B, но меньше на диске (7.6ГБ), чем E4B. Лучшее качество на ГБ." },
+                { Language.Japanese, "★ Gemma 4 12B — 実質12B ながら E4B より小容量（7.6GB）。容量対品質が最良。128Kコンテキスト。" },
+                { Language.Chinese, "★ Gemma 4 12B — 真正的 12B，体积却比 E4B 更小（7.6GB）。每 GB 质量最佳。128K 上下文。" }
+            },
+            ["MSModel_gemma4_26b"] = new() {
+                { Language.English, "★ Gemma 4 26B-A4B MoE (18GB) — only 4B active at runtime, so it runs fast. 256K context. 24GB VRAM." },
+                { Language.Korean, "★ Gemma 4 26B-A4B MoE (18GB) — 실행 시 4B 만 활성화되어 빠름. 256K 컨텍스트. 24GB VRAM." },
+                { Language.Russian, "★ Gemma 4 26B-A4B MoE (18ГБ) — активны лишь 4B, поэтому работает быстро. 256К контекст." },
+                { Language.Japanese, "★ Gemma 4 26B-A4B MoE（18GB）— 実行時は4Bのみ活性化で高速。256Kコンテキスト。24GB VRAM。" },
+                { Language.Chinese, "★ Gemma 4 26B-A4B MoE（18GB）— 运行时仅激活 4B，因此速度快。256K 上下文。24GB 显存。" }
+            },
+            ["MSModel_gemma4_31b"] = new() {
+                { Language.English, "Gemma 4 31B (20GB) — maximum quality dense model. Needs 24GB+ VRAM." },
+                { Language.Korean, "Gemma 4 31B (20GB) — 최고 품질 밀집 모델. 24GB 이상 VRAM 필요." },
+                { Language.Russian, "Gemma 4 31B (20ГБ) — максимальное качество. Требуется 24ГБ+ VRAM." },
+                { Language.Japanese, "Gemma 4 31B（20GB）— 最高品質の密モデル。24GB 以上の VRAM が必要。" },
+                { Language.Chinese, "Gemma 4 31B（20GB）— 最高品质稠密模型。需要 24GB 以上显存。" }
+            },
+            ["MSModel_qwen35_4b"] = new() {
+                { Language.English, "Qwen 3.5 4B (3.4GB) — very light, strong multilingual. 256K context." },
+                { Language.Korean, "Qwen 3.5 4B (3.4GB) — 매우 가벼움, 다국어 강함. 256K 컨텍스트." },
+                { Language.Russian, "Qwen 3.5 4B (3.4ГБ) — очень лёгкая, сильная мультиязычность. 256К контекст." },
+                { Language.Japanese, "Qwen 3.5 4B（3.4GB）— 非常に軽量、多言語に強い。256Kコンテキスト。" },
+                { Language.Chinese, "Qwen 3.5 4B（3.4GB）— 非常轻量，多语言能力强。256K 上下文。" }
+            },
+            ["MSModel_qwen35_9b"] = new() {
+                { Language.English, "Qwen 3.5 9B (6.6GB) — balanced quality, strong multilingual. 256K context." },
+                { Language.Korean, "Qwen 3.5 9B (6.6GB) — 균형 잡힌 품질, 다국어 강함. 256K 컨텍스트." },
+                { Language.Russian, "Qwen 3.5 9B (6.6ГБ) — сбалансированное качество, сильная мультиязычность." },
+                { Language.Japanese, "Qwen 3.5 9B（6.6GB）— バランスの取れた品質、多言語に強い。256Kコンテキスト。" },
+                { Language.Chinese, "Qwen 3.5 9B（6.6GB）— 品质均衡，多语言能力强。256K 上下文。" }
+            },
+            ["MSModel_qwen35_27b"] = new() {
+                { Language.English, "Qwen 3.5 27B (17GB) — high quality alternative to Gemma. 256K context. 24GB VRAM." },
+                { Language.Korean, "Qwen 3.5 27B (17GB) — Gemma 대안 고품질. 256K 컨텍스트. 24GB VRAM." },
+                { Language.Russian, "Qwen 3.5 27B (17ГБ) — качественная альтернатива Gemma. 256К контекст." },
+                { Language.Japanese, "Qwen 3.5 27B（17GB）— Gemma の高品質な代替。256Kコンテキスト。24GB VRAM。" },
+                { Language.Chinese, "Qwen 3.5 27B（17GB）— Gemma 的高质量替代。256K 上下文。24GB 显存。" }
+            },
+            ["MSModel_gemini37flash"] = new() {
+                { Language.English, "Gemini 3.7 Flash — latest and most capable Flash model. Fast, cheap, strong reasoning." },
+                { Language.Korean, "Gemini 3.7 Flash — 최신 최고 성능 Flash. 빠르고 저렴하며 추론이 강함." },
+                { Language.Russian, "Gemini 3.7 Flash — новейшая и самая мощная модель Flash. Быстрая и недорогая." },
+                { Language.Japanese, "Gemini 3.7 Flash — 最新かつ最高性能の Flash。高速・低コスト・高い推論力。" },
+                { Language.Chinese, "Gemini 3.7 Flash — 最新且最强的 Flash 模型。快速、便宜、推理强。" }
+            },
+            ["MSModel_gemini36flash"] = new() {
+                { Language.English, "Gemini 3.6 Flash — previous-generation Flash. Balanced speed and multimodal ability." },
+                { Language.Korean, "Gemini 3.6 Flash — 이전 세대 Flash. 속도와 멀티모달 능력의 균형." },
+                { Language.Russian, "Gemini 3.6 Flash — Flash предыдущего поколения. Баланс скорости и мультимодальности." },
+                { Language.Japanese, "Gemini 3.6 Flash — 前世代の Flash。速度とマルチモーダル性能のバランス。" },
+                { Language.Chinese, "Gemini 3.6 Flash — 上一代 Flash。速度与多模态能力均衡。" }
+            },
+            ["MSModel_gemini35lite"] = new() {
+                { Language.English, "Gemini 3.5 Flash-Lite — cheapest and fastest. Good default for chat." },
+                { Language.Korean, "Gemini 3.5 Flash-Lite — 가장 저렴하고 빠름. 대화용 기본값으로 적합." },
+                { Language.Russian, "Gemini 3.5 Flash-Lite — самая дешёвая и быстрая. Хороший вариант по умолчанию." },
+                { Language.Japanese, "Gemini 3.5 Flash-Lite — 最も安価で高速。チャットの既定値に最適。" },
+                { Language.Chinese, "Gemini 3.5 Flash-Lite — 最便宜最快。适合作为聊天默认值。" }
+            },
+            ["MSModel_qwen36_27b"] = new() {
+                { Language.English, "Qwen 3.6 27B on Groq — very fast inference. Groq's recommended replacement for the retired Llama models." },
+                { Language.Korean, "Groq 의 Qwen 3.6 27B — 매우 빠른 추론. 폐기된 Llama 모델들의 Groq 공식 대체." },
+                { Language.Russian, "Qwen 3.6 27B на Groq — очень быстрый вывод. Официальная замена снятых моделей Llama." },
+                { Language.Japanese, "Groq の Qwen 3.6 27B — 非常に高速。廃止された Llama モデルの公式代替。" },
+                { Language.Chinese, "Groq 上的 Qwen 3.6 27B — 推理极快。已下线 Llama 模型的官方替代。" }
+            },
+            ["MSModel_gptoss_20b"] = new() {
+                { Language.English, "GPT-OSS 20B on Groq — lightweight open-weight model, very fast." },
+                { Language.Korean, "Groq 의 GPT-OSS 20B — 가벼운 공개 가중치 모델, 매우 빠름." },
+                { Language.Russian, "GPT-OSS 20B на Groq — лёгкая модель с открытыми весами, очень быстрая." },
+                { Language.Japanese, "Groq の GPT-OSS 20B — 軽量なオープンウェイトモデル、非常に高速。" },
+                { Language.Chinese, "Groq 上的 GPT-OSS 20B — 轻量开放权重模型，速度极快。" }
+            },
+            ["MSModel_gptoss_120b"] = new() {
+                { Language.English, "GPT-OSS 120B on Groq — highest quality open-weight option." },
+                { Language.Korean, "Groq 의 GPT-OSS 120B — 공개 가중치 중 최고 품질." },
+                { Language.Russian, "GPT-OSS 120B на Groq — наивысшее качество среди открытых весов." },
+                { Language.Japanese, "Groq の GPT-OSS 120B — オープンウェイトで最高品質。" },
+                { Language.Chinese, "Groq 上的 GPT-OSS 120B — 开放权重中质量最高。" }
+            },
+            ["MSModel_gpt54mini"] = new() {
+                { Language.English, "GPT-5.4 Mini — budget option, 400K context. Good default for chat." },
+                { Language.Korean, "GPT-5.4 Mini — 저렴한 선택지, 400K 컨텍스트. 대화용 기본값으로 적합." },
+                { Language.Russian, "GPT-5.4 Mini — бюджетный вариант, 400К контекст. Хороший вариант по умолчанию." },
+                { Language.Japanese, "GPT-5.4 Mini — 低コスト、400Kコンテキスト。チャットの既定値に最適。" },
+                { Language.Chinese, "GPT-5.4 Mini — 经济选项，400K 上下文。适合作为聊天默认值。" }
+            },
+            ["MSModel_gpt54"] = new() {
+                { Language.English, "GPT-5.4 — standard model. Higher quality, higher cost." },
+                { Language.Korean, "GPT-5.4 — 표준 모델. 품질이 높고 비용도 높음." },
+                { Language.Russian, "GPT-5.4 — стандартная модель. Выше качество, выше цена." },
+                { Language.Japanese, "GPT-5.4 — 標準モデル。品質は高いがコストも高い。" },
+                { Language.Chinese, "GPT-5.4 — 标准模型。质量更高，成本也更高。" }
+            },
+            ["MSModel_gpt55"] = new() {
+                { Language.English, "GPT-5.5 — flagship model. Maximum quality, most expensive." },
+                { Language.Korean, "GPT-5.5 — 플래그십 모델. 최고 품질, 가장 비쌈." },
+                { Language.Russian, "GPT-5.5 — флагманская модель. Максимальное качество, самая дорогая." },
+                { Language.Japanese, "GPT-5.5 — フラッグシップ。最高品質だが最も高価。" },
+                { Language.Chinese, "GPT-5.5 — 旗舰模型。质量最高，价格最贵。" }
+            },
             ["MSModel_gemma4_e4b"] = new() {
                 { Language.English, "★ RECOMMENDED — Google Gemma 4 E4B. Latest generation, native structured output, thinking mode. ~5GB VRAM. 128K context." },
                 { Language.Korean, "★ 추천 — Google Gemma 4 E4B. 최신 세대, 네이티브 구조화 출력, 씽킹 모드. ~5GB VRAM. 128K 컨텍스트." },

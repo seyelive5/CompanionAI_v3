@@ -480,17 +480,21 @@ namespace CompanionAI_v3.UI
         /// </summary>
         private static readonly (string Name, float SizeGB, string Desc)[] DOWNLOADABLE_MODELS = new[]
         {
-            // Gemma 4 series
+            // Gemma 4 series — QAT 판은 같은 모델의 양자화 학습판으로 용량이 크게 작다
+            ("gemma4:e2b-it-qat", 4.3f, "Gemma 4 E2B QAT — smallest, fits 6GB VRAM, 128K context"),
+            ("gemma4:e4b-it-qat", 6.1f, "Gemma 4 E4B QAT — same model as E4B at 2/3 the size, 128K context"),
             ("gemma4:e2b",    7.2f, "Gemma 4 E2B — lightweight, 128K context"),
+            ("gemma4:12b",    7.6f, "Gemma 4 12B — dense 12B, smaller on disk than E4B, 128K context"),
             ("gemma4:e4b",    9.6f, "Gemma 4 E4B — recommended, 128K context"),
             ("gemma4:26b",   18.0f, "Gemma 4 26B-A4B MoE (Q4_K_M) — only 4B active at runtime, 256K context"),
-            ("VladimirGav/gemma4-26b-16GB-VRAM", 14.0f, "Gemma 4 26B community build (IQ4_XS) — fits on 16GB VRAM"),
+            ("gemma4:31b",   20.0f, "Gemma 4 31B — max quality, needs 24GB+ VRAM"),
             // Qwen 3.5 series
             ("qwen3.5:0.8b",  1.0f, "Qwen 3.5 0.8B — very light, testing only"),
             ("qwen3.5:2b",    2.7f, "Qwen 3.5 2B — fast, low VRAM"),
             ("qwen3.5:4b",    3.4f, "Qwen 3.5 4B — balanced"),
             ("qwen3.5:9b",    6.6f, "Qwen 3.5 9B — higher quality"),
             ("qwen3.5:27b",  17.0f, "Qwen 3.5 27B — max quality, needs 20GB+ RAM"),
+            ("qwen3.5:35b",  24.0f, "Qwen 3.5 35B — largest practical local model, needs 24GB+ VRAM"),
         };
 
         private static void DrawLLMCombatAITab()
@@ -1251,33 +1255,32 @@ namespace CompanionAI_v3.UI
         {
             new OllamaTier
             {
-                Label = "4B  (6GB GPU)", DescKey = "MSTier_4b", IsHighEnd = false,
+                Label = "Light  (6GB GPU)", DescKey = "MSTier_4b", IsHighEnd = false,
                 Models = new[]
                 {
-                    new ModelPreset { Id = "gemma4:e4b", Label = "★ Gemma 4 E4B (Recommended)", DescKey = "MSModel_gemma4_e4b" },
-                    new ModelPreset { Id = "gemma3:4b-it-qat", Label = "Gemma 3 4B QAT", DescKey = "MSModel_gemma3_4b" },
+                    new ModelPreset { Id = "gemma4:e4b-it-qat", Label = "★ Gemma 4 E4B QAT (Recommended)", DescKey = "MSModel_gemma4_e4b_qat" },
+                    new ModelPreset { Id = "gemma4:e2b-it-qat", Label = "Gemma 4 E2B QAT",                 DescKey = "MSModel_gemma4_e2b_qat" },
+                    new ModelPreset { Id = "qwen3.5:4b",        Label = "Qwen 3.5 4B",                     DescKey = "MSModel_qwen35_4b" },
                 }
             },
             new OllamaTier
             {
-                Label = "12B  (12GB GPU)", DescKey = "MSTier_12b", IsHighEnd = false,
+                Label = "Medium  (12GB GPU)", DescKey = "MSTier_12b", IsHighEnd = false,
                 Models = new[]
                 {
-                    new ModelPreset { Id = "gemma3:12b",                                Label = "★ Gemma 3 12B",           DescKey = "MSModel_gemma3_12b" },
-                    new ModelPreset { Id = "elated_hamilton_557/daichi-12b",               Label = "Daichi 12B",              DescKey = "MSModel_daichi" },
-                    new ModelPreset { Id = "qwen3:14b",                                  Label = "Qwen 3 14B",              DescKey = "MSModel_qwen3_14b" },
-                    new ModelPreset { Id = "michaelbui/nemomix-unleashed-12b:q4-k-m",     Label = "NemoMix Unleashed 12B",   DescKey = "MSModel_nemomix" },
+                    new ModelPreset { Id = "gemma4:12b",  Label = "★ Gemma 4 12B", DescKey = "MSModel_gemma4_12b" },
+                    new ModelPreset { Id = "gemma4:e4b",  Label = "Gemma 4 E4B",   DescKey = "MSModel_gemma4_e4b" },
+                    new ModelPreset { Id = "qwen3.5:9b",  Label = "Qwen 3.5 9B",   DescKey = "MSModel_qwen35_9b" },
                 }
             },
             new OllamaTier
             {
-                Label = "27B+  (24GB GPU)", DescKey = "MSTier_27b", IsHighEnd = true,
+                Label = "Large  (24GB GPU)", DescKey = "MSTier_27b", IsHighEnd = true,
                 Models = new[]
                 {
-                    new ModelPreset { Id = "gemma4:27b", Label = "★ Gemma 4 27B", DescKey = "MSModel_gemma4_27b" },
-                    new ModelPreset { Id = "gemma3:27b",                                             Label = "Gemma 3 27B",             DescKey = "MSModel_gemma3_27b" },
-                    new ModelPreset { Id = "jean-luc/big-tiger-gemma:27b-v1c-Q3_K_M",                Label = "Big Tiger Gemma 27B",     DescKey = "MSModel_bigtiger" },
-                    new ModelPreset { Id = "qwen3:32b",                                              Label = "Qwen 3 32B",              DescKey = "MSModel_qwen3_32b" },
+                    new ModelPreset { Id = "gemma4:26b",  Label = "★ Gemma 4 26B MoE", DescKey = "MSModel_gemma4_26b" },
+                    new ModelPreset { Id = "gemma4:31b",  Label = "Gemma 4 31B",       DescKey = "MSModel_gemma4_31b" },
+                    new ModelPreset { Id = "qwen3.5:27b", Label = "Qwen 3.5 27B",      DescKey = "MSModel_qwen35_27b" },
                 }
             },
         };
@@ -1287,22 +1290,27 @@ namespace CompanionAI_v3.UI
 
         private static readonly Dictionary<MSp.ApiProvider, ModelPreset[]> _cloudPresets = new()
         {
+            // Gemini: 3.x 만 사용. 3.1 Pro 는 아직 preview 라 제외 — preview 는 2주 예고로 폐기될 수 있어
+            // 모드에 고정 프리셋으로 넣으면 이번 Groq 사태와 같은 고장이 반복된다.
             [MSp.ApiProvider.Gemini] = new[]
             {
-                new ModelPreset { Id = "gemini-2.5-flash",      Label = "Gemini 2.5 Flash",      DescKey = "MSModel_gemini25flash" },
-                new ModelPreset { Id = "gemini-2.5-flash-lite", Label = "Gemini 2.5 Flash-Lite",  DescKey = "MSModel_gemini25lite" },
-                new ModelPreset { Id = "gemini-2.5-pro",        Label = "Gemini 2.5 Pro",         DescKey = "MSModel_gemini25pro" },
+                new ModelPreset { Id = "gemini-3.7-flash",      Label = "Gemini 3.7 Flash",      DescKey = "MSModel_gemini37flash" },
+                new ModelPreset { Id = "gemini-3.6-flash",      Label = "Gemini 3.6 Flash",      DescKey = "MSModel_gemini36flash" },
+                new ModelPreset { Id = "gemini-3.5-flash-lite", Label = "Gemini 3.5 Flash-Lite", DescKey = "MSModel_gemini35lite" },
             },
+            // Groq: 기존 3종(llama-3.3-70b-versatile / qwen3-32b / llama-4-scout)은 모두 폐기됨
+            // (2026-07-17, 2026-08-16). Groq 공식 권장 대체 모델로 교체.
             [MSp.ApiProvider.Groq] = new[]
             {
-                new ModelPreset { Id = "llama-3.3-70b-versatile",                    Label = "Llama 3.3 70B",    DescKey = "MSModel_llama33" },
-                new ModelPreset { Id = "meta-llama/llama-4-scout-17b-16e-instruct",  Label = "Llama 4 Scout",    DescKey = "MSModel_llama4scout" },
-                new ModelPreset { Id = "qwen/qwen3-32b",                             Label = "Qwen 3 32B",       DescKey = "MSModel_qwen3" },
+                new ModelPreset { Id = "qwen/qwen3.6-27b",     Label = "Qwen 3.6 27B",   DescKey = "MSModel_qwen36_27b" },
+                new ModelPreset { Id = "openai/gpt-oss-20b",   Label = "GPT-OSS 20B",    DescKey = "MSModel_gptoss_20b" },
+                new ModelPreset { Id = "openai/gpt-oss-120b",  Label = "GPT-OSS 120B",   DescKey = "MSModel_gptoss_120b" },
             },
             [MSp.ApiProvider.OpenAI] = new[]
             {
-                new ModelPreset { Id = "gpt-4o-mini",  Label = "GPT-4o Mini",   DescKey = "MSModel_gpt4omini" },
-                new ModelPreset { Id = "gpt-4o",       Label = "GPT-4o",        DescKey = "MSModel_gpt4o" },
+                new ModelPreset { Id = "gpt-5.4-mini",  Label = "GPT-5.4 Mini",  DescKey = "MSModel_gpt54mini" },
+                new ModelPreset { Id = "gpt-5.4",       Label = "GPT-5.4",       DescKey = "MSModel_gpt54" },
+                new ModelPreset { Id = "gpt-5.5",       Label = "GPT-5.5",       DescKey = "MSModel_gpt55" },
             },
         };
 
