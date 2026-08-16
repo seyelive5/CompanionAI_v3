@@ -319,3 +319,23 @@
   - `RunConnectionDiagnostic()` 신설 — 설정 유효성 → (Ollama) 서버 도달 + **모델 설치 여부** → 실제 응답 1회(60s) 단계별 판정. "연결 테스트" 버튼이 이걸 호출.
   - 설정 UI 상태줄: 진단 상태(초록/노랑/빨강) + 마지막 실패 사유 + `Provider · Model · ApiUrl` 상시 표시.
 - [ ] **인게임 검증**: ① 보스 전투에서 마무리 우선 OFF 시 보스 타겟팅 빈도 증가 ② Ollama 서버 끈 상태로 연결 테스트 → "Cannot reach Ollama at …" 표시, 모델 미설치 시 "ollama pull …" 안내 ③ 채팅에서 실패 시 `[ERROR]` 메시지 노출
+
+### 18. Machine Spirit / LLM 계층 구조 검토 + 오류 진단 일원화 (v3.119.1) — ⚠️ 인게임 검증 대기
+
+**배경**: MS 서브시스템을 프론트/백엔드 관점으로 검토(백엔드 6,861줄 + 프론트 ~1,000줄 + 별도 전투 LLM 스택 5,159줄).
+
+**검토 결과 — 계층은 살아있으나 경계 침식 3곳**:
+- ✅ **좋음**: `ChatWindow`(302줄)는 채팅 기록을 주입받고 백엔드 호출이 `OnUserMessage` 하나뿐인 깨끗한 뷰. 메인스레드 블로킹 0(`.Wait()`/`Thread.Sleep` 없음, 전부 코루틴). 프롬프트 5개 언어 분기. 모델별 샘플링 프리셋(공식값+버그 회피). API 키 프로바이더별 분리. `[ERROR]` 접두 규약이 렌더·컨텍스트·요약에서 일관 처리.
+- ⚠️ **MainUI ↔ OllamaSetup 결합**: UI 가 `OllamaSetup` 멤버 9종을 직접 조작(State/InstalledModels/IsFetching/IsDeleting/DeleteConfirmModel/TemplateFixedModel/Fetch/Delete/SetupState) + `CoroutineRunner.Start` 9회 → **UI 가 상태 기계를 대신 운전**. ChatWindow 수준 파사드로 좁힐 여지.
+- ⚠️ **ContextBuilder 1,945줄**: 공개 API 는 `Build*` 10개인데 1,528줄까지 전부 private. 게임 상태 수집(Party/Combat/World/Equipment/Buffs/Stats)이 프롬프트 빌더 안에 동거, 80자+ 리터럴 102개.
+- ⚠️ **전송 계층 2벌**: `MachineSpirit/LLMClient`(631, 스트리밍+클라우드 4종) vs `Planning/LLM/LLMHttpClient`(369, Ollama 전용 결정적). 둘 다 `/api/chat` + UnityWebRequest 수명주기 + keep_alive/options 를 각자 구현. 후자는 "4파일 중복 70% 제거"용 통합 계층인데 MachineSpirit 과는 미통합.
+- 기타: `LLMClient._isRequesting` 불리언 하나로 전역 직렬화 → 겹친 요청은 큐 없이 **유실**. RAG 인덱싱은 코루틴(메인스레드 슬라이스, `i%50`/`batch%10` 양보).
+
+- [x] **수정 (v3.119.1) — 오류 진단 일원화**: 검토에서 확인된 **최우선 항목**(방금 고친 대화 쪽과 동일 클래스가 전투 LLM 에 그대로 잔존).
+  - `Planning/LLM/LLMDiagnostics.cs` 신설 — `DescribeFailure(raw, httpStatus, wasTimeout, isLocalOllama, apiUrl, model)` 공용 해석기(연결거부/404/401·403/429/5xx/타임아웃/빈응답). `MachineSpirit.DescribeLLMError` 는 이 함수에 위임 → **두 스택이 같은 문구** 사용.
+  - 전투 LLM 상태: `CombatLastError`/`CombatLastSuccessTime`/`CombatFailureCount` + `RecordCombatFailure`(Warn 로그, 조치 문구 포함)/`RecordCombatSuccess`. **Judge·Scorer·Commander 3곳 성공·실패 양쪽 배선**.
+  - UI: LLM 전투 AI 섹션에 상태 표시 — 실패 시 빨강 `⚠ <조치문구> (휴리스틱 대체 중, N회)`, 정상 시 초록. 5개 언어.
+  - `OnCombatEnd` 에서 `ResetCombatState()` — 지난 전투 실패 문구 잔류 방지.
+  - **왜 중요한가**: 전투 LLM 은 실패해도 휴리스틱으로 정상 폴백하므로 게임은 계속된다 → 표시가 없으면 "켜져 있는데 실제로는 안 쓰이는" 상태를 사용자가 **영원히 모른다**.
+- [ ] **인게임 검증**: Ollama 끈 채 LLM 전투 AI 켜고 전투 → 설정 화면에 `⚠ Cannot reach Ollama at … (휴리스틱 대체 중, N회)` 표시, 서버 켜고 재전투 시 초록 전환.
+- [ ] **후속 후보(미착수)**: MainUI↔OllamaSetup 파사드 / ContextBuilder 게임상태 수집 분리 / 전송 계층 통합 / `_isRequesting` 요청 유실.

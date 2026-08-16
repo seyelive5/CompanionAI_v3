@@ -535,44 +535,15 @@ namespace CompanionAI_v3.MachineSpirit
         /// </summary>
         private static string DescribeLLMError(string rawError)
         {
-            string e = rawError ?? "unknown";
-            bool isOllama = Config?.Provider == ApiProvider.Ollama;
-
-            // 연결 자체 실패 — 서버 미실행이 압도적으로 흔한 원인
-            if (e.IndexOf("Cannot connect", StringComparison.OrdinalIgnoreCase) >= 0
-                || e.IndexOf("Connection refused", StringComparison.OrdinalIgnoreCase) >= 0
-                || e.IndexOf("Failed to connect", StringComparison.OrdinalIgnoreCase) >= 0
-                || e.StartsWith("HTTP 0", StringComparison.OrdinalIgnoreCase))
-            {
-                return isOllama
-                    ? $"Cannot reach Ollama at {Config?.ApiUrl}. Is the Ollama server running? (start it, then press Test Connection)"
-                    : $"Cannot reach the API server at {Config?.ApiUrl}. Check the URL and your internet connection.";
-            }
-
-            if (e.StartsWith("HTTP 404", StringComparison.OrdinalIgnoreCase))
-            {
-                return isOllama
-                    ? $"Model '{Config?.Model}' not found on the Ollama server. Pull it first (ollama pull {Config?.Model}) or pick an installed model."
-                    : "Endpoint or model not found (HTTP 404). Check the API URL and model name.";
-            }
-
-            if (e.StartsWith("HTTP 401", StringComparison.OrdinalIgnoreCase)
-                || e.StartsWith("HTTP 403", StringComparison.OrdinalIgnoreCase))
-                return "API key rejected (HTTP 401/403). Check the API key for this provider.";
-
-            if (e.StartsWith("HTTP 429", StringComparison.OrdinalIgnoreCase))
-                return "Rate limited by the provider (HTTP 429). Wait a moment and try again.";
-
-            if (e.IndexOf("timeout", StringComparison.OrdinalIgnoreCase) >= 0
-                || e.IndexOf("timed out", StringComparison.OrdinalIgnoreCase) >= 0)
-                return isOllama
-                    ? "The model did not respond in time. A smaller model may be needed for this machine."
-                    : "The request timed out. Check your connection or try again.";
-
-            if (e.IndexOf("Empty response", StringComparison.OrdinalIgnoreCase) >= 0)
-                return $"The model '{Config?.Model}' returned an empty response. Try another model.";
-
-            return $"Request failed: {e}";
+            // 해석은 Planning.LLM.LLMDiagnostics 로 일원화 — 대화/전투 두 스택이 같은 문구를 쓴다.
+            //   (원시 문자열에 "HTTP 404" 등이 박혀 오므로 상태 코드는 0으로 넘기고 텍스트 판정에 맡긴다)
+            return Planning.LLM.LLMDiagnostics.DescribeFailure(
+                rawError,
+                httpStatusCode: 0,
+                wasTimeout: false,
+                isLocalOllama: Config?.Provider == ApiProvider.Ollama,
+                apiUrl: Config?.ApiUrl,
+                model: Config?.Model);
         }
 
         #endregion

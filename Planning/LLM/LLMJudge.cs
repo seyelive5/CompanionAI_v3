@@ -207,6 +207,7 @@ namespace CompanionAI_v3.Planning.LLM
                 int selectedIndex = 0;
                 if (response.Success)
                 {
+                    LLMDiagnostics.RecordCombatSuccess();
                     string raw = response.RawJson ?? "";
                     Log.Planning.Debug($"[LLMJudge] Raw response ({raw.Length} chars): {Truncate(raw, 300)}");
                     int shuffledIndex = ParseResponse(raw, candidateCount);
@@ -228,6 +229,10 @@ namespace CompanionAI_v3.Planning.LLM
                         ? "Judge timeout exceeded"
                         : $"HTTP {response.HttpStatusCode}: {response.ErrorMessage}";
                     Log.Planning.Info($"[LLMJudge] Failed: {errorText} — fallback to index 0 ({LastJudgeTimeMs}ms)");
+                    // 실패를 사용자 표시 가능한 상태로 기록 — 전투 LLM 은 휴리스틱으로 조용히 폴백하므로
+                    // 기록하지 않으면 "LLM 이 켜져 있는데 실제로는 안 쓰이는" 상태를 알 방법이 없다.
+                    LLMDiagnostics.RecordCombatFailure("LLMJudge", response.ErrorMessage,
+                        response.HttpStatusCode, response.WasTimeout, baseUrl, model);
                 }
 
                 onResult?.Invoke(selectedIndex);

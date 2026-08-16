@@ -435,6 +435,21 @@ namespace CompanionAI_v3.Settings
                 { Language.Chinese, "在单回合内使用两套武器组。\n切换武器(0 AP)以使用备用武器组的攻击。\n⚠️ 此功能正在开发中，可能无法按预期工作。" }
             },
 
+            ["LLMCombatAIActive"] = new() {
+                { Language.English, "LLM is responding — combat AI is using it." },
+                { Language.Korean, "LLM 응답 정상 — 전투 AI가 사용 중입니다." },
+                { Language.Russian, "LLM отвечает — боевой ИИ его использует." },
+                { Language.Japanese, "LLM は応答中 — 戦闘AIが使用しています。" },
+                { Language.Chinese, "LLM 响应正常 — 战斗AI正在使用。" }
+            },
+            ["LLMCombatAIFallback"] = new() {
+                { Language.English, "using heuristics instead" },
+                { Language.Korean, "휴리스틱으로 대체 중" },
+                { Language.Russian, "используется эвристика" },
+                { Language.Japanese, "ヒューリスティックで代替中" },
+                { Language.Chinese, "改用启发式规则" }
+            },
+
             ["FinishLowHPEnemies"] = new() {
                 { Language.English, "Prioritize Finishing Blows" },
                 { Language.Korean, "마무리 우선" },

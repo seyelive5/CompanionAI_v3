@@ -1720,6 +1720,9 @@ namespace CompanionAI_v3.Core
             // ★ v3.8.48: 리플렉션 캐시 정리
             GameInterface.CustomBehaviourTreePatch.ClearTreeCache();
 
+            // 전투 LLM 진단 상태 초기화 — 지난 전투의 실패 문구가 다음 전투까지 남지 않도록
+            Planning.LLM.LLMDiagnostics.ResetCombatState();
+
             // ★ v3.8.48: Situation 풀 정리
             _analyzer.ClearPool();
 

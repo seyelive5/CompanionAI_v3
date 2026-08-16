@@ -240,6 +240,7 @@ namespace CompanionAI_v3.Planning.LLM
                 CommanderDirective directive;
                 if (response.Success)
                 {
+                    LLMDiagnostics.RecordCombatSuccess();
                     string raw = response.RawJson ?? "";
                     Log.Planning.Debug($"[LLMCommander] Raw ({raw.Length} chars): {Truncate(raw, 300)}");
                     string content = LLMHttpClient.ExtractContent(raw);
@@ -257,6 +258,8 @@ namespace CompanionAI_v3.Planning.LLM
                         ? "Commander timeout exceeded"
                         : $"HTTP {response.HttpStatusCode}: {response.ErrorMessage}";
                     Log.Planning.Info($"[LLMCommander] Failed: {errorText} — default directive ({LastCommanderTimeMs}ms)");
+                    LLMDiagnostics.RecordCombatFailure("LLMCommander", response.ErrorMessage,
+                        response.HttpStatusCode, response.WasTimeout, baseUrl, model);
                 }
 
                 onResult?.Invoke(directive);

@@ -470,6 +470,23 @@ namespace CompanionAI_v3.UI
             Main.Settings.EnableLLMCombatAI = DrawCheckbox(Main.Settings.EnableLLMCombatAI, L("LLMCombatAIEnable"));
             GUILayout.Space(3);
 
+            // 전투 LLM 상태 — 실패해도 휴리스틱으로 조용히 폴백하므로, 표시가 없으면
+            // "켜져 있는데 실제로는 안 쓰이는" 상태를 사용자가 알 수 없다.
+            if (Main.Settings.EnableLLMCombatAI)
+            {
+                string combatErr = CompanionAI_v3.Planning.LLM.LLMDiagnostics.CombatLastError;
+                if (!string.IsNullOrEmpty(combatErr))
+                {
+                    int fails = CompanionAI_v3.Planning.LLM.LLMDiagnostics.CombatFailureCount;
+                    GUILayout.Label($"<color={UIStyles.RoleRed}>⚠ {combatErr} ({L("LLMCombatAIFallback")}, {fails}x)</color>", UIStyles.Description);
+                }
+                else if (CompanionAI_v3.Planning.LLM.LLMDiagnostics.CombatLastSuccessTime > 0f)
+                {
+                    GUILayout.Label($"<color={UIStyles.RoleGreen}>{L("LLMCombatAIActive")}</color>", UIStyles.Description);
+                }
+                GUILayout.Space(3);
+            }
+
             var ollamaState = MSp.OllamaSetup.State;
             bool ollamaReady = ollamaState == MSp.OllamaSetup.SetupState.Ready;
 

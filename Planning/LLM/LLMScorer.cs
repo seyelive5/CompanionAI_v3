@@ -187,6 +187,7 @@ namespace CompanionAI_v3.Planning.LLM
 
                 if (response.Success && !string.IsNullOrEmpty(response.RawJson))
                 {
+                    LLMDiagnostics.RecordCombatSuccess();
                     string responseText = response.RawJson;
                     Log.Planning.Debug($"[LLMScorer] Raw response ({responseText.Length} chars): {Truncate(responseText, 300)}");
                     string content = LLMHttpClient.ExtractContent(responseText);
@@ -222,6 +223,8 @@ namespace CompanionAI_v3.Planning.LLM
                         ? "Scorer timeout exceeded"
                         : $"HTTP {response.HttpStatusCode}: {response.ErrorMessage}";
                     Log.Planning.Info($"[LLMScorer] Failed: {errorText} -- fallback to defaults ({LastScorerTimeMs}ms)");
+                    LLMDiagnostics.RecordCombatFailure("LLMScorer", response.ErrorMessage,
+                        response.HttpStatusCode, response.WasTimeout, baseUrl, model);
                 }
 
                 _pendingWeights = weights;
