@@ -505,14 +505,20 @@ namespace CompanionAI_v3.MachineSpirit
         /// 채팅에 `[ERROR]` 접두 메시지로 표기(이 접두사는 ContextBuilder·요약에서 제외되므로 대화 오염 없음)
         /// + LastError 에 보관해 설정 패널 상태줄에서도 확인 가능.
         /// </summary>
-        private static void ReportLLMFailure(string rawError)
+        /// <param name="userInitiated">
+        /// 사용자가 직접 보낸 요청(채팅 입력·연결 테스트)인지. true 일 때만 채팅에 오류를 남긴다.
+        /// 자동 발화(인사·유휴 코멘트·이벤트 반응)까지 채팅에 쓰면 서버가 꺼진 동안 분당 1회씩
+        /// 같은 오류가 쌓인다(IdleMode High 실측: 60초 간격 반복). 자동 실패는 설정 상태줄로만 알린다.
+        /// </param>
+        private static void ReportLLMFailure(string rawError, bool userInitiated)
         {
             LastError = DescribeLLMError(rawError);
             LastErrorTime = Time.time;
             _diagnosticPending = false;  // 진단 대기 해제 (실패로 확정)
 
             // "이미 요청 진행 중"은 정상적인 중복 방지라 사용자에게 알릴 실패가 아님 (로그만)
-            bool userVisible = !string.IsNullOrEmpty(rawError)
+            bool userVisible = userInitiated
+                && !string.IsNullOrEmpty(rawError)
                 && rawError.IndexOf("already in progress", StringComparison.OrdinalIgnoreCase) < 0;
 
             if (userVisible)
@@ -526,8 +532,19 @@ namespace CompanionAI_v3.MachineSpirit
                 TrimHistory();
             }
 
-            Log.MachineSpirit.Warn($"[MachineSpirit] LLM request failed: {rawError} (provider={Config?.Provider}, model={Config?.Model})");
+            // 로그 억제: 같은 사유가 반복되면(서버가 계속 꺼져 있음) 60초에 한 번만 Warn.
+            //   사용자 요청은 항상 남긴다 — 본인이 방금 시도한 것이므로 즉시 근거가 필요.
+            bool sameAsLast = string.Equals(rawError, _lastLoggedFailure, StringComparison.Ordinal);
+            if (userInitiated || !sameAsLast || Time.time - _lastFailureLogTime > 60f)
+            {
+                _lastLoggedFailure = rawError;
+                _lastFailureLogTime = Time.time;
+                Log.MachineSpirit.Warn($"[MachineSpirit] LLM request failed: {rawError} (provider={Config?.Provider}, model={Config?.Model})");
+            }
         }
+
+        private static string _lastLoggedFailure;
+        private static float _lastFailureLogTime;
 
         /// <summary>
         /// 원시 오류 문자열(HTTP 코드/예외 메시지)을 사용자가 조치할 수 있는 한 문장으로 변환.
@@ -561,7 +578,7 @@ namespace CompanionAI_v3.MachineSpirit
         /// 9개 응답 경로의 중복(~40줄×9) 제거 + Id 추적으로 잘림/고아 버그 해결. summarize: 채팅 경로만 true.
         /// </summary>
         private static void StartOllamaStream(List<LLMClient.ChatMessage> messages, MessageCategory category, bool summarize,
-            Action<string> onFinalText = null, Action onAlways = null)
+            Action<string> onFinalText = null, Action onAlways = null, bool userInitiated = false)
         {
             int id = AddAssistantPlaceholder(category);
             CoroutineRunner.Start(LLMClient.SendOllamaStreaming(
@@ -587,7 +604,7 @@ namespace CompanionAI_v3.MachineSpirit
                 {
                     RemoveMsgByIdIfEmpty(id);
                     ChatWindow.SetThinking(false);
-                    ReportLLMFailure(error);
+                    ReportLLMFailure(error, userInitiated);
                     onAlways?.Invoke();
                 }
             ));
@@ -623,7 +640,7 @@ namespace CompanionAI_v3.MachineSpirit
             if (Config.Provider == ApiProvider.Ollama)
             {
                 // ★ Streaming (Id 추적): placeholder 추가 + 토큰 append. 잘림/고아 버그 해결 + 중복 제거.
-                StartOllamaStream(messages, MessageCategory.Default, summarize: true);
+                StartOllamaStream(messages, MessageCategory.Default, summarize: true, userInitiated: true);
             }
             else
             {
@@ -648,7 +665,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        ReportLLMFailure(error);
+                        ReportLLMFailure(error, userInitiated: true);   // 사용자 채팅 입력 — 채팅에 오류 표시
                     }
                 ));
             }
@@ -698,7 +715,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        ReportLLMFailure(error);
+                        ReportLLMFailure(error, userInitiated);
                     }
                 ));
             }
@@ -750,7 +767,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        ReportLLMFailure(error);
+                        ReportLLMFailure(error, userInitiated: false);  // 자동 발화 — 상태줄로만 알림
                     }
                 ));
             }
@@ -797,7 +814,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        ReportLLMFailure(error);
+                        ReportLLMFailure(error, userInitiated);
                     }
                 ));
             }
@@ -833,7 +850,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        ReportLLMFailure(error);
+                        ReportLLMFailure(error, userInitiated: false);  // 자동 발화 — 상태줄로만 알림
                     }
                 ));
             }
@@ -887,7 +904,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        ReportLLMFailure(error);
+                        ReportLLMFailure(error, userInitiated: false);  // 자동 발화 — 상태줄로만 알림
                     }
                 ));
             }
@@ -1008,7 +1025,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        ReportLLMFailure(error);
+                        ReportLLMFailure(error, userInitiated: false);  // 자동 발화 — 상태줄로만 알림
                     }
                 ));
             }
@@ -1111,7 +1128,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        ReportLLMFailure(error);
+                        ReportLLMFailure(error, userInitiated: false);  // 자동 발화 — 상태줄로만 알림
                     }
                 ));
             }
@@ -1244,7 +1261,7 @@ namespace CompanionAI_v3.MachineSpirit
                     onError: error =>
                     {
                         ChatWindow.SetThinking(false);
-                        ReportLLMFailure(error);
+                        ReportLLMFailure(error, userInitiated: false);  // 자동 발화 — 상태줄로만 알림
                     }
                 ));
             }

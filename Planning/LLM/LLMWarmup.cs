@@ -3,9 +3,11 @@
 // 게임 실행 후 LLM 전투 AI가 켜져 있으면 백그라운드로 모델을 미리 메모리에 올림.
 // keep_alive=-1이 모든 요청에 이미 설정되어 있어 한 번 올리면 유지됨.
 // ★ v3.114.0 (Phase F.2): UnityWebRequest/HttpWebRequest → LLMHttpClient 마이그레이션.
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using CompanionAI_v3.Logging;
+using UnityEngine;
 
 namespace CompanionAI_v3.Planning.LLM
 {
@@ -23,6 +25,13 @@ namespace CompanionAI_v3.Planning.LLM
         private static readonly HashSet<string> _warmedModels = new HashSet<string>();
         private static bool _isWarming;
         private const int WARMUP_TIMEOUT_SECONDS = 120; // 큰 모델도 로드 가능
+
+        // 재시도 백오프 — 서버가 꺼져 있으면 연결 거부가 ~1.2초 만에 돌아오고 실패 시 warmed 등록을
+        // 하지 않으므로, 백오프가 없으면 매 프레임 체크가 사실상 1.2초 주기 무한 재시도가 된다
+        // (실측: 6.5분 동안 "Preloading" 로그 324줄 — 진단 로그가 묻힘).
+        private static float _nextAttemptTime;
+        private static int _consecutiveFailures;
+        private static readonly float[] BackoffSeconds = { 5f, 15f, 30f, 60f };
 
         public static bool IsWarming => _isWarming;
 
@@ -62,6 +71,9 @@ namespace CompanionAI_v3.Planning.LLM
 
             if (_warmedModels.Contains(model)) return;
 
+            // 백오프 대기 중이면 스킵 (실패 반복 시 5→15→30→60초로 간격 확대)
+            if (Time.time < _nextAttemptTime) return;
+
             string apiUrl = settings.MachineSpirit?.ApiUrl;
             if (string.IsNullOrEmpty(apiUrl)) apiUrl = "http://localhost:11434";
 
@@ -82,7 +94,11 @@ namespace CompanionAI_v3.Planning.LLM
             _isWarming = true;
             try
             {
-                Log.Planning.Info($"[LLMWarmup] Preloading model '{modelId}'...");
+                // 첫 시도만 Info — 실패 반복 중에는 Debug 로 낮춰 로그 폭주를 막는다
+                if (_consecutiveFailures == 0)
+                    Log.Planning.Info($"[LLMWarmup] Preloading model '{modelId}'...");
+                else
+                    Log.Planning.Debug($"[LLMWarmup] Retrying preload of '{modelId}' (attempt {_consecutiveFailures + 1})");
 
                 // Build request via LLMHttpClient.BuildChatRequest (Warmup pattern: user 메시지만, num_predict=1, keep_alive=-1)
                 var body = LLMHttpClient.BuildChatRequest(
@@ -102,12 +118,30 @@ namespace CompanionAI_v3.Planning.LLM
                 if (response.Success)
                 {
                     _warmedModels.Add(modelId);
+                    _consecutiveFailures = 0;
+                    _nextAttemptTime = 0f;
+                    LLMDiagnostics.RecordCombatSuccess();
                     Log.Planning.Info($"[LLMWarmup] Model '{modelId}' warmed in {response.ElapsedSeconds:F1}s");
                 }
                 else
                 {
-                    Log.Planning.Debug($"[LLMWarmup] Warmup failed for '{modelId}': {response.ErrorMessage} (HTTP {response.HttpStatusCode})");
-                    // 실패 시 _warmedModels에 추가하지 않음 → 다음 체크 시 재시도
+                    // 실패 시 _warmedModels 에 추가하지 않음 → 재시도하되, 백오프로 간격을 늘린다.
+                    float backoff = BackoffSeconds[Math.Min(_consecutiveFailures, BackoffSeconds.Length - 1)];
+                    _consecutiveFailures++;
+                    _nextAttemptTime = Time.time + backoff;
+
+                    // 첫 실패만 사용자에게 알린다 — 워밍업 실패 = 전투 LLM 사용 불가이므로
+                    // 전투가 시작되기 전에 설정 화면 상태줄에서 미리 확인할 수 있다.
+                    if (_consecutiveFailures == 1)
+                    {
+                        LLMDiagnostics.RecordCombatFailure("LLMWarmup", response.ErrorMessage,
+                            response.HttpStatusCode, response.WasTimeout, baseUrl, modelId);
+                    }
+                    else
+                    {
+                        Log.Planning.Debug($"[LLMWarmup] Warmup failed for '{modelId}': {response.ErrorMessage} " +
+                            $"(HTTP {response.HttpStatusCode}) — retry in {backoff:F0}s");
+                    }
                 }
             }
             finally
